@@ -1,4 +1,5 @@
 import type { ConversationArtifactCard } from '../../types/conversation';
+import type { ArtifactCandidateReviewDraft } from '../../types/artifactReview';
 
 const REVISION_DRAFTS: Partial<Record<ConversationArtifactCard['artifactType'], string>> = {
   chapter_text: '请根据以下要求修改上一版章节正文候选：\n',
@@ -14,6 +15,37 @@ const REVISION_DRAFTS: Partial<Record<ConversationArtifactCard['artifactType'], 
 /** Builds a revision request that matches the selected artifact's domain semantics. */
 export function buildArtifactRevisionDraft(
   artifactType: ConversationArtifactCard['artifactType'],
+  revisionNotes?: string,
 ): string {
-  return REVISION_DRAFTS[artifactType] ?? '请根据以下要求调整上一版创作产物：\n';
+  const opening = REVISION_DRAFTS[artifactType] ?? '请根据以下要求调整上一版创作产物：\n';
+  return revisionNotes?.trim() ? `${opening}${revisionNotes}` : opening;
+}
+
+/** Keeps both the existing goal and the exact review text visible before the user sends it. */
+export function appendArtifactRevisionDraft(existingDraft: string, revisionDraft: string): string {
+  if (!revisionDraft || existingDraft.includes(revisionDraft)) return existingDraft;
+  if (!existingDraft) return revisionDraft;
+  const separator = existingDraft.endsWith('\n\n')
+    ? ''
+    : existingDraft.endsWith('\n')
+      ? '\n'
+      : '\n\n';
+  return `${existingDraft}${separator}${revisionDraft}`;
+}
+
+/** Review suggestions are prompt text, never edited artifact data or an apply selection. */
+export function formatArtifactReviewNotes(
+  drafts: Record<string, ArtifactCandidateReviewDraft>,
+): string {
+  return Object.values(drafts)
+    .map((draft) => {
+      const suggestions = [
+        draft.suggestedTitle.trim() ? `建议标题：${draft.suggestedTitle}` : '',
+        draft.suggestedSummary.trim() ? `建议摘要：${draft.suggestedSummary}` : '',
+        draft.notes.trim() ? `补充要求：${draft.notes}` : '',
+      ].filter(Boolean);
+      return suggestions.length ? [`候选：${draft.originalTitle}`, ...suggestions].join('\n') : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
 }

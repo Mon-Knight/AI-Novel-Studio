@@ -4,6 +4,8 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +22,13 @@ import type { WritingContext } from '../../utils/writingContext';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
 import PanelErrorBoundary from '../common/PanelErrorBoundary';
+import {
+  captureFocusSnapshot,
+  restoreFocusSnapshot,
+  type FocusSnapshot,
+} from '../common/focusRestoration';
+import { hasActiveModal } from '../common/useModalAccessibility';
+import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
 
 const AiGeneratePanel = lazy(() => import('./panels/AiGeneratePanel'));
 const ChapterEngineeringPanel = lazy(() => import('./panels/ChapterEngineeringPanel'));
@@ -233,6 +242,10 @@ function RightPanel({
 }: RightPanelProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const openerRef = useRef<FocusSnapshot | null>(null);
+  const wasOpenRef = useRef(false);
+  const returnFocusRef = useRef(true);
   // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
   const [lastPanelType, setLastPanelType] = useState<PanelType>(null);
 
@@ -240,18 +253,62 @@ function RightPanel({
     if (panelType) setLastPanelType(panelType);
   }, [panelType]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const overlay = overlayRef.current;
-    if (!overlay) return;
     if (panelType) {
-      overlay.removeAttribute('inert');
+      if (!wasOpenRef.current) {
+        const active =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const opener =
+          active && active !== document.body && !overlay?.contains(active)
+            ? active
+            : document.querySelector<HTMLElement>('[data-testid="chapter-editor"]');
+        openerRef.current = captureFocusSnapshot(opener);
+        returnFocusRef.current = true;
+      }
+      wasOpenRef.current = true;
+      overlay?.removeAttribute('inert');
       return;
     }
-    if (overlay.contains(document.activeElement)) {
+    if (wasOpenRef.current && returnFocusRef.current) {
+      // Non-modal content may have been scrolled or located while the panel was open.
+      restoreFocusSnapshot(captureFocusSnapshot(openerRef.current?.element ?? null));
+    }
+    if (overlay?.contains(document.activeElement)) {
       (document.activeElement as HTMLElement | null)?.blur();
     }
-    overlay.setAttribute('inert', '');
+    wasOpenRef.current = false;
+    overlay?.setAttribute('inert', '');
   }, [panelType]);
+
+  useLayoutEffect(
+    () => () => {
+      if (
+        document.getElementById(titleId)?.closest('.right-panel')?.contains(document.activeElement)
+      )
+        restoreFocusSnapshot(captureFocusSnapshot(openerRef.current?.element ?? null));
+    },
+    [titleId],
+  );
+
+  useEffect(() => {
+    if (!panelType) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        isComposingKeyboardEvent(event) ||
+        hasActiveModal()
+      )
+        return;
+      if (!(event.target instanceof Node) || !panelRef.current?.contains(event.target)) return;
+      event.preventDefault();
+      returnFocusRef.current = true;
+      onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose, panelType]);
 
   // v1.0.45: 检测当前面板的 AI 输出是否基于旧正文
   const effectivePanelType = panelType || lastPanelType;
@@ -326,6 +383,9 @@ function RightPanel({
       if (panelRef.current?.contains(target)) return;
       if (target.closest('.right-toolbar')) return;
       if (target.closest('[data-e2e-dialog-host="true"]')) return;
+      if (hasActiveModal() || target.closest('[aria-modal="true"]')) return;
+      // A deliberate click on the editor or another control owns the next focus.
+      returnFocusRef.current = false;
       onClose();
     }
     document.addEventListener('mousedown', handleDocumentMouseDown, true);
@@ -355,11 +415,15 @@ function RightPanel({
       <div
         ref={panelRef}
         className={`right-panel ${panelType ? 'is-open' : 'is-closed'}`}
+        role="region"
+        aria-labelledby={titleId}
         onMouseDown={stopAll}
         onClick={stopAll}
       >
         <div className="right-panel-header">
-          <span className="right-panel-title">{config.title}</span>
+          <span className="right-panel-title" id={titleId}>
+            {config.title}
+          </span>
           <button
             type="button"
             className="right-panel-close"
@@ -369,6 +433,7 @@ function RightPanel({
             onMouseDown={stopAll}
             onClick={(e) => {
               stopAll(e);
+              returnFocusRef.current = true;
               onClose();
             }}
           >

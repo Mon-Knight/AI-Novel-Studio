@@ -3,7 +3,7 @@
  */
 
 .home-page {
-  padding: var(--spacing-2xl);
+  padding: var(--spacing-xl);
   max-width: 1440px;
   margin: 0 auto;
   height: 100%;
@@ -55,17 +55,22 @@
 
 /* === 快捷入口卡片 === */
 .home-quick-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-md);
-  margin-bottom: var(--spacing-2xl);
+  margin-bottom: var(--spacing-lg);
 }
 
 .quick-action-card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: var(--spacing-lg);
+  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  cursor: pointer;
   text-align: center;
   transition:
     border-color var(--transition-fast),
@@ -77,14 +82,13 @@
 
 .quick-action-card:hover {
   border-color: var(--color-primary);
-  box-shadow: var(--shadow-hover);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
 }
 
 .quick-action-card .qa-icon {
-  width: 40px;
-  height: 40px;
-  margin: 0 auto var(--spacing-sm);
+  width: 24px;
+  height: 24px;
+  margin: 0;
   border-radius: var(--radius-md);
   background: var(--color-primary-light);
   display: flex;
@@ -167,8 +171,7 @@
 
 .novel-card:hover {
   border-color: var(--color-primary);
-  box-shadow: var(--shadow-hover);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
 }
 
 /* v1.0.26 删除按钮 */
@@ -190,7 +193,8 @@
   transition: opacity var(--transition-fast);
   color: var(--color-error);
 }
-.novel-card:hover .novel-card-delete-btn {
+.novel-card:hover .novel-card-delete-btn,
+.novel-card:focus-within .novel-card-delete-btn {
   opacity: 1;
 }
 .novel-card-delete-btn:hover {
@@ -200,12 +204,18 @@
 }
 
 .novel-card-cover {
-  height: 120px;
+  height: 80px;
+  cursor: pointer;
   background: var(--gradient-cover);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
 }
 
 .novel-card-cover-icon {
@@ -226,10 +236,17 @@
 }
 
 .novel-card-body {
-  padding: var(--spacing-lg);
   flex: 1;
   display: flex;
   flex-direction: column;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  padding: var(--spacing-lg);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
 }
 
 .novel-card-title {
@@ -270,7 +287,7 @@
   align-items: center;
   justify-content: space-between;
   margin-top: auto;
-  padding-top: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
   border-top: 1px solid var(--color-border-light);
 }
 
@@ -308,6 +325,17 @@
   padding: var(--spacing-xs) var(--spacing-md);
   border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.home-page .page-heading-actions .btn {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .novel-card-action:hover {

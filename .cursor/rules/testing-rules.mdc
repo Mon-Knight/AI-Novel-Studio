@@ -6,6 +6,8 @@ alwaysApply: true
 
 # Testing Rules
 
+本文细化根 `AGENTS.md` 的验证矩阵，只运行变更范围适用的门禁，不能反向扩大任务。
+
 ## 验证分层
 
 ### 纯文档
@@ -28,13 +30,15 @@ npm run build
 ### Rust / SQLite
 
 ```powershell
-cd src-tauri
-cargo check
-<相关 cargo test>
-cd ..
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+# 相关 cargo test 使用 --locked；共享 DSH 状态及完整 Rust 验收加 -- --test-threads=1
 ```
 
-### 发布、Tauri 或 DSH 载体
+### Tauri 或 DSH 载体
+
+运行相关动态测试、真实 Windows Tauri E2E 与 `npm run tauri:build`。涉及 DSH 时先准备固定载体与当前 Gateway；不使用不明来源缓存，也不要求普通局部任务自动提交来取得 clean tree。
+
+### 发布
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
@@ -56,8 +60,8 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 1. 完整记录错误输出
 2. 定位失败文件和行号
 3. 分析原因
-4. 修复后重新运行全部验证
-5. 全部通过后才可提交
+4. 修复本次引入的问题后重新运行适用验证；既有失败或环境阻碍如实报告，不借此扩大任务
+5. 提交需相应授权；报告限制不等于豁免发布门禁，`NOT_RUN`、Mock 与真实桌面/live 证据必须区分
 
 ## 禁止
 

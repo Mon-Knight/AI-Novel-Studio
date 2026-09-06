@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { inspectChapterCandidateIntegrity } from './chapterCandidateIntegrity';
 
+test('low-confidence cross-actor actions and unrelated event times are review warnings', () => {
+  const samples = [
+    {
+      previousChapterText: '林砚打开照片，确认死者的手腕上有一道刀伤。',
+      candidateText: '陈警官在另一个房间打开照片，辨认失踪孩子的校服。',
+    },
+    { candidateText: '火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。' },
+  ];
+  for (const sample of samples) {
+    const issues = inspectChapterCandidateIntegrity(sample);
+    assert.ok(issues.length > 0);
+    assert.ok(issues.every((issue) => issue.severity === 'warning'));
+  }
+  assert.ok(
+    inspectChapterCandidateIntegrity({
+      candidateText: '<analysis>内部推理</analysis>\n最后一扇门关上了。',
+    }).some((issue) => issue.severity === 'error'),
+  );
+});
+
 test('detects a new chapter reopening a completed scene from the previous chapter body', () => {
   const repeated = '“你为什么不问他们，为什么报警广播出现在没有发布警报的夜里？”';
   const previousChapterText = [

@@ -1,4 +1,5 @@
 import { TriangleAlert } from 'lucide-react';
+import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 
 export default function SecuritySettingsCard() {
   return (
@@ -17,7 +18,7 @@ export default function SecuritySettingsCard() {
           <strong>安全与合规提醒</strong>
         </div>
         <ul style={{ paddingLeft: 18, marginTop: 4, fontSize: 13 }}>
-          <li>API Key 仅保存在本地客户端内存或加密存储中，不会上传到任何中间服务器</li>
+          <li>{getCredentialStorageCopy().storage}鉴权只发送到你明确配置的 Provider Endpoint。</li>
           <li>请勿将包含 API Key 的配置文件或代码提交到 GitHub 等公开仓库</li>
           <li>AI 任务与审计日志记录已进行凭据脱敏处理，绝不保存完整 API Key</li>
         </ul>

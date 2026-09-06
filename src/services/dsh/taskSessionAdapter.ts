@@ -12,7 +12,11 @@ import {
 } from './taskRuntimeService';
 import { captureTaskModelSnapshot } from '../conversation/taskModelSnapshot';
 import { taskConversationService } from '../conversation/taskConversationService';
-import { classifyTaskIntent, isConversationalGoal } from '../conversation/taskGoalRouting';
+import {
+  assertTaskGoalExecutable,
+  classifyTaskIntent,
+  isConversationalGoal,
+} from '../conversation/taskGoalRouting';
 
 export const WORKBENCH_CONVERSATIONAL_REPLY =
   '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
@@ -125,6 +129,11 @@ export const taskSessionAdapter = {
     input: TaskRuntimeInput,
     onEvent?: (event: TaskRuntimeEvent) => void,
   ): Promise<TaskRun> {
+    try {
+      assertTaskGoalExecutable(input.goal);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (isConversationalGoal(input.goal)) {
       return completeConversationalTurn(input, onEvent);
     }

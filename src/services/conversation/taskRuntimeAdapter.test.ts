@@ -24,6 +24,67 @@ import {
 import { taskSessionAdapter, WORKBENCH_CONVERSATIONAL_REPLY } from '../dsh/taskSessionAdapter';
 import { workbenchChapterWriter } from './workbenchChapterWriter';
 import { putLocalMemoryDocument, retrieveLocalMemory } from '../memory/adoptedDraftMemory';
+import { buildWorkbenchMemoryQuery } from './workbenchMemoryQuery';
+import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
+
+test('retrieval queries are bounded without altering complete Writer instructions', async () => {
+  for (const goal of ['甲'.repeat(1000), '甲'.repeat(1001), '😀'.repeat(1001)]) {
+    const query = buildWorkbenchMemoryQuery(goal);
+    assert.ok(Array.from(query).length <= 1000);
+    assert.equal(query.includes('\ud83d '), false);
+  }
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  const goal =
+    '生成本章正文。' +
+    '角色沿着火车留下的线索调查。'.repeat(100) +
+    '结尾保留钟楼谜题。不要润色旧稿。';
+  const model = mockModel();
+  const conversation = await taskConversationService.create('novel-long', '长指令', model);
+  const turn = await taskConversationService.appendTurn(conversation.conversationId, 'user', goal);
+  const originalInvoke = productionToolRegistry.invoke;
+  const seenQueries: string[] = [];
+  let writerGoal = '';
+  productionToolRegistry.invoke = async (name, _version, args) => {
+    const record = args as Record<string, unknown>;
+    if (name === 'search_memory') {
+      seenQueries.push(String(record.query));
+      assert.ok(Array.from(String(record.query)).length <= 1000);
+    }
+    return { ok: true, data: name === 'generate_chapter' ? { text: record.candidateText } : {} };
+  };
+  try {
+    const runtime = createTaskRuntimeAdapter({
+      chapterWriter: {
+        generate: async (input) => {
+          writerGoal = input.goal;
+          assert.equal(input.mode, 'generate');
+          return {
+            text: '这是用于长指令回归的完整候选正文，仅供人工审阅，不会自动采用。',
+            source: 'writer',
+          };
+        },
+      },
+    });
+    const result = await runtime.start({
+      conversationId: conversation.conversationId,
+      novelId: 'novel-long',
+      turnId: turn.turnId,
+      chapterId: 'chapter-long',
+      goal,
+      modelSnapshot: model,
+    });
+    assert.equal(result.status, 'completed');
+    assert.equal(writerGoal, goal);
+    assert.equal(seenQueries.length, 1);
+    assert.equal(
+      (await taskConversationService.get(conversation.conversationId))?.turns[0]?.content,
+      goal,
+    );
+  } finally {
+    productionToolRegistry.invoke = originalInvoke;
+  }
+});
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -536,6 +597,13 @@ test('short follow-up writing inherits only explicit task-wide constraints', asy
         return {
           text: '这是由短提示触发并读取正式小说资产后生成的章节候选正文，长度足够进入人工审阅。',
           source: 'writer',
+          integrityWarnings: [
+            {
+              code: 'chapter_temporal_semantics_conflict',
+              summary: '需人工核对时间所指事件。',
+              severity: 'warning',
+            },
+          ],
         };
       },
     },
@@ -554,6 +622,22 @@ test('short follow-up writing inherits only explicit task-wide constraints', asy
   assert.match(writerGoal, /【当前用户指令】\n继续写/);
   assert.match(writerGoal, /全程使用第三人称限知/);
   assert.doesNotMatch(writerGoal, /钟楼开场|馆长现身/);
+  const reloaded = await taskConversationService.get(conversation.conversationId);
+  const evidence = reloaded?.toolEvents.find((event) => event.toolName === 'generate_chapter')
+    ?.result as {
+    generationContext: {
+      taskConstraints: { included: number; entries: Array<{ status: string }> };
+      integrityWarnings: Array<{ code: string }>;
+    };
+  };
+  assert.equal(evidence.generationContext.taskConstraints.included, 1);
+  assert.equal(evidence.generationContext.taskConstraints.entries[0]?.status, 'included');
+  assert.equal(
+    evidence.generationContext.integrityWarnings[0]?.code,
+    'chapter_temporal_semantics_conflict',
+  );
+  assert.match(reloaded?.artifacts[0]?.summary ?? '', /1 项低置信语义提醒/);
+  assert.doesNotMatch(JSON.stringify(evidence), /全程使用第三人称限知/);
 });
 
 test('writer progress replaces the running event result and terminal evidence replaces progress', async () => {
@@ -1326,7 +1410,7 @@ test('only atomically supported structured artifact cards expose an apply action
       onDecide: () => undefined,
     }),
   );
-  assert.doesNotMatch(reportHtml, /workbench-artifact-apply/);
+  assert.doesNotMatch(reportHtml, /data-testid="workbench-artifact-apply"/);
   assert.match(reportHtml, /要求修改/);
   assert.match(reportHtml, /拒绝/);
 
@@ -1346,7 +1430,7 @@ test('only atomically supported structured artifact cards expose an apply action
       onDecide: () => undefined,
     }),
   );
-  assert.doesNotMatch(genericHtml, /workbench-artifact-apply/);
+  assert.doesNotMatch(genericHtml, /data-testid="workbench-artifact-apply"/);
 });
 
 test('structured artifact cards disclose browser apply limitations before interaction', () => {
@@ -1433,7 +1517,7 @@ test('structured apply conflicts require a new candidate instead of replaying th
       onDecide: () => undefined,
     }),
   );
-  assert.doesNotMatch(html, /workbench-artifact-apply/);
+  assert.doesNotMatch(html, /data-testid="workbench-artifact-apply"/);
   assert.match(html, /要求修改/);
   assert.match(html, /拒绝/);
 });

@@ -6,6 +6,17 @@ import {
   formatWorkbenchFailure,
 } from './workbenchFailure';
 
+test('goal clarification is a parameter decision, not a model retry failure', () => {
+  const failure = classifyWorkbenchFailure(
+    Object.assign(new Error('请明确本回合动作。'), {
+      code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED',
+    }),
+  );
+  assert.equal(failure.layer, 'parameter');
+  assert.match(failure.hint, /尚未调用模型/);
+  assert.doesNotMatch(failure.hint, /换模型/);
+});
+
 test('classifies missing chapter, candidate, service and model failures', () => {
   assert.equal(classifyWorkbenchFailure(chapterRequiredError()).code, 'WORKBENCH_CHAPTER_REQUIRED');
   assert.equal(
@@ -85,7 +96,7 @@ test('classifies missing frozen-model credentials as a recoverable service failu
   );
   assert.equal(failure.layer, 'service');
   assert.equal(failure.code, 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE');
-  assert.match(failure.hint, /本次应用会话/);
+  assert.match(failure.hint, /浏览器凭据只在当前会话内存/);
   assert.doesNotMatch(failure.hint, /API Key\s*[:=]/i);
 });
 

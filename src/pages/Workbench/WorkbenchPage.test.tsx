@@ -11,6 +11,10 @@ import type {
   TaskConversationBundle,
 } from '../../types/conversation';
 import type { NovelContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
+import {
+  queryLocalConversationDirectory,
+  toConversationPage,
+} from '../../services/conversation/conversationDirectoryQuery';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost/#/',
@@ -101,6 +105,7 @@ const originalGetAll = novelRepository.getAll;
 const originalUpdateNovel = novelRepository.update;
 const originalGetChapters = chapterRepository.getByNovelId;
 const originalListConversations = taskConversationService.list;
+const originalListPage = taskConversationService.listPage;
 const originalGetConversation = taskConversationService.get;
 const originalCreateConversation = taskConversationService.create;
 const originalCreateInitializedConversation = taskConversationService.createInitialized;
@@ -244,6 +249,14 @@ beforeEach(() => {
   novelRepository.getAll = async () => [mockNovel];
   chapterRepository.getByNovelId = async () => [mockChapter];
   taskConversationService.list = async () => [mockConversation];
+  taskConversationService.listPage = async (input = {}) => {
+    const limit = input.limit ?? 100;
+    const rows = await taskConversationService.list(input.novelId, input);
+    return toConversationPage(
+      queryLocalConversationDirectory(rows, { ...input, limit: limit + 1 }),
+      limit,
+    );
+  };
   taskConversationService.get = async () => mockBundle;
   taskConversationService.create = async (novelId, title, defaultModel) => ({
     conversationId: 'conv-002',
@@ -299,6 +312,7 @@ afterEach(() => {
   novelRepository.update = originalUpdateNovel;
   chapterRepository.getByNovelId = originalGetChapters;
   taskConversationService.list = originalListConversations;
+  taskConversationService.listPage = originalListPage;
   taskConversationService.get = originalGetConversation;
   taskConversationService.create = originalCreateConversation;
   taskConversationService.createInitialized = originalCreateInitializedConversation;
@@ -321,6 +335,174 @@ afterEach(() => {
   artifactDecisionService.applyStructured = originalApplyStructuredArtifact;
   artifactDecisionService.record = originalRecordArtifactDecision;
   artifactDecisionService.ensureChapterSummaryFollowUp = originalEnsureChapterSummaryFollowUp;
+});
+
+test('Workbench directory reaches an old task through paged storage, search, and restart selection', async () => {
+  const older: TaskConversation = {
+    ...mockConversation,
+    title: '很早的待处理任务',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const rows: TaskConversation[] = [
+    older,
+    ...Array.from({ length: 120 }, (_, index) => ({
+      ...mockConversation,
+      conversationId: `page-${String(index).padStart(4, '0')}`,
+      title: `目录任务 ${index}`,
+    })),
+  ];
+  taskConversationService.list = originalListConversations;
+  taskConversationService.listPage = originalListPage;
+  localStorage.setItem(
+    'ai_novel_studio_task_conversations',
+    JSON.stringify({
+      bundles: rows.map((conversation) => ({
+        conversation,
+        turns: [],
+        runs: [],
+        toolEvents: [],
+        artifacts: [],
+      })),
+    }),
+  );
+  taskConversationService.get = async (id) => ({
+    ...mockBundle,
+    conversation: rows.find((row) => row.conversationId === id)!,
+    turns: [],
+    runs: [],
+    toolEvents: [],
+    artifacts: [],
+  });
+  const view = render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await screen.findByTestId('workbench-load-more-tasks');
+  assert.equal(screen.queryByText(older.title), null);
+  fireEvent.click(screen.getByTestId('workbench-load-more-tasks'));
+  await screen.findByText(older.title);
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜索创作任务' }), {
+    target: { value: older.title },
+  });
+  await waitFor(() => assert.equal(screen.getAllByTestId('workbench-task').length, 1));
+  fireEvent.click(screen.getByTestId('workbench-task'));
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-task-header').dataset.conversationId,
+      older.conversationId,
+    ),
+  );
+  view.unmount();
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-task-header').dataset.conversationId,
+      older.conversationId,
+    ),
+  );
+  assert.ok(screen.getAllByText(older.title).length > 0);
+});
+
+test('Workbench directory does not let a late search replace the newer query', async () => {
+  const next = { ...mockConversation, conversationId: 'search-newer', title: '最新搜索结果' };
+  let resolveOld!: (value: { items: TaskConversation[] }) => void;
+  const oldPage = new Promise<{ items: TaskConversation[] }>((resolve) => {
+    resolveOld = resolve;
+  });
+  const listPage = taskConversationService.listPage;
+  let oldSearchStarted = false;
+  taskConversationService.listPage = async (input = {}) => {
+    if (input.query === '旧搜索') {
+      oldSearchStarted = true;
+      return oldPage;
+    }
+    return input.query === '最新' ? { items: [next] } : listPage(input);
+  };
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await screen.findByTestId('workbench-task-header');
+  const input = screen.getByRole('searchbox', { name: '搜索创作任务' });
+  fireEvent.change(input, { target: { value: '旧搜索' } });
+  await waitFor(() => assert.equal(oldSearchStarted, true));
+  fireEvent.change(input, { target: { value: '最新' } });
+  await screen.findByText(next.title);
+  await act(async () => resolveOld({ items: [{ ...next, title: '旧搜索结果' }] }));
+  assert.ok(screen.getByText(next.title));
+  assert.equal(screen.queryByText('旧搜索结果'), null);
+});
+
+test('Workbench preserves the project tree and preference when an off-page task read fails', async () => {
+  const preference = { version: 1, novelId: mockNovel.id, conversationId: 'off-page-preferred' };
+  localStorage.setItem('ai_novel_studio_workbench_selection', JSON.stringify(preference));
+  let fail = true;
+  taskConversationService.get = async (id) => {
+    if (id === preference.conversationId) {
+      if (fail) throw new Error('合成的暂时 IPC 失败');
+      return {
+        ...mockBundle,
+        conversation: { ...mockConversation, conversationId: id, title: '恢复的旧任务' },
+      };
+    }
+    return mockBundle;
+  };
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText(/最近任务恢复失败/);
+  assert.ok(screen.getByTestId('workbench-project'));
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem('ai_novel_studio_workbench_selection')!),
+    preference,
+  );
+  fail = false;
+  fireEvent.click(screen.getByRole('button', { name: '重试任务' }));
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-task-header').dataset.conversationId,
+      preference.conversationId,
+    ),
+  );
+});
+
+test('Workbench directory discards a late rejected refresh after a newer search succeeds', async () => {
+  const next = { ...mockConversation, conversationId: 'search-new', title: '新的查询结果' };
+  let rejectOld!: (error: Error) => void;
+  const pending = new Promise<{ items: TaskConversation[] }>((_resolve, reject) => {
+    rejectOld = reject;
+  });
+  const listPage = taskConversationService.listPage;
+  let oldSearchStarted = false;
+  taskConversationService.listPage = async (input = {}) => {
+    if (input.query === '旧') {
+      oldSearchStarted = true;
+      return pending;
+    }
+    return input.query === '新的' ? { items: [next] } : listPage(input);
+  };
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await screen.findByTestId('workbench-task-header');
+  const input = screen.getByRole('searchbox', { name: '搜索创作任务' });
+  fireEvent.change(input, { target: { value: '旧' } });
+  await waitFor(() => assert.equal(oldSearchStarted, true));
+  fireEvent.change(input, { target: { value: '新的' } });
+  await screen.findByText(next.title);
+  await act(async () => rejectOld(new Error('过期的目录错误')));
+  assert.ok(screen.getByText(next.title));
+  assert.equal(screen.queryByText(/过期的目录错误/), null);
 });
 
 test('WorkbenchPage keeps the workbench frame visible while projects load', async () => {
@@ -1121,16 +1303,24 @@ test('WorkbenchPage clicking a task template fills the input draft', async () =>
   fireEvent.click(screen.getByText('完善大纲'));
   assert.equal(
     (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
+    '生成下一章',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
+  assert.equal(
+    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
     '完善当前章节大纲',
   );
 
+  fireEvent.click(screen.getByText('更多模板'));
   fireEvent.click(screen.getByText('人物一致性审计'));
+  fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
   assert.equal(
     (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
     '审计本章已采用正文的人物一致性',
   );
 
   fireEvent.click(screen.getByText('推演事件'));
+  fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
   assert.equal(
     (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
     '生成本章剧情事件候选',
@@ -2253,6 +2443,15 @@ test('Workbench releases an applied candidate that did not satisfy the same read
 });
 
 test('Workbench keeps the selected project intact when an old asset apply settles late', async () => {
+  // Explicit selection, independent of the directory's stable timestamp/ID tie-break.
+  localStorage.setItem(
+    'ai_novel_studio_workbench_selection',
+    JSON.stringify({
+      version: 1,
+      novelId: mockNovel.id,
+      conversationId: mockConversation.conversationId,
+    }),
+  );
   useBrowserMockModel();
   const secondNovel: Novel = {
     ...mockNovel,
@@ -3858,6 +4057,14 @@ test('retrying an older failed run creates a new run on the original user turn',
 });
 
 test('WorkbenchPage switches projects and task bundles as one selection', async () => {
+  localStorage.setItem(
+    'ai_novel_studio_workbench_selection',
+    JSON.stringify({
+      version: 1,
+      novelId: mockNovel.id,
+      conversationId: mockConversation.conversationId,
+    }),
+  );
   const secondNovel: Novel = {
     ...mockNovel,
     id: 'novel-002',
@@ -4412,7 +4619,7 @@ test('Workbench task tree searches archived tasks and restores them from the row
   fireEvent.change(screen.getByRole('searchbox', { name: '搜索创作任务' }), {
     target: { value: '人物' },
   });
-  assert.ok(screen.getByText('已归档的人物审计'));
+  await waitFor(() => assert.ok(screen.getByText('已归档的人物审计')));
   const menuTrigger = screen.getByRole('button', { name: '已归档的人物审计的更多操作' });
   fireEvent.click(menuTrigger);
   fireEvent.keyDown(window, { key: 'Escape' });

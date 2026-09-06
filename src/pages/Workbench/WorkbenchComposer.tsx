@@ -9,10 +9,10 @@ import { WorkbenchModelSelect } from './WorkbenchModelSelect';
 import { WorkbenchModelRecoveryNotice } from './WorkbenchModelRecoveryNotice';
 import { WorkbenchAssetScopePanel } from './WorkbenchAssetScopePanel';
 import { useWorkbenchModelCredential } from './hooks/useWorkbenchModelCredential';
-import {
-  isWorkbenchTaskTemplateEnabled,
-  type WorkbenchTaskTemplate,
-} from './workbenchTaskTemplates';
+import type { WorkbenchTaskTemplate } from './workbenchTaskTemplates';
+import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
+import { GrowingGoalTextarea } from './GrowingGoalTextarea';
+import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
 
 export type TaskTemplate = WorkbenchTaskTemplate;
 
@@ -32,6 +32,7 @@ function resolveCoreAssetReadyCount(
 }
 
 interface WorkbenchComposerProps {
+  scopeKey?: string;
   templates: TaskTemplate[];
   plugins: CurrentPluginProjection[];
   pluginsLoading: boolean;
@@ -63,6 +64,7 @@ interface WorkbenchComposerProps {
 }
 
 export function WorkbenchComposer({
+  scopeKey = '',
   templates,
   plugins,
   pluginsLoading,
@@ -132,27 +134,14 @@ export function WorkbenchComposer({
       className="workbench-composer agent-console-composer"
       data-composer-state={composerState}
     >
-      <div className="workbench-template-row" data-testid="workbench-task-templates">
-        {templates.map((template) => (
-          <button
-            type="button"
-            className="workbench-template-chip"
-            key={template.id}
-            data-testid={`workbench-template-${template.id}`}
-            disabled={templatesDisabled || !isWorkbenchTaskTemplateEnabled(template, hasChapter)}
-            title={
-              !hasChapter && !chaptersLoading && template.scope === 'chapter'
-                ? '请先选择或创建目标章节'
-                : hasChapter && template.scope === 'project'
-                  ? '项目级动作需在“整个小说项目”范围的新任务中执行'
-                  : undefined
-            }
-            onClick={() => onDraftChange(template.goal)}
-          >
-            {template.label}
-          </button>
-        ))}
-      </div>
+      <WorkbenchTemplateControls
+        key={scopeKey}
+        templates={templates}
+        hasChapter={hasChapter}
+        disabled={templatesDisabled}
+        value={draft}
+        onChange={onDraftChange}
+      />
 
       <div className="workbench-composer-surface">
         {contextPending && (
@@ -240,13 +229,15 @@ export function WorkbenchComposer({
           />
         )}
 
-        <textarea
+        <GrowingGoalTextarea
           data-testid="workbench-composer-input"
+          aria-label="创作目标"
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&
+              !isComposingKeyboardEvent(event) &&
               (event.ctrlKey || event.metaKey) &&
               !executionLocked &&
               canSendDraft

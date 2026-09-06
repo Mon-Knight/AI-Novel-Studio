@@ -34,7 +34,11 @@ interface WorkbenchTurnProps {
   chapterSummaryOrchestration: ChapterSummaryOrchestrationState;
   retryRunBlockedReason: string;
   onReloadArtifacts?: () => void;
-  onDecideArtifact: (artifact: ConversationArtifactCard, decision: ArtifactDecisionKind) => void;
+  onDecideArtifact: (
+    artifact: ConversationArtifactCard,
+    decision: ArtifactDecisionKind,
+    revisionNotes?: string,
+  ) => void;
   onRetry: (runId: string) => void;
   onRetryChapterSummaryStart?: () => void;
 }
@@ -165,13 +169,13 @@ export function WorkbenchTurn({
               <ArtifactCard
                 artifact={artifact}
                 key={artifact.cardId}
-                busy={decisionBusyCardId === artifact.cardId}
+                busy={Boolean(decisionBusyCardId)}
                 newlyArrived={
                   newlyArrivedArtifacts.conversationId === conversationId &&
                   newlyArrivedArtifacts.cardIds.has(artifact.cardId)
                 }
                 onReload={onReloadArtifacts}
-                onDecide={(decision) => onDecideArtifact(artifact, decision)}
+                onDecide={(decision, notes) => onDecideArtifact(artifact, decision, notes)}
               />
             ))}
             {run.error && (

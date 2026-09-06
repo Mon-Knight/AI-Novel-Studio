@@ -17,7 +17,16 @@ export type ChapterCandidateIntegrityIssueCode =
 export interface ChapterCandidateIntegrityIssue {
   code: ChapterCandidateIntegrityIssueCode;
   summary: string;
+  severity: 'error' | 'warning';
 }
+
+const SEMANTIC_REVIEW_WARNINGS = new Set<ChapterCandidateIntegrityIssueCode>([
+  'chapter_boundary_action_replay',
+  'chapter_source_chain_break',
+  'chapter_dialogue_reference_conflict',
+  'chapter_temporal_semantics_conflict',
+  'chapter_audit_voice_leakage',
+]);
 
 export interface InspectChapterCandidateIntegrityInput {
   candidateText: string;
@@ -611,7 +620,7 @@ function hasClusteredAuditVoiceLeakage(candidateText: string): boolean {
 export function inspectChapterCandidateIntegrity(
   input: InspectChapterCandidateIntegrityInput,
 ): ChapterCandidateIntegrityIssue[] {
-  const issues: ChapterCandidateIntegrityIssue[] = [];
+  const issues: Array<Omit<ChapterCandidateIntegrityIssue, 'severity'>> = [];
   if (
     input.previousChapterText?.trim() &&
     hasOpeningRollback(input.candidateText, input.previousChapterText)
@@ -685,5 +694,8 @@ export function inspectChapterCandidateIntegrity(
       summary: '章节正文密集泄漏核实状态与内部审校结论，未转化为故事呈现。',
     });
   }
-  return issues;
+  return issues.map((issue) => ({
+    ...issue,
+    severity: SEMANTIC_REVIEW_WARNINGS.has(issue.code) ? 'warning' : 'error',
+  }));
 }

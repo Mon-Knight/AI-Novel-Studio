@@ -48,6 +48,10 @@
   user-select: none;
 }
 
+.workspace-sidebar[hidden] {
+  display: none;
+}
+
 .workspace-sidebar-header {
   padding: var(--spacing-md) var(--spacing-lg);
   border-bottom: 1px solid var(--color-border-light);
@@ -471,9 +475,80 @@
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
   text-align: center;
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--color-border-light);
+  width: min(100%, 920px);
+  margin: 0 auto 10px;
+  overflow-wrap: anywhere;
+}
+
+.editor-document-metadata,
+.editor-action-feedback,
+.editor-document-load-notice {
+  width: min(100%, 920px);
+  margin: 0 auto 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.editor-document-metadata summary,
+.editor-chapter-context > summary {
+  cursor: pointer;
+}
+
+.editor-document-metadata summary svg,
+.editor-chapter-context > summary svg {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.editor-document-metadata > div,
+.editor-context-actions,
+.editor-save-feedback,
+.editor-adopt-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-action-feedback {
+  display: grid;
+  gap: 6px;
+}
+
+.editor-context-excerpt {
+  margin-left: 10px;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.editor-chapter-context > .editor-info-section {
+  margin-top: 12px;
+}
+
+.editor-context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editor-outline-textarea {
+  min-height: 120px;
+  margin-top: 8px;
+  font-family: var(--font-family-editor);
+  line-height: 1.8;
+}
+
+.editor-adopt-feedback.is-error,
+.statusbar-adopt-state.is-error {
+  color: var(--color-error);
+}
+
+.editor-adopt-feedback.is-adopted,
+.statusbar-adopt-state.is-adopted {
+  color: var(--color-success);
 }
 
 .editor-body {
@@ -519,16 +594,17 @@
 
 /* === 底部状态栏 === */
 .workspace-statusbar {
-  height: var(--statusbar-height);
-  min-height: var(--statusbar-height);
+  min-height: max(30px, var(--statusbar-height));
+  flex-shrink: 0;
+  flex-wrap: wrap;
   background: var(--color-bg-sidebar);
   border-top: 1px solid var(--color-border);
   display: flex;
   align-items: center;
-  padding: 0 var(--spacing-lg);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  gap: var(--spacing-lg);
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  gap: 6px 10px;
   user-select: none;
 }
 
@@ -539,9 +615,19 @@
 }
 
 .workspace-statusbar > .statusbar-item:last-child {
-  flex: 0 0 172px;
-  min-width: 172px;
-  white-space: nowrap;
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.statusbar-save-state,
+.statusbar-adopt-state {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.statusbar-save-label,
+.statusbar-adopt-state > span {
+  overflow-wrap: anywhere;
 }
 
 .statusbar-save-label,
@@ -552,11 +638,11 @@
 
 .statusbar-save-label {
   display: inline-block;
-  min-width: 148px;
+  min-width: 0;
 }
 
 .editor-save-feedback {
-  display: inline-block;
+  display: flex;
   min-width: 88px;
   font-weight: var(--font-weight-semibold);
 }
@@ -564,7 +650,7 @@
 .editor-outline-save-feedback {
   min-height: 16px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .editor-save-feedback.is-saving,
@@ -739,7 +825,7 @@
   max-width: 920px;
   margin: 0 auto 12px;
   padding: 10px 14px;
-  background: var(--color-primary-light);
+  background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   font-size: 13px;
@@ -755,7 +841,7 @@
 
 .editor-info-label {
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-text-primary);
   margin-bottom: 4px;
   font-size: 13px;
 }
@@ -770,8 +856,6 @@
 .editor-info-text {
   color: var(--color-text-secondary);
   line-height: 1.6;
-  max-height: 92px;
-  overflow: auto;
   white-space: pre-wrap;
 }
 

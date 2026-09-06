@@ -5,6 +5,11 @@ import type {
   LocalProjectBackupData,
 } from './projectBackupSchema';
 import { canonicalHash } from '../ai/compilation/canonical.ts';
+import {
+  LOCAL_BACKUP_POLICY,
+  parseLocalBackupEntryKey,
+  validateLocalProjectBackup,
+} from './projectBackupLocalStoragePolicy.ts';
 
 export interface LocalStorageLike {
   readonly length: number;
@@ -16,47 +21,17 @@ export interface LocalStorageLike {
 
 type IdFactory = () => string;
 
-const PROJECT_COLLECTION_KEYS = [
-  'ai_novel_studio_novels',
-  'ai_novel_studio_volumes',
-  'ai_novel_studio_chapters',
-  'ai_novel_studio_protagonists',
-  'ai_novel_studio_world_settings',
-  'ai_novel_studio_rule_systems',
-  'ai_novel_studio_characters',
-  'ai_novel_studio_chapter_characters',
-  'ai_novel_studio_chapter_events',
-  'ai_novel_studio_character_states',
-  'ai_novel_studio_chapter_summaries',
-  'ai_novel_studio_context_records',
-  'ai_novel_studio_ai_tasks',
-  'ai_novel_studio_ai_task_records',
-  'ai_novel_studio_style_profiles',
-  'ai_novel_studio_output_profiles',
-  'ai_novel_studio_imported_assets',
-  'ai_novel_studio_quality_reports',
-  'ai_novel_studio_quality_items',
-  'ai_novel_studio_quality_issue_states',
-  'ai_novel_studio_polish_records',
-  'ai_novel_studio_fix_runs',
-  'ai_novel_studio_setting_suggestions',
-  'ai_novel_studio_generation_jobs',
-  'ai_novel_studio_multi_agent_sessions',
-  'ai_novel_studio_autonomous_story_plans',
-] as const;
+const PROJECT_COLLECTION_KEYS = LOCAL_BACKUP_POLICY.collections;
 
 const AUTONOMOUS_PLANS_KEY = 'ai_novel_studio_autonomous_story_plans';
 const GENERATION_JOBS_KEY = 'ai_novel_studio_generation_jobs';
-const REFERENCE_LIBRARY_KEY = 'ai_novel_studio_reference_library_v1';
+const REFERENCE_LIBRARY_KEY = LOCAL_BACKUP_POLICY.referenceLibraryKey;
 const CHAPTER_SCOPED_PREFIXES = [
-  'ai_novel_studio_drafts_list_',
-  'ai_novel_studio_draft_',
-  'ai_novel_studio_chapter_engineering_states_',
-  'ai_novel_studio_chapter_generation_snapshots_',
-  'ai_novel_studio_unsaved_chapter_outline_',
+  ...LOCAL_BACKUP_POLICY.chapterPrefixes,
+  LOCAL_BACKUP_POLICY.rawChapterPrefix,
 ] as const;
-const RAW_TEXT_ENTRY_PREFIXES = ['ai_novel_studio_unsaved_chapter_outline_'] as const;
-const JOB_SCOPED_PREFIX = 'ai_novel_studio_generation_steps_';
+const RAW_TEXT_ENTRY_PREFIXES = [LOCAL_BACKUP_POLICY.rawChapterPrefix];
+const JOB_SCOPED_PREFIX = LOCAL_BACKUP_POLICY.jobPrefix;
 
 function resolveStorage(storage?: LocalStorageLike): LocalStorageLike | undefined {
   if (storage) return storage;
@@ -179,17 +154,7 @@ function isChapterScopedKey(key: string, chapterIds: Set<string>): boolean {
 
 function addRecordId(value: BackupValue, ids: Set<string>): void {
   if (!isRecord(value)) return;
-  for (const key of [
-    'id',
-    'sessionId',
-    'session_id',
-    'opinionId',
-    'opinion_id',
-    'operationId',
-    'operation_id',
-    'planId',
-    'plan_id',
-  ]) {
+  for (const key of LOCAL_BACKUP_POLICY.identityKeys) {
     const id = value[key];
     if (typeof id === 'string' && id) ids.add(id);
   }
@@ -328,6 +293,7 @@ export function collectLocalProjectData(
 
   const data: LocalProjectBackupData = { version: 1, collections, entries };
   if (Object.keys(rawEntries).length > 0) data.rawEntries = rawEntries;
+  validateLocalProjectBackup(backup, data);
   return data;
 }
 
@@ -336,12 +302,12 @@ export function mergeLocalStorageIdMap(
   databaseIdMap: Record<string, string>,
   idFactory: IdFactory = createLocalId,
 ): Record<string, string> {
-  const mergedIdMap = { ...databaseIdMap };
+  const mergedIdMap: Record<string, string> = Object.assign(Object.create(null), databaseIdMap);
   if (!data) return mergedIdMap;
 
   const usedIds = new Set([...Object.keys(mergedIdMap), ...Object.values(mergedIdMap)]);
   for (const sourceId of collectLocalEntityIds(data)) {
-    if (sourceId in mergedIdMap) continue;
+    if (Object.prototype.hasOwnProperty.call(mergedIdMap, sourceId)) continue;
     const targetId = nextAvailableId(idFactory, usedIds);
     mergedIdMap[sourceId] = targetId;
     usedIds.add(targetId);
@@ -350,7 +316,9 @@ export function mergeLocalStorageIdMap(
 }
 
 function remapValue(value: BackupValue, idMap: Record<string, string>): BackupValue {
-  if (typeof value === 'string') return idMap[value] ?? value;
+  if (typeof value === 'string') {
+    return Object.prototype.hasOwnProperty.call(idMap, value) ? idMap[value] : value;
+  }
   if (Array.isArray(value)) return value.map((entry) => remapValue(entry, idMap));
   if (isRecord(value)) {
     return Object.fromEntries(
@@ -360,11 +328,12 @@ function remapValue(value: BackupValue, idMap: Record<string, string>): BackupVa
   return value;
 }
 
-function remapStorageKey(key: string, idMap: Record<string, string>): string {
-  return Object.entries(idMap).reduce(
-    (result, [sourceId, targetId]) => result.split(sourceId).join(targetId),
-    key,
-  );
+function remapStorageKey(key: string, idMap: Record<string, string>, raw = false): string {
+  if (!raw && key === REFERENCE_LIBRARY_KEY) return key;
+  const { prefix, id } = parseLocalBackupEntryKey(key, raw);
+  const targetId = Object.prototype.hasOwnProperty.call(idMap, id) ? idMap[id] : undefined;
+  if (!targetId) throw new Error('项目备份的补充缓存缺少作用域 ID 映射。');
+  return `${prefix}${targetId}`;
 }
 
 function mergeReferenceLibraryState(
@@ -372,6 +341,23 @@ function mergeReferenceLibraryState(
   incoming: BackupValue,
 ): BackupValue {
   const empty = { schemaVersion: 1, works: [], imports: [], sections: [], operations: {} };
+  if (
+    current !== null &&
+    (!isRecord(current) ||
+      !Array.isArray(current.works) ||
+      !Array.isArray(current.imports) ||
+      !Array.isArray(current.sections) ||
+      !isRecord(current.operations))
+  ) {
+    throw new Error('现有参考资料缓存无效，已停止恢复。');
+  }
+  const existingIds = new Set<string>();
+  const incomingIds = new Set<string>();
+  if (current !== null) addRecordId(current, existingIds);
+  addRecordId(incoming, incomingIds);
+  if ([...incomingIds].some((id) => existingIds.has(id))) {
+    throw new Error('项目备份的参考资料缓存目标 ID 已存在。');
+  }
   const currentState = isRecord(current) ? current : empty;
   const incomingState = isRecord(incoming) ? incoming : empty;
   return {
@@ -412,41 +398,85 @@ async function refreshLocalAutonomousPlan(value: BackupValue): Promise<BackupVal
 }
 
 export async function restoreLocalProjectData(
-  data: LocalProjectBackupData | undefined,
+  backup: CompleteProjectBackup,
   idMap: Record<string, string>,
   storage?: LocalStorageLike,
 ): Promise<void> {
+  const data = backup.localStorage;
+  validateLocalProjectBackup(backup, data);
   const resolvedStorage = resolveStorage(storage);
   if (!data || !resolvedStorage) return;
+  const sources = new Set(Object.keys(idMap));
+  const targets = Object.values(idMap);
+  if (
+    sources.has('__proto__') ||
+    sources.has('constructor') ||
+    sources.has('prototype') ||
+    targets.some(
+      (id) => !id || sources.has(id) || LOCAL_BACKUP_POLICY.forbiddenKeys.includes(id),
+    ) ||
+    new Set(targets).size !== targets.length ||
+    [...collectLocalEntityIds(data)].some((id) => !sources.has(id)) ||
+    !idMap[String(backup.novel.id)]
+  )
+    throw new Error('项目备份的补充缓存 ID 映射无效或冲突。');
+  // Complete all asynchronous preparation before observing/writing LocalStorage.
+  // Raw attachment keys never become write targets; only this validated plan does.
+  const collections = await Promise.all(
+    Object.entries(data.collections).map(async ([key, rows]) => {
+      let remappedRows = rows.map((row) => remapValue(row, idMap));
+      if (key === AUTONOMOUS_PLANS_KEY) {
+        remappedRows = await Promise.all(remappedRows.map(refreshLocalAutonomousPlan));
+      }
+      return [key, remappedRows] as const;
+    }),
+  );
+  const plan = new Map<string, string>();
+  const append = (key: string, value: string) => {
+    if (plan.has(key)) throw new Error('项目备份的补充缓存包含重复写入目标。');
+    plan.set(key, value);
+  };
+  for (const [key, incoming] of collections) {
+    const raw = resolvedStorage.getItem(key);
+    const current = safeParse(raw);
+    if (raw !== null && !Array.isArray(current)) throw new Error('现有项目缓存无效，已停止恢复。');
+    const currentRows = Array.isArray(current) ? current : [];
+    const existingIds = new Set<string>();
+    currentRows.forEach((row) => addRecordId(row, existingIds));
+    const incomingIds = new Set<string>();
+    incoming.forEach((row) => addRecordId(row, incomingIds));
+    if ([...incomingIds].some((id) => existingIds.has(id)))
+      throw new Error('项目备份的补充缓存目标 ID 已存在。');
+    append(key, JSON.stringify([...currentRows, ...incoming]));
+  }
+  for (const [sourceKey, value] of Object.entries(data.entries)) {
+    const key = remapStorageKey(sourceKey, idMap);
+    const remapped = remapValue(value, idMap);
+    const existingRaw = resolvedStorage.getItem(key);
+    const existing = safeParse(existingRaw);
+    if (key !== REFERENCE_LIBRARY_KEY && existingRaw !== null) {
+      throw new Error('项目备份的补充缓存写入目标已存在。');
+    }
+    if (key === REFERENCE_LIBRARY_KEY && existingRaw !== null && existing === null) {
+      throw new Error('现有参考资料缓存无效，已停止恢复。');
+    }
+    const restored =
+      key === REFERENCE_LIBRARY_KEY ? mergeReferenceLibraryState(existing, remapped) : remapped;
+    append(key, JSON.stringify(restored));
+  }
+  for (const [sourceKey, value] of Object.entries(data.rawEntries ?? {})) {
+    const key = remapStorageKey(sourceKey, idMap, true);
+    if (resolvedStorage.getItem(key) !== null)
+      throw new Error('项目备份的补充缓存写入目标已存在。');
+    append(key, value);
+  }
   const touched = new Map<string, string | null>();
   const remember = (key: string) => {
     if (!touched.has(key)) touched.set(key, resolvedStorage.getItem(key));
   };
 
   try {
-    for (const [key, rows] of Object.entries(data.collections)) {
-      const current = safeParse(resolvedStorage.getItem(key));
-      const currentRows = Array.isArray(current) ? current : [];
-      let remappedRows = rows.map((row) => remapValue(row, idMap));
-      if (key === AUTONOMOUS_PLANS_KEY) {
-        remappedRows = await Promise.all(remappedRows.map(refreshLocalAutonomousPlan));
-      }
-      remember(key);
-      resolvedStorage.setItem(key, JSON.stringify([...currentRows, ...remappedRows]));
-    }
-    for (const [sourceKey, value] of Object.entries(data.entries)) {
-      const key = remapStorageKey(sourceKey, idMap);
-      remember(key);
-      const remapped = remapValue(value, idMap);
-      const restored =
-        key === REFERENCE_LIBRARY_KEY
-          ? mergeReferenceLibraryState(safeParse(resolvedStorage.getItem(key)), remapped)
-          : remapped;
-      resolvedStorage.setItem(key, JSON.stringify(restored));
-    }
-    for (const [sourceKey, value] of Object.entries(data.rawEntries ?? {})) {
-      if (typeof value !== 'string') continue;
-      const key = remapStorageKey(sourceKey, idMap);
+    for (const [key, value] of plan) {
       remember(key);
       resolvedStorage.setItem(key, value);
     }

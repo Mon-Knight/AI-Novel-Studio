@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bot, Database, Palette, Search, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { AiSettings } from '../../types/ai';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
@@ -21,6 +22,7 @@ import {
 import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettingsCard';
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
 import { SettingsSidebar, type SettingsTabKey } from './SettingsSidebar';
+import { PageHeader } from '../../components/common/PageLayout';
 
 export type { SettingsTabKey };
 
@@ -47,7 +49,7 @@ function SettingsPage() {
         if (!disposed) setSettings(aiSettingsService.getSettings());
       })
       .catch(() => {
-        if (!disposed) setMessage('本次应用会话的模型凭据恢复失败，请重新填写 API Key');
+        if (!disposed) setMessage(getCredentialStorageCopy().restoreFailed);
       });
     return () => {
       disposed = true;
@@ -107,7 +109,7 @@ function SettingsPage() {
       await aiSettingsService.saveSettings(final);
       setSettings(aiSettingsService.getSettings());
       setPolicySnapshotVersion((version) => version + 1);
-      setMessage('AI 设置已保存，API Key 仅保留到本次应用会话结束');
+      setMessage(getCredentialStorageCopy().saved);
     } catch (error) {
       setMessage(`AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
     }
@@ -222,7 +224,8 @@ function SettingsPage() {
           flex: 1,
           height: '100%',
           overflowY: 'auto',
-          padding: '28px 36px',
+          padding: 24,
+          minWidth: 0,
         }}
       >
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
@@ -248,25 +251,11 @@ function SettingsPage() {
           {/* 分类 1: 常规与外观 */}
           {activeTab === 'general' && (
             <div data-testid="settings-tab-pane-general">
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <Palette aria-hidden="true" size={20} strokeWidth={1.8} />
-                  常规与外观偏好
-                </div>
-                <div className="text-sm text-muted">
-                  配置桌面写作环境外观主题、版本更新以及基础交互偏好。
-                </div>
-              </div>
+              <PageHeader
+                title="常规与外观偏好"
+                description="配置桌面写作环境外观主题、版本更新以及基础交互偏好。"
+                icon={Palette}
+              />
               <AppearanceSettingsCard />
               <AppUpdateSettingsCard />
             </div>
@@ -275,25 +264,11 @@ function SettingsPage() {
           {/* 分类 2: AI 模型与运行时 */}
           {activeTab === 'ai_models' && (
             <div data-testid="settings-tab-pane-ai-models">
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <Bot aria-hidden="true" size={20} strokeWidth={1.8} />
-                  AI 模型服务与运行时
-                </div>
-                <div className="text-sm text-muted">
-                  配置云端 API、本地离线模型与网关服务，管理模型凭据与运行健康。
-                </div>
-              </div>
+              <PageHeader
+                title="AI 模型服务与运行时"
+                description="配置云端 API、本地离线模型与网关服务，管理模型凭据与运行健康。"
+                icon={Bot}
+              />
               <AiRuntimeOverviewCard settings={settings} localHealthResult={localHealthResult} />
               <AiProviderSettingsCard
                 settings={settings}
@@ -319,25 +294,11 @@ function SettingsPage() {
           {/* 分类 3: 网关与治理 */}
           {activeTab === 'governance' && (
             <div data-testid="settings-tab-pane-governance">
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <ShieldCheck aria-hidden="true" size={20} strokeWidth={1.8} />
-                  AI 网关与流控治理
-                </div>
-                <div className="text-sm text-muted">
-                  配置调用预算阈值、请求速率并发限制与安全审计规则。
-                </div>
-              </div>
+              <PageHeader
+                title="AI 网关与流控治理"
+                description="配置调用预算阈值、请求速率并发限制与安全审计规则。"
+                icon={ShieldCheck}
+              />
               <AiGovernanceSettingsCard
                 settings={settings}
                 onChange={update}
@@ -351,25 +312,11 @@ function SettingsPage() {
           {/* 分类 4: 数据与存储 */}
           {activeTab === 'data' && (
             <div data-testid="settings-tab-pane-data">
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <Database aria-hidden="true" size={20} strokeWidth={1.8} />
-                  本地数据与存储架构
-                </div>
-                <div className="text-sm text-muted">
-                  管理 SQLite 数据库健康、自动备份机制与数据完整性修复。
-                </div>
-              </div>
+              <PageHeader
+                title="本地数据与存储架构"
+                description="管理 SQLite 数据库健康、自动备份机制与数据完整性修复。"
+                icon={Database}
+              />
               <DataStorageSettingsCard />
             </div>
           )}
@@ -377,25 +324,11 @@ function SettingsPage() {
           {/* 分类 5: 诊断与关于 */}
           {activeTab === 'diagnostics' && (
             <div data-testid="settings-tab-pane-diagnostics">
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <Search aria-hidden="true" size={20} strokeWidth={1.8} />
-                  系统诊断与关于
-                </div>
-                <div className="text-sm text-muted">
-                  查看运行环境诊断报告、系统组件版本与软件发行信息。
-                </div>
-              </div>
+              <PageHeader
+                title="系统诊断与关于"
+                description="查看运行环境诊断报告、系统组件版本与软件发行信息。"
+                icon={Search}
+              />
               <DiagnosticsSettingsCard />
               <AboutSettingsCard />
             </div>

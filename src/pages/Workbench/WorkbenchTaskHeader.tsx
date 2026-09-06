@@ -2,6 +2,7 @@ import { Minimize2, Puzzle } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { TaskConversation } from '../../types/conversation';
 import { statusLabel } from './workbenchHelpers';
+import { ChapterLocator } from '../../components/workspace/ChapterLocator';
 
 interface WorkbenchTaskHeaderProps {
   novelTitle: string;
@@ -62,18 +63,14 @@ export function WorkbenchTaskHeader({
                 去创建章节
               </button>
             ) : (
-              <select
-                id="workbench-chapter-select"
-                data-testid="workbench-chapter-select"
-                value={chapterId ?? ''}
-                onChange={(event) => onSelectChapter(event.target.value)}
-              >
-                {chapters.map((chapter) => (
-                  <option key={chapter.id} value={chapter.id}>
-                    {chapter.title || '未命名章节'}
-                  </option>
-                ))}
-              </select>
+              <ChapterLocator
+                key={conversation.conversationId}
+                chapters={chapters}
+                activeChapterId={chapterId}
+                onSelectChapter={onSelectChapter}
+                selectId="workbench-chapter-select"
+                selectTestId="workbench-chapter-select"
+              />
             )}
             {chaptersError ? (
               <span className="workbench-chapter-hint is-error">{chaptersError}</span>

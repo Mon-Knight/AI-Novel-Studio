@@ -2,10 +2,11 @@
 
 > 文件名：`development-rules.md`  
 > 项目名称：AI Novel Studio  
-> 本地路径：`F:\ai-novel-studio`  
+> 本地路径：以当前工作区 `pwd` 为准；
 > 技术路线：Tauri + React + TypeScript + SQLite  
 > 开发方式：VS Code + Copilot / Agent 辅助开发  
 > 文档目的：约束后续开发流程、目录结构、版本管理、GitHub 备份、UI 方向、AI 功能开发边界，避免项目在长期迭代中变成混乱的网页后台或不可维护的代码堆。
+> 阅读入口：[AGENTS.md](../AGENTS.md) 定义仓库开发总规则，[Agent 工作流](agent-workflow.md) 细化执行。本文保留详细规范与演进历史；开工检查、确认条件、分层验证和 Git 授权不另设重复规则。
 > 时效说明：第 1～20 节大量保留早期 v0.x～v3.2.1 的形成过程和当前页面约束；v3.3.0+ 的主交互、Harness 复用与验证覆盖规则以第 24 节和 `docs/architecture/conversational-creative-workbench.md` 为准。
 
 ---
@@ -143,11 +144,11 @@ MVP 阶段优先完成：
 
 ---
 
-### 2.3 每次开发必须小步提交
+### 2.3 每次开发保持小步、单一目标
 
 Copilot / Agent 每次开发任务必须控制范围。
 
-推荐每次任务只做一个明确版本：
+普通任务不自动升级版本或提交；版本任务只做一个已确认版本目标。以下为早期拆分示例，不是当前待办：
 
 ```text
 v0.1.0：桌面壳与首页
@@ -917,8 +918,8 @@ F:\ai-novel-studio
 每次让 Agent 修改代码前，必须执行：
 
 ```powershell
-cd "F:\ai-novel-studio"
-git status
+pwd
+git status --short --branch
 ```
 
 要求：
@@ -930,36 +931,11 @@ git status
 
 ---
 
-### 11.3 每个版本必须提交
+### 11.3 Git 操作与发布授权
 
-每完成一个稳定版本，必须执行：
+普通任务完成后可以交付未提交差异；仅在用户或已确认任务明确授权相应动作时 commit / push / PR / tag / 发布。获准提交时只暂存相关文件并核对暂存差异，不用无差别 `git add .` 混入用户修改。
 
-```powershell
-git status
-git switch -c codex/v0.x.x-release
-git add .
-git commit -m "feat: complete v0.x.x ..."
-git push -u origin codex/v0.x.x-release
-
-# PR 审查和门禁通过并合并后
-git switch main
-git pull --ff-only origin main
-git tag v0.x.x
-git push origin v0.x.x
-```
-
-不得直接在 `main` 上进行日常开发；完整分支保护、PR、hotfix 和回滚规则见
-[`docs/project/git-workflow.md`](project/git-workflow.md)。
-
-标签格式：
-
-```text
-v0.1.0
-v0.2.0
-v0.3.0
-...
-v1.0.0
-```
+发布流程为：单一目标分支 → PR → 适用门禁与审查 → 合入并同步 `main` → 创建不可移动的 `vX.Y.Z` 发布 tag。不得直接在 `main` 上进行日常开发，也不得通过 force push 或移动 tag 重写共享历史。完整分支保护、审查例外、hotfix 与回滚规则见 [Git 治理](project/git-workflow.md)。
 
 ---
 
@@ -1056,7 +1032,7 @@ v1.0.0：可正式写长篇的基础版
 
 - 纯文档：`npm run test:docs-sync`，必要时 `npm run test:version-sync`，并执行 Prettier、diff 和范围检查；
 - 前端/TypeScript：相关动态测试、`npm run lint:ci`、`npm run build`；
-- Rust/SQLite：`cargo check`、相关动态测试，版本验收时完整 `cargo test`；
+- Rust/SQLite：`cargo check --locked --manifest-path src-tauri/Cargo.toml`、相关动态测试；版本验收在准备固定载体与当前 Gateway 后运行完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1`；
 - Tauri/DSH payload/打包：真实桌面 E2E 与生产构建；
 - 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵和 clean working tree。
 
@@ -1149,18 +1125,9 @@ sk-****abcd
 
 ### 15.1 Agent 开发前必须读取文档
 
-Agent 每次开发前应读取：
+先读根 [AGENTS.md](../AGENTS.md)，按其查阅表从 [文档索引](README.md) 进入产品、UI、数据模型与任务相关资料。首次进入仓库先看开头和当前版本覆盖章节；不要求每次通读全部设计、IDE 指令与 Skills。
 
-```text
-docs/product-design.md
-docs/ui-reference.md
-docs/data-model.md
-docs/prompt-system.md
-docs/development-rules.md
-.github/copilot-instructions.md
-```
-
-至少确认本次任务涉及的相关文档。
+明确、低风险的同会话任务说明计划后可直接执行；需求歧义、架构决策、破坏性操作和范围扩展先确认。
 
 ---
 
@@ -1501,6 +1468,6 @@ AI Novel Studio 的开发必须坚持三个核心：
 
 - 用户最新明确需求或已确认任务书是当前目标，不强制在不同聊天/IDE 间复制任务书；
 - 旧 UI 规则按版本解释，不能把 v3.2.1 三栏布局强加给 v3.3.0+ 主工作台；
-- 验证按文档、前端、Rust/SQLite、Tauri/DSH 和发布范围分层；
+- 在最终验证前同步文档与 CHANGELOG；验证按文档、前端、Rust/SQLite、Tauri/DSH 和发布范围分层，具体命令与证据要求见根 `AGENTS.md`；
 - commit、push、tag 只在用户或版本/发布任务明确要求时执行；
 - Agent 规则时效审计见 `docs/audit/agent-requirements-review-2026-08-20.md`。

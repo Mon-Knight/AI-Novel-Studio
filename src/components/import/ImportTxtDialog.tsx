@@ -1,8 +1,8 @@
 /**
  * AI Novel Studio - TXT 导入确认弹窗
  */
-import { useState, useRef } from 'react';
-import { CircleCheck, FileText, FolderOpen, LoaderCircle, TriangleAlert, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { CircleCheck, FileText, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -13,6 +13,7 @@ import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
 import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
 import { describeUnknownError } from '../../utils/errorMessage';
+import { ModalFrame } from '../common/ModalFrame';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
@@ -30,6 +31,13 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -52,7 +60,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   };
 
   const handleImport = async () => {
-    if (!analyzeResult || !novelTitle.trim()) return;
+    if (importing || !analyzeResult || !novelTitle.trim()) return;
     setImporting(true);
     setError('');
     try {
@@ -102,7 +110,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
           setImporting(false);
           setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
           setStep('done');
-          setTimeout(() => {
+          closeTimer.current = setTimeout(() => {
             onClose();
             navigate(`/novels/${novel.id}`);
           }, 1500);
@@ -115,249 +123,220 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   };
 
   return (
-    <>
-      <div className="modal-overlay" onClick={onClose} />
-      <div
-        className="modal-content"
-        style={{
-          maxWidth: 540,
-          width: '90%',
-          maxHeight: '85vh',
-          overflowY: 'auto',
-          padding: '18px 22px',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 12,
-            paddingBottom: 8,
-            borderBottom: '1px solid var(--color-border)',
-          }}
-        >
-          <span
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700 }}
-          >
-            <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
-            导入 TXT 小说
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭 TXT 导入"
-            title="关闭"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--color-text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <X aria-hidden="true" size={18} strokeWidth={1.8} />
-          </button>
-        </div>
-
-        {step === 'select' && (
-          <div>
-            <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              选择本地 TXT 文件，系统将自动识别章节标题并智能划分卷章结构。
-            </div>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                padding: '20px 16px',
-                border: '1.5px dashed var(--color-border)',
-                borderRadius: 8,
-                textAlign: 'center',
-                cursor: 'pointer',
-                background: 'var(--color-bg-hover, #f8fafc)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-              }}
+    <ModalFrame
+      title={
+        <>
+          <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
+          导入 TXT 小说
+        </>
+      }
+      maxWidth={540}
+      onDismiss={onClose}
+      busy={importing}
+      closeLabel="关闭 TXT 导入"
+      footer={
+        step === 'analyze' && analyzeResult ? (
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={importing}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleImport}
+              disabled={importing || !novelTitle.trim()}
             >
-              <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
-              <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 TXT 文件</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                支持 UTF-8 编码文本
-              </div>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".txt,.TXT"
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-            />
-          </div>
-        )}
-
-        {step === 'analyze' && analyzeResult && (
-          <div>
-            <div
-              style={{
-                fontSize: 13,
-                marginBottom: 12,
-                padding: 8,
-                background: 'var(--color-info-bg)',
-                borderRadius: 6,
-                border: '1px solid var(--color-info-border)',
-              }}
-            >
-              <FileText
-                aria-hidden="true"
-                size={16}
-                strokeWidth={1.8}
-                style={{ verticalAlign: 'text-bottom', marginRight: 6 }}
-              />
-              {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 ·{' '}
-              {formatNumber(analyzeResult.totalWords)} 字
-              {analyzeResult.detectedChapterCount > 0 && (
+              {importing ? (
                 <>
-                  {' '}
-                  · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节
+                  <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+                  确认导入
                 </>
               )}
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      {step === 'select' && (
+        <div>
+          <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            选择本地 TXT 文件，系统将自动识别章节标题并智能划分卷章结构。
+          </div>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: '20px 16px',
+              border: '1.5px dashed var(--color-border)',
+              borderRadius: 8,
+              textAlign: 'center',
+              cursor: 'pointer',
+              background: 'var(--color-bg-hover, #f8fafc)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              color: 'var(--color-text-primary)',
+            }}
+          >
+            <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
+            <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 TXT 文件</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              支持 UTF-8 编码文本
             </div>
-            {analyzeResult.warnings.map((w, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  color: 'var(--color-warning)',
-                  marginBottom: 8,
-                }}
-              >
-                <TriangleAlert aria-hidden="true" size={15} strokeWidth={1.8} />
-                {w}
-              </div>
-            ))}
-            {analyzeResult.chapters.length <= 6 && (
-              <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 150, overflowY: 'auto' }}>
-                {analyzeResult.chapters.map((ch, i) => (
-                  <div key={i} style={{ padding: '2px 0' }}>
-                    · {ch.title}（{ch.wordCount} 字）
-                  </div>
-                ))}
-              </div>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            aria-label="选择 TXT 文件"
+            accept=".txt,.TXT"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+        </div>
+      )}
+
+      {step === 'analyze' && analyzeResult && (
+        <div>
+          <div
+            style={{
+              fontSize: 13,
+              marginBottom: 12,
+              padding: 8,
+              background: 'var(--color-info-bg)',
+              borderRadius: 6,
+              border: '1px solid var(--color-info-border)',
+            }}
+          >
+            <FileText
+              aria-hidden="true"
+              size={16}
+              strokeWidth={1.8}
+              style={{ verticalAlign: 'text-bottom', marginRight: 6 }}
+            />
+            {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 ·{' '}
+            {formatNumber(analyzeResult.totalWords)} 字
+            {analyzeResult.detectedChapterCount > 0 && (
+              <>
+                {' '}
+                · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节
+              </>
             )}
-            {analyzeResult.chapters.length > 6 && (
-              <div style={{ fontSize: 12, marginBottom: 12, color: 'var(--color-text-muted)' }}>
-                前 6 章：
-                {analyzeResult.chapters
-                  .slice(0, 6)
-                  .map((c) => c.title)
-                  .join(' / ')}{' '}
-                ……
-              </div>
-            )}
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div>
-                  <label
-                    style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}
-                  >
-                    作品名称 *
-                  </label>
-                  <input
-                    className="input"
-                    value={novelTitle}
-                    onChange={(e) => setNovelTitle(e.target.value)}
-                    style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
-                  />
+          </div>
+          {analyzeResult.warnings.map((w, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                color: 'var(--color-warning)',
+                marginBottom: 8,
+              }}
+            >
+              <TriangleAlert aria-hidden="true" size={15} strokeWidth={1.8} />
+              {w}
+            </div>
+          ))}
+          {analyzeResult.chapters.length <= 6 && (
+            <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 150, overflowY: 'auto' }}>
+              {analyzeResult.chapters.map((ch, i) => (
+                <div key={i} style={{ padding: '2px 0' }}>
+                  · {ch.title}（{ch.wordCount} 字）
                 </div>
-                <div>
-                  <label
-                    style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}
-                  >
-                    题材
-                  </label>
-                  <input
-                    className="input"
-                    value={genre}
-                    onChange={(e) => setGenre(e.target.value)}
-                    placeholder="如：玄幻/科幻/都市"
-                    style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
-                  />
-                </div>
+              ))}
+            </div>
+          )}
+          {analyzeResult.chapters.length > 6 && (
+            <div style={{ fontSize: 12, marginBottom: 12, color: 'var(--color-text-muted)' }}>
+              前 6 章：
+              {analyzeResult.chapters
+                .slice(0, 6)
+                .map((c) => c.title)
+                .join(' / ')}{' '}
+              ……
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 3 }}>
+                  作品名称 *
+                </label>
+                <input
+                  aria-label="作品名称"
+                  className="input"
+                  value={novelTitle}
+                  onChange={(e) => setNovelTitle(e.target.value)}
+                  style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
+                />
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}>
-                  简介
+                <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 3 }}>
+                  题材
                 </label>
-                <textarea
+                <input
+                  aria-label="题材"
                   className="input"
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  rows={2}
-                  style={{ width: '100%', resize: 'vertical', fontSize: 12, padding: '5px 8px' }}
+                  value={genre}
+                  onChange={(e) => setGenre(e.target.value)}
+                  placeholder="如：玄幻/科幻/都市"
+                  style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
                 />
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>
-                取消
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={handleImport}
-                disabled={importing || !novelTitle.trim()}
-              >
-                {importing ? (
-                  <>
-                    <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
-                    导入中...
-                  </>
-                ) : (
-                  <>
-                    <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
-                    确认导入
-                  </>
-                )}
-              </button>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 3 }}>
+                简介
+              </label>
+              <textarea
+                aria-label="简介"
+                className="input"
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+                rows={2}
+                style={{ width: '100%', resize: 'vertical', fontSize: 12, padding: '5px 8px' }}
+              />
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {step === 'done' && (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <CircleCheck
-              aria-hidden="true"
-              size={40}
-              strokeWidth={1.8}
-              style={{ marginBottom: 12, color: 'var(--color-success)' }}
-            />
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
-              {resultMsg}
-            </div>
+      {step === 'done' && (
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <CircleCheck
+            aria-hidden="true"
+            size={40}
+            strokeWidth={1.8}
+            style={{ marginBottom: 12, color: 'var(--color-success)' }}
+          />
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
+            {resultMsg}
           </div>
-        )}
+        </div>
+      )}
 
-        {error && (
-          <div
-            style={{
-              padding: 8,
-              background: 'var(--color-error-bg)',
-              borderRadius: 6,
-              color: 'var(--color-error)',
-              fontSize: 13,
-              marginTop: 8,
-            }}
-          >
-            {error}
-          </div>
-        )}
-      </div>
-    </>
+      {error && (
+        <div
+          style={{
+            padding: 8,
+            background: 'var(--color-error-bg)',
+            borderRadius: 6,
+            color: 'var(--color-error)',
+            fontSize: 13,
+            marginTop: 8,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </ModalFrame>
   );
 }
 

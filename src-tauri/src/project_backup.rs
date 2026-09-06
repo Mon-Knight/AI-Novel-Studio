@@ -10,6 +10,9 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+#[path = "project_backup_local_storage.rs"]
+mod local_storage_policy;
+
 const BACKUP_TYPE: &str = "ai_novel_studio_project";
 const BACKUP_SCHEMA_VERSION: u32 = 11;
 const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION: u32 = 2;
@@ -1211,6 +1214,9 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
 }
 
 fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), String> {
+    // The optional WebView attachment is untrusted even on direct IPC calls.
+    // Reject it before any restore transaction or maintenance-mode write.
+    local_storage_policy::validate(backup)?;
     if backup.backup_type != BACKUP_TYPE {
         return Err("不是 AI Novel Studio 项目备份文件".to_string());
     }
@@ -2467,6 +2473,12 @@ pub fn restore_project_backup_in_conn(
                 restored_records.insert((*table).to_string(), 0);
                 continue;
             }
+            None if backup.schema_version < 11
+                && matches!(*table, "artifact_decisions" | "review_authorizations") =>
+            {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
             None => return Err(format!("备份缺少数据表：{table}")),
         };
         let legacy_quality_rows;
@@ -2836,6 +2848,123 @@ mod tests {
             .expect("enable foreign keys");
         crate::db::create_tables(&mut conn).expect("create schema");
         conn
+    }
+
+    #[test]
+    fn project_backup_rejects_unsafe_local_attachments_before_any_sqlite_write() {
+        let source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let mut target = test_connection();
+        let before: i64 = target
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .expect("read write count");
+        for local in [
+            serde_json::json!({"version": 1, "collections": {}, "entries": {"ai_novel_studio_ai_settings": {"runtimeMode": "api"}}}),
+            serde_json::json!({"version": 1, "collections": {"unrelated": []}, "entries": {}}),
+            serde_json::json!({"version": 1, "collections": {}, "entries": {}, "rawEntries": {"ai_novel_studio_ai_settings": "{}"}}),
+            serde_json::json!({"version": 1, "collections": {}, "entries": {}, "rawEntries": {"ai_novel_studio_unsaved_chapter_outline_other-chapter": "foreign"}}),
+            serde_json::json!({"version": 1, "collections": {"ai_novel_studio_quality_reports": [{"id": "report-local", "novelId": "foreign", "chapterId": "chapter-1"}]}, "entries": {}}),
+            serde_json::json!({"version": 1, "collections": {"ai_novel_studio_generation_jobs": [{"id": "job-local", "novelId": "novel-source", "novel_id": "foreign"}]}, "entries": {}}),
+            serde_json::json!({"version": 1, "collections": {}, "entries": {"ai_novel_studio_drafts_list_chapter-1": [{"id": "draft-local", "novelId": "novel-source", "chapterId": "foreign"}]}}),
+            serde_json::json!({"version": 1, "collections": {}, "entries": {"ai_novel_studio_generation_steps_job-foreign": []}}),
+            serde_json::json!({"version": 1, "collections": {"ai_novel_studio_novels": [{"id": "novel-source", "__proto__": {"polluted": true}}]}, "entries": {}}),
+            serde_json::json!({"version": 1, "collections": {}, "entries": {"ai_novel_studio_reference_library_v1": {"schemaVersion": 1, "works": [{"id": "work-local", "novelId": "foreign"}], "imports": [], "sections": [], "operations": {}}}}),
+        ] {
+            let mut candidate = backup.clone();
+            candidate.local_storage = Some(local);
+            let error = restore_project_backup_in_conn(&mut target, &candidate)
+                .expect_err("reject unsafe local attachment");
+            assert!(error.contains("补充缓存"), "unexpected rejection: {error}");
+            let after: i64 = target
+                .query_row("SELECT total_changes()", [], |row| row.get(0))
+                .expect("read write count");
+            assert_eq!(
+                before, after,
+                "even rolled-back writes are forbidden before preflight"
+            );
+            assert!(target.is_autocommit());
+        }
+    }
+
+    #[test]
+    fn project_backup_rejects_foreign_or_cross_chapter_draft_cache_references_before_writes() {
+        let source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        source
+            .execute_batch(
+                "INSERT INTO chapters (id, novel_id, title, created_at, updated_at)
+                 VALUES ('chapter-2', 'novel-source', 'second', '2026-01-01', '2026-01-01');
+                 INSERT INTO chapter_drafts (id, novel_id, chapter_id, created_at, updated_at)
+                 VALUES ('draft-second', 'novel-source', 'chapter-2', '2026-01-01', '2026-01-01');",
+            )
+            .expect("seed trusted draft");
+        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let mut target = test_connection();
+        let before: i64 = target
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .expect("write count");
+        for field in [
+            "draftId",
+            "sourceDraftId",
+            "adoptedDraftId",
+            "input_draft_id",
+            "candidateDraftId",
+        ] {
+            for draft in ["foreign-draft", "draft-second"] {
+                let mut candidate = backup.clone();
+                let mut report = serde_json::json!({"id": "report-local", "novelId": "novel-source", "chapterId": "chapter-1"});
+                report[field] = serde_json::json!(draft);
+                candidate.local_storage = Some(serde_json::json!({
+                    "version": 1, "collections": {"ai_novel_studio_quality_reports": [report]}, "entries": {}
+                }));
+                let error = restore_project_backup_in_conn(&mut target, &candidate)
+                    .expect_err("reject untrusted draft reference");
+                assert!(error.contains("补充缓存"));
+                let after: i64 = target
+                    .query_row("SELECT total_changes()", [], |row| row.get(0))
+                    .expect("write count");
+                assert_eq!(after, before);
+            }
+        }
+    }
+
+    #[test]
+    fn project_backup_legacy_schemas_keep_scoped_local_only_records() {
+        let source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let local = serde_json::json!({
+            "version": 1,
+            "collections": {
+                "ai_novel_studio_novels": [{"id": "novel-source", "title": "local fixture"}],
+                "ai_novel_studio_quality_reports": [{"id": "report-local", "novelId": "novel-source", "chapterId": "chapter-1", "draftId": "draft-local"}],
+                "ai_novel_studio_generation_jobs": [{"id": "job-local", "chapterId": "chapter-1"}],
+                "ai_novel_studio_multi_agent_sessions": [{"session": {"sessionId": "session-local", "novelId": "novel-source", "chapterId": "chapter-1", "sourceDraftId": "draft-local"}, "rounds": [{"inputDraftId": "draft-local"}]}]
+            },
+            "entries": {
+                "ai_novel_studio_draft_chapter-1": {"id": "draft-local", "novelId": "novel-source", "chapterId": "chapter-1", "content": "合成正文"},
+                "ai_novel_studio_generation_steps_job-local": [{"id": "step-local", "jobId": "job-local"}],
+                "ai_novel_studio_reference_library_v1": {
+                    "schemaVersion": 1,
+                    "works": [{"id": "work-local", "novelId": "novel-source"}],
+                    "imports": [{"id": "import-local", "workId": "work-local"}],
+                    "sections": [{"id": "section-local", "importId": "import-local", "workId": "work-local"}],
+                    "operations": {}
+                }
+            },
+            "rawEntries": {"ai_novel_studio_unsaved_chapter_outline_chapter-1": "原样保留\r\n大纲"}
+        });
+        let mut target = test_connection();
+        for schema in MIN_SUPPORTED_BACKUP_SCHEMA_VERSION..=BACKUP_SCHEMA_VERSION {
+            let mut candidate = backup.clone();
+            candidate.schema_version = schema;
+            keep_tables_for_declared_schema(&mut candidate);
+            candidate.local_storage = Some(local.clone());
+            let restored = restore_project_backup_in_conn(&mut target, &candidate)
+                .expect("restore legacy backup with safe attachment");
+            assert_ne!(restored.novel_id, "novel-source");
+        }
     }
 
     fn seed_autonomous_plan(conn: &Connection, novel_id: &str, plan_id: &str, operation_id: &str) {

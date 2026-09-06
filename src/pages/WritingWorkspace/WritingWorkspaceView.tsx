@@ -17,6 +17,7 @@ import { showInfo } from '../../utils/nativeDialog';
 import type { WritingWorkspaceViewProps } from './WritingWorkspaceView.types';
 import { isWorkspaceAiPanelRetired } from '../../types/rightSidebar';
 import { WorkspaceDocumentSkeleton } from './WorkspaceDocumentSkeleton';
+import { WorkspaceFocusToggle } from './WorkspaceFocusToggle';
 
 export default function WritingWorkspaceView({
   novelId,
@@ -62,11 +63,14 @@ export default function WritingWorkspaceView({
     ? null
     : activePanel;
   const [readinessOpen, setReadinessOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [editorActionState, setEditorActionState] = useState<EditorActionState>({
     saving: false,
     adopting: false,
     saveState: 'idle',
     saveMessage: '',
+    adoptState: 'idle',
+    adoptMessage: '',
   });
   const activeChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === activeChapterId),
@@ -80,6 +84,8 @@ export default function WritingWorkspaceView({
       adopting: false,
       saveState: 'idle',
       saveMessage: '',
+      adoptState: 'idle',
+      adoptMessage: '',
     });
   }, [activeChapterId]);
   const activeContentState = chapterLoader.contentLoadError ?? activeDraft?.contentState;
@@ -131,8 +137,12 @@ export default function WritingWorkspaceView({
   }, [loadChapterDraft, refs.activeChapterId, refs.editorSnapshot]);
 
   return (
-    <div className="workspace-page" data-summary-exists={summary.exists ? 'true' : 'false'}>
-      <div className="workspace-sidebar">
+    <div
+      className={`workspace-page${focusMode ? ' is-focused' : ''}`}
+      data-focus-mode={focusMode ? 'true' : 'false'}
+      data-summary-exists={summary.exists ? 'true' : 'false'}
+    >
+      <div className="workspace-sidebar" id="workspace-chapter-directory" hidden={focusMode}>
         <div className={`workspace-novel-title${pageLoading ? ' is-loading' : ''}`}>
           {novel?.title || (pageLoading ? '正在载入作品' : '未选择作品')}
         </div>
@@ -161,12 +171,14 @@ export default function WritingWorkspaceView({
           <div className="workspace-topbar-title">
             <BackButton label="返回创作工作台" to="/" />
           </div>
-          {activeChapter && (
-            <div className="workspace-current-chapter">
-              当前：第{activeChapter.chapterNumber}章 {activeChapter.title}
-            </div>
-          )}
           <div className="workspace-topbar-spacer" aria-hidden="true" />
+          <WorkspaceFocusToggle
+            active={focusMode}
+            onToggle={() => {
+              setFocusMode((current) => !current);
+              refs.editor.current?.focus();
+            }}
+          />
         </div>
 
         {pageLoading ? (
@@ -276,6 +288,9 @@ export default function WritingWorkspaceView({
               recoverySaveStatus={recoverySaveStatus}
               documentSaveState={editorActionState.saveState}
               documentSaveMessage={editorActionState.saveMessage}
+              documentAdoptState={editorActionState.adoptState}
+              documentAdoptMessage={editorActionState.adoptMessage}
+              draftAdopted={activeDraft?.isAdopted}
             />
           </>
         )}

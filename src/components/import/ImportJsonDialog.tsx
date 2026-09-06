@@ -1,8 +1,8 @@
 /**
  * AI Novel Studio - JSON 导入确认弹窗
  */
-import { useState, useRef } from 'react';
-import { CircleCheck, FileJson, FolderOpen, LoaderCircle, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { CircleCheck, FileJson, FolderOpen, LoaderCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
@@ -18,6 +18,7 @@ import type { JsonDetectResult } from '../../services/import/jsonImportService';
 import type { CreateOutputProfileInput } from '../../types/output';
 import { runWithLoading } from '../../lib/runWithLoading';
 import { describeUnknownError } from '../../utils/errorMessage';
+import { ModalFrame } from '../common/ModalFrame';
 
 interface ImportJsonDialogProps {
   onClose: () => void;
@@ -54,6 +55,13 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
   const isProjectBackupCandidate =
     detectResult?.type === 'ai_novel_studio_project' &&
     detectResult.isProjectBackupCandidate === true;
@@ -82,7 +90,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   };
 
   const handleImport = async () => {
-    if (!detectResult || !rawData) return;
+    if (importing || !detectResult || !rawData) return;
     setImporting(true);
     setError('');
     try {
@@ -169,7 +177,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
           }
           setImporting(false);
           setStep('done');
-          setTimeout(() => {
+          closeTimer.current = setTimeout(() => {
             onClose();
             if (detectResult.type === 'style_profile' || detectResult.type === 'output_profile')
               navigate('/styles');
@@ -184,195 +192,181 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   };
 
   return (
-    <>
-      <div className="modal-overlay" onClick={onClose} />
-      <div
-        className="modal-content"
-        style={{ maxWidth: 480, width: '90%', padding: '18px 22px' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 12,
-            paddingBottom: 8,
-            borderBottom: '1px solid var(--color-border)',
-          }}
-        >
-          <span
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700 }}
-          >
-            <FileJson aria-hidden="true" size={18} strokeWidth={1.8} />
-            导入 JSON 配置
-          </span>
+    <ModalFrame
+      title={
+        <>
+          <FileJson aria-hidden="true" size={18} strokeWidth={1.8} />
+          导入 JSON 配置
+        </>
+      }
+      maxWidth={480}
+      onDismiss={onClose}
+      busy={importing}
+      closeLabel="关闭 JSON 导入"
+      closeButtonProps={{ 'data-testid': 'project-import-close' }}
+      dialogProps={{ 'data-testid': 'project-import-dialog' }}
+      footer={
+        step === 'confirm' && detectResult ? (
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={importing}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              data-testid="project-import-confirm"
+              onClick={handleImport}
+              disabled={importing || (isProjectBackupCandidate && !hasValidProjectBackup)}
+            >
+              {importing ? (
+                <>
+                  <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+                  确认导入
+                </>
+              )}
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      {step === 'select' && (
+        <div>
+          <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            选择本地 JSON 文件。支持全量作品备份、旧版小说、风格方案与输出控制。
+          </div>
           <button
             type="button"
-            onClick={onClose}
-            aria-label="关闭 JSON 导入"
-            title="关闭"
+            onClick={() => fileInputRef.current?.click()}
             style={{
-              background: 'none',
-              border: 'none',
+              padding: '20px 16px',
+              border: '1.5px dashed var(--color-border)',
+              borderRadius: 8,
+              textAlign: 'center',
               cursor: 'pointer',
-              color: 'var(--color-text-secondary)',
+              background: 'var(--color-bg-hover, #f8fafc)',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              color: 'var(--color-text-primary)',
             }}
           >
-            <X aria-hidden="true" size={18} strokeWidth={1.8} />
+            <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
+            <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 JSON 文件</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              支持 .json 格式结构化配置文件
+            </div>
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            aria-label="选择 JSON 文件"
+            data-testid="project-import-file"
+            accept=".json,.JSON"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
         </div>
+      )}
 
-        {step === 'select' && (
-          <div>
-            <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              选择本地 JSON 文件。支持全量作品备份、旧版小说、风格方案与输出控制。
-            </div>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                padding: '20px 16px',
-                border: '1.5px dashed var(--color-border)',
-                borderRadius: 8,
-                textAlign: 'center',
-                cursor: 'pointer',
-                background: 'var(--color-bg-hover, #f8fafc)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
-              <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 JSON 文件</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                支持 .json 格式结构化配置文件
-              </div>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,.JSON"
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-            />
-          </div>
-        )}
-
-        {step === 'confirm' && detectResult && (
-          <div>
-            <div
-              style={{
-                padding: 12,
-                background: 'var(--color-info-bg)',
-                borderRadius: 6,
-                border: '1px solid var(--color-info-border)',
-                marginBottom: 16,
-                fontSize: 13,
-              }}
-            >
-              <div>
-                类型：
-                <strong>
-                  {detectResult.type === 'ai_novel_studio_project'
-                    ? isProjectBackupCandidate
-                      ? hasValidProjectBackup
-                        ? '完整作品备份'
-                        : '无效或不支持的完整备份'
-                      : '旧版项目 JSON'
-                    : detectResult.type === 'style_profile'
-                      ? '风格方案'
-                      : '输出控制方案'}
-                </strong>
-              </div>
-              {detectResult.name && <div>名称：{detectResult.name}</div>}
-              {detectResult.summary && <div>摘要：{detectResult.summary}</div>}
-            </div>
-            {isProjectBackupCandidate && !hasValidProjectBackup && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  padding: 10,
-                  border: '1px solid var(--color-error)',
-                  background: 'var(--color-error-bg)',
-                  color: 'var(--color-error-text)',
-                  fontSize: 12,
-                }}
-              >
-                此完整备份文件不完整或协议版本不受支持，不能按旧版项目 JSON 导入。
-              </div>
-            )}
-            {detectResult.type === 'ai_novel_studio_project' && !isProjectBackupCandidate && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  padding: 10,
-                  border: '1px solid var(--color-warning)',
-                  background: 'var(--color-warning-bg)',
-                  color: 'var(--color-warning-text)',
-                  fontSize: 12,
-                }}
-              >
-                这是旧版项目 JSON，只能恢复基础作品资料，不能替代完整备份。
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>
-                取消
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={handleImport}
-                disabled={importing || (isProjectBackupCandidate && !hasValidProjectBackup)}
-              >
-                {importing ? (
-                  <>
-                    <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
-                    导入中...
-                  </>
-                ) : (
-                  <>
-                    <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
-                    确认导入
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 'done' && (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <CircleCheck
-              aria-hidden="true"
-              size={40}
-              strokeWidth={1.8}
-              style={{ marginBottom: 12, color: 'var(--color-success)' }}
-            />
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
-              {resultMsg}
-            </div>
-          </div>
-        )}
-
-        {error && (
+      {step === 'confirm' && detectResult && (
+        <div>
           <div
             style={{
-              padding: 8,
-              background: 'var(--color-error-bg)',
+              padding: 12,
+              background: 'var(--color-info-bg)',
               borderRadius: 6,
-              color: 'var(--color-error)',
+              border: '1px solid var(--color-info-border)',
+              marginBottom: 16,
               fontSize: 13,
-              marginTop: 8,
             }}
           >
-            {error}
+            <div>
+              类型：
+              <strong>
+                {detectResult.type === 'ai_novel_studio_project'
+                  ? isProjectBackupCandidate
+                    ? hasValidProjectBackup
+                      ? '完整作品备份'
+                      : '无效或不支持的完整备份'
+                    : '旧版项目 JSON'
+                  : detectResult.type === 'style_profile'
+                    ? '风格方案'
+                    : '输出控制方案'}
+              </strong>
+            </div>
+            {detectResult.name && <div>名称：{detectResult.name}</div>}
+            {detectResult.summary && <div>摘要：{detectResult.summary}</div>}
           </div>
-        )}
-      </div>
-    </>
+          {isProjectBackupCandidate && !hasValidProjectBackup && (
+            <div
+              data-testid="project-import-invalid"
+              style={{
+                marginBottom: 16,
+                padding: 10,
+                border: '1px solid var(--color-error)',
+                background: 'var(--color-error-bg)',
+                color: 'var(--color-error-text)',
+                fontSize: 12,
+              }}
+            >
+              此完整备份文件不完整或协议版本不受支持，不能按旧版项目 JSON 导入。
+            </div>
+          )}
+          {detectResult.type === 'ai_novel_studio_project' && !isProjectBackupCandidate && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: 10,
+                border: '1px solid var(--color-warning)',
+                background: 'var(--color-warning-bg)',
+                color: 'var(--color-warning-text)',
+                fontSize: 12,
+              }}
+            >
+              这是旧版项目 JSON，只能恢复基础作品资料，不能替代完整备份。
+            </div>
+          )}
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <CircleCheck
+            aria-hidden="true"
+            size={40}
+            strokeWidth={1.8}
+            style={{ marginBottom: 12, color: 'var(--color-success)' }}
+          />
+          <div
+            data-testid="project-import-result"
+            style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}
+          >
+            {resultMsg}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div
+          style={{
+            padding: 8,
+            background: 'var(--color-error-bg)',
+            borderRadius: 6,
+            color: 'var(--color-error)',
+            fontSize: 13,
+            marginTop: 8,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </ModalFrame>
   );
 }
 

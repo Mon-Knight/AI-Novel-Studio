@@ -5,6 +5,38 @@ const { installE2eNetworkGuard } = await import('./e2eNetworkGuard.ts');
 const { redactDiagnosticText, sanitizeDiagnosticValue, serializeConsoleArguments } =
   await import('./e2eDiagnosticSanitizer.ts');
 const { isE2eBridgeCommandAllowed } = await import('./e2eBridgePolicy.ts');
+const { assertE2eCanonicalExposure } = await import('./e2eCanonicalExposureContract.ts');
+
+test('Domain Facade E2E requires exactly the four approved canonical identities in order', () => {
+  const identities = ['context.read@1', 'memory.search@1', 'novel.read@1', 'structure.read@1'];
+  const tools = identities.map((identity) => {
+    const [id, version] = identity.split('@');
+    return { id, version };
+  });
+  assert.doesNotThrow(() => assertE2eCanonicalExposure(tools, identities, tools));
+  for (const changed of [
+    [],
+    [...identities, 'chapter.write@1'],
+    [identities[0], identities[0], identities[2], identities[3]],
+    [...identities].reverse(),
+    ['context.read@2', ...identities.slice(1)],
+    ['chapter.read_outline@1', ...identities.slice(1)],
+  ]) {
+    const descriptors = changed.map((identity) => {
+      const [id, version] = identity.split('@');
+      return { id, version };
+    });
+    assert.throws(
+      () => assertE2eCanonicalExposure(descriptors, identities, tools),
+      /Canonical projection/,
+    );
+    assert.throws(() => assertE2eCanonicalExposure(tools, changed, tools), /Canonical projection/);
+    assert.throws(
+      () => assertE2eCanonicalExposure(tools, identities, descriptors),
+      /Canonical projection/,
+    );
+  }
+});
 
 test('closed-loop E2E additions expose queries but not adoption mutations', () => {
   for (const command of [

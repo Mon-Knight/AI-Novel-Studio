@@ -38,6 +38,59 @@ export interface ToolContextReceipt {
   sources: ContextSourceReceiptItem[];
   snapshotRequestSourceStatus?: SnapshotRequestSourceStatus;
   evidenceChain?: ContextEvidenceChain;
+  notices?: string[];
+}
+
+const SEMANTIC_WARNING_LABELS: Record<string, string> = {
+  chapter_boundary_action_replay: '相似动作可能重复，请核对人物与对象',
+  chapter_source_chain_break: '资料来源衔接可能不清晰',
+  chapter_dialogue_reference_conflict: '对话人物指代可能不清晰',
+  chapter_temporal_semantics_conflict: '时间表述可能冲突，请核对是否同一事件',
+  chapter_audit_voice_leakage: '审校式叙述较多，请判断是否符合文风',
+};
+
+function readRuntimeNotices(result: unknown): string[] {
+  if (!isRecord(result)) return [];
+  const context = isRecord(result.generationContext) ? result.generationContext : undefined;
+  if (!context) return [];
+  const notices: string[] = [];
+  const brief = isRecord(context.taskConstraints) ? context.taskConstraints : undefined;
+  if (brief) {
+    const included = safeCount(brief.included);
+    const superseded = safeCount(brief.superseded);
+    const omitted = safeCount(brief.omittedBudget);
+    if (included !== undefined && superseded !== undefined && omitted !== undefined) {
+      notices.push(
+        `持续约束（最新优先）：纳入 ${included} 条，较新约束替代 ${superseded} 条，预算未纳入 ${omitted} 条。原始要求仍保留在用户消息中。`,
+      );
+      if (Array.isArray(brief.entries)) {
+        for (const entry of brief.entries.slice(0, 64)) {
+          if (!isRecord(entry) || entry.status !== 'omitted_budget') continue;
+          const sequence = safeCount(entry.sequence);
+          const segment = safeCount(entry.segmentIndex);
+          if (sequence !== undefined && segment !== undefined)
+            notices.push(
+              `未纳入：第 ${sequence + 1} 回合第 ${segment + 1} 条持续约束（预算限制）。`,
+            );
+        }
+      }
+      const omittedEntries = safeCount(brief.omittedEntryCount);
+      if (omittedEntries)
+        notices.push(`另有 ${omittedEntries} 条历史处理记录未展开，已计入以上统计。`);
+    }
+  }
+  if (Array.isArray(context.integrityWarnings)) {
+    const codes = new Set<string>();
+    for (const warning of context.integrityWarnings) {
+      if (!isRecord(warning) || warning.severity !== 'warning' || typeof warning.code !== 'string')
+        continue;
+      const label = SEMANTIC_WARNING_LABELS[warning.code];
+      if (!label || codes.has(warning.code)) continue;
+      codes.add(warning.code);
+      notices.push(`人工审阅提醒：${label}。这是低置信提醒，未触发自动重写。`);
+    }
+  }
+  return notices;
 }
 
 const CONTEXT_CONSUMER_TOOLS = new Set([
@@ -437,7 +490,8 @@ export function resolveToolContextReceipt(
   runEvents: ToolCallEvent[] = [],
 ): ToolContextReceipt | null {
   const explicit = readExplicitSources(event.result);
-  if (explicit.sources.length > 0) {
+  const notices = readRuntimeNotices(event.result);
+  if (explicit.sources.length > 0 || notices.length > 0) {
     return {
       evidence: 'explicit',
       sources: explicit.sources,
@@ -445,6 +499,7 @@ export function resolveToolContextReceipt(
         ? { snapshotRequestSourceStatus: explicit.snapshotRequestSourceStatus }
         : {}),
       ...(explicit.evidenceChain ? { evidenceChain: explicit.evidenceChain } : {}),
+      ...(notices.length > 0 ? { notices } : {}),
     };
   }
   if (event.status !== 'succeeded' || !CONTEXT_CONSUMER_TOOLS.has(event.toolName)) return null;

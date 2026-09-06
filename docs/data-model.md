@@ -1,5 +1,11 @@
 # AI Novel Studio 数据模型设计文档
 
+<!-- ans-current-canonical:start -->
+
+Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
+读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+<!-- ans-current-canonical:end -->
+
 版本：v0.1.0 草案  
 项目名称：AI Novel Studio  
 项目路径：F:\ai-novel-studio  
@@ -2274,7 +2280,7 @@ v0.8.0 建议实现：
 
 ## 25.1 API Key
 
-API Key 只允许存在于当前应用进程内的会话凭据注册表，并按 `scope + providerId + baseUrl + modelId` 精确绑定。应用退出后注册表自然销毁；切换模型、Provider 或 Base URL 时不得沿用其他身份的 Key。
+API Key 在运行时凭据注册表中按 `scope + providerId + baseUrl + modelId` 精确绑定。Windows 桌面端另外使用 DPAPI 加密的本地保护文件支持重启恢复，不进入 SQLite、LocalStorage、项目备份或日志；浏览器开发模式只保留会话内存。切换模型、Provider 或 Base URL 时不得沿用其他身份的 Key。清空 API/Gateway 密钥并保存删除对应身份记录，本地免鉴权模型改用不含原密钥的占位值。
 
 必须做到：
 
@@ -3017,6 +3023,8 @@ Workbench（UI 聚合，不是领域父实体）
 
 ## 40.2 `TaskConversation` 逻辑聚合
 
+任务目录按 `updated_at DESC, conversation_id DESC` 的稳定游标分页；作品、归档及标题/作品名搜索在 `LIMIT` 前过滤，不增加表或 migration。浏览器开发回退使用相同游标和筛选规则。最近选中任务按 ID 单独复核所属作品和归档状态，不能因为不在第一页就判为不存在；分页/搜索返回的视图不是新的领域事实源。
+
 至少表达：
 
 - 稳定任务 ID 与所属小说 ID；
@@ -3118,8 +3126,8 @@ DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection
 - 写作工作台继续作为章节审阅/编辑器；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除，底层领域服务、历史草稿和审计事实继续保留。
 - 不把 Runtime Registry 只读投影扩展为插件安装、卸载、启停、配置、更新或市场。
 
-## 40.10 v3.6.0 Canonical 只读契约边界
+## 40.10 Canonical 只读契约边界
 
-Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个 Canonical identity 为 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`，全部仍是 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。
+Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个只读 identity 已为 `stable + working`，模型可见集合见本文开头的当前事实块。v3.6.0 发布候选曾未开放这些工具，这是历史基线，不是当前准入状态。
 
-下一步必须先关闭四项事实源/证据 blocker，再通过独立 exposure 变更放行只读 Tool；之后才进入 R4 真实 Main Agent Runtime。legacy `tool_call_events` 或 DSH allowlist 中存在旧工具名，不能证明 Canonical Tool 已进入模型可见集合，也不能反向改写既有运行事实。
+宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章继续由确定性 Writer 编排。

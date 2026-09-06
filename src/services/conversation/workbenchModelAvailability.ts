@@ -1,4 +1,5 @@
 import { isLoopbackAiBaseUrl } from '../ai/realAiClient';
+import { getCredentialStorageCopy } from '../ai/credentialStorageCopy';
 import type { CurrentPluginProjection } from './currentPluginService';
 
 export interface WorkbenchModelSelection {
@@ -59,7 +60,7 @@ export class WorkbenchModelCredentialUnavailableError extends WorkbenchModelUnav
   constructor(model: WorkbenchModelSelection) {
     super(model);
     this.name = 'WorkbenchModelCredentialUnavailableError';
-    this.message = `当前任务固定模型 ${workbenchModelKey(model)} 的本次会话凭据不可用；请重新配置模型或使用当前已配置模型新建任务。`;
+    this.message = `当前任务固定模型 ${workbenchModelKey(model)} 的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint} 或使用当前已配置模型新建任务。`;
   }
 }
 
@@ -205,8 +206,8 @@ export function getWorkbenchModelAvailability({
         selectedOption,
         canSend: false,
         message: selectionLocked
-          ? `当前任务固定模型 ${selectedKey} 的本次会话凭据不可用；请重新配置模型或使用当前已配置模型新建任务。`
-          : '当前模型的本次会话凭据不可用，请重新配置模型后重试。',
+          ? `当前任务固定模型 ${selectedKey} 的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint} 或使用当前已配置模型新建任务。`
+          : `当前模型的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint}`,
       };
     }
     return {
@@ -215,7 +216,7 @@ export function getWorkbenchModelAvailability({
       selectedOption,
       fallbackOption: localFallback,
       canSend: true,
-      message: '本地模型的本次会话凭据不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
+      message: '本地模型的匹配凭据不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
     };
   }
 

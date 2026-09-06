@@ -25,28 +25,79 @@ function AiTasksPage() {
   const [deleting, setDeleting] = useState(false);
   const [executionRevision, setExecutionRevision] = useState(0);
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [loadedQuery, setLoadedQuery] = useState('');
+  const [loadedPage, setLoadedPage] = useState(1);
+  const query = `${typeFilter}:${statusFilter}:${page}`;
+  const staleResults = loadedQuery !== query;
+  const liveQuery = useRef(query);
+  liveQuery.current = query;
+  const loadedQueryRef = useRef(loadedQuery);
+  loadedQueryRef.current = loadedQuery;
+  const deletingRef = useRef(deleting);
+  deletingRef.current = deleting;
+  const loadGeneration = useRef(0);
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const messageGeneration = useRef(0);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
 
   const showMessage = useCallback((text: string, durationMs = 3000) => {
+    const generation = ++messageGeneration.current;
+    clearTimeout(messageTimer.current);
     setMsg(text);
-    window.setTimeout(() => setMsg(''), durationMs);
+    if (durationMs > 0)
+      messageTimer.current = setTimeout(() => {
+        if (messageGeneration.current === generation) setMsg('');
+      }, durationMs);
   }, []);
+
+  useEffect(
+    () => () => {
+      loadGeneration.current += 1;
+      clearTimeout(messageTimer.current);
+    },
+    [],
+  );
 
   const loadTasks = useCallback(
     async (requestedPage = 1) => {
+      const requestedQuery = `${typeFilter}:${statusFilter}:${requestedPage}`;
+      const canPublish = requestedQuery === liveQuery.current;
+      const generation = canPublish ? ++loadGeneration.current : -1;
+      if (canPublish) {
+        setLoading(true);
+        setLoadError('');
+      }
       appLogger.debug('[AI_TASK_DELETE_UI] reload tasks start');
-      const result = await aiTaskService.getAll(requestedPage, TASK_PAGE_SIZE, {
-        taskType: typeFilter === 'all' ? undefined : typeFilter,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-      });
-      setTasks((previous) => reconcileAiTaskRecords(previous, result.items));
-      setTotal(result.total);
-      appLogger.debug('[AI_TASK_DELETE_UI] reload tasks done', {
-        itemCount: result.items.length,
-        total: result.total,
-      });
-      return result.items;
+      try {
+        const result = await aiTaskService.getAll(requestedPage, TASK_PAGE_SIZE, {
+          taskType: typeFilter === 'all' ? undefined : typeFilter,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+        });
+        if (generation === loadGeneration.current && requestedQuery === liveQuery.current) {
+          setTasks((previous) => reconcileAiTaskRecords(previous, result.items));
+          setTotal(result.total);
+          setLoadedQuery(requestedQuery);
+          setLoadedPage(requestedPage);
+          const selectable = new Set(result.items.filter(isDeletableTask).map((task) => task.id));
+          setSelectedIds((previous) => new Set([...previous].filter((id) => selectable.has(id))));
+        }
+        appLogger.debug('[AI_TASK_DELETE_UI] reload tasks done', {
+          itemCount: result.items.length,
+          total: result.total,
+        });
+        return result.items;
+      } catch (cause) {
+        if (generation === loadGeneration.current && requestedQuery === liveQuery.current) {
+          setLoadError(describeUnknownError(cause, '任务记录读取失败。'));
+        }
+        throw cause;
+      } finally {
+        if (generation === loadGeneration.current && requestedQuery === liveQuery.current)
+          setLoading(false);
+      }
     },
     [statusFilter, typeFilter],
   );
@@ -54,7 +105,6 @@ function AiTasksPage() {
   useEffect(() => {
     void loadTasks(page).catch((error) => {
       appLogger.captureError('AI_TASK_PAGE_LOAD_FAILED', error, { page, typeFilter, statusFilter });
-      showMessage('任务记录加载失败，请重试。');
     });
   }, [loadTasks, page, showMessage, statusFilter, typeFilter]);
 
@@ -62,7 +112,9 @@ function AiTasksPage() {
     if (!tasks.some((task) => task.status === 'running' || task.status === 'pending')) return;
     const timer = window.setInterval(() => {
       setExecutionRevision((value) => value + 1);
-      void loadTasks(page);
+      void loadTasks(page).catch((error: unknown) => {
+        appLogger.captureError('AI_TASK_PAGE_REFRESH_FAILED', error);
+      });
     }, 1_500);
     return () => window.clearInterval(timer);
   }, [tasks, loadTasks, page]);
@@ -82,10 +134,10 @@ function AiTasksPage() {
         0,
       ),
       totalPages: nextTotalPages,
-      visiblePage: Math.min(page, nextTotalPages),
+      visiblePage: Math.min(loadedPage, nextTotalPages),
       pagedTasks: tasks,
     };
-  }, [page, tasks, total]);
+  }, [loadedPage, tasks, total]);
 
   useEffect(() => {
     setPage(1);
@@ -93,8 +145,8 @@ function AiTasksPage() {
   }, [typeFilter, statusFilter]);
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+    if (loadedQuery === query && !loading && page > totalPages) setPage(totalPages);
+  }, [page, totalPages, loadedQuery, loading, query]);
 
   const handleStopTask = useCallback(
     (task: AiTaskRecord) => {
@@ -112,6 +164,7 @@ function AiTasksPage() {
   );
 
   const handleToggleSelect = useCallback((id: string) => {
+    if (loadedQueryRef.current !== liveQuery.current || deletingRef.current) return;
     setSelectedIds((previous) => {
       if (!tasksRef.current.some((task) => task.id === id && isDeletableTask(task))) {
         return previous;
@@ -127,8 +180,21 @@ function AiTasksPage() {
     [],
   );
 
+  const goToPage = useCallback((nextPage: number) => {
+    setPage(nextPage);
+    // Selection is page-scoped; never leave hidden rows selected for a later delete.
+    setSelectedIds(new Set());
+  }, []);
+
   const handleDeleteOne = useCallback(
     async (task: AiTaskRecord) => {
+      const requestQuery = liveQuery.current;
+      const canDeleteCurrent = () =>
+        loadedQueryRef.current === requestQuery &&
+        liveQuery.current === requestQuery &&
+        !deletingRef.current &&
+        tasksRef.current.some((item) => item.id === task.id && isDeletableTask(item));
+      if (!canDeleteCurrent()) return;
       if (!isDeletableTask(task)) {
         showMessage('运行中或等待中的任务需先停止并确认终态，之后才能删除。');
         return;
@@ -140,15 +206,21 @@ function AiTasksPage() {
         }))
       )
         return;
+      if (!canDeleteCurrent()) {
+        showMessage('列表已变化，未删除旧结果；请重新读取并选择记录。', 0);
+        return;
+      }
+      deletingRef.current = true;
+      setDeleting(true);
       try {
         const result = await aiTaskService.deleteOne(task.id);
         appLogger.debug('[AI_TASK_DELETE_UI] delete one result', result);
         if (result.deletedCount === 0)
-          return showMessage('未删除任何记录，请检查记录ID或数据库连接');
+          return showMessage('未删除任何记录，请检查记录ID或数据库连接', 0);
         const reloaded = await loadTasks(page);
         if (reloaded.some((item) => item.id === task.id)) {
           appLogger.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', [task.id]);
-          return showMessage('删除后仍检测到记录，请检查数据源');
+          return showMessage('删除后仍检测到记录，请检查数据源', 0);
         }
         setSelectedIds((previous) => {
           const next = new Set(previous);
@@ -162,23 +234,41 @@ function AiTasksPage() {
           errorMessage: describeUnknownError(error),
           error,
         });
-        showMessage('删除失败：' + describeUnknownError(error), 8000);
+        showMessage('删除失败：' + describeUnknownError(error), 0);
+      } finally {
+        deletingRef.current = false;
+        setDeleting(false);
       }
     },
     [loadTasks, page, showMessage],
   );
 
-  const deleteMany = async (ids: string[], successMessage: (count: number) => string) => {
+  const deleteMany = async (
+    ids: string[],
+    requestQuery: string,
+    successMessage: (count: number) => string,
+  ) => {
     if (ids.length === 0) return showMessage('请先选择要删除的记录', 2000);
+    if (
+      loadedQueryRef.current !== requestQuery ||
+      liveQuery.current !== requestQuery ||
+      deletingRef.current ||
+      !ids.every((id) => tasksRef.current.some((task) => task.id === id && isDeletableTask(task)))
+    ) {
+      showMessage('列表已变化，未删除旧结果；请重新读取并选择记录。', 0);
+      return;
+    }
     appLogger.debug('[AI_TASK_DELETE_UI] delete selected clicked', {
       selectedIds: ids,
       selectedCount: ids.length,
     });
+    deletingRef.current = true;
     setDeleting(true);
     try {
       const result = await aiTaskService.deleteMany(ids);
       appLogger.debug('[AI_TASK_DELETE_UI] deleteMany result', result);
-      if (result.deletedCount === 0) return showMessage('未删除任何记录，请检查记录ID或数据库连接');
+      if (result.deletedCount === 0)
+        return showMessage('未删除任何记录，请检查记录ID或数据库连接', 0);
       const reloaded = await loadTasks(page);
       const stillVisibleIds = reloaded
         .filter((item) => ids.includes(item.id))
@@ -188,7 +278,7 @@ function AiTasksPage() {
           '[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible',
           stillVisibleIds,
         );
-        return showMessage('删除后仍检测到记录，请检查数据源');
+        return showMessage('删除后仍检测到记录，请检查数据源', 0);
       }
       setSelectedIds(new Set());
       setSelectMode(false);
@@ -198,13 +288,16 @@ function AiTasksPage() {
         errorMessage: describeUnknownError(error),
         error,
       });
-      showMessage('删除失败：' + describeUnknownError(error), 8000);
+      showMessage('删除失败：' + describeUnknownError(error), 0);
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
   };
 
   const handleDeleteSelected = async () => {
+    if (staleResults || deletingRef.current) return;
+    const requestQuery = query;
     const ids = [...selectedIds];
     if (
       !(await confirmDanger({
@@ -213,10 +306,12 @@ function AiTasksPage() {
       }))
     )
       return;
-    await deleteMany(ids, (count) => `已删除 ${count} 条记录`);
+    await deleteMany(ids, requestQuery, (count) => `已删除 ${count} 条记录`);
   };
 
   const handleDeleteFiltered = async () => {
+    if (staleResults || deletingRef.current) return;
+    const requestQuery = query;
     const deletableIds = tasks.filter(isDeletableTask).map((task) => task.id);
     if (deletableIds.length === 0) {
       showMessage('当前页没有可删除的终态任务。');
@@ -229,10 +324,11 @@ function AiTasksPage() {
       }))
     )
       return;
-    await deleteMany(deletableIds, (count) => `已删除当前页 ${count} 条记录`);
+    await deleteMany(deletableIds, requestQuery, (count) => `已删除当前页 ${count} 条记录`);
   };
 
   const handleClearAll = async () => {
+    if (deletingRef.current) return;
     if (
       !(await confirmDanger({
         title: '清空全部记录',
@@ -241,22 +337,25 @@ function AiTasksPage() {
       }))
     )
       return;
+    if (deletingRef.current) return;
     const beforeCount = total;
     appLogger.debug('[AI_TASK_DELETE_UI] clear all clicked', { beforeCount });
+    deletingRef.current = true;
     setDeleting(true);
     try {
       const result = await aiTaskService.clearAll();
       appLogger.debug('[AI_TASK_DELETE_UI] clearAll result', result);
       if (beforeCount > 0 && result.deletedCount === 0)
-        return showMessage('清空失败：数据库未删除任何记录');
+        return showMessage('清空失败：数据库未删除任何记录', 0);
       const reloaded = await loadTasks(1);
       if (reloaded.length > 0) {
         appLogger.error('[AI_TASK_DELETE_VERIFY_FAILED] clear all still visible', {
           itemCount: reloaded.length,
           ids: reloaded.map((item) => item.id).slice(0, 20),
         });
-        return showMessage('清空后仍检测到记录，请检查数据源');
+        return showMessage('清空后仍检测到记录，请检查数据源', 0);
       }
+      setPage(1);
       setSelectedIds(new Set());
       setSelectMode(false);
       showMessage(`清理完成，已删除 ${result.deletedCount} 条记录`);
@@ -265,8 +364,9 @@ function AiTasksPage() {
         errorMessage: describeUnknownError(error),
         error,
       });
-      showMessage('清空失败：' + describeUnknownError(error), 8000);
+      showMessage('清空失败：' + describeUnknownError(error), 0);
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
   };
@@ -274,6 +374,11 @@ function AiTasksPage() {
   return (
     <AiTasksPageView
       tasks={tasks}
+      staleResults={staleResults}
+      requestedPage={page}
+      loading={loading || (loadedQuery !== query && !loadError)}
+      loadError={loadError}
+      onRetryLoad={() => void loadTasks(page).catch(() => undefined)}
       total={total}
       typeFilter={typeFilter}
       statusFilter={statusFilter}
@@ -290,15 +395,18 @@ function AiTasksPage() {
       onTypeFilterChange={setTypeFilter}
       onStatusFilterChange={setStatusFilter}
       onToggleSelectMode={() => {
+        if (staleResults && !selectMode) return;
+        if (deletingRef.current) return;
         setSelectMode((value) => !value);
         setSelectedIds(new Set());
       }}
-      onToggleSelectAll={() =>
+      onToggleSelectAll={() => {
+        if (staleResults || deletingRef.current) return;
         setSelectedIds(() => {
           const deletableIds = tasks.filter(isDeletableTask).map((task) => task.id);
           return selectedIds.size === deletableIds.length ? new Set() : new Set(deletableIds);
-        })
-      }
+        });
+      }}
       onDeleteSelected={handleDeleteSelected}
       onClearAll={handleClearAll}
       onDeleteFiltered={handleDeleteFiltered}
@@ -306,8 +414,8 @@ function AiTasksPage() {
       onToggleExpand={handleToggleExpand}
       onStopTask={handleStopTask}
       onDeleteOne={handleDeleteOne}
-      onPreviousPage={() => setPage((value) => Math.max(1, value - 1))}
-      onNextPage={() => setPage((value) => Math.min(totalPages, value + 1))}
+      onPreviousPage={() => goToPage(Math.max(1, page - 1))}
+      onNextPage={() => goToPage(Math.min(totalPages, page + 1))}
     />
   );
 }

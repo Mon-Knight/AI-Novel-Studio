@@ -228,6 +228,15 @@ export function GenerationContextReceipt({ receipt }: { receipt: ToolContextRece
       </span>
       <span className="workbench-context-receipt-body">
         <span className="workbench-context-receipt-note">{evidenceCopy(receipt)}</span>
+        {receipt.notices?.map((notice) => (
+          <span
+            className="workbench-context-receipt-note"
+            data-testid="workbench-runtime-review-notice"
+            key={notice}
+          >
+            {notice}
+          </span>
+        ))}
         {chain && (
           <span
             className="workbench-context-evidence-chain"

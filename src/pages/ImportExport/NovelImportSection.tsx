@@ -134,6 +134,7 @@ export function NovelImportSection({ onOpenTxt, onOpenJson }: ImportSectionProps
           <button
             type="button"
             className="btn btn-secondary btn-sm"
+            data-testid="project-import-json"
             style={{ width: '100%' }}
             onClick={onOpenJson}
           >

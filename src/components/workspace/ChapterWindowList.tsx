@@ -69,7 +69,7 @@ function ChapterWindowListComponent({
             第{chapter.chapterNumber}章：{chapter.title}
           </span>
           {showStatusLabel && (
-            <span className="text-muted" style={{ fontSize: 9 }}>
+            <span className="text-secondary" style={{ fontSize: 12 }}>
               {ChapterStatusLabels[chapter.status]}
             </span>
           )}

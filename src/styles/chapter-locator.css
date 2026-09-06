@@ -1,0 +1,65 @@
+.chapter-locator {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.chapter-locator-search {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.chapter-locator-search input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 5px 7px;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+.chapter-locator-current {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.chapter-locator-current:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.chapter-locator select {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+.chapter-locator-results {
+  display: grid;
+  max-height: 220px;
+  overflow: auto;
+  gap: 2px;
+}
+.chapter-locator-results button {
+  text-align: left;
+  padding: 6px;
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+  cursor: pointer;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.chapter-locator-results button:hover {
+  background: var(--color-bg-hover);
+}
+.chapter-locator-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.workspace-chapter-locator {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}

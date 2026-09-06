@@ -110,7 +110,7 @@ export function ChapterSummaryPanelView({
             <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>章节正文已修改</span>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-warning-text)', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-warning-text)', marginTop: 2 }}>
             当前章节上下文可能不再准确，建议重新生成。
           </div>
         </div>
@@ -161,7 +161,7 @@ export function ChapterSummaryPanelView({
           {validation && (
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '6px 8px',
                 borderRadius: 4,
                 marginBottom: 8,
@@ -218,14 +218,14 @@ export function ChapterSummaryPanelView({
           </div>
           {genResult.keyEvents && genResult.keyEvents.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)' }}>
                 <span className="panel-inline-status">
                   <Zap aria-hidden="true" size={13} strokeWidth={1.8} />
                   <span>关键事件：</span>
                 </span>
               </div>
               {genResult.keyEvents.map((event, index) => (
-                <div key={index} style={{ fontSize: 11, paddingLeft: 8 }}>
+                <div key={index} style={{ fontSize: 12, paddingLeft: 8 }}>
                   • {event}
                 </div>
               ))}
@@ -233,13 +233,13 @@ export function ChapterSummaryPanelView({
           )}
           {genResult.nextChapterHints && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)' }}>
                 <span className="panel-inline-status">
                   <Link2 aria-hidden="true" size={13} strokeWidth={1.8} />
                   <span>下章建议：</span>
                 </span>
               </div>
-              <div style={{ fontSize: 11, paddingLeft: 8 }}>{genResult.nextChapterHints}</div>
+              <div style={{ fontSize: 12, paddingLeft: 8 }}>{genResult.nextChapterHints}</div>
             </div>
           )}
           <div style={{ display: 'flex', gap: 6 }}>
@@ -294,7 +294,7 @@ export function ChapterSummaryPanelView({
               <span
                 className="panel-inline-status"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   padding: '1px 6px',
                   borderRadius: 3,
                   background: 'color-mix(in srgb, var(--color-success) 13%, transparent)',
@@ -308,7 +308,7 @@ export function ChapterSummaryPanelView({
               <span
                 className="panel-inline-status"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   padding: '1px 6px',
                   borderRadius: 3,
                   background: 'color-mix(in srgb, var(--color-error) 13%, transparent)',
@@ -322,7 +322,7 @@ export function ChapterSummaryPanelView({
               <span
                 className="panel-inline-status"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   padding: '1px 6px',
                   borderRadius: 3,
                   background: 'color-mix(in srgb, var(--color-primary) 13%, transparent)',
@@ -336,7 +336,7 @@ export function ChapterSummaryPanelView({
               <span
                 className="panel-inline-status"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   padding: '1px 6px',
                   borderRadius: 3,
                   background: 'color-mix(in srgb, var(--color-text-muted) 13%, transparent)',
@@ -349,7 +349,7 @@ export function ChapterSummaryPanelView({
             {summary.volumeId && (
               <span
                 className="panel-inline-status"
-                style={{ fontSize: 10, color: 'var(--color-text-muted)' }}
+                style={{ fontSize: 12, color: 'var(--color-text-muted)' }}
               >
                 <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
                 <span>已归卷</span>
@@ -431,7 +431,7 @@ export function ChapterSummaryPanelView({
           )}
 
           <div className="panel-section">
-            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
               创建于：{formatDateTime(summary.createdAt)}
             </div>
           </div>

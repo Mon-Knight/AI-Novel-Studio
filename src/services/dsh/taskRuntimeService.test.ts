@@ -53,7 +53,7 @@ test('DSH resolves only the credential bound to its frozen model identity', () =
   assert.equal(resolveDshTaskApiKey(snapshot), settings.apiKey);
   assert.throws(
     () => resolveDshTaskApiKey({ ...snapshot, modelId: 'unregistered-model' }),
-    /冻结模型没有本次应用会话内的匹配凭据/,
+    /冻结模型没有可用的匹配凭据/,
   );
   assert.throws(
     () =>
@@ -61,7 +61,7 @@ test('DSH resolves only the credential bound to its frozen model identity', () =
         ...snapshot,
         baseUrl: 'https://different-provider.invalid/v1',
       }),
-    /冻结模型没有本次应用会话内的匹配凭据/,
+    /冻结模型没有可用的匹配凭据/,
   );
 });
 
@@ -79,10 +79,10 @@ test('legacy snapshots without baseUrl stay fail-closed when the active model id
   saveAiSettings({ ...settings, modelName: 'different-active-model' });
   const { baseUrl: _omittedBaseUrl, ...legacySnapshot } = snapshot;
 
-  assert.throws(() => resolveDshTaskApiKey(legacySnapshot), /冻结模型没有本次应用会话内的匹配凭据/);
+  assert.throws(() => resolveDshTaskApiKey(legacySnapshot), /冻结模型没有可用的匹配凭据/);
   await assert.rejects(
     () => resolveDshTaskApiKeyAsync(legacySnapshot),
-    /冻结模型没有本次应用会话内的匹配凭据/,
+    /冻结模型没有可用的匹配凭据/,
   );
   assert.equal(hasUsableDshTaskCredential(legacySnapshot), false);
   assert.equal(await hasUsableDshTaskCredentialAsync(legacySnapshot), false);
@@ -121,11 +121,11 @@ test('an explicit historical endpoint is never rebound to the current endpoint',
 
   assert.throws(
     () => resolveDshTaskApiKey(historicalEndpointSnapshot),
-    /冻结模型没有本次应用会话内的匹配凭据/,
+    /冻结模型没有可用的匹配凭据/,
   );
   await assert.rejects(
     () => resolveDshTaskApiKeyAsync(historicalEndpointSnapshot),
-    /冻结模型没有本次应用会话内的匹配凭据/,
+    /冻结模型没有可用的匹配凭据/,
   );
 });
 
@@ -191,10 +191,7 @@ test('async DSH credential readiness fails closed after the application process 
   saveAiSettings(settings);
   resetSessionModelCredentialsForTests();
 
-  await assert.rejects(
-    () => resolveDshTaskApiKeyAsync(snapshot),
-    /冻结模型没有本次应用会话内的匹配凭据/,
-  );
+  await assert.rejects(() => resolveDshTaskApiKeyAsync(snapshot), /冻结模型没有可用的匹配凭据/);
   assert.equal(await hasUsableDshTaskCredentialAsync(snapshot), false);
 });
 

@@ -690,30 +690,45 @@ pub fn list_conversations(
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
-    let archive_filter = if include_archived {
-        ""
-    } else {
-        " AND archived_at IS NULL AND status <> 'archived'"
-    };
-    let sql = if novel_id.is_some() {
-        format!(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE novel_id=?1{archive_filter} ORDER BY updated_at DESC LIMIT ?2"
-        )
-    } else {
-        format!(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE 1=1{archive_filter} ORDER BY updated_at DESC LIMIT ?1"
-        )
-    };
-    let mut statement = connection.prepare(&sql).map_err(AppError::database)?;
-    let rows = if let Some(novel_id) = novel_id {
-        statement.query_map(
-            params![novel_id, limit.clamp(1, 500)],
-            conversation_from_row,
-        )
-    } else {
-        statement.query_map(params![limit.clamp(1, 500)], conversation_from_row)
+    list_conversations_page(connection, novel_id, if include_archived { "all" } else { "active" }, "", limit, None)
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationListCursor {
+    pub updated_at: String,
+    pub conversation_id: String,
+}
+
+pub fn list_conversations_page(
+    connection: &Connection,
+    novel_id: Option<&str>,
+    archive: &str,
+    query: &str,
+    limit: i64,
+    cursor: Option<&ConversationListCursor>,
+) -> Result<Vec<TaskConversationRecord>, AppError> {
+    if !["active", "archived", "all"].contains(&archive)
+        || query.trim().chars().count() > 200
+        || cursor.is_some_and(|value| value.updated_at.is_empty() || value.conversation_id.is_empty())
+    {
+        return Err(AppError::new("CONVERSATION_INPUT_INVALID", "任务搜索或分页参数无效", false));
     }
-    .map_err(AppError::database)?;
+    let mut statement = connection.prepare(
+        "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
+                c.created_at, c.updated_at, c.archived_at
+         FROM task_conversations c JOIN novels n ON n.id=c.novel_id
+         WHERE (?1 IS NULL OR c.novel_id=?1)
+           AND (?2='all' OR (?2='active' AND c.archived_at IS NULL AND c.status<>'archived')
+                OR (?2='archived' AND (c.archived_at IS NOT NULL OR c.status='archived')))
+           AND (?3='' OR instr(lower(c.title || ' ' || n.title), lower(?3))>0)
+           AND (?4 IS NULL OR c.updated_at<?4 OR (c.updated_at=?4 AND c.conversation_id<?5))
+         ORDER BY c.updated_at DESC, c.conversation_id DESC LIMIT ?6"
+    ).map_err(AppError::database)?;
+    let rows = statement.query_map(params![novel_id, archive, query.trim(),
+        cursor.map(|value| value.updated_at.as_str()),
+        cursor.map(|value| value.conversation_id.as_str()), limit.clamp(1, 501)], conversation_from_row)
+        .map_err(AppError::database)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(AppError::database)
 }
@@ -4250,6 +4265,44 @@ mod tests {
             .expect("read conversation")
             .expect("conversation exists");
         assert_eq!(updated.title, "生成第三章候选正文并保持人物一致");
+    }
+
+    #[test]
+    fn conversation_directory_filters_before_limit_and_pages_tied_timestamps() {
+        let mut connection = connection();
+        for index in 0..251 {
+            create_conversation(&mut connection, CreateConversationInput {
+                conversation_id: format!("page-{index:04}"),
+                novel_id: "novel-conversation-test".to_string(),
+                title: if index == 0 { "旧的待处理任务 100%".to_string() } else { format!("归档任务 {index}") },
+                default_model: None,
+                created_at: "2026-09-05T00:00:00Z".to_string(),
+            }).expect("create directory fixture");
+            if index > 0 {
+                set_conversation_archived(&mut connection, SetConversationArchivedInput {
+                    conversation_id: format!("page-{index:04}"), archived: true,
+                    updated_at: "2026-09-05T00:00:00Z".to_string(),
+                }).expect("archive fixture");
+            }
+        }
+        let active = list_conversations_page(&connection, None, "active", "", 100, None).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].conversation_id, "page-0000");
+        let search = list_conversations_page(&connection, None, "all", "100%", 100, None).unwrap();
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].conversation_id, "page-0000");
+        let mut cursor = None;
+        let mut ids = std::collections::HashSet::new();
+        loop {
+            let page = list_conversations_page(&connection, None, "all", "", 100, cursor.as_ref()).unwrap();
+            for row in &page { assert!(ids.insert(row.conversation_id.clone())); }
+            let Some(last) = page.last() else { break; };
+            cursor = Some(ConversationListCursor { updated_at: last.updated_at.clone(), conversation_id: last.conversation_id.clone() });
+        }
+        assert_eq!(ids.len(), 251);
+        assert!(list_conversations_page(&connection, Some("other-novel"), "all", "", 100, None).unwrap().is_empty());
+        assert!(list_conversations_page(&connection, None, "unknown", "", 100, None).is_err());
+        assert!(list_conversations_page(&connection, None, "all", &"字".repeat(201), 100, None).is_err());
     }
 
     #[test]

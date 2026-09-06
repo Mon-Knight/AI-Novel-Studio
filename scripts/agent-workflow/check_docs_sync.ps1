@@ -312,14 +312,15 @@ $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob
 Add-CheckResult "desktop DSH and gateway precede Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and the production Tauri build"
 
 $releaseWorkflow = Get-OptionalText ".github/workflows/release.yml"
+$windowsReleaseJob = Get-WorkflowJobBlock ([string]$releaseWorkflow) "windows-release"
+$releaseDesktopDependency = ([string]$windowsReleaseJob) -match '(?m)^\s*needs:\s*(?:desktop-gate\s*$|\[(?:[^\]\r\n]+,\s*)?desktop-gate(?:\s*,[^\]\r\n]+)?\])'
 $releaseRequiresDesktopGate =
     ([string]$releaseWorkflow).Contains("uses: ./.github/workflows/windows-desktop-e2e.yml") -and
-    ([string]$releaseWorkflow).Contains("needs: desktop-gate") -and
+    $releaseDesktopDependency -and
     ([string]$releaseWorkflow).Contains("suite: full") -and
     ([string]$releaseWorkflow).Contains("npm run test:bundle-size")
 Add-CheckResult "release waits for full desktop gate" $releaseRequiresDesktopGate "signed release depends on full reusable desktop E2E and bundle budgets"
 
-$windowsReleaseJob = Get-WorkflowJobBlock ([string]$releaseWorkflow) "windows-release"
 $windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob) @(
     "repository: deepseek-ai/deepseek-harness",
     "ref: 47f943859bef60e4160492346772ded9b24f765a",

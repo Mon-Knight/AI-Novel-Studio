@@ -4,8 +4,33 @@ import type { ConversationTurn } from '../../types/conversation';
 import {
   composeWorkbenchInstruction,
   derivePersistentTaskConstraints,
+  deriveTaskConstraintBrief,
 } from './taskConstraintBrief';
 import { encodeWorkbenchTurnContent } from './workbenchTurnOrigin';
+
+test('recent persistent directions replace old dimensions and survive the eight-item budget', () => {
+  const turns = [
+    userTurn('old-person', 0, '全程使用第一人称。'),
+    ...Array.from({ length: 8 }, (_, index) =>
+      userTurn(`old-${index}`, index + 1, `全书保留约束${index}。`),
+    ),
+    userTurn('new-person', 10, '全程使用第三人称。'),
+    userTurn('current', 11, '继续写'),
+  ];
+  const brief = deriveTaskConstraintBrief(turns, 'current');
+  assert.ok(brief.constraints.includes('全程使用第三人称。'));
+  assert.ok(!brief.constraints.includes('全程使用第一人称。'));
+  assert.equal(brief.entries.find((entry) => entry.turnId === 'old-person')?.status, 'superseded');
+  assert.equal(brief.entries.filter((entry) => entry.status === 'included').length, 8);
+  assert.equal(brief.entries.filter((entry) => entry.status === 'omitted_budget').length, 1);
+  assert.equal(turns[0].content, '全程使用第一人称。');
+});
+
+test('oversized persistent constraints report omission instead of disappearing', () => {
+  const brief = deriveTaskConstraintBrief([userTurn('long', 1, `全书${'约束'.repeat(900)}。`)]);
+  assert.deepEqual(brief.constraints, []);
+  assert.equal(brief.entries[0]?.status, 'omitted_budget');
+});
 
 function userTurn(turnId: string, sequence: number, content: string): ConversationTurn {
   return {
@@ -82,7 +107,7 @@ test('task brief deduplicates repeated constraints and gives the current goal pr
       '继续写',
       '',
       '【任务持续约束】',
-      '以下约束来自本任务此前用户回合。若与当前指令或正式小说资产冲突，以当前指令和正式小说资产为准：',
+      '以下约束来自本任务此前用户回合，按较新优先排列。同类约束冲突时以较新项为准；若与当前指令或正式小说资产冲突，以当前指令和正式小说资产为准：',
       '- 所有章节都不要使用第一人称。',
     ].join('\n'),
   );

@@ -1,3 +1,8 @@
+import {
+  validateLocalProjectBackup,
+  validateLocalProjectBackupShape,
+} from './projectBackupLocalStoragePolicy.ts';
+
 export const PROJECT_BACKUP_SCHEMA_VERSION = 11;
 export const MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION = 2;
 
@@ -123,41 +128,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isBackupValue(value: unknown): value is BackupValue {
-  if (
-    value === null ||
-    typeof value === 'boolean' ||
-    typeof value === 'number' ||
-    typeof value === 'string'
-  ) {
-    return true;
-  }
-  if (Array.isArray(value)) return value.every(isBackupValue);
-  return isRecord(value) && Object.values(value).every(isBackupValue);
-}
-
 export function isLocalProjectBackupData(data: unknown): data is LocalProjectBackupData {
-  if (
-    !isRecord(data) ||
-    data.version !== 1 ||
-    !isRecord(data.collections) ||
-    !isRecord(data.entries)
-  ) {
+  if (data === undefined) return false;
+  try {
+    validateLocalProjectBackupShape(data);
+    return true;
+  } catch {
     return false;
   }
-  if (
-    !Object.values(data.collections).every(
-      (rows) => Array.isArray(rows) && rows.every(isBackupValue),
-    )
-  ) {
-    return false;
-  }
-  if (!Object.values(data.entries).every(isBackupValue)) return false;
-  return (
-    data.rawEntries === undefined ||
-    (isRecord(data.rawEntries) &&
-      Object.values(data.rawEntries).every((value) => typeof value === 'string'))
-  );
 }
 
 export function isCompleteProjectBackup(data: unknown): data is CompleteProjectBackup {
@@ -191,10 +169,17 @@ export function isCompleteProjectBackup(data: unknown): data is CompleteProjectB
     ...(data.schemaVersion >= 11 ? ARTIFACT_DECISION_TABLES : []),
   ];
   const allowedTables = new Set<string>(requiredTables);
+  try {
+    validateLocalProjectBackup(
+      { novel: data.novel as BackupRow, tables: tables as Record<string, BackupRow[]> },
+      data.localStorage,
+    );
+  } catch {
+    return false;
+  }
   return (
     Object.keys(tables).every((table) => allowedTables.has(table)) &&
-    requiredTables.every((table) => Array.isArray(tables[table])) &&
-    (data.localStorage === undefined || isLocalProjectBackupData(data.localStorage))
+    requiredTables.every((table) => Array.isArray(tables[table]))
   );
 }
 

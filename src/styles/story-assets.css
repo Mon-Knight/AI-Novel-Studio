@@ -174,13 +174,13 @@
 .story-assets-review-main span {
   overflow: hidden;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .story-assets-review-revision {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .story-assets-review-actions {
   display: flex;

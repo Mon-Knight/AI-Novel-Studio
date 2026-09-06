@@ -21,11 +21,10 @@ function makeFixture({ gatewayBytes = 'current-gateway', sourceCommit = PINNED_C
   writeFileSync(carrierGateway, gatewayBytes);
   writeFileSync(currentGateway, gatewayBytes);
   writeFileSync(path.join(carrierRoot, 'VERSION_MATRIX.json'), JSON.stringify({ sourceCommit }));
-  const archive = spawnSync(
-    'tar',
-    ['-c', '-f', zip, '-C', path.join(root, 'fixture'), 'dsh-runtime'],
-    { encoding: 'utf8' },
-  );
+  const archive = spawnSync('tar', ['-c', '-f', 'carrier.zip', '-C', 'fixture', 'dsh-runtime'], {
+    encoding: 'utf8',
+    cwd: root,
+  });
   assert.equal(archive.error, undefined);
   assert.equal(archive.status, 0, archive.stderr);
   return { root, currentGateway, zip, temporaryParent };
@@ -70,11 +69,10 @@ test('fails closed when the carrier omits the Gateway entry', (context) => {
   unlinkSync(fixture.zip);
   const carrierRoot = path.join(fixture.root, 'fixture', 'dsh-runtime');
   rmSync(path.join(carrierRoot, 'gateway'), { recursive: true, force: true });
-  const archive = spawnSync(
-    'tar',
-    ['-c', '-f', fixture.zip, '-C', path.join(fixture.root, 'fixture'), 'dsh-runtime'],
-    { encoding: 'utf8' },
-  );
+  const archive = spawnSync('tar', ['-c', '-f', 'carrier.zip', '-C', 'fixture', 'dsh-runtime'], {
+    encoding: 'utf8',
+    cwd: fixture.root,
+  });
   assert.equal(archive.status, 0, archive.stderr);
 
   assert.throws(

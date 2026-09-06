@@ -1,4 +1,5 @@
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { LocalModelEditorDraft } from './optionalModelEditorDraft';
 
 interface LocalModelEditorProps {
@@ -57,9 +58,8 @@ export function LocalModelEditor({ draft, onChange, onSave, onCancel }: LocalMod
           placeholder="local-no-key-required"
         />
         <span className="settings-help-text">
-          {draft.apiKey
-            ? '本次会话已绑定：' + aiSettingsService.maskApiKey(draft.apiKey)
-            : 'Key 不写入卡片或备份。'}
+          {draft.apiKey ? '当前填写：' + aiSettingsService.maskApiKey(draft.apiKey) + '。' : ''}
+          {getCredentialStorageCopy().localKeyHelp}
         </span>
       </label>
       <div className="settings-card-actions" style={{ gridColumn: '1 / -1' }}>

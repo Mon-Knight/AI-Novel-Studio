@@ -1,6 +1,6 @@
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
-import { classifyTaskIntent, selectCandidateTool } from './taskGoalRouting';
+import { classifyTaskIntent, isChapterOutlineTaskGoal } from './taskGoalRouting';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 
@@ -95,7 +95,7 @@ export function shouldResolveWorkbenchChapterTarget(goal: string): boolean {
   const intent = classifyTaskIntent(goal);
   if (intent === 'chapter_write') return true;
   if (intent !== 'structured_write' || requestedChapterNumber(goal) === undefined) return false;
-  return selectCandidateTool(goal)?.name === 'generate_outline';
+  return isChapterOutlineTaskGoal(goal);
 }
 
 function chapterOrder(volumes: readonly Volume[]) {

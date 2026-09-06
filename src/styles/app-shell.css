@@ -92,7 +92,7 @@
   user-select: none;
 }
 
-/* 创作工作台自身已有项目 / 任务树，全局导航在该路由收敛为固定图标轨。 */
+/* 创作工作台和章节审阅自身已有目录，全局导航收敛为固定图标轨；审阅保留顶部栏。 */
 .app-sidebar.app-sidebar--compact {
   width: 56px;
   min-width: 56px;

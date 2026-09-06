@@ -77,7 +77,7 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
       <div style={{ display: 'grid', gap: 8 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>类型</label>
+            <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>类型</label>
             <select
               className="input"
               value={contextType}
@@ -92,7 +92,7 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+            <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
               重要度 {importance}/5
             </label>
             <input
@@ -107,7 +107,7 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
           </div>
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>标题 *</label>
+          <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>标题 *</label>
           <input
             className="input"
             value={title}
@@ -117,7 +117,7 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
           />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>内容 *</label>
+          <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>内容 *</label>
           <textarea
             className="input"
             value={content}

@@ -25,7 +25,8 @@ Object.defineProperties(globalThis, {
 const { MemoryRouter } = await import('react-router-dom');
 const vite = await createServer({
   appType: 'custom',
-  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const novelRepositoryModule = (await vite.ssrLoadModule(
   '/src/services/database/novelRepository.ts',
@@ -249,7 +250,7 @@ test('candidate review actions update, discard, expand, and edit-adopt records',
   assert.ok(editor);
   fireEvent.change(editor, { target: { value: '{"name":"Edited Candidate"}' } });
   const confirmButton = view.container.querySelector<HTMLButtonElement>(
-    '.setting-suggestions-modal-actions .btn-primary',
+    '.setting-suggestions-modal .modal-frame-footer .btn-primary',
   );
   assert.ok(confirmButton);
   fireEvent.change(editor, { target: { value: '{' } });

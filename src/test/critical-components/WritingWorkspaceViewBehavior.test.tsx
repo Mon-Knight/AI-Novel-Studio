@@ -492,6 +492,31 @@ afterEach(() => {
 });
 
 describe('WritingWorkspaceView', () => {
+  it('toggles focus without unmounting the chapter tree or removing the return and command surfaces', () => {
+    const props = baseProps();
+    const focus = vi.fn();
+    props.refs.editor.current = {
+      save: vi.fn(async () => null),
+      restoreRecovery: vi.fn(() => true),
+      focus,
+    };
+    render(<WritingWorkspaceView {...props} />);
+    const tree = screen.getByTestId('mock-volume-tree');
+    const editor = screen.getByTestId('mock-editor');
+    const directory = document.getElementById('workspace-chapter-directory');
+    fireEvent.click(screen.getByRole('button', { name: '专注正文' }));
+    expect(directory?.hidden).toBe(true);
+    expect(screen.getByTestId('mock-volume-tree')).toBe(tree);
+    expect(screen.getByTestId('mock-editor')).toBe(editor);
+    expect(screen.getByText('返回创作工作台')).toBeTruthy();
+    expect(screen.getByTestId('mock-toolbar')).toBeTruthy();
+    expect(screen.getByTestId('mock-status')).toBeTruthy();
+    expect(focus).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '显示章节目录' }));
+    expect(directory?.hidden).toBe(false);
+    expect(screen.queryByText('当前：第1章 第一章')).toBeNull();
+  });
+
   it('wires editor, tree, toolbar and current right-panel callbacks', () => {
     const props = baseProps();
     render(<WritingWorkspaceView {...props} />);

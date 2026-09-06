@@ -20,7 +20,7 @@ Mock 模式允许你在没有 API Key 的情况下体验完整工作流。
 3. 点击「添加模型」，填写显示名称、Provider、API Base URL、API Key 与模型名称
 4. 点击「保存为卡片」；已保存模型只显示名称和状态，不展示密钥、地址或采样参数
 5. 可继续添加多份 API 模型，用「使用」切换当前模型
-6. API Key 仅保留到本次应用会话结束；不会写入 LocalStorage、SQLite、项目备份或 Git。重新打开应用后需要再次填写
+6. Windows 桌面端使用 DPAPI 加密保存 API Key，重新打开应用后可恢复；浏览器开发模式仅保留会话内存。Key 不进入 LocalStorage、SQLite、项目备份、日志或 Git。清空 API/Gateway 密钥并保存会删除当前身份密钥；本地免鉴权模型不保留原密钥，改用免鉴权占位值
 7. 新任务选择的本地模型不可用时，可在任务创建并冻结模型前改用当前 API 模型；既有任务、重试和自动总结不会在后台更换冻结模型
 
 ### 支持的模型
@@ -85,7 +85,7 @@ Autonomous 候选会读取已应用的 Scene/Beat，由 Model Router 选择云�
 
 ## API Key 安全
 
-- API Key **仅保留在当前应用进程内存**，应用退出后自动失效
+- Windows 桌面端的 API Key 在运行时内存中使用，并经 DPAPI 加密保存在本机以支持重启恢复；浏览器开发模式仅保留会话内存。加密保存不等于只允许本应用读取，请妥善保护 Windows 登录账户
 - Key 按 Provider、Base URL 与模型精确绑定，切换模型不会沿用其他模型的 Key
 - Key 不写入项目、SQLite、LocalStorage、备份、Git 或应用自有同步服务
 - 真实模型调用时，鉴权信息只发送到用户配置且与当前模型匹配的 Provider Endpoint

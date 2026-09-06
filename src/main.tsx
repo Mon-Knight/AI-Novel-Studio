@@ -7,6 +7,7 @@ import ToastProvider from './components/ToastProvider';
 import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
+import { setSystemAccentColor } from './services/theme/themeRuntimeService';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
 import { startupCoordinator } from './services/startup/startupCoordinator';
 import { restoreSessionModelCredentialsFromNative } from './services/ai/aiSettingsStore';
@@ -72,13 +73,7 @@ window.addEventListener('contextmenu', (event) => {
 async function applySystemAccentColor() {
   try {
     const accent = await tauriInvoke<string | null>('get_system_accent_color');
-    if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) {
-      document.documentElement.style.setProperty('--color-accent', accent);
-      document.documentElement.style.setProperty('--color-focus-ring', accent);
-      // 仅当 accent 与默认色不同时覆盖 primary（保留用户认知中的品牌色）
-      document.documentElement.style.setProperty('--color-primary', accent);
-      document.documentElement.style.setProperty('--color-primary-hover', accent + 'cc');
-    }
+    setSystemAccentColor(accent);
   } catch {
     // 静默回退：保留 variables.css 中定义的默认颜色
   }

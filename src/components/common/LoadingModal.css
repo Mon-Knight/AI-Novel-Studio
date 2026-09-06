@@ -15,21 +15,7 @@
 }
 
 .loading-modal-card {
-  position: fixed;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: calc(var(--z-modal, 400) + 1);
-  background: var(--color-bg-card, #ffffff);
-  border: 1px solid var(--color-border, #e8e8f0);
-  border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-md, 0 2px 8px rgba(0, 0, 0, 0.06));
-  padding: 28px 32px;
-  min-width: 300px;
-  max-width: 420px;
-  width: auto;
   text-align: center;
-  animation: loadingModalSlideIn var(--motion-fast, 120ms) var(--ease-enter, ease-out);
 }
 
 @keyframes loadingModalFadeIn {
@@ -210,10 +196,6 @@
 
   .loading-modal-progress-indeterminate {
     transform: none;
-  }
-
-  .loading-modal-card {
-    transform: translateX(-50%);
   }
 
   .loading-modal-progress-indeterminate {

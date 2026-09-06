@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -55,6 +55,20 @@ export function verifyExtractedCarrierGateway({ extractedRoot, currentGateway, p
   return currentGatewaySha256;
 }
 
+// Windows tar builds misread absolute Windows paths in the -f/-C operands as
+// remote hosts ("Cannot connect to D:"), so extraction always runs with a
+// relative archive operand and cwd positioned at the extraction directory.
+function extractArchiveOperand(extractedRoot, zip) {
+  const zipPath = path.resolve(zip);
+  const zipRelative = path.relative(extractedRoot, zipPath).split(path.sep).join('/');
+  if (!path.isAbsolute(zipRelative)) {
+    return zipRelative;
+  }
+  const copiedZip = path.join(extractedRoot, 'carrier-copy.zip');
+  copyFileSync(zipPath, copiedZip);
+  return path.basename(copiedZip);
+}
+
 export function verifyReusableCarrier({
   zip,
   currentGateway,
@@ -68,13 +82,11 @@ export function verifyReusableCarrier({
       'tar',
       [
         '-xf',
-        path.resolve(zip),
-        '-C',
-        extractedRoot,
+        extractArchiveOperand(extractedRoot, zip),
         MATRIX_RELATIVE.replaceAll(path.sep, '/'),
         GATEWAY_RELATIVE.replaceAll(path.sep, '/'),
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', cwd: extractedRoot },
     );
     if (extraction.error || extraction.status !== 0) {
       throw staleCarrier('required Gateway freshness entries could not be extracted');

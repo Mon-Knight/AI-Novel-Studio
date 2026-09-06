@@ -23,7 +23,8 @@ Object.defineProperties(globalThis, {
 const { MemoryRouter } = await import('react-router-dom');
 const vite = await createServer({
   appType: 'custom',
-  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const pageModule = (await vite.ssrLoadModule(
   '/src/pages/AiTasks/AiTasksPageView.tsx',

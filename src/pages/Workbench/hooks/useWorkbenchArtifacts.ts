@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../../types/conversation';
 import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
-import { buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
+import { appendArtifactRevisionDraft, buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
 import { resolveArtifactDecisionTarget } from '../workbenchHelpers';
 
 export function useWorkbenchArtifacts(input: {
@@ -12,7 +12,7 @@ export function useWorkbenchArtifacts(input: {
   loadConversations: (novelId?: string) => Promise<void>;
   selectedNovelRef: React.MutableRefObject<string>;
   setComposerError: (error: string) => void;
-  setDraft?: (draft: string) => void;
+  setDraft?: React.Dispatch<React.SetStateAction<string>>;
   onStructuredArtifactDecision?: (input: {
     artifact: ConversationArtifactCard;
     decision: ArtifactDecisionKind;
@@ -31,14 +31,19 @@ export function useWorkbenchArtifacts(input: {
   } = input;
   const navigate = useNavigate();
   const [decisionBusyCardId, setDecisionBusyCardId] = useState('');
+  const decisionInFlightRef = useRef(false);
 
   async function decideArtifact(
     artifact: ConversationArtifactCard,
     decision: ArtifactDecisionKind,
+    revisionNotes?: string,
   ) {
-    if (!selectedNovelId || !artifact.artifactId) return;
+    if (!selectedNovelId || !artifact.artifactId || decisionInFlightRef.current) return;
+    // Lock before React rerenders so another card cannot unlock a pending review.
+    decisionInFlightRef.current = true;
     setDecisionBusyCardId(artifact.cardId);
     setComposerError('');
+    let revisionRecorded = false;
     try {
       const target = resolveArtifactDecisionTarget({
         artifactType: artifact.artifactType,
@@ -61,6 +66,13 @@ export function useWorkbenchArtifacts(input: {
         decision === 'request_apply'
           ? await artifactDecisionService.applyStructured(payload)
           : await artifactDecisionService.record(payload);
+      if (decision === 'request_revision') {
+        revisionRecorded = true;
+        const revisionDraft = buildArtifactRevisionDraft(artifact.artifactType, revisionNotes);
+        // The captured setter belongs to the originating conversation. A functional
+        // update keeps text entered while the decision was pending, even after a switch.
+        setDraft?.((existingDraft) => appendArtifactRevisionDraft(existingDraft, revisionDraft));
+      }
       await refreshBundle(artifact.conversationId);
       if (selectedNovelRef.current === selectedNovelId) {
         await loadConversations(selectedNovelId);
@@ -81,17 +93,20 @@ export function useWorkbenchArtifacts(input: {
           );
         }
       }
-      if (decision === 'request_revision') {
-        setDraft?.(buildArtifactRevisionDraft(artifact.artifactType));
-      }
       if (result.authorization && target.chapterId) {
         navigate(
           `/novels/${selectedNovelId}/workspace?chapterId=${encodeURIComponent(target.chapterId)}&authorizationId=${encodeURIComponent(result.authorization.authorizationId)}&artifactId=${encodeURIComponent(artifact.artifactId)}`,
         );
       }
     } catch (error) {
-      setComposerError(error instanceof Error ? error.message : '产物决定失败');
+      const message = error instanceof Error ? error.message : '产物决定失败';
+      setComposerError(
+        revisionRecorded
+          ? `修订请求已记录，但产物状态刷新失败；输入区内容已保留。${message}`
+          : message,
+      );
     } finally {
+      decisionInFlightRef.current = false;
       setDecisionBusyCardId('');
     }
   }

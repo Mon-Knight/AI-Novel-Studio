@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { runWithLoading } from '../../../lib/runWithLoading';
 import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { logWorkspaceWarning } from '../../../services/workspace/workspaceErrorService';
@@ -13,8 +12,11 @@ import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { formatDateTime } from '../../../utils/date';
 import { confirmInfo } from '../../../utils/nativeDialog';
+import { isComposingKeyboardEvent } from '../../../utils/keyboardEvent';
+import { hasActiveModal } from '../../common/useModalAccessibility';
 import type {
   DocumentSaveState,
+  DocumentAdoptState,
   EditorAreaProps,
   EditorCommandRequest,
   EditorDocumentState,
@@ -24,6 +26,7 @@ import {
   isDraftSaveResultForDocument,
   resolveEditorDraftContent,
 } from './editorDocumentSafety';
+import { useEditorOperationScope } from './useEditorOperationScope';
 
 interface UseEditorDocumentControllerOptions {
   chapter?: Chapter;
@@ -45,19 +48,6 @@ interface UseEditorDocumentControllerOptions {
   reviewAuthorizationId?: string;
   reviewArtifactId?: string;
   reviewLocked?: boolean;
-}
-
-function waitForInlineSaveFeedback(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.resolve();
-  return new Promise((resolve) => {
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve());
-      });
-    } else {
-      window.setTimeout(resolve, 0);
-    }
-  });
 }
 
 export function useEditorDocumentController({
@@ -84,6 +74,9 @@ export function useEditorDocumentController({
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [saveState, setSaveState] = useState<DocumentSaveState>('idle');
+  const [saveFailure, setSaveFailure] = useState('');
+  const [adoptState, setAdoptState] = useState<DocumentAdoptState>('idle');
+  const [adoptMsg, setAdoptMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [adopting, setAdopting] = useState(false);
   const [lastSaved, setLastSaved] = useState('');
@@ -95,12 +88,39 @@ export function useEditorDocumentController({
   const liveContentRef = useRef(content);
   const loadedChapterIdRef = useRef<string>();
   const loadedSourceKeyRef = useRef<string>();
-  const saveInFlightRef = useRef<Promise<ChapterDraft | null> | null>(null);
+  const saveInFlightRef = useRef<{ epoch: number; promise: Promise<ChapterDraft | null> } | null>(
+    null,
+  );
+  const adoptInFlightRef = useRef<number | null>(null);
+  const scopeKey = JSON.stringify([
+    novelId,
+    chapter?.id,
+    reviewCandidate?.artifactId,
+    reviewCandidate?.authorizationId,
+  ]);
+  const { scope, isCurrent } = useEditorOperationScope(scopeKey);
+  const [feedbackEpoch, setFeedbackEpoch] = useState(scope.current.epoch);
+  const liveAccessRef = useRef({ documentState, reviewLocked, unavailable: false });
 
   liveDocumentRef.current = { novelId, chapterId: chapter?.id };
   liveDraftIdRef.current = currentDraft?.id;
   liveContentRef.current = content;
   const effectiveContentState = contentStateOverride ?? currentDraft?.contentState;
+  liveAccessRef.current = {
+    documentState,
+    reviewLocked,
+    unavailable: effectiveContentState?.status === 'unavailable',
+  };
+  useEffect(() => {
+    setFeedbackEpoch(scope.current.epoch);
+    setSaving(false);
+    setAdopting(false);
+    setSaveFailure('');
+    setSaveMsg('');
+    setSaveState('idle');
+    setAdoptMsg('');
+    setAdoptState('idle');
+  }, [scopeKey, scope]);
 
   const emitContentSnapshot = useCallback(
     (value: string, dirty: boolean, draft: ChapterDraft | null | undefined = currentDraft) => {
@@ -147,7 +167,12 @@ export function useEditorDocumentController({
       setContent(safeContent);
       setIsDirty(false);
       setSaveMsg('');
+      setSaveFailure('');
       setSaveState(resolution.draft ? 'saved' : 'idle');
+      if (adoptInFlightRef.current !== scope.current.epoch) {
+        setAdoptState(resolution.draft?.isAdopted ? 'adopted' : 'idle');
+        setAdoptMsg('');
+      }
       setLastSaved(resolution.draft ? formatDateTime(resolution.draft.updatedAt) : '');
       loadedChapterIdRef.current = chapter?.id;
       loadedSourceKeyRef.current = sourceKey;
@@ -163,19 +188,25 @@ export function useEditorDocumentController({
     emitContentSnapshot,
     novelId,
     reviewCandidate,
+    scope,
   ]);
 
   const handleContentChange = useCallback(
     (value: string) => {
       if (documentState !== 'ready' || reviewLocked) return;
       setContent(value);
+      liveContentRef.current = value;
       const dirty = value !== (currentDraft?.content || '');
       setIsDirty(dirty);
       setSaveState(dirty ? 'editing' : currentDraft ? 'saved' : 'idle');
       setSaveMsg('');
+      if (adoptState !== 'error' && adoptInFlightRef.current !== scope.current.epoch) {
+        setAdoptState(currentDraft?.isAdopted && !dirty ? 'adopted' : 'idle');
+        setAdoptMsg('');
+      }
       emitContentSnapshot(value, dirty);
     },
-    [currentDraft, documentState, emitContentSnapshot, reviewLocked],
+    [adoptState, currentDraft, documentState, emitContentSnapshot, reviewLocked, scope],
   );
 
   const handleSelectionChange = useCallback(() => {
@@ -270,119 +301,149 @@ export function useEditorDocumentController({
     onApplyTextRejected,
   ]);
 
-  const performSave = useCallback(async (): Promise<ChapterDraft | null> => {
-    if (!chapter || !novelId || documentState !== 'ready' || reviewLocked || adopting) return null;
-    if (effectiveContentState?.status === 'unavailable') {
-      setSaveMsg('正文不可用，已阻止保存');
-      setSaveState('error');
-      return null;
-    }
-    if (currentDraft && !isDirty && currentDraft.content === content) {
-      setSaveMsg(currentDraft.isAdopted ? '当前正文已采用，无需保存' : '没有未保存修改');
-      setSaveState('saved');
-      return currentDraft;
-    }
-    setSaving(true);
-    setSaveState('saving');
-    setSaveMsg('保存中');
-    onActionStateChange?.({
-      saving: true,
-      adopting: false,
-      saveState: 'saving',
-      saveMessage: '保存中',
-    });
-    const requestNovelId = novelId;
-    const requestChapterId = chapter.id;
-    const requestDraftId = currentDraft?.id;
-    const requestContent = content;
-    try {
-      await waitForInlineSaveFeedback();
-      const savedDraft =
-        currentDraft && !currentDraft.isAdopted
-          ? await draftVersionService.update(
-              currentDraft.id,
-              requestChapterId,
-              requestContent,
-              'user_edited',
-              undefined,
-              currentDraft,
-            )
-          : await draftVersionService.create({
-              novelId: requestNovelId,
-              chapterId: requestChapterId,
-              content: requestContent,
-              source: 'user_edited',
-            });
-      if (!isDraftSaveResultForDocument(savedDraft, requestNovelId, requestChapterId)) {
-        throw new Error('草稿保存结果与当前章节不一致');
-      }
-      const liveDocument = liveDocumentRef.current;
+  const performSave = useCallback(
+    async (forAdoption = false): Promise<ChapterDraft | null> => {
+      const requestEpoch = scope.current.epoch;
       if (
-        liveDocument.novelId !== requestNovelId ||
-        liveDocument.chapterId !== requestChapterId ||
-        liveDraftIdRef.current !== requestDraftId
-      ) {
+        !chapter ||
+        !novelId ||
+        documentState !== 'ready' ||
+        reviewLocked ||
+        (!forAdoption && adoptInFlightRef.current === requestEpoch)
+      )
         return null;
-      }
-      if (liveContentRef.current !== requestContent) {
-        setSaveMsg('正文已变化，请再次保存');
-        setSaveState('editing');
-        return null;
-      }
-      setIsDirty(false);
-      setSaveMsg('已保存');
-      setSaveState('saved');
-      setLastSaved(formatDateTime(new Date()));
-      try {
-        await onDraftSaved?.(savedDraft);
-      } catch (error) {
-        logWorkspaceWarning('post_save_callback_failed', {
-          novelId: requestNovelId,
-          chapterId: requestChapterId,
-          draftId: savedDraft.id,
-          errorCode:
-            error && typeof error === 'object' && 'code' in error
-              ? String((error as { code?: unknown }).code)
-              : 'UNKNOWN_ERROR',
-        });
-      }
-      emitContentSnapshot(savedDraft.content, false, savedDraft);
-      return savedDraft;
-    } catch (error) {
-      const liveDocument = liveDocumentRef.current;
-      if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
-        const appError = normalizeAppError(error, '正文保存失败。');
-        setSaveMsg(getAppErrorUserMessage(appError));
+      setFeedbackEpoch(requestEpoch);
+      if (effectiveContentState?.status === 'unavailable') {
+        setSaveFailure('正文不可用，已阻止保存');
         setSaveState('error');
+        return null;
       }
-      return null;
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    adopting,
-    chapter,
-    content,
-    currentDraft,
-    documentState,
-    effectiveContentState,
-    emitContentSnapshot,
-    isDirty,
-    novelId,
-    onActionStateChange,
-    onDraftSaved,
-    reviewLocked,
-  ]);
+      setSaveFailure('');
+      if (currentDraft && !isDirty && currentDraft.content === content) {
+        setSaveMsg(currentDraft.isAdopted ? '当前正文已采用，无需保存' : '没有未保存修改');
+        setSaveState('saved');
+        return currentDraft;
+      }
+      setSaving(true);
+      setSaveState('saving');
+      setSaveMsg('保存中');
+      onActionStateChange?.({
+        saving: true,
+        adopting: forAdoption,
+        saveState: 'saving',
+        saveMessage: '保存中',
+        chapterId: chapter.id,
+        adoptState: forAdoption ? 'confirming' : adoptState,
+        adoptMessage: forAdoption ? '正在保存待采用的草稿' : adoptMsg,
+      });
+      const requestNovelId = novelId;
+      const requestChapterId = chapter.id;
+      const requestDraftId = currentDraft?.id;
+      const requestContent = content;
+      try {
+        const savedDraft =
+          currentDraft && !currentDraft.isAdopted
+            ? await draftVersionService.update(
+                currentDraft.id,
+                requestChapterId,
+                requestContent,
+                'user_edited',
+                undefined,
+                currentDraft,
+              )
+            : await draftVersionService.create({
+                novelId: requestNovelId,
+                chapterId: requestChapterId,
+                content: requestContent,
+                source: 'user_edited',
+              });
+        if (!isDraftSaveResultForDocument(savedDraft, requestNovelId, requestChapterId)) {
+          throw new Error('草稿保存结果与当前章节不一致');
+        }
+        const liveDocument = liveDocumentRef.current;
+        if (
+          !isCurrent(requestEpoch) ||
+          liveDocument.novelId !== requestNovelId ||
+          liveDocument.chapterId !== requestChapterId ||
+          liveDraftIdRef.current !== requestDraftId
+        ) {
+          return null;
+        }
+        if (liveContentRef.current !== requestContent) {
+          setSaveMsg('正文已变化，请再次保存');
+          setSaveState('editing');
+          return null;
+        }
+        setIsDirty(false);
+        setSaveMsg('已保存');
+        setSaveState('saved');
+        setLastSaved(formatDateTime(new Date()));
+        try {
+          await onDraftSaved?.(savedDraft);
+        } catch (error) {
+          logWorkspaceWarning('post_save_callback_failed', {
+            novelId: requestNovelId,
+            chapterId: requestChapterId,
+            draftId: savedDraft.id,
+            errorCode:
+              error && typeof error === 'object' && 'code' in error
+                ? String((error as { code?: unknown }).code)
+                : 'UNKNOWN_ERROR',
+          });
+        }
+        if (isCurrent(requestEpoch) && liveContentRef.current === requestContent) {
+          emitContentSnapshot(savedDraft.content, false, savedDraft);
+        }
+        return savedDraft;
+      } catch (error) {
+        const liveDocument = liveDocumentRef.current;
+        if (
+          isCurrent(requestEpoch) &&
+          liveDocument.novelId === requestNovelId &&
+          liveDocument.chapterId === requestChapterId &&
+          liveDraftIdRef.current === requestDraftId
+        ) {
+          const appError = normalizeAppError(error, '正文保存失败。');
+          setSaveFailure(getAppErrorUserMessage(appError));
+          setSaveState('error');
+        }
+        return null;
+      } finally {
+        if (isCurrent(requestEpoch)) setSaving(false);
+      }
+    },
+    [
+      adoptMsg,
+      adoptState,
+      chapter,
+      content,
+      currentDraft,
+      documentState,
+      effectiveContentState,
+      emitContentSnapshot,
+      isDirty,
+      novelId,
+      onActionStateChange,
+      onDraftSaved,
+      reviewLocked,
+      scope,
+      isCurrent,
+    ],
+  );
 
-  const handleSave = useCallback((): Promise<ChapterDraft | null> => {
-    if (saveInFlightRef.current) return saveInFlightRef.current;
-    const save = performSave();
-    saveInFlightRef.current = save;
-    void save.finally(() => {
-      if (saveInFlightRef.current === save) saveInFlightRef.current = null;
-    });
-    return save;
-  }, [performSave]);
+  const handleSave = useCallback(
+    (forAdoption = false): Promise<ChapterDraft | null> => {
+      const epoch = scope.current.epoch;
+      if (saveInFlightRef.current?.epoch === epoch) return saveInFlightRef.current.promise;
+      const save = performSave(forAdoption);
+      saveInFlightRef.current = { epoch, promise: save };
+      void save.finally(() => {
+        if (saveInFlightRef.current?.promise === save) saveInFlightRef.current = null;
+      });
+      return save;
+    },
+    [performSave, scope],
+  );
 
   const restoreRecovery = useCallback(
     (recoveryContent: string, selectionStart = 0, selectionEnd = selectionStart): boolean => {
@@ -414,81 +475,92 @@ export function useEditorDocumentController({
 
   const handleAdoptCurrent = useCallback(async () => {
     if (!chapter || !novelId || documentState !== 'ready' || reviewLocked) return;
-    if (adopting || saving) return;
+    const requestEpoch = scope.current.epoch;
+    if (
+      adoptInFlightRef.current === requestEpoch ||
+      saveInFlightRef.current?.epoch === requestEpoch
+    )
+      return;
+    setFeedbackEpoch(requestEpoch);
     if (effectiveContentState?.status === 'unavailable') {
-      setSaveMsg('正文不可用，已阻止采用');
+      setAdoptMsg('正文不可用，已阻止采用');
+      setAdoptState('error');
       return;
     }
     if (currentDraft?.isAdopted && !isDirty && currentDraft.content === content) {
-      setSaveMsg('当前正文已采用');
+      setAdoptMsg('当前正文已采用');
+      setAdoptState('adopted');
       return;
     }
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
+    const requestContent = content;
+    const requestDraftId = currentDraft?.id;
     let draftToAdopt = currentDraft;
-
-    if (!draftToAdopt || draftToAdopt.content !== content || isDirty) {
+    adoptInFlightRef.current = requestEpoch;
+    setAdopting(true);
+    setAdoptState('confirming');
+    setAdoptMsg('等待确认采用');
+    const hasSameContentAndAccess = () =>
+      isCurrent(requestEpoch) &&
+      liveContentRef.current === requestContent &&
+      liveAccessRef.current.documentState === 'ready' &&
+      !liveAccessRef.current.reviewLocked &&
+      !liveAccessRef.current.unavailable;
+    try {
+      const needsSave = !draftToAdopt || draftToAdopt.content !== content || isDirty;
       const confirmed = await confirmInfo({
-        title: '保存并采用',
-        message: '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？',
+        title: needsSave ? '保存并采用' : '采用草稿',
+        message: needsSave
+          ? '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？'
+          : `确认采用草稿 v${draftToAdopt?.versionNo} 作为正式正文？`,
         testId: 'apply-confirm',
       });
-      if (!confirmed) return;
-      draftToAdopt = await handleSave();
-    } else {
-      const existingDraft = draftToAdopt;
-      if (
-        !existingDraft.isAdopted &&
-        !(await confirmInfo({
-          title: '采用草稿',
-          message: `确认采用草稿 v${existingDraft.versionNo} 作为正式正文？`,
-          testId: 'apply-confirm',
-        }))
-      )
+      if (!isCurrent(requestEpoch)) return;
+      if (!confirmed) {
+        setAdoptState('idle');
+        setAdoptMsg('已取消采用，正文未改变');
         return;
-    }
-
-    if (!draftToAdopt) {
-      setSaveMsg('采用失败');
-      setTimeout(() => setSaveMsg(''), 3000);
-      return;
-    }
-    const draftForAdoption = draftToAdopt;
-    setAdopting(true);
-    try {
+      }
+      if (!hasSameContentAndAccess() || liveDraftIdRef.current !== requestDraftId) {
+        throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
+      }
+      if (needsSave) draftToAdopt = await handleSave(true);
+      if (!isCurrent(requestEpoch)) return;
+      if (!draftToAdopt) {
+        setAdoptState('error');
+        setAdoptMsg('尚未采用：草稿保存未完成，请先处理保存反馈。');
+        return;
+      }
+      if (!hasSameContentAndAccess()) {
+        throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
+      }
+      const draftForAdoption = draftToAdopt;
+      const adoptionEditorDraftId = liveDraftIdRef.current;
+      setAdoptState('adopting');
+      setAdoptMsg('正在校验并采用草稿');
       const activeAuthId = reviewCandidate?.authorizationId || reviewAuthorizationId;
       let adopted: ChapterDraft;
       if (activeAuthId) {
         const expectedContentHash = await computeContentSha256(draftForAdoption.content);
-        const adoptResult = await runWithLoading(
-          {
-            title: '正在确认采用',
-            initialMessage: '正在原子校验授权并更新正文……',
-            successMessage: '已采用为正式正文',
-            errorMessage: '采用失败',
-            successAutoCloseMs: 800,
-          },
-          async () =>
-            await artifactDecisionService.adoptReviewAuthorizedDraft({
-              authorizationId: activeAuthId,
-              draftId: draftForAdoption.id,
-              expectedDraftVersion: draftForAdoption.versionNo,
-              expectedContentHash,
-            }),
-        );
+        if (!isCurrent(requestEpoch)) return;
+        if (!hasSameContentAndAccess() || liveDraftIdRef.current !== adoptionEditorDraftId) {
+          throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
+        }
+        const adoptResult = await artifactDecisionService.adoptReviewAuthorizedDraft({
+          authorizationId: activeAuthId,
+          draftId: draftForAdoption.id,
+          expectedDraftVersion: draftForAdoption.versionNo,
+          expectedContentHash,
+        });
         adopted = adoptResult.adoptedDraft;
       } else {
         if (onBeforeAdopt) await onBeforeAdopt(draftForAdoption.id);
-        adopted = await runWithLoading(
-          {
-            title: '正在确认采用',
-            initialMessage: '正在更新正式正文版本……',
-            successMessage: '已采用为正式正文',
-            errorMessage: '采用失败',
-            successAutoCloseMs: 800,
-          },
-          async () => await draftVersionService.adopt(draftForAdoption.id, requestChapterId),
-        );
+        if (!isCurrent(requestEpoch)) return;
+        if (!hasSameContentAndAccess() || liveDraftIdRef.current !== adoptionEditorDraftId) {
+          throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
+        }
+        adopted = await draftVersionService.adopt(draftForAdoption.id, requestChapterId);
       }
       if (
         adopted.id !== draftForAdoption.id ||
@@ -500,30 +572,49 @@ export function useEditorDocumentController({
       }
       const liveDocument = liveDocumentRef.current;
       if (
+        !isCurrent(requestEpoch) ||
         liveDocument.novelId !== requestNovelId ||
-        liveDocument.chapterId !== requestChapterId ||
-        liveContentRef.current !== draftForAdoption.content
+        liveDocument.chapterId !== requestChapterId
       ) {
         return;
       }
-      setSaveMsg('已采用');
+      if (liveContentRef.current !== draftForAdoption.content) {
+        setAdoptState('idle');
+        setAdoptMsg('先前草稿已采用；当前修改尚未采用。');
+        return;
+      }
+      setAdoptMsg('已采用为正式正文');
+      setAdoptState('adopted');
       setSaveState('saved');
-      void onDraftSaved?.(adopted);
-      emitContentSnapshot(adopted.content, false, adopted);
-      onChapterUpdated?.(requestChapterId);
-      setTimeout(() => setSaveMsg(''), 2000);
+      try {
+        await onDraftSaved?.(adopted);
+      } catch {
+        logWorkspaceWarning('post_adopt_callback_failed', {
+          novelId: requestNovelId,
+          chapterId: requestChapterId,
+          draftId: adopted.id,
+        });
+      }
+      if (isCurrent(requestEpoch) && liveContentRef.current === adopted.content) {
+        emitContentSnapshot(adopted.content, false, adopted);
+        onChapterUpdated?.(requestChapterId);
+      }
     } catch (error) {
       const liveDocument = liveDocumentRef.current;
-      if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
+      if (
+        isCurrent(requestEpoch) &&
+        liveDocument.novelId === requestNovelId &&
+        liveDocument.chapterId === requestChapterId
+      ) {
         const appError = normalizeAppError(error, '采用失败。');
-        setSaveMsg(getAppErrorUserMessage(appError));
-        setTimeout(() => setSaveMsg(''), 3000);
+        setAdoptMsg(`采用失败：${getAppErrorUserMessage(appError)}`);
+        setAdoptState('error');
       }
     } finally {
-      setAdopting(false);
+      if (adoptInFlightRef.current === requestEpoch) adoptInFlightRef.current = null;
+      if (isCurrent(requestEpoch)) setAdopting(false);
     }
   }, [
-    adopting,
     chapter,
     content,
     currentDraft,
@@ -539,11 +630,19 @@ export function useEditorDocumentController({
     reviewAuthorizationId,
     reviewCandidate?.authorizationId,
     reviewLocked,
-    saving,
+    scope,
+    isCurrent,
   ]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        hasActiveModal() ||
+        isComposingKeyboardEvent(event) ||
+        (event.target instanceof Element && event.target.closest('[data-editor-outline]'))
+      )
+        return;
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
         if (isDirty) void handleSave();
@@ -571,14 +670,22 @@ export function useEditorDocumentController({
     handleContentChange,
     handleSave,
     handleSelectionChange,
-    adopting,
+    adopting: feedbackEpoch === scope.current.epoch && adopting,
+    adoptState: feedbackEpoch === scope.current.epoch ? adoptState : ('idle' as DocumentAdoptState),
+    adoptMsg: feedbackEpoch === scope.current.epoch ? adoptMsg : '',
+    handleAdoptCurrent,
     isDirty,
     lastSaved,
     loadedChapterIdRef,
     restoreRecovery,
-    saveMsg,
-    saveState,
-    saving,
+    saveMsg: feedbackEpoch === scope.current.epoch ? saveFailure || saveMsg : '',
+    saveState:
+      feedbackEpoch === scope.current.epoch
+        ? saveFailure
+          ? ('error' as const)
+          : saveState
+        : ('idle' as const),
+    saving: feedbackEpoch === scope.current.epoch && saving,
     textareaRef,
   };
 }

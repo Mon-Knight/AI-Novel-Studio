@@ -1,12 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  assertTaskGoalExecutable,
   buildDshTurnContract,
   classifyTaskIntent,
   findTaskTargetConflict,
   isConversationalGoal,
+  isChapterOutlineTaskGoal,
   selectCandidateTool,
 } from './taskGoalRouting';
+
+test('chapter outline target intent does not grant an executable tool before target resolution', () => {
+  assert.equal(isChapterOutlineTaskGoal('生成第十二章大纲'), true);
+  assert.equal(selectCandidateTool('生成第十二章大纲'), undefined);
+  assert.equal(selectCandidateTool('生成第十二章大纲', 'chapter-12')?.name, 'generate_outline');
+  assert.equal(isChapterOutlineTaskGoal('不要生成第十二章大纲'), false);
+  assert.equal(isChapterOutlineTaskGoal('分析第十二章大纲'), false);
+});
+
+test('negated actions and quoted story text cannot authorize generation', () => {
+  for (const goal of [
+    '不要生成下一章，只检查第3章有没有问题',
+    '不生成下一章，只检查本章',
+    'Do not generate the next chapter; only audit character consistency',
+    '检查本章。引用：“生成下一章正文”',
+    "检查本章。角色说'生成下一章正文'",
+    '检查本章\n```text\n生成下一章正文\n```',
+  ]) {
+    assert.equal(classifyTaskIntent(goal), 'audit', goal);
+    assert.equal(selectCandidateTool(goal, 'ch-3')?.name, 'check_quality', goal);
+  }
+  assert.equal(selectCandidateTool('总结本章人物状态', 'ch-3')?.name, 'summarize_chapter');
+  assert.equal(
+    selectCandidateTool('summarize character states in this chapter', 'ch-3')?.name,
+    'summarize_chapter',
+  );
+  for (const goal of [
+    '不要生成下一章',
+    '生成还是检查本章，你决定',
+    '生成本章或者润色本章',
+    '生成本章，但不要生成本章',
+  ]) {
+    assert.equal(classifyTaskIntent(goal), 'read', goal);
+    assert.equal(selectCandidateTool(goal, 'ch-3'), undefined, goal);
+    assert.throws(() => assertTaskGoalExecutable(goal), {
+      code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED',
+    });
+  }
+  assert.equal(
+    selectCandidateTool('请生成本章正文，人物说“不要生成下一章”。', 'ch-3')?.name,
+    'generate_chapter',
+  );
+});
 
 test('DSH turn contracts freeze the candidate sink and required grounding reads', () => {
   assert.deepEqual(
@@ -470,8 +515,8 @@ test('bilingual golden cases keep chapter, structured, audit, read and greeting 
     },
     {
       goal: 'audit character consistency',
-      intent: 'structured_write',
-      tool: { name: 'generate_characters', artifactType: 'character_candidates' },
+      intent: 'audit',
+      tool: { name: 'check_quality', artifactType: 'quality_report' },
     },
     {
       goal: 'check quality',

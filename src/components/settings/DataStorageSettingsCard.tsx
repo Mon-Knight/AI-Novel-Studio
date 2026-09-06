@@ -127,7 +127,7 @@ export default function DataStorageSettingsCard() {
               {repairMsg}
             </div>
           )}
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
             桌面端规范化 SQLite 作品基础字段并执行完整性检查；浏览器开发模式会先生成 LocalStorage
             安全镜像。
           </div>

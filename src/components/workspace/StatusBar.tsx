@@ -1,8 +1,7 @@
 import { formatNumber } from '../../utils/format';
 import type { Chapter } from '../../types/chapter';
-import { ChapterStatusLabels } from '../../types/chapter';
 import type { WorkspaceRecoverySaveStatus } from '../../types/workspaceRecovery';
-import type { DocumentSaveState } from './editor-area/editorAreaTypes';
+import type { DocumentSaveState, DocumentAdoptState } from './editor-area/editorAreaTypes';
 
 interface StatusBarProps {
   chapter?: Chapter;
@@ -13,6 +12,9 @@ interface StatusBarProps {
   recoverySaveStatus?: WorkspaceRecoverySaveStatus;
   documentSaveState?: DocumentSaveState;
   documentSaveMessage?: string;
+  documentAdoptState?: DocumentAdoptState;
+  documentAdoptMessage?: string;
+  draftAdopted?: boolean;
 }
 
 function resolveSaveStatus(
@@ -55,10 +57,12 @@ function StatusBar({
   recoverySaveStatus = 'idle',
   documentSaveState = 'idle',
   documentSaveMessage = '',
+  documentAdoptState = 'idle',
+  documentAdoptMessage = '',
+  draftAdopted = false,
 }: StatusBarProps) {
   const wordCount = draftWordCount ?? chapter?.wordCount ?? 0;
   const targetWords = chapter?.targetWordCount ?? 0;
-  const status = chapter?.status || 'not_started';
   const saveStatus = resolveSaveStatus(
     contentAvailable,
     Boolean(isDirty),
@@ -67,49 +71,25 @@ function StatusBar({
     documentSaveMessage,
     Boolean(draftVersion && draftVersion !== 'v0 占位'),
   );
+  const adoptLabel =
+    documentAdoptState === 'error'
+      ? documentAdoptMessage || '采用失败'
+      : documentAdoptState === 'confirming'
+        ? '等待确认采用'
+        : documentAdoptState === 'adopting'
+          ? '正在采用'
+          : !isDirty && (documentAdoptState === 'adopted' || draftAdopted)
+            ? '已采用为正式正文'
+            : '当前内容未采用';
 
   return (
     <div className="workspace-statusbar">
-      {chapter && (
-        <>
-          <div className="statusbar-item">
-            <span>第{chapter.chapterNumber}章：</span>
-            <strong>{chapter.title}</strong>
-          </div>
-          <span className="statusbar-separator" />
-        </>
-      )}
       <div className="statusbar-item">
         <span>字数：</span>
         <strong data-testid="chapter-word-count" data-word-count={wordCount}>
           {formatNumber(wordCount)}
         </strong>
         <span className="text-muted"> / {formatNumber(targetWords)}</span>
-      </div>
-      <span className="statusbar-separator" />
-      <div className="statusbar-item">
-        <span>状态：</span>
-        <span
-          style={{
-            color:
-              status === 'not_started'
-                ? 'var(--color-text-muted)'
-                : status === 'outline_ready'
-                  ? 'var(--color-primary)'
-                  : status === 'adopted'
-                    ? 'var(--color-success)'
-                    : status === 'summarized'
-                      ? 'var(--color-success)'
-                      : 'var(--color-warning)',
-          }}
-        >
-          {ChapterStatusLabels[status]}
-        </span>
-      </div>
-      <span className="statusbar-separator" />
-      <div className="statusbar-item">
-        <span>草稿：</span>
-        <span>{draftVersion || 'v0 占位'}</span>
       </div>
       <span className="statusbar-separator" />
       <div
@@ -123,8 +103,19 @@ function StatusBar({
           className="statusbar-save-label"
           aria-live="polite"
           role={saveStatus.tone === 'error' ? 'alert' : 'status'}
+          title={saveStatus.label}
         >
           {saveStatus.label}
+        </span>
+      </div>
+      <span className="statusbar-separator" />
+      <div
+        className={`statusbar-item statusbar-adopt-state is-${documentAdoptState}`}
+        data-testid="document-adopt-status"
+        data-adopt-state={documentAdoptState}
+      >
+        <span role={documentAdoptState === 'error' ? 'alert' : 'status'} title={adoptLabel}>
+          {adoptLabel}
         </span>
       </div>
     </div>

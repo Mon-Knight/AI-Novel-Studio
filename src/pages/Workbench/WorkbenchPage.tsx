@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import { captureTaskModelSnapshot } from '../../services/conversation/taskModelSnapshot';
@@ -29,7 +29,7 @@ import {
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
-import { markWorkbenchOnce } from './workbenchHelpers';
+import { useWorkbenchVisibility } from './hooks/useWorkbenchVisibility';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
 import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
@@ -54,6 +54,7 @@ export function WorkbenchPage() {
 
   const {
     novels,
+    directory,
     conversations,
     setConversations,
     selectedNovelId,
@@ -84,16 +85,10 @@ export function WorkbenchPage() {
     reloadChapters,
     loadInitialData,
   } = useWorkbenchConversations();
-  useLayoutEffect(() => {
-    markWorkbenchOnce('creative-workbench-visible');
-  }, []);
-  useEffect(() => {
-    if (projectsLoading || conversationsLoading || bundleLoading || chaptersLoading) return;
-    markWorkbenchOnce('workbench-content-ready');
-  }, [bundleLoading, chaptersLoading, conversationsLoading, projectsLoading]);
-  const selectedChapter = chapterId
-    ? chapters.find((chapter) => chapter.id === chapterId)
-    : undefined;
+  useWorkbenchVisibility(
+    !projectsLoading && !conversationsLoading && !bundleLoading && !chaptersLoading,
+  );
+  const selectedChapter = chapters.find((chapter) => chapter.id === chapterId);
   const hasChapter = Boolean(selectedChapter);
   const assetScope = useWorkbenchAssetScope({
     novelId: selectedNovelId,
@@ -235,6 +230,7 @@ export function WorkbenchPage() {
   });
   const composer = (
     <WorkbenchComposer
+      scopeKey={selectedConversationId || selectedNovelId}
       templates={WORKBENCH_TASK_TEMPLATES}
       plugins={plugins}
       pluginsLoading={pluginsLoading}
@@ -339,6 +335,7 @@ export function WorkbenchPage() {
   return (
     <div className="workbench-page" data-testid="creative-workbench">
       <WorkbenchNavigation
+        directory={directory}
         novels={novels}
         conversations={conversations}
         selectedNovelId={selectedNovelId}
@@ -355,7 +352,7 @@ export function WorkbenchPage() {
         onRenameTask={renameTask}
         onSetTaskArchived={setTaskArchived}
         onRetryProjects={() => void loadInitialData()}
-        onRetryConversations={() => void loadConversations()}
+        onRetryConversations={() => void loadInitialData()}
         onOpenLibrary={() => navigate('/novels')}
       />
 
@@ -426,7 +423,7 @@ export function WorkbenchPage() {
                   chapterSummaryOrchestration={chapterSummaryOrchestration}
                   onDismissCompression={() => setCompressionCandidate(null)}
                   onReloadArtifacts={() => void refreshBundle(selectedConversation.conversationId)}
-                  onDecideArtifact={(artifact, decision) => void decideArtifact(artifact, decision)}
+                  onDecideArtifact={decideArtifact}
                   onRetry={(runId) => void retryRun(runId)}
                   retryRunBlockedReason={retryRunBlockedReason}
                   onRetryChapterSummaryStart={retryChapterSummaryStart}

@@ -15,7 +15,9 @@ import {
   hideContextReceiptInternals,
   resolveToolContextReceipt,
 } from './workbenchContextReceiptModel';
-import { ArtifactCandidateList } from './ArtifactCandidateList';
+import { ArtifactApplyScopeNotice, ArtifactCandidateList } from './ArtifactCandidateList';
+import { ArtifactDecisionActions } from './ArtifactDecisionActions';
+import { useArtifactCandidateReview } from './hooks/useArtifactCandidateReview';
 import { isStructuredCandidateArtifactType } from './artifactCandidateOptions';
 import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
 
@@ -246,12 +248,16 @@ export const ArtifactCard = memo(function ArtifactCard({
   newlyArrived = false,
 }: {
   artifact: ConversationArtifactCard;
-  onDecide?: (decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply') => void;
+  onDecide?: (
+    decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply',
+    revisionNotes?: string,
+  ) => void;
   onReload?: () => void;
   busy?: boolean;
   newlyArrived?: boolean;
 }) {
   const [contentExpanded, setContentExpanded] = useState(false);
+  const review = useArtifactCandidateReview(artifact);
   const decision = artifact.latestDecision?.decision;
   const evidence = artifact.artifactEvidence;
   const validationIssues = evidence?.validationIssues ?? [];
@@ -335,6 +341,7 @@ export const ArtifactCard = memo(function ArtifactCard({
         <span className="workbench-artifact-status">{projectedStatus}</span>
       </div>
       {!isInvalid && <p>{artifact.summary}</p>}
+      {supportsStructuredApply && <ArtifactApplyScopeNotice />}
       {isDeterministicCompression && (
         <p
           className="workbench-artifact-derivation-note"
@@ -392,9 +399,13 @@ export const ArtifactCard = memo(function ArtifactCard({
       )}
       {showStructuredOptions && artifact.content ? (
         <ArtifactCandidateList
+          key={artifact.artifactId ?? artifact.cardId}
           artifactType={artifact.artifactType}
           content={artifact.content}
-          onDecide={canAct && onDecide ? (decision) => onDecide(decision) : undefined}
+          drafts={review.drafts}
+          onDraftChange={review.updateDraft}
+          reviewAvailable={canAct}
+          disabled={busy || isInvalid}
         />
       ) : null}
       <details onToggle={(event) => setContentExpanded(event.currentTarget.open)}>
@@ -414,73 +425,17 @@ export const ArtifactCard = memo(function ArtifactCard({
           ))}
       </details>
       {canAct && (
-        <div className="workbench-artifact-actions">
-          {isChapter ? (
-            <button
-              className="btn btn-primary btn-sm"
-              data-testid="workbench-artifact-confirm-review"
-              disabled={busy || isInvalid}
-              title={isInvalid ? '产物结构与来源校验未通过，不能进入章节审阅' : undefined}
-              onClick={() => onDecide?.('confirm')}
-            >
-              确认进入审阅
-            </button>
-          ) : canApply ? (
-            <button
-              className="btn btn-secondary btn-sm"
-              data-testid="workbench-artifact-apply"
-              data-availability={
-                isInvalid
-                  ? 'validation-failed'
-                  : applyUnavailable
-                    ? 'runtime-unsupported'
-                    : 'available'
-              }
-              disabled={busy || isInvalid || applyUnavailable}
-              title={
-                isInvalid
-                  ? '产物结构与来源校验未通过，不能申请应用'
-                  : applyUnavailable
-                    ? '浏览器开发预览不会写入小说正式事实，请在桌面应用中完成应用'
-                    : '通过原子事务应用到小说正式事实'
-              }
-              onClick={() => onDecide?.('request_apply')}
-            >
-              {isInvalid ? '结构与来源未通过' : applyUnavailable ? '仅桌面端可应用' : '应用到作品'}
-            </button>
-          ) : isReadOnlyReport ? (
-            <button
-              className="btn btn-secondary btn-sm"
-              data-testid="workbench-artifact-acknowledge"
-              data-decision-kind="confirm"
-              disabled={busy || isInvalid}
-              title={
-                isInvalid
-                  ? '报告结构与来源校验未通过，不能标记已阅'
-                  : '仅记录报告已阅，不应用到小说正式事实'
-              }
-              onClick={() => onDecide?.('confirm')}
-            >
-              标记已阅
-            </button>
-          ) : null}
-          <button
-            className="btn btn-secondary btn-sm"
-            data-testid="workbench-artifact-revise"
-            disabled={busy}
-            onClick={() => onDecide?.('request_revision')}
-          >
-            要求修改
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            data-testid="workbench-artifact-reject"
-            disabled={busy}
-            onClick={() => onDecide?.('reject')}
-          >
-            拒绝
-          </button>
-        </div>
+        <ArtifactDecisionActions
+          revisionCount={review.revisionCount}
+          revisionNotes={review.revisionNotes}
+          isChapter={isChapter}
+          canApply={canApply}
+          isReadOnlyReport={isReadOnlyReport}
+          isInvalid={isInvalid}
+          applyUnavailable={applyUnavailable}
+          busy={busy}
+          onDecide={onDecide}
+        />
       )}
     </article>
   );

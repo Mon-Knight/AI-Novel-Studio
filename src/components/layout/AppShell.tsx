@@ -11,14 +11,21 @@ interface AppShellProps {
 function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const usesWorkbenchShell = location.pathname === '/';
+  const usesWritingShell = /^\/novels\/[^/]+\/workspace\/?$/.test(location.pathname);
 
   return (
     <div
-      className={usesWorkbenchShell ? 'app-shell app-shell--workbench' : 'app-shell'}
+      className={
+        usesWorkbenchShell
+          ? 'app-shell app-shell--workbench'
+          : usesWritingShell
+            ? 'app-shell app-shell--writing'
+            : 'app-shell'
+      }
       data-testid="app-shell"
-      data-layout={usesWorkbenchShell ? 'workbench' : 'standard'}
+      data-layout={usesWorkbenchShell ? 'workbench' : usesWritingShell ? 'writing' : 'standard'}
     >
-      <Sidebar compact={usesWorkbenchShell} />
+      <Sidebar compact={usesWorkbenchShell || usesWritingShell} />
       <div className="app-main">
         {!usesWorkbenchShell && <TopBar />}
         <div className="app-content">{children}</div>

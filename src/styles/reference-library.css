@@ -185,7 +185,7 @@
 .reference-work-item small {
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .reference-work-detail {
   min-width: 0;
@@ -241,7 +241,7 @@
 }
 .reference-fact-grid span {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .reference-version-section h3,
 .reference-section-list h3 {
@@ -273,13 +273,13 @@
 .reference-version-item em {
   margin-left: 6px;
   color: var(--color-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 .reference-version-item span {
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .reference-section-list article {
   padding: 12px 2px;
@@ -295,7 +295,7 @@
 }
 .reference-section-list article span {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .reference-section-list article p {
   margin: 7px 0 0;

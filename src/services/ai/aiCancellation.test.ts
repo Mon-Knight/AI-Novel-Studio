@@ -44,10 +44,11 @@ Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable
 const originalFetch = globalThis.fetch;
 const vite = await createServer({
   appType: 'custom',
+  optimizeDeps: { noDiscovery: true },
   define: {
     'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
   },
-  server: { middlewareMode: true, hmr: false },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 
 const realModule = (await vite.ssrLoadModule(

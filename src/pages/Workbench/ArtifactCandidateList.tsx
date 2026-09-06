@@ -1,46 +1,63 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pencil } from 'lucide-react';
+import type { ArtifactCandidateReviewDraft } from '../../types/artifactReview';
+import { formatArtifactReviewNotes } from './artifactRevisionPrompt';
 import {
   extractArtifactCandidateOptions,
   type ArtifactCandidateOption,
 } from './artifactCandidateOptions';
 
-interface ArtifactCandidateDraft {
-  title: string;
-  summary: string;
-  notes: string;
-}
-
 interface ArtifactCandidateListProps {
   artifactType: string;
   content: string;
-  onDecide?: (decision: 'request_revision') => void;
+  drafts: Record<string, ArtifactCandidateReviewDraft>;
+  onDraftChange: (candidateId: string, draft: ArtifactCandidateReviewDraft) => void;
+  reviewAvailable?: boolean;
+  disabled?: boolean;
 }
 
-function draftFor(item: ArtifactCandidateOption, drafts: Record<string, ArtifactCandidateDraft>) {
-  return drafts[item.id] ?? { title: item.title, summary: item.summary, notes: '' };
+function draftFor(
+  item: ArtifactCandidateOption,
+  drafts: Record<string, ArtifactCandidateReviewDraft>,
+) {
+  return Object.prototype.hasOwnProperty.call(drafts, item.id)
+    ? drafts[item.id]
+    : {
+        originalTitle: item.title,
+        suggestedTitle: '',
+        suggestedSummary: '',
+        notes: '',
+      };
+}
+
+export function ArtifactApplyScopeNotice() {
+  return (
+    <p className="workbench-artifact-apply-scope" data-testid="workbench-artifact-apply-scope">
+      应用范围：整份原始候选的全部内容。审阅标记和修订意见不改变应用范围；如需修改，请先要求修订并审阅新候选。
+    </p>
+  );
 }
 
 export function ArtifactCandidateList({
   artifactType,
   content,
-  onDecide,
+  drafts,
+  onDraftChange,
+  reviewAvailable = false,
+  disabled = false,
 }: ArtifactCandidateListProps) {
   const extracted = useMemo(
     () => extractArtifactCandidateOptions(artifactType, content),
     [artifactType, content],
   );
   const paragraphMode = artifactType === 'chapter_summary';
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(extracted.items.map((item) => item.id)),
-  );
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, ArtifactCandidateDraft>>({});
+  const reviewDisabled = disabled || !reviewAvailable;
 
   useEffect(() => {
-    setSelectedIds(new Set(extracted.items.map((item) => item.id)));
+    setReviewedIds(new Set());
     setEditingId(null);
-    setDrafts({});
   }, [extracted]);
 
   if (extracted.items.length === 0) {
@@ -50,15 +67,15 @@ export function ArtifactCandidateList({
           className="workbench-artifact-candidates-empty"
           data-testid="workbench-artifact-candidates-unparsed"
         >
-          未能解析为可选候选，请查看原始数据。
+          未能解析候选条目，请查看原始数据。
         </p>
       );
     }
     return null;
   }
 
-  const toggleSelected = (id: string) => {
-    setSelectedIds((current) => {
+  const toggleReviewed = (id: string) => {
+    setReviewedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -68,21 +85,13 @@ export function ArtifactCandidateList({
 
   const toggleEditing = (item: ArtifactCandidateOption) => {
     setEditingId((current) => (current === item.id ? null : item.id));
-    setDrafts((current) =>
-      current[item.id]
-        ? current
-        : {
-            ...current,
-            [item.id]: { title: item.title, summary: item.summary, notes: '' },
-          },
-    );
   };
 
-  const updateDraft = (id: string, patch: Partial<ArtifactCandidateDraft>) => {
-    setDrafts((current) => {
-      const baseline = current[id] ?? { title: '', summary: '', notes: '' };
-      return { ...current, [id]: { ...baseline, ...patch } };
-    });
+  const updateDraft = (
+    item: ArtifactCandidateOption,
+    patch: Partial<ArtifactCandidateReviewDraft>,
+  ) => {
+    onDraftChange(item.id, { ...draftFor(item, drafts), ...patch });
   };
 
   return (
@@ -92,40 +101,37 @@ export function ArtifactCandidateList({
       data-mode={paragraphMode ? 'paragraphs' : 'options'}
     >
       {extracted.items.map((item) => {
-        const selected = selectedIds.has(item.id);
+        const reviewed = reviewedIds.has(item.id);
         const editing = editingId === item.id;
         const draft = draftFor(item, drafts);
+        const itemRevisionNotes = formatArtifactReviewNotes({ [item.id]: draft });
         return (
           <li
-            className={
-              selected || paragraphMode
-                ? 'workbench-artifact-candidate'
-                : 'workbench-artifact-candidate is-deselected'
-            }
+            className="workbench-artifact-candidate"
             data-testid="workbench-artifact-candidate"
             data-candidate-id={item.id}
-            data-selected={paragraphMode ? undefined : selected ? 'true' : 'false'}
+            data-reviewed={paragraphMode ? undefined : reviewed ? 'true' : 'false'}
             key={item.id}
           >
             <div className="workbench-artifact-candidate-header">
-              {paragraphMode ? (
-                <h4 className="workbench-artifact-candidate-title">{draft.title}</h4>
-              ) : (
+              <h4 className="workbench-artifact-candidate-title">{item.title}</h4>
+              {!paragraphMode && (
                 <label className="workbench-artifact-candidate-select">
                   <input
                     type="checkbox"
-                    checked={selected}
-                    onChange={() => toggleSelected(item.id)}
+                    checked={reviewed}
+                    disabled={reviewDisabled}
+                    onChange={() => toggleReviewed(item.id)}
                   />
-                  <span className="workbench-artifact-candidate-title">{draft.title}</span>
+                  <span>已审阅</span>
                 </label>
               )}
             </div>
-            {draft.summary ? (
-              <p className="workbench-artifact-candidate-summary">{draft.summary}</p>
+            {item.summary ? (
+              <p className="workbench-artifact-candidate-summary">{item.summary}</p>
             ) : null}
-            {draft.notes && !editing ? (
-              <p className="workbench-artifact-candidate-notes">{draft.notes}</p>
+            {itemRevisionNotes && !editing ? (
+              <p className="workbench-artifact-candidate-notes">{itemRevisionNotes}</p>
             ) : null}
             <div className="workbench-artifact-candidate-actions">
               <button
@@ -133,46 +139,47 @@ export function ArtifactCandidateList({
                 className="btn btn-secondary btn-sm"
                 data-testid="workbench-artifact-candidate-edit"
                 aria-expanded={editing}
+                disabled={reviewDisabled}
                 onClick={() => toggleEditing(item)}
               >
                 <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
-                修改
+                填写修订意见
               </button>
-              {onDecide ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="workbench-artifact-candidate-revise"
-                  onClick={() => onDecide('request_revision')}
-                >
-                  修订
-                </button>
-              ) : null}
             </div>
             {editing ? (
               <div className="workbench-artifact-candidate-editor">
+                <p className="workbench-artifact-review-hint">
+                  以下为本地修订意见，不会修改原始候选。本次应用会话内切换任务仍会保留，退出应用后清除；请用卡片底部“带出全部意见”追加到输入区，检查后再发送。
+                </p>
                 <label>
-                  标题
+                  建议标题
                   <input
                     type="text"
-                    value={draft.title}
-                    onChange={(event) => updateDraft(item.id, { title: event.target.value })}
+                    value={draft.suggestedTitle}
+                    placeholder={item.title}
+                    disabled={reviewDisabled}
+                    onChange={(event) => updateDraft(item, { suggestedTitle: event.target.value })}
                   />
                 </label>
                 <label>
-                  摘要
+                  建议摘要
                   <textarea
                     rows={3}
-                    value={draft.summary}
-                    onChange={(event) => updateDraft(item.id, { summary: event.target.value })}
+                    value={draft.suggestedSummary}
+                    placeholder={item.summary}
+                    disabled={reviewDisabled}
+                    onChange={(event) =>
+                      updateDraft(item, { suggestedSummary: event.target.value })
+                    }
                   />
                 </label>
                 <label>
-                  备注
+                  补充要求
                   <textarea
                     rows={2}
                     value={draft.notes}
-                    onChange={(event) => updateDraft(item.id, { notes: event.target.value })}
+                    disabled={reviewDisabled}
+                    onChange={(event) => updateDraft(item, { notes: event.target.value })}
                   />
                 </label>
               </div>

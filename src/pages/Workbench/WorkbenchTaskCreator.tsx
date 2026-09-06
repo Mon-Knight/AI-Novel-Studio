@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { useModalAccessibility } from '../../components/common/useModalAccessibility';
 import { CircleAlert, LoaderCircle, X } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
@@ -6,7 +7,10 @@ import { isConversationalGoal } from '../../services/conversation/taskGoalRoutin
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import type { TaskTemplate } from './WorkbenchComposer';
-import { isWorkbenchTaskTemplateEnabled } from './workbenchTaskTemplates';
+import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
+import { GrowingGoalTextarea } from './GrowingGoalTextarea';
+import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
+import { ChapterLocator } from '../../components/workspace/ChapterLocator';
 import { WorkbenchModelSelect } from './WorkbenchModelSelect';
 import { WorkbenchModelRecoveryNotice } from './WorkbenchModelRecoveryNotice';
 import { useWorkbenchModelCredential } from './hooks/useWorkbenchModelCredential';
@@ -57,11 +61,7 @@ export function WorkbenchTaskCreator({
   onCancel,
 }: WorkbenchTaskCreatorProps) {
   const dialogRef = useRef<HTMLElement>(null);
-  const openerRef = useRef<HTMLElement | null>(
-    typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null),
-  );
-  const creatingRef = useRef(creating);
-  const onCancelRef = useRef(onCancel);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const conversationalGoal = isConversationalGoal(goal);
   const contextBlocksSubmit = (contextPending || contextFailed) && !conversationalGoal;
   const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
@@ -79,75 +79,16 @@ export function WorkbenchTaskCreator({
       ? modelAvailability.message
       : `${modelAvailability.message} 本地能力问答仍可创建。`;
 
-  useEffect(() => {
-    creatingRef.current = creating;
-    onCancelRef.current = onCancel;
-  }, [creating, onCancel]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const opener = openerRef.current;
-    const backdrop = dialog.closest<HTMLElement>('.workbench-task-creator-backdrop');
-    const backgroundNodes = Array.from(backdrop?.parentElement?.children ?? []).filter(
-      (node): node is HTMLElement => node instanceof HTMLElement && node !== backdrop,
-    );
-    const previousBackgroundState = backgroundNodes.map((node) => ({
-      node,
-      inert: node.inert,
-      ariaHidden: node.getAttribute('aria-hidden'),
-    }));
-    backgroundNodes.forEach((node) => {
-      node.inert = true;
-      node.setAttribute('aria-hidden', 'true');
-    });
-    const initialFocusTimer = window.setTimeout(() => {
-      dialog.querySelector<HTMLTextAreaElement>('[data-testid="workbench-new-task-goal"]')?.focus();
-    }, 0);
-
-    const focusableSelector =
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !creatingRef.current) {
-        event.preventDefault();
-        onCancelRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (
-        event.shiftKey &&
-        (document.activeElement === first || !dialog.contains(document.activeElement))
-      ) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.clearTimeout(initialFocusTimer);
-      previousBackgroundState.forEach(({ node, inert, ariaHidden }) => {
-        node.inert = inert;
-        if (ariaHidden === null) node.removeAttribute('aria-hidden');
-        else node.setAttribute('aria-hidden', ariaHidden);
-      });
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
+  useModalAccessibility({
+    overlayRef,
+    dialogRef,
+    onDismiss: onCancel,
+    busy: creating,
+    initialFocusSelector: '[data-testid="workbench-new-task-goal"]',
+  });
 
   return (
-    <div className="workbench-task-creator-backdrop">
+    <div ref={overlayRef} className="workbench-task-creator-backdrop">
       <section
         ref={dialogRef}
         className="workbench-task-creator"
@@ -177,7 +118,7 @@ export function WorkbenchTaskCreator({
         <div className="workbench-task-creator-body">
           <label className="workbench-task-goal">
             <span>创作目标</span>
-            <textarea
+            <GrowingGoalTextarea
               autoFocus
               data-testid="workbench-new-task-goal"
               rows={4}
@@ -190,6 +131,7 @@ export function WorkbenchTaskCreator({
               onKeyDown={(event) => {
                 if (
                   event.key === 'Enter' &&
+                  !isComposingKeyboardEvent(event) &&
                   (event.ctrlKey || event.metaKey) &&
                   goal.trim() &&
                   !creating &&
@@ -203,46 +145,27 @@ export function WorkbenchTaskCreator({
             />
           </label>
 
-          <div className="workbench-template-row">
-            {templates.map((template) => (
-              <button
-                type="button"
-                className="workbench-template-chip"
-                key={template.id}
-                data-testid={`workbench-template-${template.id}`}
-                disabled={creating || !isWorkbenchTaskTemplateEnabled(template, Boolean(chapterId))}
-                title={
-                  !chapterId && template.scope === 'chapter'
-                    ? '请先选择目标章节'
-                    : chapterId && template.scope === 'project'
-                      ? '请先将目标范围切换为整个小说项目'
-                      : undefined
-                }
-                onClick={() => onGoalChange(template.goal)}
-              >
-                {template.label}
-              </button>
-            ))}
-          </div>
+          <WorkbenchTemplateControls
+            templates={templates}
+            hasChapter={Boolean(chapterId)}
+            disabled={creating}
+            value={goal}
+            onChange={onGoalChange}
+          />
 
           <div className="workbench-task-creator-controls">
-            <label className="workbench-scope-control" htmlFor="workbench-new-task-chapter">
-              <span>目标范围</span>
-              <select
-                id="workbench-new-task-chapter"
-                data-testid="workbench-new-task-chapter"
-                value={chapterId}
+            <div className="workbench-scope-control">
+              <label htmlFor="workbench-new-task-chapter">目标范围</label>
+              <ChapterLocator
+                chapters={chapters}
+                activeChapterId={chapterId}
+                onSelectChapter={onChapterChange}
                 disabled={creating}
-                onChange={(event) => onChapterChange(event.target.value)}
-              >
-                <option value="">整个小说项目</option>
-                {chapters.map((chapter) => (
-                  <option key={chapter.id} value={chapter.id}>
-                    {chapter.title || '未命名章节'}
-                  </option>
-                ))}
-              </select>
-            </label>
+                includeProject
+                selectId="workbench-new-task-chapter"
+                selectTestId="workbench-new-task-chapter"
+              />
+            </div>
             <WorkbenchModelSelect
               id="workbench-new-task-model"
               testId="workbench-new-task-model-select"

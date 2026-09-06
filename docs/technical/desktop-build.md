@@ -8,11 +8,11 @@
 # 前端构建
 npm run build
 
-# 桌面 EXE 构建
-npm run tauri build
+# 桌面 EXE / 安装包构建：先准备固定 DSH assets，再执行 Tauri 打包
+npm run tauri:build
 ```
 
-构建产物位于 `src-tauri/target/release/`
+默认构建产物位于 `src-tauri/target/release/`；若设置了 `CARGO_TARGET_DIR`，以实际输出为准。构建不等于获准发布；分层验证见根 [AGENTS.md](../../AGENTS.md)，完整发布门禁与载体/Gateway 准备顺序见 [测试策略](testing.md)。
 
 ## 环境配置
 

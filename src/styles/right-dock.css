@@ -97,7 +97,7 @@
 }
 
 .right-toolbar-btn .tb-label {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: var(--font-weight-medium);
   line-height: 1;
 }
@@ -232,30 +232,10 @@
   margin-bottom: var(--spacing-md);
 }
 
-.panel-field-label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin-bottom: var(--spacing-xs);
-}
-
 .panel-field-value {
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
-}
-
-.panel-select {
-  width: 100%;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  background: var(--color-bg-card);
-}
-
-.panel-select:focus {
-  border-color: var(--color-primary);
 }
 
 .panel-input,
@@ -347,7 +327,7 @@
 .agent-plan-card__subtitle {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-plan-status {
@@ -356,7 +336,7 @@
   border-radius: 999px;
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-plan-status--completed {
@@ -376,7 +356,7 @@
   gap: var(--spacing-sm);
   margin-top: var(--spacing-md);
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-plan-progress__track {
@@ -410,7 +390,7 @@
   align-items: center;
   gap: 5px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-plan-step--completed {
@@ -434,7 +414,7 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -520,7 +500,7 @@
   display: block;
   margin-bottom: 2px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
 }
 
@@ -664,7 +644,7 @@
   display: block;
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .engineering-snapshot-summary {
@@ -814,7 +794,7 @@
   display: block;
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   max-height: 80px;
   overflow: auto;
@@ -958,7 +938,7 @@
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-md);
   color: var(--color-warning-text);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -1040,7 +1020,7 @@
   }
 
   .right-toolbar-btn .tb-label {
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .right-panel-body {
@@ -1337,7 +1317,7 @@
 
 .multi-agent-metrics span {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .multi-agent-metrics strong {

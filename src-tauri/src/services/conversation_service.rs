@@ -15,7 +15,7 @@ pub use repository::{
     CreateArtifactCardInput, CreateConversationInput, CreateInitializedConversationInput,
     CreateRunInput, InitializedTaskConversation, RecordArtifactDecisionInput, RecoverRunsInput,
     RenameConversationInput, ReviewAuthorizationRecord, SetConversationArchivedInput,
-    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, TaskTurnRunProjection,
+    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, TaskTurnRunProjection, ConversationListCursor,
     ToolCallEventRecord, UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
 };
 
@@ -89,6 +89,17 @@ pub fn list(
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
     repository::list_conversations(connection, novel_id, include_archived, limit)
+}
+
+pub fn list_page(
+    connection: &Connection,
+    novel_id: Option<&str>,
+    archive: &str,
+    query: &str,
+    limit: i64,
+    cursor: Option<&ConversationListCursor>,
+) -> Result<Vec<TaskConversationRecord>, AppError> {
+    repository::list_conversations_page(connection, novel_id, archive, query, limit, cursor)
 }
 
 pub fn get(

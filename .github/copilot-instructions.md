@@ -1,12 +1,13 @@
 # GitHub Copilot / Agent 项目开发指令
 
 项目名称：AI Novel Studio  
-项目路径：F:\ai-novel-studio  
+项目路径：以当前工作区 `pwd` 为准；
 目标平台：Windows 桌面端  
 技术路线：Tauri + React + TypeScript + SQLite  
 主要开发工具：VS Code + GitHub Copilot / Agent  
 文档用途：约束 Copilot / Agent 在本项目中的开发方向、代码结构、UI 风格、数据边界和版本管理流程。
 
+> 规则入口：先读 [AGENTS.md](../AGENTS.md)。本文是 Copilot 的补充说明，不另设总约束；开工检查、按任务查阅、确认条件、分层验证和 Git 授权统一遵循根入口。
 > 时效说明：本文第 8～21 节大量记录早期 v0.x～v3.2.1 页面形成过程。v3.3.0+ 已确认目标以第 32 节和 `docs/architecture/conversational-creative-workbench.md` 为准；旧首页、三栏工作台和右侧 AI 面板要求不得覆盖新目标。
 
 ---
@@ -37,30 +38,14 @@ AI 辅助生成角色、事件、正文、润色建议、质量检查、章节�
 
 # 2. 开发时必须优先阅读的文档
 
-开始任何开发任务前，优先查看以下文档：
+先读根 `AGENTS.md` 并检查真实工作目录、分支和已有修改，再从 `docs/README.md` 按任务进入权威文档。首次进入仓库读取产品、UI、数据模型文档的开头与当前版本覆盖章节，后续只深入相关部分，不强制通读全部资料。
 
-```text
-docs/product-design.md
-docs/ui-reference.md
-docs/data-model.md
-docs/architecture/conversational-creative-workbench.md
-```
+- 产品/界面：`docs/product-design.md`、`docs/ui-reference.md`；v3.3.0+ 对话工作台以 `docs/architecture/conversational-creative-workbench.md` 为专门基线。
+- 数据/模块：`docs/data-model.md`、`docs/module-boundaries.md` 及实际调用路径。
+- 提示词/AI：`docs/prompt-system.md` 和请求治理、Provider 管线。
+- 版本：从 `package.json` 读取，路线以 `docs/version-roadmap.md` 为准，不以示例版本或目录名推断。
 
-后续若存在以下文档，也应参考：
-
-```text
-docs/prompt-system.md
-docs/version-roadmap.md
-docs/development-rules.md
-```
-
-如果代码和文档冲突：
-
-1. 以用户最新需求为最高优先级。
-2. 以 `docs/product-design.md` 的产品定位为主要方向。
-3. 以 `docs/ui-reference.md` 的 UI 约束为界面标准。
-4. 以 `docs/data-model.md` 的数据边界为数据设计依据。
-5. 不要自行把项目改回普通后台或普通写作软件。
+文档冲突按根入口处理：遵守平台约束和用户最新明确需求，区分当前规则、历史设计和未来规划；实现状态必须核对代码、配置与测试，不能用旧三栏设计回退当前工作台。
 
 ---
 
@@ -188,7 +173,7 @@ Tauri + React + TypeScript + SQLite
 应尽量保持以下结构：
 
 ```text
-F:\ai-novel-studio
+<repository-root>
 ├─ src/
 │  ├─ app/
 │  ├─ pages/
@@ -867,30 +852,9 @@ v1.0.0：可正式写长篇的基础版
 
 # 22. Git 与 GitHub 规则
 
-本项目必须使用 Git 管理，并推送到 GitHub 备份。
+本项目使用 Git 管理。开发前执行 `pwd` 和 `git status --short --branch`，保留用户已有修改。小步修改不等于自动提交，普通任务可以交付未提交差异。
 
-每次开发前先执行：
-
-```powershell
-git status
-```
-
-每个稳定版本完成后执行：
-
-```powershell
-git switch -c codex/v0.1.0-release
-git add .
-git commit -m "feat: initialize AI Novel Studio v0.1.0"
-git push -u origin codex/v0.1.0-release
-
-# PR 适用审查条件和门禁通过并合并后
-git switch main
-git pull --ff-only origin main
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-分支、PR、hotfix 与回滚以 `docs/project/git-workflow.md` 为准，不在日常开发中直接提交到 `main`。
+只有用户或已确认任务明确授权相应动作时，才 commit / push / PR / tag / 发布；获准提交时仅暂存相关文件并检查暂存差异，不无差别 `git add .`。分支、PR、hotfix 与回滚以 `docs/project/git-workflow.md` 为准：日常开发不直接提交到 `main`，发布 tag 只能在 PR 门禁/审查通过、合入并同步 `main` 后创建，不移动既有 tag。
 
 后续版本提交信息应清晰，例如：
 
@@ -1003,11 +967,14 @@ font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
 
 # 26. 路由规则
 
-建议路由：
+当前主要路由（完整注册以 `src/App.tsx` 为准）：
 
 ```text
 /
-首页 / 作品管理
+创作工作台
+
+/novels
+作品管理首页
 
 /novels/:novelId
 作品详情页
@@ -1196,7 +1163,7 @@ AI Novel Studio 也不是网页后台。
 
 ## 32.4 Agent 规则
 
-- 当前实现与未来规划必须明确区分，不能把 v3.3.0 规划写成 v3.2.1 已有功能；
+- 当前实现、历史基线、未来规划与验收证据必须分别标明；目录/脚手架或 Mock 通过不代表生产能力或 live R4 已完成；
 - 验证按变更范围分层，发布时才强制完整统一矩阵和 clean working tree；
 - commit、push、tag 仅在用户或版本/发布任务明确要求时执行；
 - 规则冲突时优先读 `AGENTS.md`、本节及对话工作台权威设计文档。

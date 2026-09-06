@@ -17,12 +17,16 @@ export interface EditorCommandRequest {
 }
 
 export type DocumentSaveState = 'idle' | 'editing' | 'saving' | 'saved' | 'error';
+export type DocumentAdoptState = 'idle' | 'confirming' | 'adopting' | 'adopted' | 'error';
 
 export interface EditorActionState {
+  chapterId?: string;
   saving: boolean;
   adopting: boolean;
   saveState: DocumentSaveState;
   saveMessage: string;
+  adoptState: DocumentAdoptState;
+  adoptMessage: string;
 }
 
 export interface EditorLocateTarget {
@@ -65,5 +69,6 @@ export interface EditorAreaProps {
 
 export interface EditorAreaHandle {
   save: () => Promise<ChapterDraft | null>;
+  focus: () => void;
   restoreRecovery: (content: string, selectionStart?: number, selectionEnd?: number) => boolean;
 }

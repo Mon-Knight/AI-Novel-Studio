@@ -60,5 +60,28 @@ describe('VolumeTree chapter window', () => {
     fireEvent.click(screen.getByRole('button', { name: '上一批' }));
     await waitFor(() => expect(screen.getByText('841-920 / 1000')).toBeTruthy());
     expect(screen.getAllByTestId('chapter-item')).toHaveLength(80);
+    fireEvent.click(screen.getByRole('button', { name: '返回当前章' }));
+    await waitFor(() => expect(screen.getByText('921-1000 / 1000')).toBeTruthy());
+    expect(screen.getAllByTestId('chapter-item')).toHaveLength(80);
+  });
+
+  it('selects a distant chapter by title without stepping through windows', () => {
+    const onSelect = vi.fn();
+    render(
+      <VolumeTree
+        volumes={[volume]}
+        chapters={Array.from({ length: 1000 }, (_, index) => chapter(index))}
+        activeChapterId="chapter-0"
+        onSelectChapter={onSelect}
+        onCreateVolume={vi.fn(async () => undefined)}
+        onCreateChapter={vi.fn(async () => undefined)}
+      />,
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: '按章号或标题查找章节' }), {
+      target: { value: '章节 999' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '第1000章：章节 999' }));
+    expect(onSelect).toHaveBeenCalledWith('chapter-999');
+    expect(screen.getAllByTestId('chapter-item')).toHaveLength(80);
   });
 });

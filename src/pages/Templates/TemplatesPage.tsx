@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ClipboardList, Plus, Upload, X } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
+import { PageHeader, PageLayout, PageTabs } from '../../components/common/PageLayout';
 import { confirmDanger } from '../../utils/nativeDialog';
 import {
   templateService,
@@ -283,34 +284,63 @@ function TemplatesPage() {
     return 0;
   };
 
-  return (
-    <div
-      style={{
-        padding: 32,
-        maxWidth: 1000,
-        margin: '0 auto',
-        height: '100%',
-        overflowY: 'auto',
-      }}
-    >
-      <BackButton label="返回工作台" to="/" />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 22,
-          fontWeight: 700,
-          marginBottom: 8,
-          marginTop: 12,
+  const pageActions = (
+    <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        onClick={() => {
+          if (showForm && !editingId) {
+            setShowForm(false);
+          } else {
+            setEditingId(null);
+            setFormName('');
+            setFormType('custom');
+            setFormDesc('');
+            setFormContent('');
+            setFormTags('');
+            setShowForm(true);
+          }
         }}
       >
-        <ClipboardList aria-hidden="true" size={22} strokeWidth={1.8} />
-        模板中心
-      </div>
-      <div className="text-sm text-muted" style={{ marginBottom: 20 }}>
-        提供内置创作模板，并支持上传、管理与复用自定义创作架构。
-      </div>
+        {showForm && !editingId ? (
+          <>
+            <X aria-hidden="true" size={15} strokeWidth={1.8} />
+            取消创建
+          </>
+        ) : (
+          <>
+            <Plus aria-hidden="true" size={15} strokeWidth={1.8} />
+            新建模板
+          </>
+        )}
+      </button>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
+        上传模板
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".txt,.md,.json"
+        onChange={handleFileUpload}
+        style={{ display: 'none' }}
+      />
+    </div>
+  );
+  return (
+    <PageLayout>
+      <BackButton label="返回工作台" to="/" />
+      <PageHeader
+        title="模板中心"
+        description="提供内置创作模板，并支持上传、管理与复用自定义创作架构。"
+        icon={ClipboardList}
+        actions={pageActions}
+      />
 
       {msg && (
         <div
@@ -331,160 +361,85 @@ function TemplatesPage() {
         </div>
       )}
 
-      {/* 统一 Tab 导航条 + 右侧操作按钮 */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 0,
-          marginBottom: 20,
-          borderBottom: '2px solid var(--color-border)',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-        }}
+      <PageTabs<TemplateTabKey>
+        label="模板分类"
+        value={activeTab}
+        onChange={setActiveTab}
+        items={TEMPLATE_TABS.map((item) => ({
+          value: item.key,
+          label: item.label,
+          count: getTabCount(item.key),
+        }))}
       >
-        {TEMPLATE_TABS.map((t) => {
-          const isActive = activeTab === t.key;
-          const count = getTabCount(t.key);
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setActiveTab(t.key)}
-              style={{
-                padding: '8px 16px',
-                fontSize: 14,
-                fontWeight: isActive ? 600 : 400,
-                color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                borderBottom: isActive ? '2px solid var(--color-primary)' : '2px solid transparent',
-                marginBottom: -2,
-                background: 'none',
-                cursor: 'pointer',
-                borderTop: 'none',
-                borderLeft: 'none',
-                borderRight: 'none',
-              }}
-            >
-              {t.label} ({count})
-            </button>
-          );
-        })}
-        <div style={{ flex: 1, minWidth: 20 }} />
-        <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => {
-              if (showForm && !editingId) {
-                setShowForm(false);
-              } else {
-                setEditingId(null);
-                setFormName('');
-                setFormType('custom');
-                setFormDesc('');
-                setFormContent('');
-                setFormTags('');
-                setShowForm(true);
-              }
+        {/* 新建/编辑模板表单 */}
+        {showForm && (
+          <TemplateEditorForm
+            editing={Boolean(editingId)}
+            name={formName}
+            type={formType}
+            description={formDesc}
+            tags={formTags}
+            content={formContent}
+            saving={saving}
+            onNameChange={setFormName}
+            onTypeChange={setFormType}
+            onDescriptionChange={setFormDesc}
+            onTagsChange={setFormTags}
+            onContentChange={setFormContent}
+            onSave={() => void handleSaveTemplate()}
+            onCancel={() => {
+              setShowForm(false);
+              setEditingId(null);
+            }}
+          />
+        )}
+
+        {/* 模板卡片网格 */}
+        {visibleUsers.length === 0 && visibleBuiltins.length === 0 ? (
+          <div
+            style={{
+              padding: 40,
+              textAlign: 'center',
+              color: 'var(--color-text-secondary)',
+              fontSize: 14,
+              border: '1px dashed var(--color-border)',
+              borderRadius: 10,
             }}
           >
-            {showForm && !editingId ? (
-              <>
-                <X aria-hidden="true" size={15} strokeWidth={1.8} />
-                取消创建
-              </>
-            ) : (
-              <>
-                <Plus aria-hidden="true" size={15} strokeWidth={1.8} />
-                新建模板
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => fileInputRef.current?.click()}
+            该分类下暂无模板，可点击上方「新建模板」或「上传模板」快速添加。
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gap: 12,
+            }}
           >
-            <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
-            上传模板
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,.md,.json"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-          />
-        </div>
-      </div>
-
-      {/* 新建/编辑模板表单 */}
-      {showForm && (
-        <TemplateEditorForm
-          editing={Boolean(editingId)}
-          name={formName}
-          type={formType}
-          description={formDesc}
-          tags={formTags}
-          content={formContent}
-          saving={saving}
-          onNameChange={setFormName}
-          onTypeChange={setFormType}
-          onDescriptionChange={setFormDesc}
-          onTagsChange={setFormTags}
-          onContentChange={setFormContent}
-          onSave={() => void handleSaveTemplate()}
-          onCancel={() => {
-            setShowForm(false);
-            setEditingId(null);
-          }}
-        />
-      )}
-
-      {/* 模板卡片网格 */}
-      {visibleUsers.length === 0 && visibleBuiltins.length === 0 ? (
-        <div
-          style={{
-            padding: 40,
-            textAlign: 'center',
-            color: 'var(--color-text-secondary)',
-            fontSize: 14,
-            border: '1px dashed var(--color-border)',
-            borderRadius: 10,
-          }}
-        >
-          该分类下暂无模板，可点击上方「新建模板」或「上传模板」快速添加。
-        </div>
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {visibleUsers.map((template) => (
-            <UserTemplateCard
-              key={template.id}
-              template={template}
-              expanded={expandedId === template.id}
-              onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
-              onUse={(content, title) => void handleUse(content, title)}
-              onEdit={handleEditTemplate}
-              onDelete={(templateToDelete) => void handleDeleteTemplate(templateToDelete)}
-            />
-          ))}
-          {visibleBuiltins.map((template) => (
-            <BuiltInTemplateCard
-              key={template.id}
-              template={template}
-              expanded={expandedId === template.id}
-              onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
-              onUse={(content, title) => void handleUse(content, title)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+            {visibleUsers.map((template) => (
+              <UserTemplateCard
+                key={template.id}
+                template={template}
+                expanded={expandedId === template.id}
+                onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
+                onUse={(content, title) => void handleUse(content, title)}
+                onEdit={handleEditTemplate}
+                onDelete={(templateToDelete) => void handleDeleteTemplate(templateToDelete)}
+              />
+            ))}
+            {visibleBuiltins.map((template) => (
+              <BuiltInTemplateCard
+                key={template.id}
+                template={template}
+                expanded={expandedId === template.id}
+                onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
+                onUse={(content, title) => void handleUse(content, title)}
+              />
+            ))}
+          </div>
+        )}
+      </PageTabs>
+    </PageLayout>
   );
 }
 

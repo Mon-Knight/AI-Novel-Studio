@@ -39,7 +39,9 @@ export async function createCompleteProjectBackup(novelId: string): Promise<Comp
 export async function restoreCompleteProjectBackup(
   backup: CompleteProjectBackup,
 ): Promise<ProjectBackupImportResult> {
-  if (!isCompleteProjectBackup(backup)) {
+  // Do not retain a mutable caller-owned attachment across the IPC await.
+  const snapshot = structuredClone(backup);
+  if (!isCompleteProjectBackup(snapshot)) {
     throw new Error('备份文件不完整或版本不受支持。');
   }
   if (!isTauriRuntime()) {
@@ -47,11 +49,11 @@ export async function restoreCompleteProjectBackup(
   }
 
   const result = await dbCall<ProjectBackupImportResult>('import_project_backup', {
-    input: { backup },
+    input: { backup: snapshot },
   });
   try {
-    const idMap = mergeLocalStorageIdMap(backup.localStorage, result.idMap);
-    await restoreLocalProjectData(backup.localStorage, idMap);
+    const idMap = mergeLocalStorageIdMap(snapshot.localStorage, result.idMap);
+    await restoreLocalProjectData(snapshot, idMap);
     return { ...result, idMap };
   } catch (error) {
     try {

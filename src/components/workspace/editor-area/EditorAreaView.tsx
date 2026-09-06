@@ -1,22 +1,12 @@
 import type { ChapterDraft } from '../../../types/ai';
-import {
-  CheckCircle2,
-  FileText,
-  Lightbulb,
-  ListTree,
-  LoaderCircle,
-  NotebookPen,
-  Pencil,
-  Save,
-  Target,
-} from 'lucide-react';
-import { ChapterStatusLabels, type Chapter } from '../../../types/chapter';
+import { FileText, NotebookPen, RefreshCw } from 'lucide-react';
+import type { Chapter } from '../../../types/chapter';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
-import { formatNumber } from '../../../utils/format';
 import ContentUnavailableState from '../ContentUnavailableState';
 import type { EditorAreaProps, EditorDocumentState } from './editorAreaTypes';
 import type { EditorDocumentController } from './useEditorDocumentController';
 import type { ChapterOutlineEditor } from './useChapterOutlineEditor';
+import { EditorChapterContext } from './EditorChapterContext';
 
 interface EditorAreaViewProps {
   chapter?: Chapter;
@@ -58,313 +48,100 @@ export default function EditorAreaView({
     return (
       <div className="editor-content">
         <div className="editor-empty">
-          <div className="editor-empty-icon">
-            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>选择章节开始写作</div>
-          <div className="text-sm text-muted">请从左侧目录树中选择一个章节</div>
+          <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
+          <h1>选择章节开始写作</h1>
+          <p>请从章节目录选择一章，或退出专注模式查看目录。</p>
         </div>
       </div>
     );
   }
+  const ready = documentState === 'ready';
+  const busy = document.saving || document.adopting;
+  return (
+    <div className="editor-content" data-document-state={documentState}>
+      <h1 className="editor-chapter-title">
+        第{chapter.chapterNumber}章：{chapter.title}
+      </h1>
 
-  if (documentState !== 'ready') {
-    const isLoading = documentState === 'loading';
-    return (
-      <div className="editor-content" data-document-state={documentState}>
-        <div className="editor-chapter-title">
-          第{chapter.chapterNumber}章：{chapter.title}
+      {ready && currentDraft && (
+        <details className="editor-document-metadata" key={`${chapter.id}:${currentDraft.id}`}>
+          <summary>
+            <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
+            草稿信息 · v{currentDraft.versionNo}
+          </summary>
+          <div>
+            <span>来源：{DRAFT_SOURCE_LABELS[currentDraft.source] || currentDraft.source}</span>
+            <span>{currentDraft.isAdopted ? '此草稿已采用' : '草稿未采用'}</span>
+            {document.lastSaved && <span>上次保存：{document.lastSaved}</span>}
+          </div>
+        </details>
+      )}
+
+      {ready && (document.saveMsg || document.adoptMsg) && (
+        <div className="editor-action-feedback" aria-label="正文操作反馈">
+          {document.saveMsg && (
+            <div className={`editor-save-feedback is-${document.saveState}`}>
+              <span
+                data-testid="editor-save-feedback"
+                data-save-state={document.saveState}
+                role={document.saveState === 'error' ? 'alert' : 'status'}
+              >
+                {document.saveMsg}
+              </span>
+              {document.saveState === 'error' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy || reviewLocked}
+                  data-testid="editor-save-retry"
+                  onClick={() => void document.handleSave()}
+                >
+                  <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+                  重试保存
+                </button>
+              )}
+            </div>
+          )}
+          {document.adoptMsg && (
+            <div className={`editor-adopt-feedback is-${document.adoptState}`}>
+              <span
+                data-testid="editor-adopt-feedback"
+                data-adopt-state={document.adoptState}
+                role={document.adoptState === 'error' ? 'alert' : 'status'}
+              >
+                {document.adoptMsg}
+              </span>
+              {document.adoptState === 'error' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy || reviewLocked}
+                  data-testid="editor-adopt-retry"
+                  onClick={() => void document.handleAdoptCurrent()}
+                >
+                  <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+                  重试采用
+                </button>
+              )}
+            </div>
+          )}
         </div>
+      )}
+
+      {ready ? (
+        <EditorChapterContext key={chapter.id} chapter={chapter} outline={outline} />
+      ) : (
         <div
-          role="status"
-          style={{
-            width: 'min(100%, 920px)',
-            maxWidth: 920,
-            margin: '0 auto 10px',
-            padding: '9px 12px',
-            color: isLoading ? 'var(--color-text-secondary)' : 'var(--color-error)',
-            background: 'var(--color-bg-hover)',
-            border: '1px solid var(--color-border-light)',
-            borderRadius: 6,
-            fontSize: 13,
-          }}
+          className="editor-document-load-notice"
+          role={documentState === 'error' ? 'alert' : 'status'}
         >
-          {isLoading
+          {documentState === 'loading'
             ? '正在校验并读取完整正文，下方保留切换前内容且暂不可编辑。'
             : '完整正文不可用。下方仅保留切换前的安全内容供参考，不会写入当前章节。'}
         </div>
-        <div className="editor-paper">
-          <textarea
-            ref={document.textareaRef}
-            className="editor-textarea"
-            data-testid="chapter-editor"
-            data-document-state={documentState}
-            data-chapter-id={document.loadedChapterIdRef.current ?? ''}
-            data-target-chapter-id={chapter.id}
-            data-draft-id={currentDraft?.id ?? ''}
-            data-draft-version={currentDraft?.versionNo ?? ''}
-            data-content-hash={hashTextContent(document.content)}
-            data-adopted={currentDraft?.isAdopted ? 'true' : 'false'}
-            data-word-count={countTextWords(document.content)}
-            data-dirty={document.isDirty ? 'true' : 'false'}
-            data-saving="false"
-            aria-disabled="true"
-            readOnly
-            value={document.content}
-            onSelect={document.handleSelectionChange}
-            spellCheck={false}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="editor-content">
-      <div className="editor-chapter-title">
-        第{chapter.chapterNumber}章：{chapter.title}
-      </div>
-
-      {currentDraft && (
-        <div
-          style={{
-            width: 'min(100%, 920px)',
-            maxWidth: 920,
-            margin: '0 auto 10px',
-            padding: '7px 12px',
-            background: currentDraft.isAdopted
-              ? 'var(--color-success-bg)'
-              : 'var(--color-bg-hover)',
-            borderRadius: 6,
-            fontSize: 13,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 16,
-            border: currentDraft.isAdopted
-              ? '1px solid var(--color-success-border)'
-              : '1px solid var(--color-border-light)',
-          }}
-        >
-          <span className="editor-meta-item">
-            <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>草稿 v{currentDraft.versionNo}</span>
-          </span>
-          <span>来源：{DRAFT_SOURCE_LABELS[currentDraft.source] || currentDraft.source}</span>
-          <span>字数：{formatNumber(currentDraft.wordCount)}</span>
-          {currentDraft.isAdopted && (
-            <span
-              className="editor-meta-item"
-              style={{ color: 'var(--color-success)', fontWeight: 600 }}
-            >
-              <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>已采用</span>
-            </span>
-          )}
-          {document.saveMsg && (
-            <span
-              className={`editor-save-feedback is-${document.saveState}`}
-              data-testid="editor-save-feedback"
-              data-save-state={document.saveState}
-              aria-live="polite"
-              role={document.saveState === 'error' ? 'alert' : 'status'}
-            >
-              {document.saveMsg}
-            </span>
-          )}
-        </div>
       )}
 
-      {(chapter.outline || chapter.goal) && (
-        <div className="editor-info-card">
-          {chapter.outline && (
-            <div className="editor-info-section">
-              <div
-                className="editor-info-label"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <span className="editor-info-label-copy">
-                  <ListTree aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span>章节大纲</span>
-                </span>
-                {!outline.isEditingOutline ? (
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={outline.handleStartEditOutline}
-                    style={{ fontSize: 11 }}
-                  >
-                    <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
-                    <span>编辑</span>
-                  </button>
-                ) : (
-                  <span style={{ display: 'flex', gap: 4 }}>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={outline.handleSaveOutline}
-                      disabled={outline.saving}
-                      aria-busy={outline.saving || undefined}
-                      style={{ fontSize: 11 }}
-                    >
-                      {outline.saving ? (
-                        <LoaderCircle
-                          className="workspace-spinning-icon"
-                          aria-hidden="true"
-                          size={13}
-                          strokeWidth={1.8}
-                        />
-                      ) : (
-                        <Save aria-hidden="true" size={13} strokeWidth={1.8} />
-                      )}
-                      <span>{outline.saving ? '保存中' : '保存'}</span>
-                    </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={outline.handleCancelEditOutline}
-                      disabled={outline.saving}
-                      style={{ fontSize: 11 }}
-                    >
-                      取消
-                    </button>
-                  </span>
-                )}
-              </div>
-              {outline.isEditingOutline ? (
-                <textarea
-                  className="form-textarea"
-                  value={outline.outlineDraft}
-                  onChange={(event) => outline.setOutlineDraft(event.target.value)}
-                  style={{
-                    width: '100%',
-                    height: 120,
-                    resize: 'vertical',
-                    fontSize: 14,
-                    lineHeight: 1.8,
-                    fontFamily: 'var(--font-family-editor)',
-                    marginTop: 8,
-                  }}
-                  placeholder="编辑章节大纲..."
-                  autoFocus
-                />
-              ) : (
-                <div className="editor-info-text">{chapter.outline}</div>
-              )}
-              {outline.outlineSaveMsg && (
-                <div
-                  className={`editor-outline-save-feedback is-${outline.outlineSaveState}`}
-                  data-testid="outline-save-feedback"
-                  data-save-state={outline.outlineSaveState}
-                  aria-live="polite"
-                  role={outline.outlineSaveState === 'error' ? 'alert' : 'status'}
-                >
-                  {outline.outlineSaveMsg}
-                </div>
-              )}
-            </div>
-          )}
-          {chapter.goal && (
-            <div className="editor-info-section">
-              <div className="editor-info-label editor-info-label-copy">
-                <Target aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>本章目标</span>
-              </div>
-              <div className="editor-info-text">{chapter.goal}</div>
-            </div>
-          )}
-          <div className="editor-info-meta">
-            <span>状态：{ChapterStatusLabels[chapter.status]}</span>
-            <span>目标字数：{formatNumber(chapter.targetWordCount || 0)} 字</span>
-            {document.lastSaved && <span>上次保存：{document.lastSaved}</span>}
-          </div>
-        </div>
-      )}
-
-      {!chapter.outline && !outline.isEditingOutline && (
-        <div className="editor-hint-banner">
-          <Lightbulb aria-hidden="true" size={15} strokeWidth={1.8} />
-          <span>当前章节还没有大纲，建议先补充章节目标和剧情节点。</span>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={outline.handleStartEditOutline}
-            style={{ marginLeft: 8, fontSize: 11 }}
-          >
-            <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
-            <span>手动编写</span>
-          </button>
-        </div>
-      )}
-
-      {outline.isEditingOutline && !chapter.outline && (
-        <div className="editor-info-card" style={{ marginTop: 8 }}>
-          <div className="editor-info-section">
-            <div
-              className="editor-info-label"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-            >
-              <span className="editor-info-label-copy">
-                <ListTree aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>编写章节大纲</span>
-              </span>
-              <span style={{ display: 'flex', gap: 4 }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={outline.handleSaveOutline}
-                  disabled={outline.saving}
-                  aria-busy={outline.saving || undefined}
-                  style={{ fontSize: 11 }}
-                >
-                  {outline.saving ? (
-                    <LoaderCircle
-                      className="workspace-spinning-icon"
-                      aria-hidden="true"
-                      size={13}
-                      strokeWidth={1.8}
-                    />
-                  ) : (
-                    <Save aria-hidden="true" size={13} strokeWidth={1.8} />
-                  )}
-                  <span>{outline.saving ? '保存中' : '保存'}</span>
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={outline.handleCancelEditOutline}
-                  disabled={outline.saving}
-                  style={{ fontSize: 11 }}
-                >
-                  取消
-                </button>
-              </span>
-            </div>
-            <textarea
-              className="form-textarea"
-              value={outline.outlineDraft}
-              onChange={(event) => outline.setOutlineDraft(event.target.value)}
-              style={{
-                width: '100%',
-                height: 120,
-                resize: 'vertical',
-                fontSize: 14,
-                lineHeight: 1.8,
-                fontFamily: 'var(--font-family-editor)',
-                marginTop: 8,
-              }}
-              placeholder="编写章节大纲..."
-              autoFocus
-            />
-            {outline.outlineSaveMsg && (
-              <div
-                className={`editor-outline-save-feedback is-${outline.outlineSaveState}`}
-                data-testid="outline-save-feedback"
-                data-save-state={outline.outlineSaveState}
-                aria-live="polite"
-                role={outline.outlineSaveState === 'error' ? 'alert' : 'status'}
-              >
-                {outline.outlineSaveMsg}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {document.effectiveContentState?.status === 'unavailable' ? (
+      {ready && document.effectiveContentState?.status === 'unavailable' ? (
         <ContentUnavailableState
           state={document.effectiveContentState}
           retrying={retryingContent}
@@ -374,10 +151,11 @@ export default function EditorAreaView({
         />
       ) : (
         <div className="editor-paper">
-          {reviewLocked && (
+          {ready && reviewLocked && (
             <div className="editor-review-banner" data-testid="chapter-review-lock">
-              <span>当前为对话确认后的审阅模式：打开不等于保存，保存不等于采用。</span>
+              <span>当前为审阅模式：打开不等于保存，保存不等于采用。</span>
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 data-testid="chapter-review-unlock"
                 onClick={() => onUnlockReview?.()}
@@ -390,16 +168,21 @@ export default function EditorAreaView({
             ref={document.textareaRef}
             className="editor-textarea"
             data-testid="chapter-editor"
-            data-chapter-id={chapter.id}
+            aria-label={`第${chapter.chapterNumber}章 ${chapter.title} 正文`}
+            aria-disabled={!ready || undefined}
+            aria-busy={document.adopting || undefined}
+            data-document-state={documentState}
+            data-chapter-id={ready ? chapter.id : (document.loadedChapterIdRef.current ?? '')}
+            data-target-chapter-id={chapter.id}
             data-draft-id={currentDraft?.id ?? ''}
             data-draft-version={currentDraft?.versionNo ?? ''}
             data-content-hash={hashTextContent(document.content)}
             data-adopted={currentDraft?.isAdopted ? 'true' : 'false'}
             data-word-count={countTextWords(document.content)}
             data-dirty={document.isDirty ? 'true' : 'false'}
-            data-saving={document.saving ? 'true' : 'false'}
+            data-saving={ready && document.saving ? 'true' : 'false'}
             data-review-locked={reviewLocked ? 'true' : 'false'}
-            readOnly={reviewLocked}
+            readOnly={!ready || reviewLocked || document.adopting}
             value={document.content}
             onChange={(event) => document.handleContentChange(event.target.value)}
             onSelect={document.handleSelectionChange}
@@ -408,24 +191,6 @@ export default function EditorAreaView({
             }
             spellCheck={false}
           />
-        </div>
-      )}
-
-      {!document.content && document.effectiveContentState?.status !== 'unavailable' && (
-        <div className="editor-empty-state">
-          <div className="editor-empty-icon">
-            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
-          <div
-            style={{
-              fontSize: 14,
-              color: 'var(--color-text-secondary)',
-              marginBottom: 16,
-            }}
-          >
-            正文为空。
-          </div>
         </div>
       )}
     </div>

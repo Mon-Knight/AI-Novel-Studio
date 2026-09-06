@@ -8,7 +8,7 @@
 
 ## 概述
 
-`docs-sync` 确保版本完成后所有关键文档已同步。避免代码和文档脱节。
+`docs-sync` 用于文档修订、功能变更和发布前的真实性/一致性检查。遵循根 [AGENTS.md](../../../AGENTS.md)；它不授权修改业务代码、升级版本或执行 Git/发布动作。
 
 ---
 
@@ -27,7 +27,9 @@
 
 ---
 
-## 必须读取/检查的文件
+## 按范围读取/检查的入口
+
+先读取根规则和本次修改文档。下列清单用于定位相关权威入口，发布任务再逐项核对，不要求每次纯文档任务通读全部资料：
 
 - `README.md`
 - `CHANGELOG.md`
@@ -72,13 +74,13 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 
 - [ ] `README.md` 版本号已同步
 - [ ] `README.md` 当前阶段描述已更新
-- [ ] `CHANGELOG.md` 已新增当前版本条目
+- [ ] `CHANGELOG.md` 已记录本次变更；非发布任务写入 `Unreleased`，不新增虚构版本
 - [ ] `docs/version-roadmap.md` 已标记当前版本
 - [ ] `docs/agent-runtime.md` 已更新（如涉及 Agent Runtime）
 - [ ] `CHANGELOG.md` 是唯一活动发布入口，`docs/` 下没有逐版本发布说明碎片
 - [ ] Git / PR / Release 治理文件和工作流均存在
 - [ ] `AGENTS.md` 无需更新或已更新
-- [ ] 所有文档中的版本号一致
+- [ ] 当前版本声明与机器清单一致；历史版本、审计日期与已发布记录保持原语义
 
 ### 步骤 3：检查文档真实性
 
@@ -125,7 +127,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 
 ## 禁止事项
 
-- ❌ 修改文档时不更新版本号
+- ❌ 未获版本任务授权就升级应用版本；已获准升级却不同步相关版本声明
 - ❌ 声明未完成的功能为已完成
 - ❌ 多个文档描述同一件事但互相矛盾
 - ❌ 文档中存在过时信息
@@ -134,5 +136,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 
 ## 验证方式
 
-- `check_docs_sync.ps1` 全部通过
-- 人工抽查关键文档
+- `npm run test:docs-sync`（包含 live 仓库检查和失败关闭回归）
+- 涉及版本、路线或发布口径时运行 `npm run test:version-sync`
+- 只对改动文件执行 `npx prettier --check`，并运行 `git diff --check`、`git status --short`
+- 人工核查相关实现、路径/链接与能力证据；脚本通过不代表所有文档事实均已自动验证

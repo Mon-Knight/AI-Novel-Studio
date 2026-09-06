@@ -11,6 +11,9 @@ pub struct ListConversationsInput {
     #[serde(default)]
     pub include_archived: bool,
     pub limit: Option<i64>,
+    pub archive: Option<String>,
+    pub query: Option<String>,
+    pub cursor: Option<service::ConversationListCursor>,
 }
 
 fn reject_client_tool_attestation(snapshot: Option<&Value>) -> Result<(), AppError> {
@@ -64,11 +67,16 @@ pub fn list_task_conversations(
     let connection = get_connection()
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
-    service::list(
+    if input.archive.is_none() && input.query.is_none() && input.cursor.is_none() {
+        return service::list(&connection, input.novel_id.as_deref(), input.include_archived, input.limit.unwrap_or(100));
+    }
+    service::list_page(
         &connection,
         input.novel_id.as_deref(),
-        input.include_archived,
+        input.archive.as_deref().unwrap_or(if input.include_archived { "all" } else { "active" }),
+        input.query.as_deref().unwrap_or(""),
         input.limit.unwrap_or(100),
+        input.cursor.as_ref(),
     )
 }
 

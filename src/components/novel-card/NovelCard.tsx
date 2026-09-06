@@ -51,6 +51,7 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      setProgressLabel('正在读取章节进度…');
       try {
         const [volumes, chapters] = await Promise.all([
           volumeRepository.getByNovelId(novel.id),
@@ -69,7 +70,7 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
           setProgressLabel('尚未创建章节');
         }
       } catch {
-        /* ignore */
+        if (!cancelled) setProgressLabel('章节进度暂不可用，可进入作品重试');
       }
     }
     load();
@@ -79,12 +80,15 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
   }, [novel.id, novel.currentVolumeId, novel.currentChapterId]);
 
   return (
-    <div
+    <article
       className="novel-card"
       data-testid="project-card"
       data-project-id={novel.id}
       data-project-name={novel.title}
-      onClick={onClick}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('button')) return;
+        onClick();
+      }}
     >
       {/* v1.0.26 删除按钮 */}
       {onDelete && (
@@ -102,29 +106,24 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
           <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
         </button>
       )}
-      <div className="novel-card-cover">
+      <button
+        type="button"
+        className="novel-card-cover"
+        onClick={onClick}
+        aria-label={`打开作品 ${novel.title}`}
+      >
         <span className="novel-card-cover-icon" aria-hidden="true">
           <GenreIcon size={34} strokeWidth={1.8} />
         </span>
         <span className="novel-card-genre">{novel.genre || '未分类'}</span>
-      </div>
-      <div
+      </button>
+      <button
+        type="button"
         className="novel-card-body"
         data-testid="project-open"
         data-project-id={novel.id}
         data-project-name={novel.title}
-        role="button"
-        tabIndex={0}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClick();
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          event.stopPropagation();
-          onClick();
-        }}
+        onClick={onClick}
       >
         <div className="novel-card-title">{novel.title}</div>
         <div className="novel-card-desc">{novel.description || ''}</div>
@@ -134,23 +133,24 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
           <span className="novel-card-meta-item">目标 {formatNumber(targetCount)} 字</span>
           <span className="novel-card-meta-item">{formatDate(novel.updatedAt)}</span>
         </div>
-        <div className="novel-card-footer">
-          <span className={`novel-card-status ${novel.status}`}>
-            {statusLabels[novel.status] || novel.status}
-          </span>
-          <span
-            className="novel-card-action"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEnterWorkspace();
-            }}
-          >
-            进入工作台
-            <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
-          </span>
-        </div>
+      </button>
+      <div className="novel-card-footer">
+        <span className={`novel-card-status ${novel.status}`}>
+          {statusLabels[novel.status] || novel.status}
+        </span>
+        <button
+          type="button"
+          className="novel-card-action"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEnterWorkspace();
+          }}
+        >
+          进入工作台
+          <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
+        </button>
       </div>
-    </div>
+    </article>
   );
 }
 

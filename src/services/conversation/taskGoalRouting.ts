@@ -1,3 +1,17 @@
+import { stripTaskCourtesy, taskGoalDirective } from './taskGoalDirective';
+
+export function assertTaskGoalExecutable(goal: string): void {
+  if (!taskGoalDirective(goal).needsClarification) return;
+  throw Object.assign(
+    new Error(
+      '请明确本回合要执行的一个动作：生成、润色、检查或只读分析；被否定或尚未选择的动作不会执行。',
+    ),
+    {
+      code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED',
+    },
+  );
+}
+
 export type CandidateToolName =
   | 'generate_chapter'
   | 'generate_outline'
@@ -198,11 +212,21 @@ export function isConversationalGoal(goal: string): boolean {
 }
 
 function matchCandidateTool(goal: string): CandidateToolChoice | undefined {
-  const text = goal.toLowerCase();
+  const parsedDirective = taskGoalDirective(goal);
+  if (parsedDirective.needsClarification) return undefined;
+  const text = parsedDirective.text.toLowerCase();
   const directive = routingDirectiveText(text);
   const primaryDirective = text.split(/[\r\n。！？!?]/, 1)[0]?.trim() ?? '';
   const generationDirective = directive.match(CHAPTER_GENERATION_DIRECTIVE);
   const revisionDirective = directive.match(CHAPTER_REVISION_DIRECTIVE);
+  // The requested operation wins over the nouns it operates on.
+  const explicitAction = stripTaskCourtesy(primaryDirective);
+  if (/^(?:总结|摘要|summari[sz]e)\b|^(?:总结|摘要)/iu.test(explicitAction)) {
+    return { name: 'summarize_chapter', artifactType: 'chapter_summary' };
+  }
+  if (/^(?:检查|审计|质量检查)|^(?:audit|check)\b/iu.test(explicitAction)) {
+    return { name: 'check_quality', artifactType: 'quality_report' };
+  }
   if (
     ANALYSIS_REQUEST_GOAL.test(text) &&
     !/审计|检查|质量|总结|摘要|audit|quality|summar/i.test(text) &&
@@ -300,6 +324,14 @@ function matchCandidateTool(goal: string): CandidateToolChoice | undefined {
   return undefined;
 }
 
+/** Intent-only query for resolving a target before executable-tool selection. */
+export function isChapterOutlineTaskGoal(goal: string): boolean {
+  return (
+    matchCandidateTool(goal)?.name === 'generate_outline' &&
+    CHAPTER_OUTLINE_SCOPE_GOAL.test(taskGoalDirective(goal).text)
+  );
+}
+
 export function selectCandidateTool(
   goal: string,
   chapterId?: string,
@@ -307,8 +339,8 @@ export function selectCandidateTool(
   if (isConversationalGoal(goal)) return undefined;
   const selected = matchCandidateTool(goal);
   const primaryDirective =
-    goal
-      .toLowerCase()
+    taskGoalDirective(goal)
+      .text.toLowerCase()
       .split(/[\r\n。！？!?]/, 1)[0]
       ?.trim() ?? '';
   if (VOLUME_OUTLINE_SCOPE_GOAL.test(primaryDirective)) {
@@ -381,9 +413,11 @@ export function buildDshTurnContract(goal: string, chapterId?: string): DshTurnC
 
 export function classifyTaskIntent(goal: string): TaskIntent {
   if (isConversationalGoal(goal)) return 'read';
+  const directive = taskGoalDirective(goal);
+  if (directive.needsClarification) return 'read';
   const tool = matchCandidateTool(goal);
   if (!tool) {
-    if (READ_OR_SEARCH_GOAL.test(goal) || !WRITE_OR_GENERATE_GOAL.test(goal)) {
+    if (READ_OR_SEARCH_GOAL.test(directive.text) || !WRITE_OR_GENERATE_GOAL.test(directive.text)) {
       return 'read';
     }
     return 'chapter_write';

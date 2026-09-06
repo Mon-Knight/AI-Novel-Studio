@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronRight, FileText, Plus } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
@@ -7,6 +7,7 @@ import { buildChapterListIndex, centeredChapterWindowStart } from '../../utils/c
 import { showError } from '../../utils/nativeDialog';
 import { ChapterWindowList } from './ChapterWindowList';
 import { VolumeTreeDialogs } from './VolumeTreeDialogs';
+import { ChapterLocator } from './ChapterLocator';
 
 interface VolumeTreeProps {
   volumes: Volume[];
@@ -24,9 +25,10 @@ const CHAPTER_PAGE_SIZE = 80;
 const xsBtnPrimary: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
+  minHeight: 28,
   gap: 4,
   padding: '2px 8px',
-  fontSize: 11,
+  fontSize: 12,
   borderRadius: 4,
   border: '1px solid var(--color-primary)',
   background: 'var(--color-primary)',
@@ -36,9 +38,10 @@ const xsBtnPrimary: React.CSSProperties = {
 const xsBtnSecondary: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
+  minHeight: 28,
   gap: 4,
   padding: '2px 8px',
-  fontSize: 11,
+  fontSize: 12,
   borderRadius: 4,
   border: '1px solid var(--color-border)',
   background: 'var(--color-bg-hover)',
@@ -66,6 +69,7 @@ function VolumeTree({
   const [newChapterVolumeId, setNewChapterVolumeId] = useState('');
   const [creating, setCreating] = useState(false);
   const [chapterWindowStarts, setChapterWindowStarts] = useState<Record<string, number>>({});
+  const treeRef = useRef<HTMLDivElement>(null);
 
   const toggleVolume = (volumeId: string) => {
     setExpandedVolumes((prev) => ({ ...prev, [volumeId]: !prev[volumeId] }));
@@ -309,7 +313,30 @@ function VolumeTree({
   return (
     <>
       {renderHeader()}
-      <div className="workspace-sidebar-tree" data-testid="chapter-list">
+      <div className="workspace-chapter-locator">
+        <ChapterLocator
+          chapters={chapters}
+          activeChapterId={activeChapterId}
+          mode="directory"
+          onSelectChapter={onSelectChapter}
+          onLocateCurrent={() => {
+            if (!activeChapter) return;
+            const key = activeChapter.volumeId || '__orphan__';
+            const siblings = activeChapter.volumeId
+              ? (chapterIndex.byVolume.get(activeChapter.volumeId) ?? [])
+              : orphanChapters;
+            setChapterWindowStarts((current) => ({
+              ...current,
+              [key]: centeredChapterWindowStart(siblings, CHAPTER_PAGE_SIZE, activeChapter.id),
+            }));
+            if (activeChapter.volumeId) ensureExpanded(activeChapter.volumeId);
+            treeRef.current
+              ?.querySelector<HTMLElement>('[data-active="true"]')
+              ?.scrollIntoView?.({ block: 'nearest' });
+          }}
+        />
+      </div>
+      <div className="workspace-sidebar-tree" data-testid="chapter-list" ref={treeRef}>
         <div className="tree-novel-root">
           <BookOpen aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>作品相关</span>
@@ -352,7 +379,7 @@ function VolumeTree({
                       onSelectChapter={onSelectChapter}
                     />
                   ) : (
-                    <div className="text-muted" style={{ padding: '4px 44px', fontSize: 11 }}>
+                    <div className="text-muted" style={{ padding: '4px 44px', fontSize: 12 }}>
                       暂无章节
                     </div>
                   )}

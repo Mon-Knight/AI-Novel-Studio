@@ -6,6 +6,8 @@ import { LoaderCircle } from 'lucide-react';
 function LoadingState({ text = '加载中...' }: { text?: string }) {
   return (
     <div
+      role="status"
+      aria-live="polite"
       style={{
         textAlign: 'center',
         padding: '24px 16px',

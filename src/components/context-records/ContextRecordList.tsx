@@ -69,7 +69,7 @@ function ContextRecordList({
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     padding: '1px 6px',
                     borderRadius: 3,
                     background:
@@ -82,14 +82,14 @@ function ContextRecordList({
                 </span>
                 <span style={{ fontWeight: 500, fontSize: 13 }}>{r.title}</span>
                 {!r.isActive && (
-                  <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>[已停用]</span>
+                  <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>[已停用]</span>
                 )}
                 {r.isExpired && (
-                  <span style={{ fontSize: 10, color: 'var(--color-warning)' }}>[已过期]</span>
+                  <span style={{ fontSize: 12, color: 'var(--color-warning)' }}>[已过期]</span>
                 )}
               </div>
               {compact ? (
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
                   {r.content.slice(0, 60)}…
                 </div>
               ) : (
@@ -99,7 +99,7 @@ function ContextRecordList({
                     : r.content.slice(0, 100) + (r.content.length > 100 ? '…' : '')}
                 </div>
               )}
-              <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
                 <span
                   aria-label={`重要度 ${r.importance}/5`}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}

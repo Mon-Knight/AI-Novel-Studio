@@ -50,7 +50,7 @@ export function UserTemplateCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 8px',
                 borderRadius: 10,
                 background: 'var(--color-primary-light)',
@@ -62,7 +62,7 @@ export function UserTemplateCard({
             </span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 8px',
                 borderRadius: 10,
                 background: 'var(--color-bg-hover)',
@@ -92,7 +92,7 @@ export function UserTemplateCard({
               <span
                 key={`${tag}-${index}`}
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   padding: '1px 7px',
                   borderRadius: 6,
                   background: 'var(--color-bg-hover)',
@@ -224,7 +224,7 @@ export function BuiltInTemplateCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 8px',
                 borderRadius: 10,
                 background: 'var(--color-bg-hover)',
@@ -235,7 +235,7 @@ export function BuiltInTemplateCard({
             </span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 8px',
                 borderRadius: 10,
                 background: 'var(--color-bg-hover)',

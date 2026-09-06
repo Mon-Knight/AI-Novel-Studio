@@ -1,8 +1,14 @@
 # 对话式并发创作工作台设计
 
-> 状态：v3.6.1 当前安全补丁；v3.6.0 功能基线中的对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
+<!-- ans-current-canonical:start -->
+
+Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
+读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+<!-- ans-current-canonical:end -->
+
+> 状态：v3.6.2 已放行四项 Canonical 只读能力并完成仓内 loopback 闭环，R4 live 云端验收仍未完成；既有对话工作台、决定/审阅授权、章节原子采用、白名单结构化应用与旧 UI 收敛保持，其他类型及浏览器回退仍失败关闭
 > 适用版本：v3.3.0 及后续版本  
-> 当前版本：v3.6.1
+> 当前版本：v3.6.2
 > Harness 架构分析快照：[`deepseek-ai/deepseek-harness@141eb6f`](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534)（2026-08-20，仅作设计参考）  
 > 当前产品载体仍固定 `47f943859bef60e4160492346772ded9b24f765a`；本文不授权升级或替换该依赖  
 > 文档职责：定义对话式创作工作台的产品边界、交互模型、运行时职责与分阶段落地顺序
@@ -11,7 +17,7 @@
 
 ## 1. 决策摘要
 
-AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器中的多个 AI 面板”演进为**以对话驱动任务、以作品承载事实、以产物确认控制写入**的创作工作台。
+AI Novel Studio 的主界面已从“作品管理首页 + 章节编辑器中的多个 AI 面板”演进为**以对话驱动任务、以作品承载事实、以产物确认控制写入**的创作工作台。下文保留分阶段设计；当前状态与剩余验收门禁以第 13～14 节为准。
 
 ```text
 创作工作台
@@ -40,7 +46,7 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 
 当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。无任务快照的插件探测只用于当前插件只读投影，可以合成目录用 DeepSeek 身份，但不是用户任务，也不得填补缺失的冻结 `baseUrl`。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
 
-结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。Canonical Catalog/Manifest 已将 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 放行为 `stable`，`modelVisibleToolIdentities` 长度为 4。真实 R4 是 Canonical-only DSH 只读回合：`read` intent 请求无版本号 Canonical 名，Gateway 可按该 allowlist 列出它们；宿主启动仍注入 legacy `ALLOWED_TOOLS`，生产 `tools/list` 尚未切过去。Writing SubAgent 与 `chapter_write` 不走 DSH。
+结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。Canonical Catalog/Manifest 已将 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 放行为 `stable`，`modelVisibleToolIdentities` 长度为 4。DSH `read` 回合已在 start 契约、Worker 环境和宿主授权三处使用 Canonical-only allowlist，Gateway 的 `tools/list` 据此列出无版本号的四项只读名；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 R4 live 云端 Provider 仍 NOT VERIFIED，不能把四项 exposure 或 Mock 通过等同于 R4 VERIFIED。Writing SubAgent 与 `chapter_write` 不走 DSH。
 
 ---
 
@@ -140,6 +146,8 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 - 任务搜索与必要的状态筛选。
 
 左侧不展示任务计划、工具列表、运行步骤详情或产物详情。
+
+目录在存储侧先应用归档与搜索条件，再按更新时间/任务 ID 稳定分页；支持“加载更多任务”。查询变化使旧请求结果失效，刷新保留已加载窗口，旧待处理任务不能被归档条目的数量限制挤出可搜索范围。启动按 ID 复核最近有效任务，不依赖第一页是否包含该任务。
 
 ### 4.3 中央对话区
 
@@ -244,6 +252,8 @@ queued/running   → skipped（因前置失败而未执行）
 
 ### 6.3 错误呈现
 
+确定性意图路由区分否定动作、操作对象和引用正文；无法明确的目标在创建 Run/请求 Provider 前要求澄清，不以“换模型重试”代替。完整用户指令保留在原回合与 Writer 输入，记忆检索使用独立的有界 query。持续约束优先处理最新回合，明确维度可替代旧值，预算遗漏必须在已有上下文回执中可见；这些有限规则不是通用语义理解。
+
 错误必须附着在出错调用或生成步骤上，而不是只显示一个全局“任务失败”：
 
 - 读取失败：显示失败的来源与可重试动作；
@@ -262,6 +272,8 @@ queued/running   → skipped（因前置失败而未执行）
 ### 7.1 产物出现时机
 
 产物卡片只在候选完成持久化并通过结构校验后推送。流式文本、临时预览或未通过校验的结果不伪装成可确认产物。
+
+硬完整性错误仍使用有界修复和失败关闭。仅由动作词、对象类别或时间共现推断的低置信语义问题不自动重写；提醒保存到工具结果的上下文回执并在候选摘要中标出，由用户审阅。语义提醒不代表正式事实已被判定为错误，也不跳过结构、来源、哈希、作用域或采用授权校验。
 
 ### 7.2 通用结构
 
@@ -452,7 +464,7 @@ Profile / Bundle / Patch
 
 AI Novel Studio 映射时，一个任务对话对应一个持续 Session/Agent；小说 ID 构成领域 scope；不同任务可以驻留并并发。当前步骤冻结模型和 Provider，切换选择只影响后续步骤或回合，不能拆分已经发出的请求。
 
-模型凭据不进入 Session Event、任务对话或冻结快照。当前应用进程只在内存中按 `scope + providerId + baseUrl + modelId` 保存精确绑定；旧 Run 必须使用其冻结模型身份解析同一会话凭据，任一字段不匹配即失败关闭。退出应用后凭据自然失效，设置切换不得把已加载 Key 携带到另一模型。
+模型凭据不进入 Session Event、任务对话或冻结快照。运行时按 `scope + providerId + baseUrl + modelId` 精确解析内存凭据；Windows 桌面端通过 DPAPI 加密保存到本机保护文件，重启后可恢复，浏览器开发模式仅保留会话内存。旧 Run 必须使用其冻结身份解析凭据，任一字段不匹配即失败关闭；设置切换不得把已加载 Key 携带到另一模型。清空 API/Gateway 密钥并保存会删除对应身份记录，本地免鉴权模型不保留原密钥而使用免鉴权占位值。
 
 Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说事实源。章节、大纲、人物、设定、Memory 和采用状态继续以 ANS 领域服务与 SQLite 为权威；事件只保存稳定引用、安全摘要和必要快照。
 
@@ -464,7 +476,7 @@ Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说�
 
 首批领域工具仍是 `novel.read_context`、`chapter.read_outline`、`search_memory` 与 `generate_chapter`。只读工具可以受限并发；候选生成形成 Result Artifact；正式写入保持排他并经过 Decision、revision CAS 与 Safe Apply。工具结果及其产物引用来自结构化结果，不从 AI 回复正文中解析。
 
-这里的旧 Workbench 工具名属于现有 legacy 执行链。Canonical Catalog/Manifest 已把 `novel.read@1` 等标为模型可见（长度为 4）。DSH Gateway 在 Canonical allowlist 下会列出无版本号的 `novel.read / structure.read / context.read / memory.search`；宿主 `task_runtime` 仍把 legacy `ALLOWED_TOOLS` 写入 Worker，生产读回合因此仍见 legacy 名。R4 只在生产 DSH 只读回合实际列出并被模型调用 Canonical 名后才算 VERIFIED；Writing SubAgent 后置。
+这里的旧 Workbench 工具名属于现有 legacy 执行链。Canonical Catalog/Manifest 已把 `novel.read@1` 等标为模型可见（长度为 4）。宿主 `task_runtime` 对 `read` 回合在 start 契约、Worker 环境与宿主工具授权中一致使用 Canonical-only allowlist；DSH Gateway 据此列出无版本号的 `novel.read / structure.read / context.read / memory.search`，候选与审计回合继续使用 legacy 列表。仓内 loopback 只读闭环已有证据，R4 live 云端 Provider 验收仍须满足第 14.5 节的完整条件；Writing SubAgent 后置。
 
 上下文压缩必须区分：
 
@@ -552,7 +564,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 ---
 
-## 13. v3.6.0 现状与剩余差距
+## 13. v3.6.2 现状与剩余差距
 
 工作台交互目标已经落地：应用默认进入任务工作台，任务/回合/运行/工具事件/产物卡片可持久化，模型快照与任务隔离存在，工具/错误/产物在对话内展示，当前插件来自 Runtime Registry；同一 user Turn 的多次 Run 逐次保留，未决候选可靠投影为等待用户，任务切换不会串用草稿、错误或压缩候选。写作工作台已收敛为章节审阅/编辑器，旧 AI 面板和草稿历史生产入口已移除。
 

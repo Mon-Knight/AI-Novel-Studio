@@ -26,6 +26,7 @@ import {
 import type { DomainResult } from '../capabilities/domain';
 import { getCanonicalToolManifest, listCanonicalToolsForAgent } from '../capabilities/canonical';
 import { executeCanonicalToolForHostValidation } from '../capabilities/canonical/canonicalToolRuntime';
+import { assertE2eCanonicalExposure } from './e2eCanonicalExposureContract';
 
 export interface DomainFacadeSqliteSmokeEvidence {
   storageMode: 'sqlite';
@@ -69,6 +70,7 @@ export interface DomainFacadeSqliteSmokeEvidence {
     manifestToolIds: string[];
     manifestToolIdentities: string[];
     modelVisibleToolIdentities: string[];
+    agentVisibleToolIdentities: string[];
     agentVisibleCount: number;
     project: {
       source: string;
@@ -204,13 +206,11 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
 
   const canonicalManifest = await getCanonicalToolManifest();
   const canonicalAgentTools = await listCanonicalToolsForAgent();
-  if (
-    canonicalManifest.tools.map((tool) => tool.id).join(',') !==
-      ['context.read', 'memory.search', 'novel.read', 'structure.read'].join(',') ||
-    canonicalAgentTools.length !== 0
-  ) {
-    throw new Error('Canonical projection gate or stable ordering changed unexpectedly.');
-  }
+  assertE2eCanonicalExposure(
+    canonicalManifest.tools,
+    canonicalManifest.modelVisibleToolIdentities,
+    canonicalAgentTools,
+  );
   const canonicalContext = {
     invocationId: `e2e-canonical-${suffix}`,
     allowedTools: canonicalManifest.tools.map((tool) => `${tool.id}@${tool.version}`),
@@ -431,6 +431,7 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
       manifestToolIds: canonicalManifest.tools.map((tool) => tool.id),
       manifestToolIdentities: canonicalManifest.tools.map((tool) => `${tool.id}@${tool.version}`),
       modelVisibleToolIdentities: [...canonicalManifest.modelVisibleToolIdentities],
+      agentVisibleToolIdentities: canonicalAgentTools.map((tool) => `${tool.id}@${tool.version}`),
       agentVisibleCount: canonicalAgentTools.length,
       project: {
         source: canonicalProjectResult.source,

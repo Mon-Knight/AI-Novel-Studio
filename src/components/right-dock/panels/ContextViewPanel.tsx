@@ -310,7 +310,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                 key={tab.key}
                 className={`btn btn-sm ${activeTab === tab.key ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setActiveTab(tab.key)}
-                style={{ fontSize: 10, padding: '2px 8px' }}
+                style={{ fontSize: 12, padding: '2px 8px' }}
               >
                 {tab.label}（{count}）
               </button>
@@ -318,7 +318,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
           })}
         </div>
 
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
           启用 {activeCount} 条 / 共 {filteredRecords.length} 条
           {expiredCount > 0 && (
             <span

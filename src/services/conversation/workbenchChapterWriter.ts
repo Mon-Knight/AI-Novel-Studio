@@ -18,6 +18,7 @@ import {
 import {
   inspectChapterCandidateIntegrity,
   type ChapterCandidateIntegrityIssueCode,
+  type ChapterCandidateIntegrityIssue,
 } from '../generation/chapterCandidateIntegrity';
 import { buildChapterProviderContextSources } from '../generation/chapterProviderContext';
 import { generationContextCompiler } from '../generation/generationContextCompiler';
@@ -85,6 +86,7 @@ export interface WorkbenchChapterWriteResult {
   lengthRepairCount?: number;
   integrityRepairCount?: number;
   integrityRepairAttempts?: WorkbenchIntegrityRepairAttemptEvidence[];
+  integrityWarnings?: ChapterCandidateIntegrityIssue[];
   providerRequestEvidence?: WorkbenchProviderRequestEvidence;
   resolvedSettings?: AiSettings;
 }
@@ -694,11 +696,18 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       candidateText: result.text,
       previousChapterText: adoptedPreviousChapter?.content,
     });
-    while (integrityIssues.length > 0 && integrityRepairCount < MAX_INTEGRITY_REPAIR_ATTEMPTS) {
+    while (
+      integrityIssues.some((issue) => issue.severity === 'error') &&
+      integrityRepairCount < MAX_INTEGRITY_REPAIR_ATTEMPTS
+    ) {
       integrityRepairCount += 1;
       const repairSourceText = result.text.trim();
       const repairSourceHash = await computeContentSha256(repairSourceText);
-      const repairIssueCodes = [...new Set(integrityIssues.map((issue) => issue.code))].sort();
+      const repairIssueCodes = [
+        ...new Set(
+          integrityIssues.filter((issue) => issue.severity === 'error').map((issue) => issue.code),
+        ),
+      ].sort();
       integrityRepairAttempts.push({
         attempt: integrityRepairCount,
         issueCodes: repairIssueCodes,
@@ -793,10 +802,11 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         : {}),
     });
 
-    if (integrityIssues.length > 0) {
+    if (integrityIssues.some((issue) => issue.severity === 'error')) {
       throw workbenchWriterError(
         'WORKBENCH_CHAPTER_INTEGRITY_FAILED',
         `章节候选在 ${MAX_INTEGRITY_REPAIR_ATTEMPTS} 次完整性修复后仍未通过：${integrityIssues
+          .filter((issue) => issue.severity === 'error')
           .map((issue) => issue.code)
           .join(', ')}。请重试本回合。`,
       );
@@ -829,6 +839,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       lengthRepairCount,
       integrityRepairCount,
       integrityRepairAttempts,
+      integrityWarnings: integrityIssues.filter((issue) => issue.severity === 'warning'),
       providerRequestEvidence,
       resolvedSettings: settings,
     };

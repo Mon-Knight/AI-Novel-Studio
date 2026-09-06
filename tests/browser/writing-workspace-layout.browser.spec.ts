@@ -20,14 +20,59 @@ async function waitForStartupSplashRemoval(): Promise<void> {
   await (await $('#startup-splash')).waitForExist({ reverse: true });
 }
 
+async function setViewport(width: number, height: number): Promise<void> {
+  await browser.setWindowSize(width, height);
+  const outer = await browser.getWindowSize();
+  const inner = await browser.execute(() => ({ width: innerWidth, height: innerHeight }));
+  if (inner.width !== width || inner.height !== height) {
+    await browser.setWindowSize(
+      outer.width + width - inner.width,
+      outer.height + height - inner.height,
+    );
+  }
+  expect(await browser.execute(() => ({ width: innerWidth, height: innerHeight }))).toEqual({
+    width,
+    height,
+  });
+}
+
+async function installNetworkProbe(): Promise<void> {
+  await browser.execute(() => {
+    if (
+      location.hostname !== '127.0.0.1' ||
+      '__TAURI__' in window ||
+      '__TAURI_INTERNALS__' in window ||
+      '__TAURI_IPC__' in window
+    ) {
+      throw new Error('Writing layout tests require an isolated browser session.');
+    }
+    const probe = { blockedFetches: 0 };
+    (window as Window & { __writingLayoutProbe?: typeof probe }).__writingLayoutProbe = probe;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = new URL(
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+        location.href,
+      );
+      if (url.origin !== location.origin) {
+        probe.blockedFetches += 1;
+        return Promise.reject(new Error('External fetch blocked by writing layout test.'));
+      }
+      return originalFetch(input, init);
+    };
+  });
+}
+
 describe('writing workspace layout', () => {
   before(async () => {
     fs.mkdirSync(screenshotDirectory, { recursive: true });
     await browser.url('/#/novels');
+    await installNetworkProbe();
     await browser.execute(() => window.localStorage.clear());
     await browser.refresh();
     await waitForStartupSplashRemoval();
     await (await $('[data-testid="project-list"]')).waitForDisplayed();
+    await installNetworkProbe();
 
     const projectId = await createProjectThroughUi('雾港记事');
     await openWorkspace(projectId);
@@ -39,13 +84,25 @@ describe('writing workspace layout', () => {
     );
   });
 
+  afterEach(async () => {
+    const safety = await browser.execute(() => ({
+      hasTauriBridge:
+        '__TAURI__' in window || '__TAURI_INTERNALS__' in window || '__TAURI_IPC__' in window,
+      aiTasks: JSON.parse(localStorage.getItem('ai_novel_studio_ai_tasks') ?? '[]').length,
+      blockedFetches:
+        (window as Window & { __writingLayoutProbe?: { blockedFetches: number } })
+          .__writingLayoutProbe?.blockedFetches ?? -1,
+    }));
+    expect(safety).toEqual({ hasTauriBridge: false, aiTasks: 0, blockedFetches: 0 });
+  });
+
   for (const viewport of [
     { width: 1024, height: 700 },
-    { width: 1440, height: 900 },
+    { width: 1280, height: 820 },
     { width: 2560, height: 1440 },
   ]) {
     it(`keeps the review surface stable at ${viewport.width}x${viewport.height}`, async () => {
-      await browser.setWindowSize(viewport.width, viewport.height);
+      await setViewport(viewport.width, viewport.height);
       await browser.pause(80);
 
       const layout = await browser.execute(() => {
@@ -101,10 +158,12 @@ describe('writing workspace layout', () => {
 
       expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.viewport.width);
       expect(layout.shell.right).toBeLessThanOrEqual(layout.viewport.width + 1);
+      expect(layout.globalNavigation.width).toBeGreaterThanOrEqual(55);
+      expect(layout.globalNavigation.width).toBeLessThanOrEqual(57);
       expect(layout.workspace.right).toBeLessThanOrEqual(layout.viewport.width + 1);
       expect(layout.chapterTree.width).toBeGreaterThanOrEqual(239);
       expect(layout.chapterTree.width).toBeLessThanOrEqual(241);
-      expect(layout.editor.width).toBeGreaterThan(360);
+      expect(layout.editor.width).toBeGreaterThanOrEqual(viewport.width - 56 - 240 - 48 - 1);
       expect(layout.topbar.height).toBeGreaterThanOrEqual(43);
       expect(layout.topbar.height).toBeLessThanOrEqual(45);
       expect(layout.paper.width).toBeLessThanOrEqual(922);
@@ -131,8 +190,96 @@ describe('writing workspace layout', () => {
     });
   }
 
+  for (const viewport of [
+    { width: 1024, height: 700 },
+    { width: 1280, height: 820 },
+    { width: 2560, height: 1440 },
+  ]) {
+    it(`preserves prose, selection and keyboard focus in focus mode at ${viewport.width}px`, async () => {
+      await setViewport(viewport.width, viewport.height);
+      const prose = Array.from(
+        { length: 160 },
+        (_, index) => `第${index + 1}段：雾港来信仍保留全文，目录切换不得重新挂载编辑器。`,
+      ).join('\n\n');
+      await fillTextareaTestId('chapter-editor', prose);
+      const before = await browser.execute(() => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          '[data-testid="chapter-editor"]',
+        )!;
+        (window as Window & { __focusTextarea?: HTMLTextAreaElement }).__focusTextarea = textarea;
+        textarea.setSelectionRange(18, 42);
+        textarea.scrollTop = 32;
+        document
+          .querySelector<HTMLElement>('[data-testid="workspace-focus-toggle"]')!
+          .focus({ preventScroll: true });
+        return {
+          width: document.querySelector('.workspace-editor')!.getBoundingClientRect().width,
+          top: textarea.scrollTop,
+        };
+      });
+      await browser.keys('Enter');
+      const focused = await browser.execute(() => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          '[data-testid="chapter-editor"]',
+        )!;
+        return {
+          active: document.activeElement === textarea,
+          sameNode:
+            (window as Window & { __focusTextarea?: HTMLTextAreaElement }).__focusTextarea ===
+            textarea,
+          hiddenDirectory: document.querySelector<HTMLElement>('.workspace-sidebar')!.hidden,
+          focusMode: document.querySelector('.workspace-page')?.getAttribute('data-focus-mode'),
+          width: document.querySelector('.workspace-editor')!.getBoundingClientRect().width,
+          value: textarea.value,
+          selection: [textarea.selectionStart, textarea.selectionEnd],
+          top: textarea.scrollTop,
+          bodyWidth: document.documentElement.scrollWidth,
+        };
+      });
+      expect(focused.active).toBe(true);
+      expect(focused.sameNode).toBe(true);
+      expect(focused.hiddenDirectory).toBe(true);
+      expect(focused.focusMode).toBe('true');
+      expect(Math.abs(focused.width - before.width - 240)).toBeLessThanOrEqual(1);
+      expect(focused.value).toBe(prose);
+      expect(focused.selection).toEqual([18, 42]);
+      expect(focused.top).toBe(before.top);
+      expect(focused.bodyWidth).toBeLessThanOrEqual(viewport.width);
+      await expect($('[data-testid="chapter-save"]')).toBeDisplayed();
+      await expect($('[data-testid="chapter-adopt"]')).toBeDisplayed();
+      await browser.saveScreenshot(
+        path.join(screenshotDirectory, `writing-focus-${viewport.width}.png`),
+      );
+      await browser.execute(() =>
+        document
+          .querySelector<HTMLElement>('[data-testid="workspace-focus-toggle"]')!
+          .focus({ preventScroll: true }),
+      );
+      await browser.keys('Enter');
+      const restored = await browser.execute(() => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          '[data-testid="chapter-editor"]',
+        )!;
+        return {
+          active: document.activeElement === textarea,
+          top: textarea.scrollTop,
+          selection: [textarea.selectionStart, textarea.selectionEnd],
+          value: textarea.value,
+          hidden: document.querySelector<HTMLElement>('.workspace-sidebar')!.hidden,
+        };
+      });
+      expect(restored).toEqual({
+        active: true,
+        top: before.top,
+        selection: [18, 42],
+        value: prose,
+        hidden: false,
+      });
+    });
+  }
+
   it('keeps a review panel bounded in the standard desktop viewport', async () => {
-    await browser.setWindowSize(1440, 900);
+    await setViewport(1440, 900);
     await fillTextareaTestId(
       'chapter-editor',
       Array.from(
@@ -163,12 +310,9 @@ describe('writing workspace layout', () => {
     const openingTransitionProperties = await browser.execute(() => {
       const panel = document.querySelector<HTMLElement>('.right-panel');
       if (!panel) throw new Error('Missing review panel during its opening transition.');
-      return panel
-        .getAnimations()
-        .map(
-          (animation) =>
-            (animation as Animation & { transitionProperty?: string }).transitionProperty ?? '',
-        );
+      return getComputedStyle(panel)
+        .transitionProperty.split(',')
+        .map((value) => value.trim());
     });
     expect(openingTransitionProperties).toContain('opacity');
     expect(openingTransitionProperties).toContain('transform');
@@ -362,17 +506,32 @@ describe('writing workspace layout', () => {
         label: document.querySelector('[data-testid="document-save-status"]')?.textContent ?? '',
       };
     });
-    const savingIndex = bodySave.states.indexOf('saving');
     const savedIndex = bodySave.states.lastIndexOf('saved');
-    expect(savingIndex).toBeGreaterThanOrEqual(0);
-    expect(savedIndex).toBeGreaterThan(savingIndex);
-    expect(bodySave.toolbarBusySeen).toBe(true);
-    expect(bodySave.toolbarSavingLabelSeen).toBe(true);
+    // Browser LocalStorage may finish within one React paint; no artificial frame delay.
+    // Delayed-persistence component tests separately assert the visible saving transition.
+    expect(savedIndex).toBeGreaterThanOrEqual(0);
     expect(bodySave.loadingEvents).toBe(0);
     expect(bodySave.modalSeen).toBe(false);
     expect(bodySave.modalPresent).toBe(false);
     expect(bodySave.label).toContain('已保存');
+    const persisted = await browser.execute(() => {
+      const editor = document.querySelector<HTMLTextAreaElement>('[data-testid="chapter-editor"]')!;
+      const drafts = JSON.parse(
+        localStorage.getItem(`ai_novel_studio_drafts_list_${editor.dataset.chapterId}`) ?? '[]',
+      ) as Array<{ id: string; content: string }>;
+      return {
+        editor: editor.value,
+        draft: drafts.find((draft) => draft.id === editor.dataset.draftId)?.content,
+        dirty: editor.dataset.dirty,
+      };
+    });
+    expect(persisted).toEqual({
+      editor: '正文内联保存验证。\n\n第二段仍保留在编辑器中。',
+      draft: '正文内联保存验证。\n\n第二段仍保留在编辑器中。',
+      dirty: 'false',
+    });
 
+    await (await $('.editor-chapter-context > summary')).click();
     await (await $('button=手动编写')).click();
     await (await $('.editor-info-card textarea')).setValue('主角收到来信，并决定前往钟楼。');
     await browser.execute(() => {

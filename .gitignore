@@ -50,3 +50,6 @@ tmp/
 
 # WorkBuddy local agent data
 .workbuddy/
+
+# local release build output / archives
+release_output*/

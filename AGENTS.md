@@ -1,321 +1,153 @@
 # AGENTS.md — AI Novel Studio
 
-> AI Agent 主入口规则文件
-> 所有 AI Agent / Copilot / Cursor 在操作本仓库前必须首先读取本文件。
+> 仓库开发 Agent 的唯一主入口，适用于 Copilot、Cursor 及其他编码 Agent。本文约束**如何修改仓库**，不代表产品内 Agent Runtime 的能力或授权。
+> 详细文档从 [文档索引](docs/README.md) 按任务查阅；不要另建 `agent.md` 等平行规则入口。
 
----
+## 1. 开工检查
 
-## 1. 项目身份
+1. 读取用户最新明确需求和本文件，确认目标、禁止事项及交付范围；一个任务只处理一个明确目标，不自动进入下一版本。
+2. 确认真实工作目录、分支与已有修改，不根据文档中的示例路径或目录名推断：
 
-**AI Novel Studio** 是：
+   ```powershell
+   pwd
+   git status --short --branch
+   ```
 
-- ❌ 不是普通聊天机器人
-- ❌ 不是网页后台管理系统
-- ❌ 不是一次性生成整本小说的工具
-- ✅ 是 **AI 长篇小说创作工程系统**
-- ✅ 是 **AI Autonomous Creative Platform（AI 自主创作平台）**
-- ✅ 是 **桌面端 AI 写作工作台（Windows）**
+3. 保留用户已有修改。与目标文件重叠时先读取差异；遇到无法判断归属的冲突先询问，不执行覆盖、重置或清理。
+4. 从 `package.json` 查看版本、依赖和可用脚本；版本交叉核对 `src-tauri/Cargo.toml`，完整镜像由 `npm run test:version-sync` 检查。
+5. 首次进入仓库先读产品、UI、数据模型文档的开头和当前版本覆盖章节，再按下表深入任务相关部分；不要求每次通读整个 `docs/`。
+6. 修改前说明影响范围和验证计划。明确、低风险的任务可直接执行；需求含糊、需要架构决策、破坏性操作或扩大范围时先确认。
 
-核心理念：
+## 2. 文档查阅与冲突处理
+
+本文件及仓库规则不能覆盖运行平台的系统/开发者指令或用户最新明确需求。子目录规则只细化其适用范围；IDE 指令、Skills 和任务书不能自行扩大用户授权。
+
+| 任务                           | 优先查阅                                                                                                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 所有任务                       | 本文件、[文档索引](docs/README.md)、目标文件及相邻测试                                                                                                          |
+| 产品/交互                      | [产品设计](docs/product-design.md)（第 21 节起）、[UI 标准](docs/ui-reference.md)（第 18 节起）                                                                 |
+| 对话工作台、DSH、Agent Runtime | [对话工作台架构](docs/architecture/conversational-creative-workbench.md)、[运行时说明](docs/agent-runtime.md)                                                   |
+| 模块调整/状态管理              | [项目架构](docs/project-architecture.md)、[模块边界](docs/module-boundaries.md)                                                                                 |
+| SQLite、保存/采用、备份/恢复   | [数据模型](docs/data-model.md)、[数据库入口](docs/technical/database.md)、[Safe Apply](docs/architecture/safe-apply.md)                                         |
+| AI 请求/提示词/工具            | [AI 请求治理](docs/project/ai-generation-governance.md)、[Provider 管线](docs/architecture/provider-execution-pipeline.md)、[提示词系统](docs/prompt-system.md) |
+| 测试/桌面载体/打包             | [测试策略](docs/technical/testing.md)、[桌面构建](docs/technical/desktop-build.md)、[桌面 E2E](docs/technical/desktop-e2e.md)                                   |
+| 文档/开发指令                  | [Agent 工作流](docs/agent-workflow.md)、[开发规则](docs/development-rules.md)、[开发 Skills](docs/development-skills.md)                                        |
+| 版本/发布                      | [版本路线](docs/version-roadmap.md)、[Git 治理](docs/project/git-workflow.md)、[CHANGELOG](CHANGELOG.md)                                                        |
+
+按需读取 `.github/instructions/`、`.github/skills/`、`.github/prompts/` 和 `.cursor/rules/` 中与目标匹配的文件；使用 Skill 前读取其 `SKILL.md`。Skills 是开发辅助，不是软件已实现功能，也不授权开启下一阶段。
+
+判断文档冲突时：
+
+- **工作方式**以本文件为仓库总入口，`docs/agent-workflow.md` 细化执行过程，Git/发布细则以 `docs/project/git-workflow.md` 为准。
+- **产品与架构**按适用版本解释；v3.3.0+ 对话工作台以专门架构文档为准，旧三栏设计不能覆盖新主流程。
+- **实现事实**核查源代码、配置、migration、manifest 和测试；路线图、任务书、审计快照不等于已实现或已验收。
+- **历史资料**保留原有版本和验证时间，不把旧记录批量替换成当前版本。无法确认的差异明确报告，不猜测、不顺手改变实现。
+
+## 3. 项目定位与技术边界
+
+AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，不是普通聊天机器人、网页管理后台或一次生成整本小说的工具。
 
 ```text
 用户控制方向 → AI 分工生成 → 章节逐步采用 → 上下文持续沉淀
 ```
 
----
+| 层级      | 既有技术/职责                                                  |
+| --------- | -------------------------------------------------------------- |
+| 桌面壳    | Tauri 1.x + Rust                                               |
+| 前端      | React 18 + TypeScript 5 + Vite 5                               |
+| 路由/状态 | React Router 6（HashRouter）+ Zustand                          |
+| 持久化    | 桌面 SQLite；浏览器开发由 Service 提供 LocalStorage 回退       |
+| AI/运行时 | 统一服务层、受治理的 Provider 请求、固定版本 DSH Headless 载体 |
+| 提示词    | 独立 Markdown 模板与既有模板注册/编译服务                      |
 
-## 2. 技术栈（不可变）
+具体依赖以清单与锁文件为准。未经明确讨论不得更换技术栈、引入依赖、升级 DSH 载体或完整 Fork/嵌入 Harness Web UI。
 
-| 层级     | 技术                                       |
-| -------- | ------------------------------------------ |
-| 桌面壳   | Tauri (Rust)                               |
-| 前端     | React 18 + TypeScript 5                    |
-| 构建     | Vite 5                                     |
-| 路由     | React Router 6 (HashRouter)                |
-| 数据存储 | SQLite (Tauri) / LocalStorage (浏览器开发) |
-| AI 调用  | 统一服务层封装                             |
-| 提示词   | Markdown 模板独立管理                      |
+### 当前产品边界
 
-**禁止未经讨论更换技术栈。**
+- 默认 `/` 是**创作工作台**：小说项目/任务树 + 独立任务对话；模型选择靠近输入区，工具调用、错误与产物卡片在对话内显示，不展示隐藏推理。
+- **写作工作台**用于章节人工审阅、显式编辑、保存、采用及章节准备/总结，不恢复旧生成类 AI 面板为主流程。
+- **当前插件**只读展示 Runtime Registry 实际加载的功能、模型与其他插件，不扩展成管理、市场或独立工具执行面板。
+- 生产写章继续由确定性 Writer 编排；Canonical 只读链路、实验 Harness、Writing SubAgent 与 live Provider 验收是不同边界。当前准入和证据查阅对话工作台架构第 13～14 节，不凭目录存在或 Mock 通过宣称 R4 VERIFIED。
+- 保持 Windows 桌面写作体验、既有主题和样式 Token、轻量边框、克制阴影、2K 可用性与正文舒适阅读；不做移动优先、无限宽表单、大面积渐变或表格后台风格。
 
----
+## 4. 修改范围与安全底线
 
-## 3. 开发最高原则
+- 只修改目标及必要联动文件，不大规模随意重构，不顺手修复无关模块，不自行新增未来版本功能。
+- 不删除用户未明确要求的旧路由或功能；获准删除也必须具备等价迁移与回退验证。
+- 数据库结构、migration 和备份 schema 只在任务明确要求时调整；不改写已发布 migration，不操作真实用户库做测试。
+- 不硬编码或提交 API Key、会话凭据、`.env.local`、用户正文、正式数据库；日志与验证证据必须脱敏。真实模型调用需明确授权，并遵守冻结模型身份、预算、取消与错误边界。
+- 生成成功不等于正式采用。候选、用户决定、审阅授权、保存、采用和上下文沉淀不可混淆；不得绕过既有显式确认或已授权自动模式的复验门禁。
+- 正式写入保留作品/章节/草稿作用域、版本或哈希基线、revision/CAS、事务与幂等检查。冲突、未知类型、缺失授权或失效基线必须失败关闭，不能静默覆盖正文。
+- 浏览器回退不能冒充桌面 SQLite 事务或真实 Tauri/DSH 验收；Store 更新也不等于持久化成功。
 
-### 3.1 必须遵守
+## 5. 模块落点
 
-1. **每次只完成一个版本目标** —— 不跨版本开发
-2. **必须先阅读 `docs/`** —— 了解产品设计、UI 参考、数据模型
-3. **必须阅读 `AGENTS.md`** —— 本文件是 Agent 行为总约束
-4. **必须小步提交** —— 每个版本独立 commit + tag
-5. **必须运行测试** —— 修改后验证不破坏已有功能
-6. **必须更新 CHANGELOG** —— 记录每次变更
-7. **必须保持桌面应用体验** —— 不做网页后台风格
+| 位置                       | 应放内容                                              | 不应放内容                            |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------- |
+| `src/pages/`               | 路由级布局、组件组合、窄 Store selector 与同步 action | AI/SQL、复杂业务编排                  |
+| `src/components/`          | 通用 UI、局部交互与展示                               | 直接 AI/数据库调用、复杂业务逻辑      |
+| `src/features/`            | 业务流程、Feature hooks、跨服务协调                   | 直接 DOM 操作                         |
+| `src/services/`            | AI、Runtime、数据库、提示词、导入导出服务             | UI 组件                               |
+| `src/store/`               | 可订阅运行时状态、同步 action                         | 数据库/AI/文件/网络/计时器/DOM 副作用 |
+| `src/types/`               | 类型与契约定义                                        | 运行时业务逻辑                        |
+| `src-tauri/`               | 原生能力、SQLite 事务、Gateway/DSH 宿主边界           | 前端 UI 逻辑                          |
+| `prompts/`、`src/prompts/` | 既有模板与注册资产（按现有职责选择落点）              | 在组件内复制大段提示词                |
+| `contracts/`               | 跨 TypeScript/Rust/DSH 的共享契约                     | 仅为绕过漂移门禁而改 hash 或 exposure |
 
-### 3.2 严格禁止
+不把所有逻辑塞进 `App.tsx`。完整依赖关系以 [模块边界](docs/module-boundaries.md) 为准；遇到 legacy 例外先限制新增耦合，不借规则整改之名扩大本次任务。
 
-AI Agent **绝对不得**：
+## 6. 验证矩阵
 
-- ❌ 大规模随意重构整个项目
-- ❌ 删除用户未明确要求且尚未完成等价迁移、回退验证的旧路由或已有功能
-- ❌ 顺手修改无关模块
-- ❌ 自动扩展需求范围
-- ❌ 自行新增未来版本功能
-- ❌ 修改用户未明确要求的模块
-- ❌ 修改数据库结构（除非版本任务明确要求）
-- ❌ 把 UI 改成后台管理系统风格
-- ❌ 把所有逻辑写进 `App.tsx`
-- ❌ 在组件中直接写大量提示词
-- ❌ 在 UI 组件中直接写 SQL
-- ❌ 把 API Key 写死进代码或提交到 Git
+先运行直接覆盖变更的检查，再叠加适用层级；命令以 `package.json` 和 [测试策略](docs/technical/testing.md) 为准。
 
----
+| 变更范围               | 必要验证                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 纯文档                 | `npm run test:docs-sync`；改动文件的 Prettier；`git diff --check`；涉及版本/路线/发布口径时加 `npm run test:version-sync` |
+| 前端/TypeScript        | 相关动态测试 + `npm run lint:ci` + `npm run build`；交互变化加相关 UI/E2E                                                 |
+| Rust/SQLite            | `cargo check --locked --manifest-path src-tauri/Cargo.toml` + 相关测试；版本验收运行完整串行 Rust 测试                    |
+| Tauri/DSH payload/打包 | 相关动态测试、真实 Windows Tauri E2E、`npm run tauri:build`                                                               |
+| 发布                   | `scripts/agent-workflow/verify_project.ps1` 完整矩阵与 clean working tree                                                 |
 
-## 4. 开发工作流（强制）
-
-每个开发任务必须遵循以下流程：
-
-```text
-1. 读取任务书 / 用户需求
-   ↓
-2. 读取 AGENTS.md（本文件）
-   ↓
-3. 读取 docs/product-design.md
-   ↓
-4. 读取 docs/ui-reference.md
-   ↓
-5. 读取 docs/data-model.md
-   ↓
-6. 分析影响范围
-   ↓
-7. 制定修改计划（输出计划给用户确认）
-   ↓
-8. 只修改目标模块
-   ↓
-9. 运行验证命令
-   ↓
-10. 生成完成汇报
-   ↓
-11. 更新 CHANGELOG.md
-```
-
----
-
-## 5. 模块边界（不可跨）
-
-| 模块              | 职责                      | 禁止               |
-| ----------------- | ------------------------- | ------------------ |
-| `src/pages/`      | 页面级组件，组织布局      | 不写业务逻辑       |
-| `src/components/` | 通用 UI 组件              | 不直接调用 AI 服务 |
-| `src/features/`   | 业务逻辑模块              | 不直接操作 DOM     |
-| `src/services/`   | AI/数据库/提示词/导出服务 | 不包含 UI 代码     |
-| `src/store/`      | 状态管理                  | 不包含副作用       |
-| `src/types/`      | 类型定义                  | 不包含逻辑         |
-| `src-tauri/`      | Rust 桌面壳               | 不包含前端逻辑     |
-| `prompts/`        | AI 提示词模板             | 不在组件中重复     |
-
----
-
-## 6. UI 硬约束
-
-### 6.1 共同约束
-
-- 桌面写作软件风格（参考 Scrivener / 作家助手）
-- 浅色主题、克制阴影、轻量边框
-- 支持 2K 分辨率
-- 正文阅读和人工审阅区域保持舒适
-
-### 6.2 版本化布局
-
-- **v3.5.0 主界面**：创作工作台以小说项目/任务树 + 任务对话区为中心；模型选择靠近输入区；工具调用、错误和产物卡片在对话内显示。
-- **写作工作台**：章节人工审阅/编辑器，保留卷章树、正文阅读、显式编辑、保存、采用和章节准备/总结；生成类 AI 面板不再作为主流程。
-- **当前插件**：只读显示 Runtime Registry 中的功能、模型和其他插件，不扩展为插件管理、市场或独立工具执行面板。
-- v3.3.0+ UI 任务必须先读 `docs/architecture/conversational-creative-workbench.md`；旧三栏要求不能覆盖该文档的目标设计。
-
-### 6.3 禁止
-
-- 网页后台管理布局
-- 移动端优先设计
-- 无限宽度表单页
-- 大面积炫彩渐变
-- 表格管理后台风格
-
----
-
-## 7. 版本体系
-
-### 7.1 版本号规则
-
-- **v1.x**：应用化阶段（已完成）
-- **v2.x**：Agent 化阶段（Planner / Tool Calling / Memory，已完成）
-- **v3.x**：Autonomous 阶段（Multi-Agent / 自主创作，当前所处）
-
-### 7.2 当前版本
-
-当前版本为 v3.6.2；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
-
-### 7.3 发布流程
-
-```powershell
-git status
-git switch -c codex/vX.Y.Z-release
-git add .
-git commit -m "feat: complete vX.X.X ..."
-git push -u origin codex/vX.Y.Z-release
-
-# 创建 PR，门禁和适用审查条件通过后合并；再从 main 创建不可移动的发布 tag
-git switch main
-git pull --ff-only origin main
-git tag vX.X.X
-git push origin vX.X.X
-```
-
-详细分支、审查、hotfix 与回滚规则见 `docs/project/git-workflow.md`；日常开发不得直接提交到 `main`。
-
----
-
-## 8. 测试要求
-
-验证按变更范围分层，不再要求每个纯文档或局部前端任务都执行完整 Tauri 发布构建。
-
-### 8.1 文档任务
+文档任务示例（将路径替换为本次实际修改的文件，不运行全仓库格式化）：
 
 ```powershell
 npm run test:docs-sync
-npm run test:version-sync   # 涉及版本、路线或发布文档时
-npx prettier --check <changed-docs>
+npm run test:version-sync  # 涉及版本、路线或发布口径时
+npx prettier --check AGENTS.md docs/agent-workflow.md
 git diff --check
 git status --short
 ```
 
-### 8.2 代码任务
+Rust 测试保留 `--locked`；共享 DSH 状态的测试及完整 Rust 验收使用串行参数：
 
-- 运行直接覆盖修改模块的动态测试；
-- 前端/TypeScript 变更运行 `npm run lint:ci` 与 `npm run build`；
-- Rust/SQLite 变更在 `src-tauri` 运行 `cargo check`、相关测试，并在版本验收时运行完整 `cargo test`；
-- 只有桌面载体、Tauri 配置、DSH payload、打包或发布任务才把完整 `npm run tauri:build` 作为该任务强制门禁。
+```powershell
+cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+```
 
-### 8.3 发布任务
+涉及 DSH 的完整验收应先按测试文档准备固定载体并重建当前 Gateway，不能复用不明来源缓存。发布统一入口：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-发布矩阵包含版本/文档同步、覆盖率、lint、前端构建、Rust、真实 Windows Tauri E2E、生产构建与 clean working tree。定向测试不能代替发布矩阵。
+发布矩阵包含版本/文档同步、覆盖率、lint、前端构建、Rust、真实 Windows Tauri E2E 与生产构建；定向测试不能替代它。纯文档任务不要求无关的完整 Tauri 发布构建。
 
----
+任何检查失败都要定位原因：修复本次引入的问题；既有问题或环境阻碍记录命令、现象和影响，不放宽门禁、不伪造通过。跳过、`NOT_RUN`、Mock、浏览器与真实桌面/云端证据分别报告。
 
-## 9. 文档体系
+## 7. 文档同步、Git 与交付
 
-| 文件                                                     | 用途                         |
-| -------------------------------------------------------- | ---------------------------- |
-| `AGENTS.md`                                              | Agent 总入口规则             |
-| `.github/copilot-instructions.md`                        | Copilot 项目开发指令         |
-| `.github/instructions/`                                  | 分领域开发指令               |
-| `.github/prompts/`                                       | 版本开发 Prompt 模板         |
-| `.github/skills/`                                        | Agent Skills（多步骤工作流） |
-| `.cursor/rules/`                                         | Cursor IDE 规则              |
-| `docs/product-design.md`                                 | 产品设计文档                 |
-| `docs/ui-reference.md`                                   | UI 参考标准                  |
-| `docs/data-model.md`                                     | 数据模型边界                 |
-| `docs/development-rules.md`                              | 开发规则                     |
-| `docs/version-roadmap.md`                                | 版本路线图                   |
-| `docs/project-architecture.md`                           | 项目架构                     |
-| `docs/module-boundaries.md`                              | 模块边界                     |
-| `docs/agent-workflow.md`                                 | Agent 工作流                 |
-| `docs/ai-agent-roadmap.md`                               | AI Agent 路线图              |
-| `docs/architecture/conversational-creative-workbench.md` | v3.3.0+ 对话工作台权威规划   |
-| `docs/audit/agent-requirements-review-2026-08-20.md`     | Agent 要求时效审计           |
-| `CHANGELOG.md`                                           | 变更日志                     |
+1. 随修改同步相关文档，**在最终验证前**更新 `CHANGELOG.md`。不因纯文档任务自动升级应用版本，不新增逐版本 release-notes 碎片。
+2. 功能/用户流程变化更新 README 和用户指南；架构/数据变化更新对应权威设计；只修正文档时不声称实现了新功能。
+3. `commit`、`push`、创建 PR、合并、`tag` 和发布仅在用户或已确认任务明确授权相应动作时执行。小步修改不等于自动提交；普通任务不要求工作树干净。
+4. 获准提交时只暂存本次相关文件并检查暂存差异，不使用无差别 `git add .` 混入用户修改。日常开发不直接提交到 `main`，不 force push，不移动既有 tag。
+5. 发布严格按 [Git 治理](docs/project/git-workflow.md)：分支/PR → 适用门禁和审查 → 合入并同步 `main` → 不可移动的发布 tag。不要把示例命令视为自动执行授权。
 
----
+完成汇报至少包含：
 
-## 10. AI Agent 行为守则
+- **完成内容**：做了什么、未扩展哪些边界；
+- **文件**：主要修改/新增文件及其用途；
+- **验证**：实际执行的命令、结果，未执行项及原因；
+- **风险**：剩余问题、限制和需用户决策的事项；
+- **Git 状态**：是否提交/推送/打 tag，以及是否保留用户已有修改。
 
-### 10.1 分析优先
-
-在动手修改任何代码之前，必须先：
-
-1. 阅读相关 docs
-2. 理解现有代码结构
-3. 分析影响范围
-4. 输出清晰计划
-
-### 10.2 克制修改
-
-- 只修改任务目标范围内的文件
-- 不顺手"优化"无关代码
-- 不擅自重构
-- 不引入未要求的依赖
-
-### 10.3 验证闭环
-
-- 每次修改后验证
-- 构建失败必须修复
-- 不留下已知错误
-
-### 10.4 文档同步
-
-- 功能变更 → 更新 README
-- 版本完成 → 更新 CHANGELOG
-- 架构变更 → 更新 docs
-- 新版本 → 打 Git tag
-
----
-
-## 11. 用户与 Agent 的真实协作流程
-
-### 11.1 当前开发协作模式（与产品内 Agent Runtime 版本无关）
-
-仓库开发采用 **用户主导、Agent 执行** 的协作模式，但不再假定用户必须在 ChatGPT 与 VS Code 之间手工复制任务书：
-
-```text
-用户提出目标
-→ Agent 读取仓库状态与权威文档
-→ 分析影响并在需要时输出计划供确认
-→ Agent 在明确范围内执行
-→ 运行与变更范围相匹配的验证
-→ 输出完成证据
-→ 仅在用户或版本任务明确要求时 commit / push / tag
-```
-
-复杂版本任务仍可以使用自包含任务书；直接在同一 Agent 会话执行的明确任务不需要为了形式重复生成任务书。
-
-### 11.2 Agent 的角色定位
-
-Agent **不是** 自主决策者。Agent 是 **任务执行者**。
-
-- ✅ Agent 必须按用户最新明确需求或已确认任务书执行
-- ✅ Agent 可以读取项目中的 Skills 来指导执行方式
-- ❌ Agent 不能因为项目里有 Skills 就自行扩展任务
-- ❌ Agent 不能自行决定下一步版本内容
-- ❌ Agent 不能跳过任务书中的禁止事项
-
-### 11.3 任务书要求
-
-需要任务书时，任务书必须：
-
-- 自包含（不依赖对话历史）
-- 包含版本号、目标、禁止事项
-- 包含详细实现要求
-- 包含测试要求
-- 包含完成汇报格式
-
-详见 `.github/skills/agent-task-writer/SKILL.md`。
-
-### 11.4 开发辅助 Skills 的作用
-
-`.github/skills/` 中的 Skills 是 **开发辅助系统**，不是用户端产品功能。
-
-它们的作用是：
-
-- 指导 Agent 如何正确执行任务
-- 提供标准化的执行流程
-- 防止 Agent 越界操作
-
-它们不代表软件内部功能已经实现。
-
----
-
-> **本文件是 AI Novel Studio Agent 化开发的核心约束文件。**
-> **所有 AI Agent 在操作本仓库时，必须无条件遵守本文件中的规则。**
+复杂版本任务可使用自包含任务书，注明目标、版本或“非版本任务”、禁止事项、实现要求、测试和汇报格式；同一会话内的明确任务不强制重复生成任务书。详细过程见 [Agent 工作流](docs/agent-workflow.md)。

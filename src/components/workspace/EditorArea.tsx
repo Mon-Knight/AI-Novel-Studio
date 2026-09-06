@@ -13,6 +13,7 @@ export type {
 } from '../../types/workspaceSafety';
 export type {
   DocumentSaveState,
+  DocumentAdoptState,
   EditorAreaHandle,
   EditorActionState,
   EditorCommandRequest,
@@ -69,24 +70,31 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     ref,
     () => ({
       save: document.handleSave,
+      focus: () => document.textareaRef.current?.focus({ preventScroll: true }),
       restoreRecovery: document.restoreRecovery,
     }),
-    [document.handleSave, document.restoreRecovery],
+    [document.handleSave, document.restoreRecovery, document.textareaRef],
   );
 
   useLayoutEffect(() => {
     onActionStateChange?.({
+      chapterId: props.chapter?.id,
       saving: document.saving,
       adopting: document.adopting,
       saveState: document.saveState,
       saveMessage: document.saveMsg,
+      adoptState: document.adoptState,
+      adoptMessage: document.adoptMsg,
     });
   }, [
     document.adopting,
+    document.adoptState,
+    document.adoptMsg,
     document.saveMsg,
     document.saveState,
     document.saving,
     onActionStateChange,
+    props.chapter?.id,
   ]);
 
   return (

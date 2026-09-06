@@ -4,12 +4,20 @@ import { isTauri } from '../database/db';
 import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
 import { WORKBENCH_TOOLS } from './currentPluginService';
-import { classifyTaskIntent, selectCandidateTool } from './taskGoalRouting';
+import {
+  assertTaskGoalExecutable,
+  classifyTaskIntent,
+  selectCandidateTool,
+} from './taskGoalRouting';
 import {
   composeWorkbenchInstruction,
-  derivePersistentTaskConstraints,
+  deriveTaskConstraintBrief,
+  summarizeTaskConstraintBrief,
 } from './taskConstraintBrief';
 import { workbenchChapterWriter } from './workbenchChapterWriter';
+import { buildWorkbenchMemoryQuery } from './workbenchMemoryQuery';
+import { taskGoalDirective } from './taskGoalDirective';
+import type { TaskConstraintBriefReceipt } from '../../types/taskConstraintBrief';
 import { chapterRequiredError, formatWorkbenchFailure } from './workbenchFailure';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
 import type { ToolInvocationContext, ToolResult } from '../../types/toolRegistry';
@@ -46,7 +54,7 @@ export interface TaskRuntimeAdapterDependencies {
 const WRITER_TOOLS = new Set(['generate_chapter', 'polish_chapter']);
 
 function isChapterRevisionGoal(goal: string): boolean {
-  return /重新|重写|修改|改写|润色|优化|调整/i.test(goal);
+  return /重新|重写|修改|改写|润色|优化|调整/i.test(taskGoalDirective(goal).text);
 }
 
 function summarizeArguments(args: Record<string, unknown>): Record<string, unknown> {
@@ -95,6 +103,7 @@ function withWriterContextEvidence(
           issueCodes: string[];
           sourceContentHash: string;
         }>;
+        integrityWarnings?: Array<{ code: string; summary: string; severity: string }>;
         providerRequestEvidence?: {
           schemaVersion: 'workbench_provider_request_evidence_v1';
           hashAlgorithm: 'sha256';
@@ -118,6 +127,7 @@ function withWriterContextEvidence(
         };
       }
     | undefined,
+  taskConstraints?: TaskConstraintBriefReceipt,
 ): unknown {
   const summarized = summarizeResult(result);
   if (!written) return summarized;
@@ -133,6 +143,8 @@ function withWriterContextEvidence(
       finalWordCount: written.finalWordCount,
       lengthRepairCount: written.lengthRepairCount,
       integrityRepairCount: written.integrityRepairCount,
+      integrityWarnings: written.integrityWarnings,
+      ...(taskConstraints ? { taskConstraints } : {}),
       ...(written.integrityRepairAttempts
         ? { integrityRepairAttempts: written.integrityRepairAttempts }
         : {}),
@@ -212,9 +224,14 @@ async function publishChapterCandidate(input: {
   text: string;
   artifactId?: string;
   mode: 'generate' | 'polish';
+  warningCount?: number;
 }): Promise<void> {
   const title = input.mode === 'polish' ? '润色章节候选' : '章节正文候选';
-  const summary = '已用正式写章管线生成，仅供确认审阅，不会直接写入正式正文。';
+  const summary =
+    '已用正式写章管线生成，仅供确认审阅，不会直接写入正式正文。' +
+    (input.warningCount
+      ? ` 有 ${input.warningCount} 项低置信语义提醒，请结合正文人工判断；系统未为此自动重写。`
+      : '');
   if (input.artifactId && isTauri()) {
     await taskConversationService.createArtifactCard({
       conversationId: input.conversationId,
@@ -295,6 +312,7 @@ async function execute(
   chapterWriter: ChapterWriterPort,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
+  assertTaskGoalExecutable(input.goal);
   const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
   const workerId = input.workerId ?? 'worker-' + input.conversationId + '-' + String(Date.now());
   const run = await taskConversationService.createRun(
@@ -338,21 +356,21 @@ async function execute(
       name: 'search_memory',
       args: () => ({
         novelId: input.novelId,
-        query: input.goal,
+        query: buildWorkbenchMemoryQuery(input.goal),
         ...(input.chapterId ? { targetChapterId: input.chapterId } : {}),
       }),
     });
     const candidateTool = selectCandidateTool(input.goal, input.chapterId);
     let writerInstruction = input.goal;
+    let taskConstraints: TaskConstraintBriefReceipt | undefined;
     if (candidateTool && WRITER_TOOLS.has(candidateTool.name)) {
       const bundle = await taskConversationService.get(input.conversationId);
       if (!bundle || bundle.conversation.novelId !== input.novelId) {
         throw new Error('写章任务对话不存在或不属于当前作品。');
       }
-      writerInstruction = composeWorkbenchInstruction(
-        input.goal,
-        derivePersistentTaskConstraints(bundle.turns, input.turnId),
-      );
+      const brief = deriveTaskConstraintBrief(bundle.turns, input.turnId);
+      writerInstruction = composeWorkbenchInstruction(input.goal, brief.constraints);
+      taskConstraints = brief.entries.length > 0 ? summarizeTaskConstraintBrief(brief) : undefined;
     }
     if (candidateTool) {
       steps.push({
@@ -407,7 +425,13 @@ async function execute(
             onProgress: async (progress) => {
               const progressEvent = await taskConversationService.updateToolEvent(runningEvent, {
                 status: 'running',
-                result: progress,
+                result: {
+                  ...progress,
+                  generationContext: {
+                    sources: [],
+                    ...(taskConstraints ? { taskConstraints } : {}),
+                  },
+                },
               });
               onEvent?.({ run: currentRun, toolEvent: progressEvent });
             },
@@ -441,6 +465,7 @@ async function execute(
                     issueCodes: string[];
                     sourceContentHash: string;
                   }>;
+                  integrityWarnings?: Array<{ code: string; summary: string; severity: string }>;
                   providerRequestEvidence?: {
                     schemaVersion: 'workbench_provider_request_evidence_v1';
                     hashAlgorithm: 'sha256';
@@ -470,7 +495,7 @@ async function execute(
           status: result.ok ? 'succeeded' : 'failed',
           durationMs: Math.max(0, Math.round(performance.now() - started)),
           error: result.ok ? undefined : result.error,
-          result: withWriterContextEvidence(result, written),
+          result: withWriterContextEvidence(result, written, taskConstraints),
           finishedAt: new Date().toISOString(),
         });
         finalized = true;
@@ -479,7 +504,7 @@ async function execute(
         if (!result.ok) throw new Error(result.error || '工具 ' + step.name + ' 执行失败');
         if (WRITER_TOOLS.has(step.name) && input.chapterId && result.ok) {
           const writtenCandidate = evidence.writer as
-            { text?: string; artifactId?: string } | undefined;
+            { text?: string; artifactId?: string; integrityWarnings?: unknown[] } | undefined;
           const text =
             writtenCandidate?.text ||
             (result.data && typeof result.data === 'object' && 'text' in result.data
@@ -493,6 +518,7 @@ async function execute(
               runId: run.runId,
               text,
               artifactId: writtenCandidate?.artifactId,
+              warningCount: writtenCandidate?.integrityWarnings?.length,
               mode:
                 step.name === 'polish_chapter' || isChapterRevisionGoal(input.goal)
                   ? 'polish'

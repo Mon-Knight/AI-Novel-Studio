@@ -95,6 +95,8 @@ export interface GlobalLoadingState {
   onClose?: () => void;
   onRetry?: () => void;
   operationId?: string;
+  /** The rendered modal owns the single dismissal timer. */
+  autoCloseMs: number;
 }
 
 export function useGlobalLoadingModal(
@@ -109,6 +111,7 @@ export function useGlobalLoadingModal(
     percent: -1,
     errorMessage: '',
     cancelable: false,
+    autoCloseMs,
   });
 
   const closeModal = useCallback(() => {
@@ -132,6 +135,7 @@ export function useGlobalLoadingModal(
             percent: detail.percent ?? -1,
             cancelable: detail.cancelable ?? false,
             errorMessage: '',
+            autoCloseMs,
             operationId: detail.operationId,
             onCancel:
               detail.cancelable && detail.operationId
@@ -168,18 +172,9 @@ export function useGlobalLoadingModal(
               cancelable: false,
               errorMessage: '',
               onCancel: undefined,
+              autoCloseMs: detail.autoCloseMs ?? autoCloseMs,
             };
           });
-          const successAutoCloseMs = detail.autoCloseMs ?? autoCloseMs;
-          if (successAutoCloseMs > 0) {
-            setTimeout(() => {
-              setState((prev) =>
-                detail.operationId && prev.operationId !== detail.operationId
-                  ? prev
-                  : { ...prev, open: false },
-              );
-            }, successAutoCloseMs);
-          }
           break;
         }
         case 'error':

@@ -11,6 +11,8 @@ interface AiTaskRecordCardProps {
   expanded: boolean;
   selected: boolean;
   selectMode: boolean;
+  staleResults?: boolean;
+  deleting?: boolean;
   activeExecutionState: ActiveExecutionState;
   onToggleSelect: (id: string) => void;
   onToggleExpand: (id: string) => void;
@@ -65,6 +67,8 @@ function AiTaskRecordCard({
   expanded,
   selected,
   selectMode,
+  staleResults = false,
+  deleting = false,
   activeExecutionState,
   onToggleSelect,
   onToggleExpand,
@@ -75,16 +79,24 @@ function AiTaskRecordCard({
     (task.status === 'running' || task.status === 'pending') && activeExecutionState !== 'inactive';
   const canDelete =
     task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled';
+  const selectionDisabled = staleResults || deleting;
 
   return (
     <div
       className="detail-card"
+      data-testid="ai-task-record"
+      data-task-id={task.id}
+      data-stale={staleResults ? 'true' : 'false'}
       style={{
         cursor: 'pointer',
         borderLeft: `3px solid ${statusColor(task.status)}`,
         background: selected ? 'var(--color-primary-light)' : undefined,
       }}
-      onClick={() => (selectMode ? canDelete && onToggleSelect(task.id) : onToggleExpand(task.id))}
+      onClick={() =>
+        selectMode && !staleResults
+          ? !selectionDisabled && canDelete && onToggleSelect(task.id)
+          : onToggleExpand(task.id)
+      }
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
@@ -100,6 +112,9 @@ function AiTaskRecordCard({
             {selectMode && canDelete && (
               <input
                 type="checkbox"
+                aria-label={`选择任务记录 ${task.id}`}
+                disabled={selectionDisabled}
+                style={{ width: 24, height: 24, flex: '0 0 24px' }}
                 checked={selected}
                 onChange={() => onToggleSelect(task.id)}
                 onClick={(event) => event.stopPropagation()}
@@ -108,7 +123,7 @@ function AiTaskRecordCard({
             <span style={{ fontWeight: 600, fontSize: 13 }}>{AiTaskTypeLabels[task.taskType]}</span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 6px',
                 borderRadius: 3,
                 background: statusBackground(task.status),
@@ -118,16 +133,16 @@ function AiTaskRecordCard({
               {statusLabel(task.status)}
             </span>
             {task.modelName && (
-              <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                 {task.modelName}
               </span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
             {task.inputSummary && task.inputSummary.slice(0, 60)}
             {task.inputSummary && task.inputSummary.length > 60 && '…'}
           </div>
-          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
             {formatDateTime(task.createdAt)}
             {task.finishedAt && ` → ${formatDateTime(task.finishedAt)}`}
           </div>
@@ -152,12 +167,14 @@ function AiTaskRecordCard({
             {canDelete && (
               <button
                 className="btn btn-text btn-sm"
-                style={{ color: 'var(--color-error)' }}
+                style={{ color: 'var(--color-error-text)', minWidth: 28, minHeight: 28 }}
                 onClick={(event) => {
                   event.stopPropagation();
                   onDelete(task);
                 }}
                 title="删除此记录"
+                aria-label={`删除任务记录 ${task.id}`}
+                disabled={selectionDisabled}
               >
                 <Trash2 aria-hidden="true" size={16} strokeWidth={1.8} />
               </button>
@@ -172,7 +189,7 @@ function AiTaskRecordCard({
             padding: 8,
             background: 'var(--color-bg-primary)',
             borderRadius: 4,
-            fontSize: 11,
+            fontSize: 12,
           }}
         >
           <div>

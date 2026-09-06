@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, RouterProvider, createHashRouter, createMemoryRouter } from 'react-router-dom';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -263,8 +263,11 @@ describe('workspace leave guard', () => {
     renderWithMemoryRouter(<GuardHarness save={async () => true} discard={discard} />);
     await waitFor(() => expect(tauriHarness.closeHandler).not.toBeNull());
 
+    const concurrentRequest = screen.getByRole('button', { name: '切换 C' });
     await user.click(screen.getByRole('button', { name: '切换 B' }));
-    await user.click(screen.getByRole('button', { name: '切换 C' }));
+    expect(concurrentRequest.hasAttribute('inert')).toBe(true);
+    // A real pointer is blocked by the modal; replay a programmatic competing request.
+    fireEvent.click(concurrentRequest);
     act(() => tauriHarness.closeHandler?.({ preventDefault: vi.fn() }));
 
     expect(screen.getAllByTestId('workspace-leave-dialog')).toHaveLength(1);

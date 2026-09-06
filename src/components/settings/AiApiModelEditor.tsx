@@ -1,5 +1,6 @@
 import type { CloudApiProvider } from '../../types/ai';
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { ApiModelEditorDraft } from './apiModelEditorDraft';
 
 interface AiApiModelEditorProps {
@@ -67,9 +68,8 @@ export function AiApiModelEditor({ draft, onChange, onSave, onCancel }: AiApiMod
           placeholder="sk-..."
         />
         <div className="settings-help-text">
-          {draft.apiKey
-            ? '本次应用会话已绑定：' + aiSettingsService.maskApiKey(draft.apiKey)
-            : 'Key 仅保留在本次应用会话，不写入模型卡片、项目备份或 Git。'}
+          {draft.apiKey ? '当前填写：' + aiSettingsService.maskApiKey(draft.apiKey) + '。' : ''}
+          {getCredentialStorageCopy().keyHelp}
         </div>
       </div>
       <div className="settings-field">

@@ -337,7 +337,7 @@ test('artifact card defers failed content details until the disclosure is opened
   assert.doesNotMatch(html, /候选内容正在载入/);
 });
 
-test('structured artifact cards show selectable options instead of dumping JSON', () => {
+test('structured artifact cards separate local review marks from whole-artifact application', () => {
   const html = renderToStaticMarkup(
     createElement(ArtifactCard, {
       artifact: {
@@ -361,9 +361,12 @@ test('structured artifact cards show selectable options instead of dumping JSON'
   assert.match(html, /查明真相/);
   assert.match(html, /原始数据/);
   assert.match(html, /type="checkbox"/);
-  assert.match(html, /checked/);
-  assert.match(html, /修改/);
-  assert.match(html, />修订</);
+  assert.doesNotMatch(html, /\schecked(?:=|\s|>)/);
+  assert.match(html, /已审阅/);
+  assert.match(html, /填写修订意见/);
+  assert.match(html, />要求修改</);
+  assert.doesNotMatch(html, /workbench-artifact-candidate-revise/);
+  assert.match(html, /整份原始候选的全部内容/);
   assert.doesNotMatch(html, /查看候选内容/);
   assert.doesNotMatch(html, /<pre>/);
 });

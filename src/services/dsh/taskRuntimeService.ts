@@ -113,7 +113,7 @@ export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
     modelId: resolvedSnapshot.modelId,
   });
   if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
-    throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
+    throw new Error('冻结模型没有可用的匹配凭据，已拒绝启动任务。');
   }
   return apiKey;
 }
@@ -160,7 +160,7 @@ export async function resolveDshTaskApiKeyAsync(modelSnapshot: TaskModelSnapshot
     modelId: resolvedSnapshot.modelId,
   });
   if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
-    throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
+    throw new Error('冻结模型没有可用的匹配凭据，已拒绝启动任务。');
   }
   return apiKey;
 }

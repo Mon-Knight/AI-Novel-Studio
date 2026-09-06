@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { hasActiveModal } from '../components/common/useModalAccessibility';
+import { isComposingKeyboardEvent } from '../utils/keyboardEvent';
 
 export interface ShortcutDefinition {
   /** Target key, case-insensitive (e.g., 's', 'Enter', 'Escape', '/') */
@@ -27,6 +29,7 @@ export function useKeyboardShortcuts(shortcuts: ShortcutDefinition[]): void {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || hasActiveModal() || isComposingKeyboardEvent(event)) return;
       const activeElement = document.activeElement as HTMLElement | null;
       const isInput =
         activeElement &&

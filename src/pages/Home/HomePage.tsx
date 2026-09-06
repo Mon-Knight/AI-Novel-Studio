@@ -1,5 +1,5 @@
 import { appLogger } from '../../services/observability/appLogger';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import {
   BookOpenText,
   FileJson,
@@ -15,7 +15,12 @@ import NovelCard from '../../components/novel-card/NovelCard';
 import FirstTimeGuide from '../../components/common/FirstTimeGuide';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
 import ImportJsonDialog from '../../components/import/ImportJsonDialog';
-import type { Novel } from '../../types/novel';
+import { useNovelLibrary } from '../../features/novels/useNovelLibrary';
+import LoadingState from '../../components/common/LoadingState';
+import ErrorState from '../../components/common/ErrorState';
+import EmptyState from '../../components/common/EmptyState';
+import { PageHeader } from '../../components/common/PageLayout';
+import { CreateNovelDialog } from '../../components/novel-card/CreateNovelDialog';
 import { confirmDanger, showError } from '../../utils/nativeDialog';
 import { describeUnknownError } from '../../utils/errorMessage';
 import '../../styles/home.css';
@@ -31,7 +36,7 @@ const quickActions: Array<
 
 function HomePage() {
   const navigate = useNavigate();
-  const [novels, setNovels] = useState<Novel[]>([]);
+  const { novels, setNovels, loading, error, reload: loadNovels } = useNovelLibrary();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('');
@@ -40,26 +45,18 @@ function HomePage() {
   const [createError, setCreateError] = useState('');
   const [showTxtImport, setShowTxtImport] = useState(false);
   const [showJsonImport, setShowJsonImport] = useState(false);
-
-  const loadNovels = useCallback(async () => {
-    try {
-      const list = await novelRepository.getAll();
-      setNovels(list);
-    } catch (e) {
-      appLogger.error('Failed to load novels:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadNovels();
-  }, [loadNovels]);
+  const creationPending = useRef(false);
+  const recentNovel = [...novels].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  )[0];
 
   const handleCreateNovel = async () => {
-    if (creating) return; // 防重复提交
+    if (creationPending.current) return;
     if (!newTitle.trim()) {
       setCreateError('请输入作品名称');
       return;
     }
+    creationPending.current = true;
     setCreating(true);
     setCreateError('');
     try {
@@ -77,6 +74,7 @@ function HomePage() {
     } catch (e) {
       setCreateError('创建失败，请重试');
     } finally {
+      creationPending.current = false;
       setCreating(false);
     }
   };
@@ -113,41 +111,42 @@ function HomePage() {
 
   return (
     <div className="home-page">
-      {/* v1.0.0 首次使用引导 */}
+      <PageHeader
+        title="小说作品"
+        icon={BookOpenText}
+        description="继续已有作品，或开始一个新的小说项目。"
+        actions={
+          <>
+            {recentNovel && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => navigate(`/novels/${recentNovel.id}/workspace`)}
+                data-testid="project-continue-recent"
+              >
+                继续《{recentNovel.title}》
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              data-testid="project-create"
+              onClick={() => setShowCreateModal(true)}
+            >
+              <PenLine aria-hidden="true" size={16} strokeWidth={1.8} />
+              新建作品
+            </button>
+          </>
+        }
+      />
       <FirstTimeGuide />
-
-      {/* 横幅 */}
-      <div className="home-banner">
-        <div className="home-banner-icon">
-          <BookOpenText aria-hidden="true" size={28} strokeWidth={1.8} />
-        </div>
-        <div className="home-banner-content">
-          <div className="home-banner-title">欢迎使用 AI Novel Studio</div>
-          <div className="home-banner-desc">
-            Windows 桌面端 AI 小说创作工作台。逐章辅助生成、修改、润色与确认，帮助完成长篇小说。
-          </div>
-        </div>
-      </div>
 
       {/* 快捷入口 */}
       <div className="home-quick-actions">
-        <div
-          className="quick-action-card"
-          data-testid="project-create"
-          onClick={() => setShowCreateModal(true)}
-          style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-light)' }}
-        >
-          <div className="qa-icon">
-            <PenLine aria-hidden="true" size={20} strokeWidth={1.8} />
-          </div>
-          <div className="qa-label" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
-            新建作品
-          </div>
-        </div>
         {quickActions.map((action) => {
           const Icon = action.icon;
           return (
-            <div
+            <button
+              type="button"
               key={action.label}
               className="quick-action-card"
               onClick={() => {
@@ -163,7 +162,7 @@ function HomePage() {
                 <Icon aria-hidden="true" size={20} strokeWidth={1.8} />
               </div>
               <div className="qa-label">{action.label}</div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -171,22 +170,24 @@ function HomePage() {
       {/* 作品列表 */}
       <div className="home-section-header">
         <span className="home-section-title">我的作品</span>
-        <span className="home-section-count">共 {novels.length} 部</span>
+        <span className="home-section-count">
+          {loading ? '正在读取…' : error ? '读取未完成' : `共 ${novels.length} 部`}
+        </span>
       </div>
 
       <div data-testid="project-list">
-        {novels.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>
-            <BookOpenText
-              aria-hidden="true"
-              size={48}
-              strokeWidth={1.8}
-              style={{ marginBottom: 16, opacity: 0.3 }}
-            />
-            <div style={{ fontSize: 16, marginBottom: 16 }}>
-              还没有作品，点击上方「新建作品」开始
-            </div>
-          </div>
+        {error && (
+          <ErrorState message="作品读取失败" detail={error} onRetry={() => void loadNovels()} />
+        )}
+        {loading && novels.length === 0 ? (
+          <LoadingState text="正在读取作品…" />
+        ) : novels.length === 0 && !error ? (
+          <EmptyState
+            icon={BookOpenText}
+            title="还没有作品"
+            description="创建作品后，即可在创作工作台提出目标。"
+            action={{ label: '创建第一部作品', onClick: () => setShowCreateModal(true) }}
+          />
         ) : (
           <div className="novel-card-grid">
             {novels.map((novel) => (
@@ -204,82 +205,23 @@ function HomePage() {
 
       {/* 新建作品弹窗 */}
       {showCreateModal && (
-        <div
-          className="modal-overlay"
-          data-testid="project-create-dialog"
-          onClick={() => setShowCreateModal(false)}
-        >
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <PenLine aria-hidden="true" size={18} strokeWidth={1.8} />
-              新建作品
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <label className="panel-field-label">作品名称 *</label>
-                <input
-                  type="text"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  data-testid="project-name-input"
-                  className="form-input"
-                  placeholder="请输入作品名称"
-                  style={{ width: '100%' }}
-                  autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateNovel()}
-                />
-              </div>
-              <div>
-                <label className="panel-field-label">题材</label>
-                <input
-                  type="text"
-                  value={newGenre}
-                  onChange={(e) => setNewGenre(e.target.value)}
-                  className="form-input"
-                  placeholder="如：科幻、仙侠、悬疑"
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label className="panel-field-label">简介</label>
-                <textarea
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  className="form-textarea"
-                  placeholder="简要介绍作品背景和主要情节方向"
-                  style={{ width: '100%', height: 80, resize: 'vertical' }}
-                />
-              </div>
-              {createError && (
-                <div
-                  data-testid="error-notice"
-                  style={{ fontSize: 13, color: 'var(--color-error)' }}
-                >
-                  {createError}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setCreateError('');
-                  }}
-                >
-                  取消
-                </button>
-                <button
-                  data-testid="project-save"
-                  className="btn btn-primary"
-                  onClick={handleCreateNovel}
-                  disabled={creating}
-                >
-                  {creating ? '创建中...' : '创建作品'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <CreateNovelDialog
+          value={{ title: newTitle, genre: newGenre, description: newDesc }}
+          busy={creating}
+          error={createError}
+          onChange={(patch) => {
+            if (patch.title !== undefined) setNewTitle(patch.title);
+            if (patch.genre !== undefined) setNewGenre(patch.genre);
+            if (patch.description !== undefined) setNewDesc(patch.description);
+          }}
+          onCreate={() => void handleCreateNovel()}
+          onCancel={() => {
+            if (!creating) {
+              setShowCreateModal(false);
+              setCreateError('');
+            }
+          }}
+        />
       )}
 
       {/* 导入弹窗 */}

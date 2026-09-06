@@ -6,11 +6,12 @@ alwaysApply: true
 
 # Release Rules
 
+本文仅适用于已授权的发布任务；普通文档/代码任务按根 `AGENTS.md` 分层验证，不因本规则常驻而自动触发发布。
+
 ## 发布前强制要求
 
-- ✅ `npm run build` 通过
-- ✅ `cargo check` 通过
-- ✅ `npm run tauri build` 通过
+- ✅ `powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1` 完整发布矩阵通过，且发布工作树 clean
+- ✅ 桌面生产构建使用包含 DSH assets 准备的 `npm run tauri:build`，不以裸 Tauri 构建替代
 - ✅ `CHANGELOG.md` 已更新
 - ✅ `README.md` 已同步
 - ✅ `docs/version-roadmap.md` 已标记
@@ -18,13 +19,15 @@ alwaysApply: true
 
 ## 人工确认事项
 
-以下操作 **默认不自动执行**，需人工确认：
+以下操作 **默认不自动执行**，仅在用户或已确认任务明确授权相应动作时执行：
 
 - ⚠️ `git tag vX.X.X` — 默认不自动 tag
-- ⚠️ `git push origin main` — 默认不自动 push
+- ⚠️ `git push -u origin codex/vX.Y.Z-release` — 仅推送已授权任务分支，不直接向 `main` 推送
 - ⚠️ `git push origin vX.X.X` — 默认不自动 push tag
 - ⚠️ 删除文件 — 绝对不自动删除
 - ⚠️ 覆盖安装包 — 需确认
+
+发布顺序以 `docs/project/git-workflow.md` 为准：PR 门禁与审查通过、合入并同步 `main` 后才创建不可移动的 tag；确认构建不等于授权 commit / push / PR / 合并 / tag / 发布。
 
 ## 禁止
 

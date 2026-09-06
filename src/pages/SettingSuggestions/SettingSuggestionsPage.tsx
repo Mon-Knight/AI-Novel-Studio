@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
+import { SettingSuggestionEditDialog } from './SettingSuggestionEditDialog';
 import { novelRepository } from '../../services/database/novelRepository';
 import { settingSuggestionService } from '../../services/settingSuggestions/settingSuggestionService';
 import type { Novel } from '../../types/novel';
@@ -52,6 +53,8 @@ function SettingSuggestionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<SettingSuggestionRecord | null>(null);
   const [editingJson, setEditingJson] = useState('');
+  const [editingBusy, setEditingBusy] = useState(false);
+  const editingInFlight = useRef(false);
   const generateAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
@@ -189,7 +192,9 @@ function SettingSuggestionsPage() {
   };
 
   const confirmEditAdopt = async () => {
-    if (!editingRecord) return;
+    if (!editingRecord || editingInFlight.current) return;
+    editingInFlight.current = true;
+    setEditingBusy(true);
     setError('');
     try {
       const parsed = JSON.parse(editingJson) as SettingSuggestionPayload;
@@ -200,6 +205,9 @@ function SettingSuggestionsPage() {
       setMessage(`已编辑后采纳，目标 ${result.targetId?.slice(0, 8) || ''}`);
     } catch (e: unknown) {
       setError(describeUnknownError(e, '编辑后采纳失败，请检查 JSON 格式'));
+    } finally {
+      editingInFlight.current = false;
+      if (mountedRef.current) setEditingBusy(false);
     }
   };
 
@@ -466,30 +474,14 @@ function SettingSuggestionsPage() {
       </div>
 
       {editingRecord && (
-        <div className="modal-overlay" onClick={() => setEditingRecord(null)}>
-          <div
-            className="modal-dialog setting-suggestions-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-title">编辑后采纳</div>
-            <div className="setting-suggestions-muted">
-              修改 JSON 字段后保存，会写入正式模块并把候选标记为“编辑后采纳”。
-            </div>
-            <textarea
-              className="input setting-suggestions-json-editor"
-              value={editingJson}
-              onChange={(e) => setEditingJson(e.target.value)}
-            />
-            <div className="setting-suggestions-modal-actions">
-              <button className="btn btn-secondary" onClick={() => setEditingRecord(null)}>
-                取消
-              </button>
-              <button className="btn btn-primary" onClick={confirmEditAdopt}>
-                确认采纳
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingSuggestionEditDialog
+          value={editingJson}
+          onChange={setEditingJson}
+          busy={editingBusy}
+          error={error}
+          onClose={() => setEditingRecord(null)}
+          onConfirm={() => void confirmEditAdopt()}
+        />
       )}
     </div>
   );

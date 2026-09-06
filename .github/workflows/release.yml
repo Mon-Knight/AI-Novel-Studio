@@ -15,23 +15,42 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
+  release-context:
+    name: Validate semantic version and channel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Select validated release channel
+        id: channel
+        shell: bash
+        env:
+          REQUESTED_RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: node scripts/release/select-release-channel.mjs >> "$GITHUB_OUTPUT"
+
   desktop-gate:
     name: Required Windows desktop quality and E2E
+    needs: release-context
     uses: ./.github/workflows/windows-desktop-e2e.yml
     with:
       suite: full
 
   windows-release:
-    needs: desktop-gate
+    needs: [desktop-gate, release-context]
     runs-on: windows-2022
     timeout-minutes: 90
+    concurrency:
+      group: release-channel-${{ needs.release-context.outputs.channel }}
+      cancel-in-progress: false
     env:
-      RELEASE_CHANNEL: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel) || (contains(github.ref_name, '-') && 'beta') || 'stable' }}
+      RELEASE_CHANNEL: ${{ needs.release-context.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -158,15 +177,9 @@ jobs:
             Select-Object -First 1
           if (-not $installer) { throw 'No matching rollback installer was produced.' }
 
-          $releases = gh release list --limit 50 --json tagName,isPrerelease | ConvertFrom-Json
-          $wantPrerelease = $env:RELEASE_CHANNEL -eq 'beta'
-          $previous = $releases |
-            Where-Object {
-              $_.tagName -ne "v$version" -and
-              $_.tagName -match '^v\d+\.\d+\.\d+' -and
-              $_.isPrerelease -eq $wantPrerelease
-            } |
-            Select-Object -First 1
+          $previousJson = node scripts/release/publish-channel.mjs --previous
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to verify the current channel and rollback target.' }
+          $previous = $previousJson | ConvertFrom-Json
 
           $arguments = @(
             'scripts/release/build-release-manifest.mjs',
@@ -178,20 +191,25 @@ jobs:
           )
           $notesFile = "dist-release/release-notes-v$version.md"
           node scripts/release/extract-release-notes.mjs --version $version --output $notesFile
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to extract release notes.' }
           $arguments += @('--notes-file', (Resolve-Path $notesFile).Path)
-          if ($previous) {
-            $previousVersion = $previous.tagName.TrimStart('v')
-            $arguments += @('--previous-version', $previousVersion)
-            $previousRelease = gh release view $previous.tagName --json assets | ConvertFrom-Json
-            $previousInstaller = $previousRelease.assets |
-              Where-Object { $_.name -match '(\.msi|setup\.exe)$' } |
-              Sort-Object @{ Expression = { if ($_.name -match 'setup\.exe$') { 0 } else { 1 } } }, name |
-              Select-Object -First 1
-            if ($previousInstaller.url) {
-              $arguments += @('--previous-installer-url', $previousInstaller.url)
-            }
+          if ($previous.previousVersion) {
+            $arguments += @('--previous-version', $previous.previousVersion)
+            $arguments += @('--previous-installer-url', $previous.previousInstallerUrl)
           }
           node @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build validated channel metadata.' }
+
+      - name: Verify immutable tagged release or first publication
+        id: tag_preflight
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $result = node scripts/release/publish-channel.mjs --check-tag
+          if ($LASTEXITCODE -ne 0) { throw 'Existing tagged release differs or remote preflight failed.' }
+          $result | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - uses: actions/upload-artifact@v4
         with:
@@ -204,7 +222,7 @@ jobs:
           retention-days: 30
 
       - name: Publish tagged GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && steps.tag_preflight.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ env.RELEASE_CHANNEL == 'beta' }}
@@ -220,23 +238,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $pointerTag = "updates-$env:RELEASE_CHANNEL"
-          $channelRoot = "dist-release/channels/$env:RELEASE_CHANNEL"
-          $rollback = Get-Content -LiteralPath "$channelRoot/rollback.json" -Raw | ConvertFrom-Json
-          $pointerNotes = "Rolling signed update metadata for the $env:RELEASE_CHANNEL channel."
-          if ($rollback.previousInstallerUrl) {
-            $pointerNotes += "`n`nRollback target: v$($rollback.previousVersion)`n`n[Download the retained previous installer]($($rollback.previousInstallerUrl))"
-          } else {
-            $pointerNotes += "`n`nNo previous installer is available for this channel yet."
-          }
-          gh release view $pointerTag *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $pointerTag --target $env:GITHUB_SHA --prerelease --title "AI Novel Studio $env:RELEASE_CHANNEL update index" --notes $pointerNotes
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create rolling release $pointerTag." }
-          } else {
-            gh release edit $pointerTag --prerelease --title "AI Novel Studio $env:RELEASE_CHANNEL update index" --notes $pointerNotes
-            if ($LASTEXITCODE -ne 0) { throw "Failed to update rolling release $pointerTag." }
-          }
-
-          gh release upload $pointerTag "$channelRoot/latest.json" "$channelRoot/release.json" "$channelRoot/rollback.json" --clobber
-          if ($LASTEXITCODE -ne 0) { throw "Failed to publish rolling release assets for $pointerTag." }
+          node scripts/release/publish-channel.mjs --publish
+          if ($LASTEXITCODE -ne 0) { throw 'Channel publication or verified metadata recovery failed; inspect the preceding error.' }

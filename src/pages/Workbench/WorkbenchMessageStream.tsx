@@ -45,7 +45,11 @@ interface WorkbenchMessageStreamProps {
   chapterSummaryOrchestration: ChapterSummaryOrchestrationState;
   onDismissCompression: () => void;
   onReloadArtifacts?: () => void;
-  onDecideArtifact: (artifact: ConversationArtifactCard, decision: ArtifactDecisionKind) => void;
+  onDecideArtifact: (
+    artifact: ConversationArtifactCard,
+    decision: ArtifactDecisionKind,
+    revisionNotes?: string,
+  ) => void;
   onRetry: (runId: string) => void;
   retryRunBlockedReason?: string;
   onRetryChapterSummaryStart?: () => void;
@@ -415,13 +419,13 @@ export function WorkbenchMessageStream({
           <ArtifactCard
             artifact={artifact}
             key={artifact.cardId}
-            busy={decisionBusyCardId === artifact.cardId}
+            busy={Boolean(decisionBusyCardId)}
             newlyArrived={
               newlyArrivedArtifacts.conversationId === bundle.conversation.conversationId &&
               newlyArrivedArtifacts.cardIds.has(artifact.cardId)
             }
             onReload={onReloadArtifacts}
-            onDecide={(decision) => onDecideArtifact(artifact, decision)}
+            onDecide={(decision, notes) => onDecideArtifact(artifact, decision, notes)}
           />
         ))}
         {assetRecovery && (

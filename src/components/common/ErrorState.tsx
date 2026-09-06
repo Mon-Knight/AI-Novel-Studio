@@ -12,14 +12,16 @@ interface ErrorStateProps {
 
 function ErrorState({ message = '发生错误', detail, onRetry, onBack }: ErrorStateProps) {
   return (
-    <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+    <div role="alert" style={{ textAlign: 'center', padding: '24px 16px' }}>
       <CircleX
         aria-hidden="true"
         size={40}
         strokeWidth={1.8}
         style={{ marginBottom: 12, color: 'var(--color-error)' }}
       />
-      <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--color-error)', marginBottom: 4 }}>
+      <div
+        style={{ fontSize: 15, fontWeight: 500, color: 'var(--color-error-text)', marginBottom: 4 }}
+      >
         {message}
       </div>
       {detail && (
@@ -37,13 +39,13 @@ function ErrorState({ message = '发生错误', detail, onRetry, onBack }: Error
       )}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
         {onRetry && (
-          <button className="btn btn-primary btn-sm" onClick={onRetry}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onRetry}>
             <RotateCcw aria-hidden="true" size={15} strokeWidth={1.8} />
             重试
           </button>
         )}
         {onBack && (
-          <button className="btn btn-secondary btn-sm" onClick={onBack}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onBack}>
             <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
             返回
           </button>

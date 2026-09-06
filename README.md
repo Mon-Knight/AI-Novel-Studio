@@ -35,10 +35,18 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 
 应用默认进入创作工作台：壳层先显示稳定骨架，恢复任务和旧上下文在后台继续；工作台恢复最近有效任务，并提供搜索、重命名、归档/恢复与“目标 + 模型 + 章节范围”原子新建流程。任务拥有独立模型快照、运行与取消状态，工具、错误和带来源/基线/校验证据的候选产物在对话中内联显示。发送前只允许当前 Runtime 模型目录中的精确模型条目；目录匹配本身只证明条目可选，桌面 DSH 模型任务还会在创建 Run 前经同一 governed proxy 执行精确 `provider/model` 的可取消原生 tool-call nonce 探针；失败不留 Run，成功证据精简冻结到模型快照，同 Worker 最多复用 10 分钟，Worker 重启后重新验证。历史任务保持原模型身份，不能借用不同模型的 endpoint 或会话凭据；固定模型不可用时可保留草稿并使用当前设置模型新建任务。问候与能力说明使用明确的 `ans-local` 本地来源，不冒充所选模型运行。写作工作台以局部骨架保持卷章树、正文纸张和工具轨稳定，保留章节审阅、编辑、保存、采用、草稿历史、章节准备与总结入口。
 
-当前生产章节路径仍由确定性意图路由与既有写章管线编排。四个 Canonical 只读能力已经完成共享 Manifest 和宿主门禁，但仍为 `catalog_only + partial`，模型可见数量为 0；真实 Main Agent 尚未放行，非生产 ReAct Harness 不代表生产自主 Agent 已完成。
+生产章节路径仍由确定性意图路由与既有 Writer 管线编排，不由 Writing SubAgent 接管。四项 Canonical 只读能力 `novel.read / structure.read / context.read / memory.search` 已在共享 Manifest 中标为 `stable + working`，模型可见身份共 4 项；DSH `read` 回合已使用 Canonical-only allowlist，候选与审计链保留既有 legacy 工具边界。
+
+任务目录支持稳定分页、全目录搜索与归档筛选，最近有效任务可在第一页之外恢复。写作要求与有界记忆检索词分离；否定或含糊动作在模型调用前判定，持续约束按最新方向处理并在上下文回执标明预算遗漏。低置信语义提醒保留给人工审阅，硬完整性错误和正式采用门禁不放宽。项目备份附件在任何恢复写入前校验允许键及项目归属，拒绝借备份覆盖应用设置或其他作品缓存。
+
+已有仓内 loopback 只读闭环证据不等于 live 云端 Provider 验收：**R4 live 仍未完成，不能宣称 R4 VERIFIED**，Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。当前状态与验收标准见 [对话工作台架构](docs/architecture/conversational-creative-workbench.md) 第 13～14 节；非生产 ReAct Harness 或启发式脚手架不代表生产自主 Agent 已完成。
+
+结构化候选卡片始终展示原始标题与摘要。“已审阅”仅是本地阅读标记；修订意见在本次应用会话内临时保留，不改变原始候选或应用范围。卡片底部的“带出全部意见”把全部已填意见追加到原任务输入区，保留未发送草稿，由用户检查并发送；没有意见时可使用“要求修改”。桌面“应用到作品”仍按整份原始候选执行既有校验与原子事务，不支持按本地标记局部应用。
 
 **核心能力：**
 
+- **UI 体验收口**：作品与资产加载状态分层，任务筛选/目录支持稳定更新和快速定位；Composer 支持长目标、模板追加/替换撤销与中文输入法保护；章节审阅提供专注模式、折叠上下文和独立保存/采用反馈；统一弹窗焦点、通知暂停、主题强调色和可读性。
+- 新建作品、卷章及风格/输出方案的表单弹窗使用统一的居中、限宽和主题样式；长表单可在弹窗内滚动，公共按钮、字段及卡片不依赖访问其他页面后才加载样式。
 - ✅ Multi-Agent Orchestrator 与六专家并行评审（v3.0.0）
 - ✅ 共识、候选修订、SQLite 历史与工作台可视化（v3.0.0）
 - ✅ 五类自主创作 Agent 与 12～500 章分层规划（v3.0.0）
@@ -84,7 +92,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
 - **AI 候选安全应用**：设定候选通过不可变 Proposal/Plan、显式用户确认、目标 version/hash、单事务副作用和 Artifact 来源链接进入正式设定库。
 - **正式 Context / Constraint Compiler**：按稳定来源身份、固定 UTF-8 预算、Prompt hash、Provider identity 和 canonical compilation hash 生成可复现请求，并由 Rust 在 Task 创建前失败关闭验证。
-- **版本化 Tool Registry**：九个真实读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；当前生产 Provider 请求尚不允许模型调用工具。
+- **版本化 Tool Registry**：既有章节准备管线的九个读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；它与 DSH 模型侧 Canonical/legacy allowlist 是不同层级，不能把其中一层的工具数量或放行状态套用到所有 Provider 请求。
 - **持久章节准备计划**：固定六步 DAG 由 SQLite 保存并在执行前复验 Registry/schema/权限/scope/参数 hash；Attempt 与 Checkpoint 可追踪，租约防止并发执行。
 - **显式恢复与重试**：中断运行在启动时进入 `waiting_retry`，原 Attempt 标记 `abandoned`；只有用户明确点击继续才创建新 Attempt，不自动重放工具。
 - **Multi-Agent 协作评审**：情节、角色、设定、逻辑、语言和质量专家并行评审同一草稿；单个专家失败不会阻塞其他结果，最小 quorum、防伪共识和最多三轮迭代由服务端约束。
@@ -181,7 +189,7 @@ npm run tauri:build
 | 2K 适配  | 内容宽度受控，阅读 / 表单 / 卡片布局不会无限拉伸 |
 | 数据存储 | 桌面模式 SQLite；浏览器开发模式 LocalStorage     |
 
-API Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模型精确绑定；不会写入项目、SQLite、LocalStorage、备份、Git 或应用自有同步服务。真实模型调用时，鉴权信息只发送到用户配置且与当前模型匹配的 Provider Endpoint。
+API Key 按 Provider、Base URL 与模型精确绑定。Windows 桌面端由 `SessionCredentialVault` 使用 DPAPI 加密写入应用数据目录的本地保护文件，并在启动时尝试恢复；浏览器开发模式仅保留会话内存，不把密钥写入 LocalStorage。密钥不进入小说项目、SQLite、项目备份、日志、Git 或应用自有同步服务；真实模型鉴权仅发送到用户配置且与当前模型匹配的 Provider Endpoint，不能跨身份借用凭据。
 
 ---
 
@@ -213,7 +221,7 @@ API Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模
 2. 使用 **Mock 模式** 可以在无 API Key 的情况下测试完整工作流。
 3. 关闭 Mock 模式后，配置 OpenAI 兼容 API：
    - API Base URL，例如 `https://api.openai.com/v1`
-   - API Key，仅保留到本次应用进程结束，并固定绑定当前 Provider、Base URL 与模型
+   - API Key，固定绑定当前 Provider、Base URL 与模型；Windows 桌面端通过 DPAPI 本地加密保存并支持重启恢复，浏览器开发模式仅保留会话内存
    - 模型名称，例如 `gpt-4`、`deepseek-chat`
 4. 如需启用本地章节 Scene 模型，在“本地章节场景模型”卡片中配置：
    - Base URL 默认 `http://127.0.0.1:8080/v1`，模型默认 `qwen35-9b-novel-v3`
@@ -268,7 +276,7 @@ API Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模
 | v3.6.0                    | 功能基线：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                                  |
 | v3.6.1                    | 已完成：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复                                                                                                |
 | v3.6.2                    | **当前版本**：Canonical 只读链路放行（4 项 stable Tool、DSH read 回合 Canonical-only allowlist）、DPAPI 会话凭据持久化与桌面体验收口；R4 live 云端验收仍未完成               |
-| v3.x 后续                 | Canonical 工具模型可见化、真实 Main Agent / Writing SubAgent 验收、结构化产物原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付                |
+| v3.x 后续                 | 更多 Canonical 能力准入、R4 live Provider / Writing SubAgent 验收、未覆盖结构化类型的原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付        |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
 
@@ -300,6 +308,8 @@ ai-novel-studio/
 ---
 
 ## 11. 测试与构建
+
+以下为可选套件与命令索引，不是每次任务全部执行的清单。编码 Agent 先按 [AGENTS.md](AGENTS.md) 的验证矩阵选择适用层级；纯文档任务不要求完整 Tauri 发布构建。
 
 ```powershell
 # 版本号与用户可见文档同步门禁
@@ -383,7 +393,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 ## 12. 当前限制
 
 - 桌面端结构化 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json`+`context_compression` 与 `ArtifactDecision` 同事务写入；其余结构化类型和浏览器回退失败关闭且零领域写入。章节正文仍走审阅授权与 SQLite 原子采用。
-- 四个 Canonical 只读能力当前均为 `catalog_only + partial`，模型可见数量为 0；生产 Main Agent 与 Writing SubAgent 尚未放行，旧 ReAct Harness 仅是非生产实验底座。
+- 四项 Canonical 只读已放行，但 R4 live 云端 Provider 验收仍未完成；`test:agent-runtime:real` 的 `NOT_RUN` 或 loopback 通过不能替代 live 证据。Writing SubAgent 与 `chapter_write` 走 DSH 仍后置，旧 ReAct Harness 仅是非生产实验底座。
 - 三层 Novel Memory 的片段、状态与版本快照目前保存在进程内，不能替代 SQLite `memory_documents`、正式章节上下文及其跨重启持久化语义。
 - migration 028 的通用多目标事务当前覆盖章节 metadata、势力、地点及其正式关系；跨章节正文批量改写仍必须先生成候选、逐目标审核，不能绕过草稿与采用边界。
 - SQLite 与 LocalStorage 无法构成跨存储 ACID 事务。v2.1.8 的旧上下文迁移先原子提交 SQLite，再清理已映射缓存；清理失败会返回警告并允许幂等重试，歧义记录会保留在本地。浏览器 LocalStorage 仅用于开发回退。
@@ -404,6 +414,8 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 ---
 
 ## 13. 文档索引
+
+**参与开发/使用编码 Agent**：从 [AGENTS.md](AGENTS.md) 开始，按 [Agent 工作流](docs/agent-workflow.md) 执行，再从 [文档总索引](docs/README.md) 查阅任务相关设计。根入口统一维护规则，不另建 `agent.md` 副本。
 
 | 分类             | 入口                                                               |
 | ---------------- | ------------------------------------------------------------------ |

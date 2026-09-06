@@ -13,6 +13,7 @@ AI Novel Studio 存储用户全部创作资产。数据库操作必须安全、�
 ## Schema 修改规则
 
 ### 绝对禁止
+
 - ❌ 删除字段 → 改为标记 deprecated
 - ❌ 重命名字段 → 改为新增 + 迁移
 - ❌ 修改字段类型 → 改为新增正确类型字段
@@ -20,6 +21,7 @@ AI Novel Studio 存储用户全部创作资产。数据库操作必须安全、�
 - ❌ 生产代码中使用 DROP TABLE
 
 ### 允许的操作
+
 - ✅ ALTER TABLE ADD COLUMN（必须有默认值）
 - ✅ CREATE TABLE IF NOT EXISTS
 - ✅ CREATE INDEX IF NOT EXISTS
@@ -32,15 +34,19 @@ AI Novel Studio 存储用户全部创作资产。数据库操作必须安全、�
 - 频繁查询列必须建立索引
 - 大文本字段考虑分离存储
 
-## Agent 系统预留
+## Agent 系统预留（历史设计参考）
+
+下列字段/表名只是早期设计提示，不授权新增 schema。实际数据结构以 migration 和 `docs/data-model.md` 为准；只有明确的数据库任务才可按兼容性流程修改，不为未来版本提前预留字段或建表。
 
 现有表应考虑预留字段：
+
 - `agent_status` - Agent 处理状态
 - `agent_metadata` - Agent 元数据 (JSON)
 - `task_id` - 关联 Agent 任务 ID
 - `version` - 数据版本号
 
 未来可能新增的表（预留命名空间）：
+
 - `agent_tasks`
 - `agent_memory`
 - `tool_calls`
@@ -48,5 +54,5 @@ AI Novel Studio 存储用户全部创作资产。数据库操作必须安全、�
 
 ## 数据库文件
 
-- Tauri 模式：%APPDATA%/ai-novel-studio/
+- Windows 生产小说库：`%LOCALAPPDATA%\AI Novel Studio\ai-novel-studio.db`（以 `src-tauri/src/db.rs` 为准）；E2E 使用专用隔离目录，不操作用户库
 - 不提交 .db / .sqlite 文件到 Git

@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { WorkbenchTaskMenu } from './WorkbenchTaskMenu';
 import {
-  Archive,
-  ArchiveRestore,
   ArrowUpRight,
   Check,
+  ChevronRight,
   Ellipsis,
   Library,
-  Pencil,
   Plus,
   Search,
   X,
@@ -15,8 +13,12 @@ import {
 import type { Novel } from '../../types/novel';
 import type { TaskConversation } from '../../types/conversation';
 import { statusLabel } from './workbenchHelpers';
+import { WorkbenchDirectoryFeedback } from './WorkbenchDirectoryFeedback';
+import type { WorkbenchConversationDirectory } from '../../features/workbench/useWorkbenchConversationDirectory';
+import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
 
 interface WorkbenchNavigationProps {
+  directory: WorkbenchConversationDirectory & { initializing: boolean };
   novels: Novel[];
   conversations: TaskConversation[];
   selectedNovelId: string;
@@ -67,6 +69,7 @@ function formatRecentActivity(value: string): string {
 }
 
 export function WorkbenchNavigation({
+  directory,
   novels,
   conversations,
   selectedNovelId,
@@ -86,32 +89,47 @@ export function WorkbenchNavigation({
   onRetryConversations,
   onOpenLibrary,
 }: WorkbenchNavigationProps) {
-  const [query, setQuery] = useState('');
-  const [archiveView, setArchiveView] = useState<'active' | 'archived'>('active');
+  const { query, setQuery, archive: archiveView, setArchive: setArchiveView } = directory;
   const [openMenuId, setOpenMenuId] = useState('');
   const [renamingId, setRenamingId] = useState('');
   const [renameDraft, setRenameDraft] = useState('');
   const [busyTaskId, setBusyTaskId] = useState('');
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set());
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const normalizedQuery = directory.displayQuery.trim().toLocaleLowerCase();
+  const displayedArchive = directory.displayArchive;
 
   const visibleConversations = useMemo(
     () =>
-      conversations.filter((conversation) => {
+      [
+        ...directory.items,
+        ...conversations.filter(
+          (item) =>
+            item.conversationId === selectedConversationId &&
+            !directory.items.some((loaded) => loaded.conversationId === item.conversationId),
+        ),
+      ].filter((conversation) => {
         const archived = Boolean(conversation.archivedAt || conversation.status === 'archived');
-        if ((archiveView === 'archived') !== archived) return false;
+        if ((displayedArchive === 'archived') !== archived) return false;
         if (!normalizedQuery) return true;
         const novelTitle = novels.find((novel) => novel.id === conversation.novelId)?.title ?? '';
         return `${conversation.title} ${novelTitle}`.toLocaleLowerCase().includes(normalizedQuery);
       }),
-    [archiveView, conversations, normalizedQuery, novels],
+    [
+      displayedArchive,
+      conversations,
+      directory.items,
+      normalizedQuery,
+      novels,
+      selectedConversationId,
+    ],
   );
 
   const openMenuConversation = useMemo(
-    () => conversations.find((conversation) => conversation.conversationId === openMenuId),
-    [conversations, openMenuId],
+    () => visibleConversations.find((conversation) => conversation.conversationId === openMenuId),
+    [visibleConversations, openMenuId],
   );
 
   useEffect(() => {
@@ -132,9 +150,16 @@ export function WorkbenchNavigation({
       closeMenu();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' || event.key === 'Tab') {
+      if (isComposingKeyboardEvent(event)) return;
+      if (event.key === 'Escape') {
         event.preventDefault();
         closeMenu(true);
+        return;
+      }
+      if (event.key === 'Tab') {
+        // Return synchronously, then let the browser continue the normal Tab order.
+        menuTriggerRef.current?.focus();
+        setOpenMenuId('');
         return;
       }
       const items = getMenuItems();
@@ -219,6 +244,8 @@ export function WorkbenchNavigation({
             aria-label="搜索创作任务"
             value={query}
             placeholder="搜索任务"
+            disabled={directory.initializing}
+            maxLength={200}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
@@ -227,6 +254,7 @@ export function WorkbenchNavigation({
             type="button"
             className={archiveView === 'active' ? 'is-active' : ''}
             aria-pressed={archiveView === 'active'}
+            disabled={directory.initializing}
             onClick={() => setArchiveView('active')}
           >
             当前
@@ -235,6 +263,7 @@ export function WorkbenchNavigation({
             type="button"
             className={archiveView === 'archived' ? 'is-active' : ''}
             aria-pressed={archiveView === 'archived'}
+            disabled={directory.initializing}
             onClick={() => setArchiveView('archived')}
           >
             归档
@@ -243,6 +272,11 @@ export function WorkbenchNavigation({
       </div>
 
       <div className="workbench-tree-scroll" onScroll={() => setOpenMenuId('')}>
+        {(directory.loading || conversationsLoading) && (
+          <div className="workbench-tree-feedback" role="status">
+            {directory.items.length > 0 ? '正在更新任务目录，暂显示上次结果…' : '正在读取任务目录…'}
+          </div>
+        )}
         {projectsLoading ? (
           <NavigationSkeleton />
         ) : projectsError ? (
@@ -260,175 +294,181 @@ export function WorkbenchNavigation({
               (conversation) => conversation.novelId === novel.id,
             );
             if (normalizedQuery && novelConversations.length === 0) return null;
+            const collapsed = !query.trim() && collapsedProjects.has(novel.id);
             return (
               <section className="workbench-project" key={novel.id}>
-                <button
-                  type="button"
-                  className={`workbench-project-row ${selectedNovelId === novel.id ? 'is-active' : ''}`}
-                  data-testid="workbench-project"
-                  data-novel-id={novel.id}
-                  data-selected={selectedNovelId === novel.id ? 'true' : 'false'}
-                  title={novel.title}
-                  onClick={() => onSelectProject(novel.id)}
-                >
-                  <span className="workbench-project-mark" aria-hidden="true">
-                    {novel.title.slice(0, 1) || '书'}
-                  </span>
-                  <span className="workbench-project-title">{novel.title}</span>
-                  <span
-                    className="workbench-project-count"
-                    aria-label={`${novelConversations.length}个任务`}
+                <div className="workbench-project-heading">
+                  <button
+                    type="button"
+                    className="workbench-project-collapse"
+                    aria-label={`${collapsed ? '展开' : '收起'}${novel.title}的任务`}
+                    aria-expanded={!collapsed}
+                    disabled={Boolean(query.trim())}
+                    title={query.trim() ? '搜索结果保持展开' : undefined}
+                    onClick={() =>
+                      setCollapsedProjects((current) => {
+                        const next = new Set(current);
+                        if (next.has(novel.id)) next.delete(novel.id);
+                        else next.add(novel.id);
+                        return next;
+                      })
+                    }
                   >
-                    {novelConversations.length}
-                  </span>
-                </button>
-                {novelConversations.map((conversation) => {
-                  const running = runningConversationIds.has(conversation.conversationId);
-                  const archived = Boolean(
-                    conversation.archivedAt || conversation.status === 'archived',
-                  );
-                  const displayStatus = archived
-                    ? 'archived'
-                    : running
-                      ? 'running'
-                      : conversation.status;
-                  const isBusy = busyTaskId === conversation.conversationId;
-                  return (
-                    <div className="workbench-task-entry" key={conversation.conversationId}>
-                      {renamingId === conversation.conversationId ? (
-                        <div className="workbench-task-rename">
-                          <input
-                            autoFocus
-                            value={renameDraft}
-                            aria-label="任务标题"
-                            maxLength={160}
-                            disabled={isBusy}
-                            onChange={(event) => setRenameDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter')
-                                void submitRename(conversation.conversationId);
-                              if (event.key === 'Escape') setRenamingId('');
-                            }}
-                          />
-                          <button
-                            type="button"
-                            aria-label="保存任务标题"
-                            title="保存"
-                            disabled={!renameDraft.trim() || isBusy}
-                            onClick={() => void submitRename(conversation.conversationId)}
-                          >
-                            <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="取消重命名"
-                            title="取消"
-                            disabled={isBusy}
-                            onClick={() => setRenamingId('')}
-                          >
-                            <X aria-hidden="true" size={14} strokeWidth={1.8} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className={`workbench-task-row ${selectedConversationId === conversation.conversationId ? 'is-active' : ''}`}
-                            data-testid="workbench-task"
-                            data-conversation-id={conversation.conversationId}
-                            data-status={displayStatus}
-                            data-selected={
-                              selectedConversationId === conversation.conversationId
-                                ? 'true'
-                                : 'false'
-                            }
-                            title={`${conversation.title} · ${statusLabel(displayStatus)}`}
-                            onClick={() => onSelectTask(novel.id, conversation.conversationId)}
-                          >
-                            <span
-                              className={`workbench-status-dot is-${displayStatus}`}
-                              aria-hidden="true"
+                    <ChevronRight aria-hidden="true" size={14} strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`workbench-project-row ${selectedNovelId === novel.id ? 'is-active' : ''}`}
+                    data-testid="workbench-project"
+                    data-novel-id={novel.id}
+                    data-selected={selectedNovelId === novel.id ? 'true' : 'false'}
+                    title={novel.title}
+                    onClick={() => onSelectProject(novel.id)}
+                  >
+                    <span className="workbench-project-mark" aria-hidden="true">
+                      {novel.title.slice(0, 1) || '书'}
+                    </span>
+                    <span className="workbench-project-title">{novel.title}</span>
+                    <span
+                      className="workbench-project-count"
+                      aria-label={`当前已载入${novelConversations.length}个任务`}
+                      title="当前查询已载入的任务数，不是项目总数"
+                    >
+                      {novelConversations.length}
+                    </span>
+                  </button>
+                </div>
+                {!collapsed &&
+                  novelConversations.map((conversation) => {
+                    const running = runningConversationIds.has(conversation.conversationId);
+                    const archived = Boolean(
+                      conversation.archivedAt || conversation.status === 'archived',
+                    );
+                    const displayStatus = archived
+                      ? 'archived'
+                      : running
+                        ? 'running'
+                        : conversation.status;
+                    const isBusy = busyTaskId === conversation.conversationId;
+                    return (
+                      <div className="workbench-task-entry" key={conversation.conversationId}>
+                        {renamingId === conversation.conversationId ? (
+                          <div className="workbench-task-rename">
+                            <input
+                              autoFocus
+                              value={renameDraft}
+                              aria-label="任务标题"
+                              maxLength={160}
+                              disabled={isBusy}
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (isComposingKeyboardEvent(event)) return;
+                                if (event.key === 'Enter')
+                                  void submitRename(conversation.conversationId);
+                                if (event.key === 'Escape') setRenamingId('');
+                              }}
                             />
-                            <span className="workbench-task-copy">
-                              <span className="workbench-task-title">{conversation.title}</span>
-                              <time dateTime={conversation.updatedAt}>
-                                {formatRecentActivity(conversation.updatedAt)}
-                              </time>
-                            </span>
-                            <span className="workbench-task-status">
-                              {statusLabel(displayStatus)}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            className="workbench-task-menu-trigger"
-                            aria-label={`${conversation.title}的更多操作`}
-                            aria-haspopup="menu"
-                            aria-expanded={openMenuId === conversation.conversationId}
-                            title="更多操作"
-                            ref={
-                              openMenuId === conversation.conversationId
-                                ? menuTriggerRef
-                                : undefined
-                            }
-                            onClick={(event) => {
-                              if (openMenuId === conversation.conversationId) {
-                                setOpenMenuId('');
-                                return;
+                            <button
+                              type="button"
+                              aria-label="保存任务标题"
+                              title="保存"
+                              disabled={!renameDraft.trim() || isBusy}
+                              onClick={() => void submitRename(conversation.conversationId)}
+                            >
+                              <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="取消重命名"
+                              title="取消"
+                              disabled={isBusy}
+                              onClick={() => setRenamingId('')}
+                            >
+                              <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className={`workbench-task-row ${selectedConversationId === conversation.conversationId ? 'is-active' : ''}`}
+                              data-testid="workbench-task"
+                              data-conversation-id={conversation.conversationId}
+                              data-status={displayStatus}
+                              data-selected={
+                                selectedConversationId === conversation.conversationId
+                                  ? 'true'
+                                  : 'false'
                               }
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              const menuWidth = 148;
-                              const menuHeight = archived ? 44 : 78;
-                              setMenuPosition({
-                                top:
-                                  window.innerHeight - rect.bottom >= menuHeight + 8
-                                    ? rect.bottom + 4
-                                    : Math.max(8, rect.top - menuHeight - 4),
-                                left: Math.min(
-                                  window.innerWidth - menuWidth - 8,
-                                  Math.max(8, rect.right - menuWidth),
-                                ),
-                              });
-                              setOpenMenuId(conversation.conversationId);
-                            }}
-                          >
-                            <Ellipsis aria-hidden="true" size={16} strokeWidth={1.8} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-                {conversationsLoading && novel.id === selectedNovelId && (
-                  <span className="workbench-task-loading" role="status">
-                    正在恢复任务…
-                  </span>
-                )}
+                              title={`${conversation.title} · ${statusLabel(displayStatus)}`}
+                              onClick={() => onSelectTask(novel.id, conversation.conversationId)}
+                            >
+                              <span
+                                className={`workbench-status-dot is-${displayStatus}`}
+                                aria-hidden="true"
+                              />
+                              <span className="workbench-task-copy">
+                                <span className="workbench-task-title">{conversation.title}</span>
+                                <time dateTime={conversation.updatedAt}>
+                                  {formatRecentActivity(conversation.updatedAt)}
+                                </time>
+                              </span>
+                              <span className="workbench-task-status">
+                                {statusLabel(displayStatus)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="workbench-task-menu-trigger"
+                              aria-label={`${conversation.title}的更多操作`}
+                              aria-haspopup="menu"
+                              aria-expanded={openMenuId === conversation.conversationId}
+                              title="更多操作"
+                              ref={
+                                openMenuId === conversation.conversationId
+                                  ? menuTriggerRef
+                                  : undefined
+                              }
+                              onClick={(event) => {
+                                if (openMenuId === conversation.conversationId) {
+                                  setOpenMenuId('');
+                                  return;
+                                }
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                const menuWidth = 148;
+                                const menuHeight = archived ? 44 : 78;
+                                setMenuPosition({
+                                  top:
+                                    window.innerHeight - rect.bottom >= menuHeight + 8
+                                      ? rect.bottom + 4
+                                      : Math.max(8, rect.top - menuHeight - 4),
+                                  left: Math.min(
+                                    window.innerWidth - menuWidth - 8,
+                                    Math.max(8, rect.right - menuWidth),
+                                  ),
+                                });
+                                setOpenMenuId(conversation.conversationId);
+                              }}
+                            >
+                              <Ellipsis aria-hidden="true" size={16} strokeWidth={1.8} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
               </section>
             );
           })
         )}
 
-        {!projectsLoading &&
-          !projectsError &&
-          novels.length > 0 &&
-          visibleConversations.length === 0 && (
-            <div className="workbench-tree-feedback">
-              {normalizedQuery
-                ? '没有匹配的任务'
-                : archiveView === 'archived'
-                  ? '暂无归档任务'
-                  : '暂无创作任务'}
-            </div>
-          )}
-
-        {!projectsLoading && !projectsError && conversationsError && (
-          <div className="workbench-tree-feedback is-error" role="alert">
-            <span>{conversationsError}</span>
-            <button type="button" onClick={onRetryConversations}>
-              重试任务
-            </button>
-          </div>
+        {!projectsLoading && !projectsError && novels.length > 0 && (
+          <WorkbenchDirectoryFeedback
+            directory={directory}
+            empty={visibleConversations.length === 0}
+            error={conversationsError}
+            onRetry={onRetryConversations}
+          />
         )}
       </div>
 
@@ -437,62 +477,23 @@ export function WorkbenchNavigation({
         <span>管理小说作品</span>
         <ArrowUpRight aria-hidden="true" size={13} strokeWidth={1.8} />
       </button>
-      {openMenuConversation &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="workbench-task-menu"
-            role="menu"
-            aria-label={`${openMenuConversation.title}的任务操作`}
-            style={menuPosition}
-          >
-            {!openMenuConversation.archivedAt && openMenuConversation.status !== 'archived' && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setRenameDraft(openMenuConversation.title);
-                  setRenamingId(openMenuConversation.conversationId);
-                  setOpenMenuId('');
-                }}
-              >
-                <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>重命名</span>
-              </button>
-            )}
-            <button
-              type="button"
-              role="menuitem"
-              disabled={
-                busyTaskId === openMenuConversation.conversationId ||
-                runningConversationIds.has(openMenuConversation.conversationId)
-              }
-              title={
-                runningConversationIds.has(openMenuConversation.conversationId)
-                  ? '请先停止运行中的任务'
-                  : undefined
-              }
-              onClick={() =>
-                void updateArchived(
-                  openMenuConversation.conversationId,
-                  !(openMenuConversation.archivedAt || openMenuConversation.status === 'archived'),
-                )
-              }
-            >
-              {openMenuConversation.archivedAt || openMenuConversation.status === 'archived' ? (
-                <ArchiveRestore aria-hidden="true" size={14} strokeWidth={1.8} />
-              ) : (
-                <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
-              )}
-              <span>
-                {openMenuConversation.archivedAt || openMenuConversation.status === 'archived'
-                  ? '恢复任务'
-                  : '归档任务'}
-              </span>
-            </button>
-          </div>,
-          document.body,
-        )}
+      {openMenuConversation && (
+        <WorkbenchTaskMenu
+          conversation={openMenuConversation}
+          menuRef={menuRef}
+          position={menuPosition}
+          busy={busyTaskId === openMenuConversation.conversationId}
+          running={runningConversationIds.has(openMenuConversation.conversationId)}
+          onRename={() => {
+            setRenameDraft(openMenuConversation.title);
+            setRenamingId(openMenuConversation.conversationId);
+            setOpenMenuId('');
+          }}
+          onArchive={(archived) =>
+            void updateArchived(openMenuConversation.conversationId, archived)
+          }
+        />
+      )}
     </aside>
   );
 }

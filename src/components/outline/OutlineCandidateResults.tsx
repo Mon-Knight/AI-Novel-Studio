@@ -1,4 +1,5 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useRef, type Dispatch, type SetStateAction } from 'react';
+import '../../styles/outline-candidates.css';
 import type {
   ChapterOutlineCandidate,
   VolumeOutlineCandidate,
@@ -26,17 +27,29 @@ export function OutlineCandidateResults({
   const candidateAnchorRef = useRef<HTMLDivElement>(null);
   const hasGeneratedCandidate = volumeCandidate !== null || chapterCandidates.length > 0;
 
-  useEffect(() => {
-    if (!hasGeneratedCandidate) return;
-    const frame = requestAnimationFrame(() => {
-      candidateAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [hasGeneratedCandidate]);
-
   return (
     <>
-      <div ref={candidateAnchorRef} />
+      {hasGeneratedCandidate && (
+        <div role="status" className="outline-candidate-ready">
+          <span>大纲候选已就绪，请审阅后确认保存。</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              candidateAnchorRef.current?.scrollIntoView({
+                behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+                  ? 'auto'
+                  : 'smooth',
+                block: 'start',
+              });
+              candidateAnchorRef.current?.focus({ preventScroll: true });
+            }}
+          >
+            查看候选
+          </button>
+        </div>
+      )}
+      <div ref={candidateAnchorRef} tabIndex={-1} aria-label="大纲候选内容" />
 
       {volumeCandidate && (
         <div
@@ -50,6 +63,7 @@ export function OutlineCandidateResults({
           <div style={{ fontWeight: 600, marginBottom: 4 }}>分卷大纲候选</div>
           <input
             className="form-input"
+            aria-label="分卷候选标题"
             value={volumeCandidate.title}
             onChange={(event) =>
               setVolumeCandidate({ ...volumeCandidate, title: event.target.value })
@@ -59,6 +73,7 @@ export function OutlineCandidateResults({
           />
           <textarea
             className="form-textarea"
+            aria-label="分卷候选摘要"
             value={volumeCandidate.summary}
             onChange={(event) =>
               setVolumeCandidate({ ...volumeCandidate, summary: event.target.value })
@@ -75,6 +90,7 @@ export function OutlineCandidateResults({
           {volumeCandidate.goal !== undefined && (
             <input
               className="form-input"
+              aria-label="分卷候选目标"
               value={volumeCandidate.goal || ''}
               onChange={(event) =>
                 setVolumeCandidate({ ...volumeCandidate, goal: event.target.value })
@@ -86,6 +102,7 @@ export function OutlineCandidateResults({
           {volumeCandidate.mainConflict !== undefined && (
             <input
               className="form-input"
+              aria-label="分卷候选主要冲突"
               value={volumeCandidate.mainConflict || ''}
               onChange={(event) =>
                 setVolumeCandidate({ ...volumeCandidate, mainConflict: event.target.value })
@@ -118,6 +135,7 @@ export function OutlineCandidateResults({
               <div style={{ fontWeight: 600, marginBottom: 4 }}>章节候选 #{index + 1}</div>
               <input
                 className="form-input"
+                aria-label={`章节候选 ${index + 1} 标题`}
                 value={candidate.title}
                 onChange={(event) => {
                   const updated = [...chapterCandidates];
@@ -129,6 +147,7 @@ export function OutlineCandidateResults({
               />
               <textarea
                 className="form-textarea"
+                aria-label={`章节候选 ${index + 1} 大纲`}
                 value={candidate.rawText || candidate.outline}
                 onChange={(event) => {
                   const updated = [...chapterCandidates];
@@ -151,6 +170,7 @@ export function OutlineCandidateResults({
               {candidate.goal !== undefined && (
                 <input
                   className="form-input"
+                  aria-label={`章节候选 ${index + 1} 目标`}
                   value={candidate.goal || ''}
                   onChange={(event) => {
                     const updated = [...chapterCandidates];
@@ -165,6 +185,7 @@ export function OutlineCandidateResults({
                 <input
                   className="form-input"
                   type="number"
+                  aria-label={`章节候选 ${index + 1} 字数`}
                   value={candidate.targetWordCount || 2500}
                   onChange={(event) => {
                     const updated = [...chapterCandidates];

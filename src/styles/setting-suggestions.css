@@ -206,7 +206,8 @@
 }
 
 .setting-suggestions-modal {
-  width: 720px;
+  width: 100%;
+  max-width: 720px;
 }
 
 .setting-suggestions-json-editor {

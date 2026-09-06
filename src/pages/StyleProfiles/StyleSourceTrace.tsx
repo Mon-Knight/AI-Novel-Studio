@@ -32,7 +32,7 @@ export function StyleSourceTrace({ profile }: { profile: StyleProfile }) {
         border: '1px solid var(--color-border)',
         background: 'var(--color-bg-hover)',
         color: 'var(--color-text-secondary)',
-        fontSize: 11,
+        fontSize: 12,
         lineHeight: 1.6,
         overflowWrap: 'anywhere',
       }}

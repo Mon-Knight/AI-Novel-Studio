@@ -34,7 +34,8 @@ export function registerToastListener(fn: ToastListener): () => void {
 }
 
 export function showToast(options: ToastOptions): void {
-  const { kind = 'info', title, message, durationMs = 4000 } = options;
+  const { kind = 'info', title, message } = options;
+  const durationMs = options.durationMs ?? (kind === 'error' || kind === 'warning' ? 0 : 4000);
   if (!message) return;
 
   const item: ToastItem = {

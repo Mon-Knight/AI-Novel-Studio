@@ -1,5 +1,11 @@
 # 测试策略与用例
 
+<!-- ans-current-canonical:start -->
+
+Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
+读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+<!-- ans-current-canonical:end -->
+
 > 当前版本：v3.6.2（对话式创作工作台与审阅收敛）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、可靠取消与请求治理、真实流式预览、参考资料与分层风格、混合语义 Memory、跨进程三档调度、多目标事务与正式故事资产、正文变更动态回归、性能基准、真实浏览器模式 E2E、Windows 真实 Tauri E2E、签名更新发布、前端构建与 Rust/Tauri 编译。
 
@@ -701,11 +707,21 @@ npm run test:e2e -- --spec domain-facade-sqlite.spec.ts
 
 `test:canonical-manifest` 由三套独立实现验证同一个 `contracts/agent/canonical-tool-manifest.v1.json`：Node/DSH 复算 portable hash 并检查 legacy 隔离；TypeScript 校验 Catalog、固定 adapter、动态 projection、版本/hash/exposure/allowlist/permission/schema 门禁；Rust 通过 `include_str!` 嵌入并独立复算 hash。Windows E2E 进一步比较 TS/Rust attestation，并验证四个 host-validation read Tool 进入真实 SQLite Facade 链。
 
-当前必须保持 `modelVisibleToolIdentities=[]`。这只表示 Canonical Tool 尚未向 Agent 放行；既有 DSH Workbench legacy allowlist 仍存在，测试不得把两者混写成“DSH 全局 Tool 数为 0”。共享 artifact 不得自动注入 `productionToolRegistry`、`WORKBENCH_TOOLS`、`ANS_ALLOWED_TOOLS`、DSH `tools/list` 或 Main Agent prompt。
+当前必须保持本文开头事实块与共享 Manifest 的四项模型可见只读 identity 一致，并验证宿主只读回合的 Canonical allowlist。候选与审计回合继续使用 legacy 工具；loopback 证明不替代 live 云端验收，生产写章也不因此迁入 DSH。新增工具必须经过独立准入，不能通过修改 hash 或 exposure 绕过门禁。
 
 ---
 
 ## 3. 专项运行时回归
+
+### 测试归属与本批边界回归
+
+`test:all` 先校验测试归属，保留原有 Node/tsx、Vitest、独立面板和性能运行参数，再通过 `test:discovered` 按正确 runner 实际执行遗漏的单测。新增测试没有归属、runner 冲突或引用已删除文件必须失败；桌面/真实云端保留专属入口和明确证据边界。旧 `creative-agent-workflow.spec.ts` 指向已退出生产的实验 UI，明确标为 legacy / NOT_RUN，不通过恢复旧主流程来冒充当前桌面覆盖。
+
+当前边界回归包括：备份恶意附件在任何 SQLite/LocalStorage 写入前拒绝与 schema 2～11 兼容；任务目录超过 100 条后的分页、归档搜索、迟到请求隔离及选中任务恢复；否定与总结对象路由、完整指令/有界检索分离、约束预算回执；语义警告不多发请求而硬错误仍阻断；凭据双环境说明；更新通道防倒退、不可变产物和部分上传故障补偿。
+
+`check-capability-docs` 对五份当前事实块、Manifest 和宿主只读 allowlist 交叉验证，并用过期当前声明及虚假 live 成功的负向样本验证门禁。历史版本记录不批量改成当前准入。
+
+真实 Windows 专项入口为 `npm run test:e2e -- --spec project-backup-boundary` 和 `npm run test:e2e -- --spec workbench-task-directory`；它们使用隔离库、受限桥和无云端请求的测试环境，不能替代真实云端或远端发布验收。
 
 ```powershell
 npm run test:ai-tasks-delete

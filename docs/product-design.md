@@ -1,5 +1,11 @@
 # AI Novel Studio 产品设计文档
 
+<!-- ans-current-canonical:start -->
+
+Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
+读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+<!-- ans-current-canonical:end -->
+
 版本：v0.1.0 草案  
 项目名称：AI Novel Studio  
 项目路径：F:\ai-novel-studio  
@@ -7,7 +13,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是当前安全补丁。
+> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是 SQLite 等安全修复，v3.6.2 是当前 Canonical 只读链路与桌面体验收口补丁；版本号以 `package.json` 和同步检查为准。
 
 ---
 
@@ -226,7 +232,7 @@ AI Novel Studio 是 Windows 桌面软件，应优先保证本地可用。
 
 基础数据应保存在本地 SQLite 中。
 
-API Key 不进入项目数据或应用自有云同步，仅在当前应用进程内按模型身份保存；真实模型鉴权只发送到用户明确配置的 Provider Endpoint。作品数据、草稿、风格方案等不应默认上传到云端。
+API Key 不进入小说项目、SQLite、LocalStorage、项目备份、日志或应用自有云同步。Windows 桌面端按精确 Provider、Base URL 和模型身份在内存中使用凭据，并通过 DPAPI 加密保存到本地保护文件以支持重启恢复；浏览器开发模式仅保留会话内存。真实模型鉴权只发送到用户明确配置且身份匹配的 Provider Endpoint。作品数据、草稿、风格方案等不应默认上传到云端。
 
 后续可以扩展云同步，但不是早期版本重点。
 
@@ -1230,7 +1236,7 @@ prompts/
 
 必须：
 
-- Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模型精确绑定
+- Key 按 Provider、Base URL 与模型精确绑定；Windows 桌面端在运行时内存使用并经 DPAPI 加密保存以支持重启恢复，浏览器开发模式仅保留会话内存
 - 切换模型时不沿用已加载 Key，任务运行按冻结模型身份解析且错配失败关闭
 - 不写入 SQLite、LocalStorage、项目备份或应用自有同步服务
 - 真实鉴权只发送到用户配置且与当前模型匹配的 Provider Endpoint
@@ -1340,7 +1346,7 @@ v0.1.0 完成后，应满足：
 
 Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成。四个 Canonical 只读 identity（`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`）现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4。这只是 Catalog/Manifest exposure。
 
-真实 R4 是 Canonical-only DSH 只读回合。工作台 `read` intent 已请求 `novel.read / structure.read / context.read / memory.search`；Gateway 在该 allowlist 下会把它们列入 `tools/list`。宿主 `task_runtime` 仍注入 legacy `ALLOWED_TOOLS`，生产读回合尚未切到 Canonical 名。`mainAgentRuntimeService` 启发式脚手架不是 R4 VERIFIED。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。本文不授权 Writing SubAgent 或新版本开发。
+R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置，详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
 

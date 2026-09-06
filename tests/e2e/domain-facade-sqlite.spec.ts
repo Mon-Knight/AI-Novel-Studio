@@ -1,6 +1,7 @@
 /// <reference types="@wdio/globals/types" />
 
 import { browser, expect } from '@wdio/globals';
+import { E2E_CANONICAL_TOOL_IDENTITIES } from '../../src/services/tauri/e2eCanonicalExposureContract';
 import {
   assertCleanDiagnostics,
   bridgeCall,
@@ -47,6 +48,7 @@ interface DomainFacadeSqliteSmokeEvidence {
     manifestToolIds: string[];
     manifestToolIdentities: string[];
     modelVisibleToolIdentities: string[];
+    agentVisibleToolIdentities: string[];
     agentVisibleCount: number;
     project: {
       source: string;
@@ -111,8 +113,14 @@ describe('Domain Facade SQLite production chain', () => {
     ]);
     expect(evidence.canonical.canonicalization).toBe('ans_canonical_json_v1');
     expect(evidence.canonical.projectionHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(evidence.canonical.modelVisibleToolIdentities).toEqual([]);
-    expect(evidence.canonical.agentVisibleCount).toBe(0);
+    expect(evidence.canonical.manifestToolIdentities).toEqual([...E2E_CANONICAL_TOOL_IDENTITIES]);
+    expect(evidence.canonical.modelVisibleToolIdentities).toEqual([
+      ...E2E_CANONICAL_TOOL_IDENTITIES,
+    ]);
+    expect(evidence.canonical.agentVisibleToolIdentities).toEqual([
+      ...E2E_CANONICAL_TOOL_IDENTITIES,
+    ]);
+    expect(evidence.canonical.agentVisibleCount).toBe(4);
     expect(evidence.canonical.project).toMatchObject({
       source: 'sqlite',
       storageMode: 'sqlite',

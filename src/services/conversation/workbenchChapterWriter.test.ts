@@ -97,6 +97,96 @@ const providerRequestEvidence: AiProviderRequestEvidence = {
 
 const inRangeChapterCandidate = '正'.repeat(3_000);
 
+test('semantic review warnings preserve the candidate with no automatic Provider rewrite', async () => {
+  const samples = [
+    {
+      previous: '林砚打开照片，确认死者的手腕上有一道刀伤。',
+      opening: '陈警官在另一个房间打开照片，辨认失踪孩子的校服。',
+      code: 'chapter_boundary_action_replay',
+    },
+    {
+      opening: '火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。',
+      code: 'chapter_temporal_semantics_conflict',
+    },
+  ];
+  for (const sample of samples) {
+    let requests = 0;
+    const text = `${sample.opening}\n${'甲'.repeat(2950)}。`;
+    const writer = createTestWorkbenchChapterWriter({
+      getSettings: () => baseSettings,
+      loadAdoptedPreviousChapter: async () =>
+        sample.previous
+          ? {
+              status: 'adopted',
+              context: {
+                chapterId: 'previous',
+                draftId: 'previous-draft',
+                contentHash: 'previous-hash',
+                content: sample.previous,
+              },
+            }
+          : { status: 'none' },
+      compileContext: async () => snapshot,
+      executeGeneration: async () => {
+        requests += 1;
+        return {
+          persistence: 'ephemeral_browser',
+          text,
+          provider: { text, providerId: 'mock', modelId: 'Frozen Mock', durationMs: 1 },
+        };
+      },
+    });
+    const result = await writer.generate({
+      novelId: 'novel-001',
+      chapterId: 'chapter-003',
+      goal: '生成本章正文',
+      mode: 'generate',
+      modelSnapshot: frozenModel,
+    });
+    assert.equal(requests, 1);
+    assert.equal(result.text, text);
+    assert.equal(result.integrityRepairCount, 0);
+    assert.ok(
+      result.integrityWarnings?.some(
+        (issue) => issue.code === sample.code && issue.severity === 'warning',
+      ),
+    );
+  }
+});
+
+test('a semantic warning cannot downgrade a simultaneous hard integrity failure', async () => {
+  const text = `火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。\n${'甲'.repeat(2950)}。\n<analysis>内部推理</analysis>`;
+  const calls: ChapterGenerationExecutionInput[] = [];
+  const writer = createTestWorkbenchChapterWriter({
+    getSettings: () => baseSettings,
+    loadAdoptedPreviousChapter: noPreviousAdoptedChapter,
+    compileContext: async () => snapshot,
+    executeGeneration: async (input) => {
+      calls.push(input);
+      return {
+        persistence: 'ephemeral_browser',
+        text,
+        provider: { text, providerId: 'mock', modelId: 'Frozen Mock', durationMs: 1 },
+      };
+    },
+  });
+  await assert.rejects(
+    writer.generate({
+      novelId: 'novel-001',
+      chapterId: 'chapter-003',
+      goal: '生成本章正文',
+      mode: 'generate',
+      modelSnapshot: frozenModel,
+    }),
+    { code: 'WORKBENCH_CHAPTER_INTEGRITY_FAILED' },
+  );
+  assert.equal(calls.length, 3);
+  assert.ok((calls[1].taskInput.issueCodes as string[]).includes('chapter_meta_reasoning_leakage'));
+  assert.ok(
+    !(calls[1].taskInput.issueCodes as string[]).includes('chapter_temporal_semantics_conflict'),
+  );
+});
+
 function createTestWorkbenchChapterWriter(deps: WorkbenchChapterWriterDependencies = {}) {
   return createWorkbenchChapterWriter({
     resolveGenerationProfiles: async () => ({}),

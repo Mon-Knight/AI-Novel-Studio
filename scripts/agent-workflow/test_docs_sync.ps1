@@ -143,7 +143,7 @@ try {
 
     $releaseWorkflowPath = Join-Path $FixtureRoot ".github/workflows/release.yml"
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = $releaseWorkflow -replace 'needs: desktop-gate', 'needs: omitted-desktop-gate'
+    $releaseWorkflow = $releaseWorkflow.Replace('needs: [desktop-gate, release-context]', 'needs: [omitted-desktop-gate, release-context]')
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
     Assert-CheckResult "release without desktop dependency" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"

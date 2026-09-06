@@ -217,7 +217,7 @@ test('fails closed while the directory refreshes, fails, or misses the selection
   assert.equal(localCredentialFallback.canSend, true);
   assert.equal(localCredentialFallback.selectedOption?.key, 'local_llama_cpp:qwen-local');
   assert.equal(localCredentialFallback.fallbackOption?.key, 'deepseek-official:deepseek-chat');
-  assert.match(localCredentialFallback.message, /本地模型的本次会话凭据不可用/);
+  assert.match(localCredentialFallback.message, /本地模型的匹配凭据不可用/);
 
   const fixedTaskModel = getWorkbenchModelAvailability({
     plugins: localFallback.options.map((option) =>
@@ -282,7 +282,7 @@ test('marks a matching remote model unavailable when its session credential is g
   assert.equal(locked.status, 'unavailable');
   assert.equal(locked.canSend, false);
   assert.equal(locked.selectedOption?.key, 'openai_compatible:gpt-5.6-luna');
-  assert.match(locked.message, /本次会话凭据不可用/);
+  assert.match(locked.message, /匹配凭据不可用/);
   assert.match(locked.message, /新建任务/);
 
   const unlocked = getWorkbenchModelAvailability({
@@ -318,6 +318,6 @@ test('preserves credential recovery when the probe returns no usable model rows'
 
   assert.equal(unavailable.status, 'unavailable');
   assert.equal(unavailable.canSend, false);
-  assert.match(unavailable.message, /本次会话凭据不可用/);
-  assert.match(unavailable.message, /重新配置模型/);
+  assert.match(unavailable.message, /匹配凭据不可用/);
+  assert.match(unavailable.message, /相同 Provider、Endpoint 与模型重新填写/);
 });

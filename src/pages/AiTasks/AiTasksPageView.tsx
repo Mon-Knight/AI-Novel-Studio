@@ -12,6 +12,10 @@ import {
   X,
 } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
+import { PageHeader, PageLayout } from '../../components/common/PageLayout';
+import EmptyState from '../../components/common/EmptyState';
+import LoadingState from '../../components/common/LoadingState';
+import ErrorState from '../../components/common/ErrorState';
 import type { AiTaskRecord, AiTaskStatus, AiTaskType } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
 import AiTaskRecordCard from './AiTaskRecordCard';
@@ -23,6 +27,11 @@ import {
 } from './aiTasksPresentation';
 
 export interface AiTasksPageViewProps {
+  loading?: boolean;
+  staleResults?: boolean;
+  requestedPage?: number;
+  loadError?: string;
+  onRetryLoad?: () => void;
   tasks: AiTaskRecord[];
   total: number;
   typeFilter: AiTaskType | 'all';
@@ -53,6 +62,11 @@ export interface AiTasksPageViewProps {
 }
 
 function AiTasksPageView({
+  loading = false,
+  staleResults = false,
+  requestedPage,
+  loadError = '',
+  onRetryLoad,
   tasks,
   total,
   typeFilter,
@@ -87,30 +101,30 @@ function AiTasksPageView({
   ).length;
 
   return (
-    <div
-      style={{ padding: 32, maxWidth: 900, margin: '0 auto', height: '100%', overflowY: 'auto' }}
-    >
+    <PageLayout>
       <BackButton label="返回工作台" to="/" />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 22,
-          fontWeight: 700,
-          marginBottom: 8,
-          marginTop: 12,
-        }}
-      >
-        <Bot aria-hidden="true" size={22} strokeWidth={1.8} />
-        AI 任务记录
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-        查看所有 AI 生成、分析、检查和润色任务的执行记录
-        {visibleCost > 0 && <span> · 当前页已计价 {formatUsd(visibleCost)}</span>}
-      </div>
+      <PageHeader
+        title="AI 任务记录"
+        icon={Bot}
+        description={
+          <>
+            查看生成、分析、检查和润色的执行记录
+            {visibleCost > 0 && (
+              <span>
+                {' '}
+                · {staleResults ? '上次结果' : '当前页'}已计价 {formatUsd(visibleCost)}
+              </span>
+            )}
+          </>
+        }
+      />
       {msg && (
         <div
+          role={
+            msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')
+              ? 'alert'
+              : 'status'
+          }
           style={{
             padding: '8px 16px',
             marginBottom: 16,
@@ -141,6 +155,7 @@ function AiTasksPageView({
         <button
           className={`btn btn-sm ${selectMode ? 'btn-primary' : 'btn-secondary'}`}
           onClick={onToggleSelectMode}
+          disabled={deleting || (staleResults && !selectMode)}
         >
           {selectMode ? (
             <>
@@ -156,7 +171,11 @@ function AiTasksPageView({
         </button>
         {selectMode && (
           <>
-            <button className="btn btn-sm btn-secondary" onClick={onToggleSelectAll}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={onToggleSelectAll}
+              disabled={deleting || staleResults}
+            >
               {deletableTaskCount > 0 && selectedIds.size === deletableTaskCount ? (
                 <>
                   <Square aria-hidden="true" size={15} strokeWidth={1.8} />
@@ -172,7 +191,7 @@ function AiTasksPageView({
             <button
               className="btn btn-sm btn-danger"
               onClick={onDeleteSelected}
-              disabled={deleting || selectedIds.size === 0}
+              disabled={deleting || staleResults || selectedIds.size === 0}
             >
               {deleting ? (
                 <>
@@ -221,7 +240,7 @@ function AiTasksPageView({
             key={value}
             className={`btn btn-xs ${typeFilter === value ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => onTypeFilterChange(value)}
-            style={{ fontSize: 11, padding: '2px 8px' }}
+            style={{ fontSize: 12, padding: '4px 8px', minHeight: 28 }}
           >
             {value === 'all' ? '全部' : AiTaskTypeLabels[value]}
           </button>
@@ -265,7 +284,7 @@ function AiTasksPageView({
               key={value}
               className={`btn btn-xs ${statusFilter === value ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => onStatusFilterChange(value)}
-              style={{ fontSize: 11, padding: '2px 8px' }}
+              style={{ fontSize: 12, padding: '4px 8px', minHeight: 28 }}
             >
               {StatusIcon && <StatusIcon aria-hidden="true" size={13} strokeWidth={1.8} />}
               {label}
@@ -278,33 +297,55 @@ function AiTasksPageView({
           <button
             className="btn btn-xs btn-danger"
             onClick={onDeleteFiltered}
-            disabled={deleting || deletableTaskCount === 0}
+            disabled={deleting || staleResults || deletableTaskCount === 0}
           >
             <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
             删除当前页的 {deletableTaskCount} 条终态记录
           </button>
         </div>
       )}
-      {tasks.length === 0 ? (
-        <div className="detail-card" style={{ textAlign: 'center', padding: 32 }}>
-          <Bot
-            aria-hidden="true"
-            size={40}
-            strokeWidth={1.8}
-            style={{ marginBottom: 12, color: 'var(--color-text-muted)' }}
-          />
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>暂无 AI 任务记录</div>
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--color-text-muted)',
-              maxWidth: 400,
-              margin: '0 auto',
-            }}
-          >
-            当你生成正文、分析风格、推荐角色、推荐事件、总结章节或润色正文后，这里会显示任务记录。
-          </div>
+      {loadError && (
+        <ErrorState message="任务记录读取失败" detail={loadError} onRetry={onRetryLoad} />
+      )}
+      {staleResults && tasks.length > 0 && (
+        <div className="list-refreshing" role="status" data-testid="ai-tasks-stale-results">
+          当前保留上次读取的第 {visiblePage}{' '}
+          页结果，不属于当前筛选或页码；读取成功前不可选择或删除这些记录。
         </div>
+      )}
+      {loading &&
+        (tasks.length > 0 ? (
+          <div className="list-refreshing" role="status">
+            正在更新任务记录，暂时保留已读取结果…
+          </div>
+        ) : (
+          <LoadingState text="正在更新任务记录…" />
+        ))}
+      {tasks.length === 0 && !loading && !loadError ? (
+        <EmptyState
+          icon={Bot}
+          title={
+            typeFilter !== 'all' || statusFilter !== 'all'
+              ? '当前筛选没有匹配记录'
+              : '暂无 AI 任务记录'
+          }
+          description={
+            typeFilter !== 'all' || statusFilter !== 'all'
+              ? '更换筛选条件，或清除筛选查看全部记录。'
+              : '执行创作任务后，记录会显示在这里。'
+          }
+          action={
+            typeFilter !== 'all' || statusFilter !== 'all'
+              ? {
+                  label: '清除筛选',
+                  onClick: () => {
+                    onTypeFilterChange('all');
+                    onStatusFilterChange('all');
+                  },
+                }
+              : undefined
+          }
+        />
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
           {pagedTasks.map((task) => (
@@ -314,6 +355,8 @@ function AiTasksPageView({
               expanded={expandedId === task.id}
               selected={selectedIds.has(task.id)}
               selectMode={selectMode}
+              staleResults={staleResults}
+              deleting={deleting}
               activeExecutionState={executionStates.get(task.id) ?? 'inactive'}
               onToggleSelect={onToggleSelect}
               onToggleExpand={onToggleExpand}
@@ -325,17 +368,18 @@ function AiTasksPageView({
             <nav className="list-pagination" aria-label="AI 任务分页">
               <button
                 className="btn btn-secondary btn-sm"
-                disabled={visiblePage <= 1}
+                disabled={staleResults || (requestedPage ?? visiblePage) <= 1}
                 onClick={onPreviousPage}
               >
                 上一页
               </button>
               <span>
-                第 {visiblePage} / {totalPages} 页 · 共 {total} 条
+                {staleResults ? '上次结果：' : ''}第 {visiblePage} / {totalPages} 页 · 共 {total} 条
+                {staleResults && requestedPage ? `；请求第 ${requestedPage} 页` : ''}
               </span>
               <button
                 className="btn btn-secondary btn-sm"
-                disabled={visiblePage >= totalPages}
+                disabled={staleResults || (requestedPage ?? visiblePage) >= totalPages}
                 onClick={onNextPage}
               >
                 下一页
@@ -344,7 +388,7 @@ function AiTasksPageView({
           )}
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 }
 

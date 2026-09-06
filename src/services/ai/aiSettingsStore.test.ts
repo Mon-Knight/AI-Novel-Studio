@@ -294,11 +294,12 @@ test('real-provider E2E opt-in uses sanitized settings while ordinary E2E stays 
     storage.clear();
     const vite = await createServer({
       appType: 'custom',
+      optimizeDeps: { noDiscovery: true },
       define: {
         'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
         'import.meta.env.VITE_AI_NOVEL_STUDIO_REAL_E2E': JSON.stringify(realEnabled),
       },
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: false, watch: null },
     });
     try {
       const isolated = (await vite.ssrLoadModule(

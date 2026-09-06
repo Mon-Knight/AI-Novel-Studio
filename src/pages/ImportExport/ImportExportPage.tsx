@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowDownToLine, FileJson, Upload } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
+import { PageHeader, PageLayout, PageTabs } from '../../components/common/PageLayout';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
 import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import { novelRepository } from '../../services/database/novelRepository';
@@ -79,34 +80,39 @@ function ImportExportPage() {
     }
   };
 
+  const pageActions = (
+    <>
+      {activeTab === 'import' && (
+        <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowTxtImport(true)}
+          >
+            <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
+            导入 TXT
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowJsonImport(true)}
+          >
+            <FileJson aria-hidden="true" size={15} strokeWidth={1.8} />
+            导入 JSON
+          </button>
+        </div>
+      )}
+    </>
+  );
   return (
-    <div
-      style={{
-        padding: 32,
-        maxWidth: 1000,
-        margin: '0 auto',
-        height: '100%',
-        overflowY: 'auto',
-      }}
-    >
+    <PageLayout>
       <BackButton label="返回工作台" to="/" />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 22,
-          fontWeight: 700,
-          marginBottom: 8,
-          marginTop: 12,
-        }}
-      >
-        <ArrowDownToLine aria-hidden="true" size={22} strokeWidth={1.8} />
-        导入导出中心
-      </div>
-      <div className="text-sm text-muted" style={{ marginBottom: 20 }}>
-        导出已采用章节正文、Markdown 排版与完整 JSON 备份；导入外部小说原稿与配置资产。
-      </div>
+      <PageHeader
+        title="导入导出中心"
+        description="导出已采用章节正文、Markdown 排版与完整 JSON 备份；导入外部小说原稿与配置资产。"
+        icon={ArrowDownToLine}
+        actions={pageActions}
+      />
 
       {msg && (
         <div
@@ -137,107 +143,39 @@ function ImportExportPage() {
         </div>
       )}
 
-      {/* 统一 Tab 导航条 */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 0,
-          marginBottom: 20,
-          borderBottom: '2px solid var(--color-border)',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
+      <PageTabs<ImportExportTab>
+        label="导入导出分类"
+        value={activeTab}
+        onChange={setActiveTab}
+        items={[
+          { value: 'export', label: '作品导出', count: novels.length > 0 ? 3 : 0 },
+          { value: 'import', label: '数据导入', count: 2, testId: 'project-import-tab' },
+        ]}
       >
-        <div style={{ display: 'flex' }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('export')}
-            style={{
-              padding: '8px 20px',
-              fontSize: 14,
-              fontWeight: activeTab === 'export' ? 600 : 400,
-              color:
-                activeTab === 'export' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              borderBottom:
-                activeTab === 'export' ? '2px solid var(--color-primary)' : '2px solid transparent',
-              marginBottom: -2,
-              background: 'none',
-              cursor: 'pointer',
-              borderTop: 'none',
-              borderLeft: 'none',
-              borderRight: 'none',
-            }}
-          >
-            作品导出 ({novels.length > 0 ? 3 : 0})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('import')}
-            style={{
-              padding: '8px 20px',
-              fontSize: 14,
-              fontWeight: activeTab === 'import' ? 600 : 400,
-              color:
-                activeTab === 'import' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              borderBottom:
-                activeTab === 'import' ? '2px solid var(--color-primary)' : '2px solid transparent',
-              marginBottom: -2,
-              background: 'none',
-              cursor: 'pointer',
-              borderTop: 'none',
-              borderLeft: 'none',
-              borderRight: 'none',
-            }}
-          >
-            数据导入 (2)
-          </button>
-        </div>
+        {activeTab === 'export' && (
+          <NovelExportSection
+            novels={novels}
+            selectedNovelId={selectedNovelId}
+            onSelectNovelId={setSelectedNovelId}
+            chapters={chapters}
+            selectedChapterId={selectedChapterId}
+            onSelectChapterId={setSelectedChapterId}
+            onExport={handleExport}
+            exportNovelToTxt={exportService.exportNovelToTxt}
+            exportNovelToMarkdown={exportService.exportNovelToMarkdown}
+            exportNovelBackupJson={exportService.exportNovelBackupJson}
+            exportChapterToTxt={exportService.exportChapterToTxt}
+            exportChapterToMarkdown={exportService.exportChapterToMarkdown}
+          />
+        )}
 
         {activeTab === 'import' && (
-          <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setShowTxtImport(true)}
-            >
-              <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
-              导入 TXT
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowJsonImport(true)}
-            >
-              <FileJson aria-hidden="true" size={15} strokeWidth={1.8} />
-              导入 JSON
-            </button>
-          </div>
+          <NovelImportSection
+            onOpenTxt={() => setShowTxtImport(true)}
+            onOpenJson={() => setShowJsonImport(true)}
+          />
         )}
-      </div>
-
-      {activeTab === 'export' && (
-        <NovelExportSection
-          novels={novels}
-          selectedNovelId={selectedNovelId}
-          onSelectNovelId={setSelectedNovelId}
-          chapters={chapters}
-          selectedChapterId={selectedChapterId}
-          onSelectChapterId={setSelectedChapterId}
-          onExport={handleExport}
-          exportNovelToTxt={exportService.exportNovelToTxt}
-          exportNovelToMarkdown={exportService.exportNovelToMarkdown}
-          exportNovelBackupJson={exportService.exportNovelBackupJson}
-          exportChapterToTxt={exportService.exportChapterToTxt}
-          exportChapterToMarkdown={exportService.exportChapterToMarkdown}
-        />
-      )}
-
-      {activeTab === 'import' && (
-        <NovelImportSection
-          onOpenTxt={() => setShowTxtImport(true)}
-          onOpenJson={() => setShowJsonImport(true)}
-        />
-      )}
+      </PageTabs>
 
       {showTxtImport && (
         <ImportTxtDialog
@@ -255,7 +193,7 @@ function ImportExportPage() {
           }}
         />
       )}
-    </div>
+    </PageLayout>
   );
 }
 

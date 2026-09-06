@@ -1,8 +1,25 @@
+import { buildAccentPalette, normalizeAccent } from './accentPalette';
+
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type EffectiveTheme = Exclude<ThemePreference, 'system'>;
 
 const THEME_STORAGE_KEY = 'ai_novel_studio_theme_preference';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
+let systemAccent: string | null = null;
+
+/** Updates runtime color tokens without adding DOM side effects to the theme store. */
+export function setSystemAccentColor(accent: unknown): void {
+  systemAccent = normalizeAccent(accent);
+  if (typeof document === 'undefined') return;
+  const theme = document.documentElement.dataset.effectiveTheme === 'dark' ? 'dark' : 'light';
+  applyAccentPalette(theme);
+}
+
+function applyAccentPalette(theme: EffectiveTheme): void {
+  for (const [property, value] of Object.entries(buildAccentPalette(systemAccent, theme))) {
+    document.documentElement.style.setProperty(property, value);
+  }
+}
 
 export interface ThemeRuntimeSnapshot {
   preference: ThemePreference;
@@ -55,6 +72,7 @@ export function applyThemeToDocument(
   root.dataset.theme = preference;
   root.dataset.effectiveTheme = effectiveTheme;
   root.style.colorScheme = effectiveTheme;
+  applyAccentPalette(effectiveTheme);
 }
 
 function listenForSystemThemeChange(listener: (prefersDark: boolean) => void): () => void {

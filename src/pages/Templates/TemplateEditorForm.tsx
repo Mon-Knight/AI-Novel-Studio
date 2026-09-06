@@ -64,10 +64,13 @@ export function TemplateEditorForm(props: TemplateEditorFormProps) {
           style={{
             background: 'none',
             border: 'none',
+            minWidth: 28,
+            minHeight: 28,
             cursor: 'pointer',
             color: 'var(--color-text-secondary)',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'center',
           }}
           aria-label="关闭表单"
         >

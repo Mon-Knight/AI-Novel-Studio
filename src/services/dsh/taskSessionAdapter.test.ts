@@ -202,6 +202,41 @@ const readModelSnapshot: TaskModelSnapshot = {
   capturedAt: '2026-08-28T00:00:00.000Z',
 };
 
+test('ambiguous and denied instructions stop before native model dispatch or Run creation', async () => {
+  const originalWindow = mockTauriWindow();
+  const originalStart = dshTaskRuntimeService.start;
+  const originalCreateRun = taskConversationService.createRun;
+  let calls = 0;
+  dshTaskRuntimeService.start = async () => {
+    calls += 1;
+    throw new Error('unexpected Provider dispatch');
+  };
+  taskConversationService.createRun = async () => {
+    calls += 1;
+    throw new Error('unexpected Run creation');
+  };
+  try {
+    for (const goal of ['不要生成下一章', '生成还是检查本章，你决定']) {
+      await assert.rejects(
+        taskSessionAdapter.startTurn({
+          conversationId: 'clarify',
+          novelId: 'novel-1',
+          turnId: 'turn-clarify',
+          goal,
+          chapterId: 'chapter-1',
+          modelSnapshot: readModelSnapshot,
+        }),
+        { code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED' },
+      );
+    }
+    assert.equal(calls, 0);
+  } finally {
+    restoreWindow(originalWindow);
+    dshTaskRuntimeService.start = originalStart;
+    taskConversationService.createRun = originalCreateRun;
+  }
+});
+
 const modelToolAttestation: ModelToolCallingAttestation = {
   protocol: 'ans_model_tool_attestation_v1',
   provider: 'deepseek-official',

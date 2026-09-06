@@ -1,6 +1,15 @@
 import { dbCall, generateId, isTauri, lsGet, lsSet, nowISO } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { isContextCompressionCandidate } from '../context/novelContextCompressionProvider';
+import {
+  normalizeConversationDirectoryQuery,
+  queryLocalConversationDirectory,
+  toConversationPage,
+} from './conversationDirectoryQuery';
+import type {
+  ConversationDirectoryPage,
+  ConversationDirectoryQuery,
+} from '../../types/conversation-directory';
 import type {
   ArtifactDecision,
   ConversationArtifactCard,
@@ -43,7 +52,7 @@ interface LocalConversationState {
   bundles: TaskConversationBundle[];
 }
 
-interface ListConversationOptions {
+interface ListConversationOptions extends Omit<ConversationDirectoryQuery, 'novelId'> {
   includeArchived?: boolean;
 }
 
@@ -546,23 +555,37 @@ export const taskConversationService = {
 
   async list(novelId?: string, options: ListConversationOptions = {}): Promise<TaskConversation[]> {
     const includeArchived = options.includeArchived === true;
+    const query = normalizeConversationDirectoryQuery({
+      ...options,
+      novelId,
+      archive: options.archive ?? (includeArchived ? 'all' : 'active'),
+    });
     const raw = await dbCall<unknown[]>(
       'list_task_conversations',
       {
-        input: { novelId, includeArchived, limit: 100 },
+        input: { ...query, includeArchived },
       },
-      () =>
-        localState()
-          .bundles.filter((bundle) => !novelId || bundle.conversation.novelId === novelId)
-          .filter(
-            (bundle) =>
-              includeArchived ||
-              (!bundle.conversation.archivedAt && bundle.conversation.status !== 'archived'),
-          )
-          .map((bundle) => bundle.conversation)
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      async () => {
+        const { novelRepository } = await import('../database/novelRepository');
+        const titles = query.query
+          ? Object.fromEntries(
+              (await novelRepository.getAll()).map((novel) => [novel.id, novel.title]),
+            )
+          : {};
+        return queryLocalConversationDirectory(
+          localState().bundles.map((bundle) => bundle.conversation),
+          query,
+          titles,
+        );
+      },
     );
     return (Array.isArray(raw) ? raw : []).map(normalizeConversation);
+  },
+
+  async listPage(input: ConversationDirectoryQuery = {}): Promise<ConversationDirectoryPage> {
+    const limit = Math.min(100, normalizeConversationDirectoryQuery(input).limit ?? 100);
+    const rows = await taskConversationService.list(input.novelId, { ...input, limit: limit + 1 });
+    return toConversationPage(rows, limit);
   },
 
   async get(

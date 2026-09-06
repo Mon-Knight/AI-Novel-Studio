@@ -42,7 +42,8 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const vite = await createServer({
   appType: 'custom',
-  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const outputProfileModule = (await vite.ssrLoadModule(
   '/src/services/styles/outputProfileService.ts',

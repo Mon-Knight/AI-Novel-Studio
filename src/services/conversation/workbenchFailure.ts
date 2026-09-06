@@ -1,3 +1,5 @@
+import { getCredentialStorageCopy } from '../ai/credentialStorageCopy';
+
 export type WorkbenchFailureLayer = 'parameter' | 'scheduling' | 'data' | 'service' | 'model';
 
 export interface WorkbenchFailure {
@@ -35,6 +37,15 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       : '';
   const message = error instanceof Error ? error.message : String(error ?? '任务失败');
   const text = code + ' ' + message;
+
+  if (code === 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED') {
+    return {
+      layer: 'parameter',
+      code,
+      message,
+      hint: '请明确一个动作后重新发送；尚未调用模型。',
+    };
+  }
 
   if (
     code === CHAPTER_REQUIRED ||
@@ -119,7 +130,7 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       layer: 'service',
       code,
       message: message.trim() || '固定模型的本次会话凭据不可用。',
-      hint: 'API Key 只保留在本次应用会话；请在模型设置中重新配置，或使用当前模型新建任务。',
+      hint: getCredentialStorageCopy().unavailableHint,
     };
   }
   if (RETRYABLE_PROVIDER_FAILURE_CODES.has(code) || TRANSIENT_PROVIDER_FAILURE_PATTERN.test(text)) {

@@ -40,6 +40,8 @@ const allSpecs = [
   'cold-start.spec.ts',
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',
+  'project-backup-boundary.spec.ts',
+  'workbench-task-directory.spec.ts',
   'chapter-save.spec.ts',
   'large-text-save.spec.ts',
   'provider-pipeline-setting.spec.ts',

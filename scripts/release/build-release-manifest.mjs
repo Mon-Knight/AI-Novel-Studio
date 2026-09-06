@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseVersion, assertChannelVersion, assertRollback } from './release-version.mjs';
 
 const MAX_RELEASE_NOTES_CHARS = 4_000;
 const MAX_SIGNATURE_CHARS = 16_000;
@@ -25,16 +26,7 @@ function requireValue(values, key) {
 }
 
 function assertVersion(version) {
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(version)) {
-    throw new Error(`Invalid semantic version: ${version}`);
-  }
-}
-
-function assertChannelVersion(channel, version) {
-  const isPrerelease = version.split('+', 1)[0].includes('-');
-  if ((channel === 'stable' && isPrerelease) || (channel === 'beta' && !isPrerelease)) {
-    throw new Error(`Version ${version} does not belong to the ${channel} channel.`);
-  }
+  parseVersion(version);
 }
 
 function assertWorkspacePath(workspace, candidate, label) {
@@ -156,6 +148,7 @@ const previousInstallerUrlInput = values.get('previous-installer-url')?.trim();
 const previousInstallerUrl = previousInstallerUrlInput
   ? assertHttpsUrl(previousInstallerUrlInput, 'Previous installer URL')
   : null;
+assertRollback({ version, channel, previousVersion, previousInstallerUrl, repository });
 
 const outputDirectory = path.join(workspace, 'dist-release', 'channels', channel);
 await mkdir(outputDirectory, { recursive: true });

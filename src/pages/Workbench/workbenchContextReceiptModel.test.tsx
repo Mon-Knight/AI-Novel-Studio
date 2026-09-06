@@ -9,6 +9,46 @@ import {
   resolveToolContextReceipt,
 } from './workbenchContextReceiptModel';
 
+test('persisted constraint decisions and semantic warnings rebuild safe visible receipts', () => {
+  const result = JSON.parse(
+    JSON.stringify({
+      generationContext: {
+        sources: [],
+        taskConstraints: {
+          included: 8,
+          superseded: 1,
+          omittedBudget: 1,
+          omittedEntryCount: 0,
+          entries: [
+            {
+              sequence: 2,
+              segmentIndex: 0,
+              status: 'omitted_budget',
+              text: 'private original instruction',
+            },
+          ],
+        },
+        integrityWarnings: [
+          {
+            code: 'chapter_temporal_semantics_conflict',
+            severity: 'warning',
+            summary: 'private original prose',
+          },
+        ],
+      },
+    }),
+  );
+  const receipt = resolveToolContextReceipt(toolEvent({ result }));
+  assert.ok(receipt);
+  const html = renderToStaticMarkup(createElement(GenerationContextReceipt, { receipt }));
+  assert.match(html, /纳入 8 条/);
+  assert.match(html, /较新约束替代 1 条/);
+  assert.match(html, /预算未纳入 1 条/);
+  assert.match(html, /第 3 回合第 1 条/);
+  assert.match(html, /未触发自动重写/);
+  assert.doesNotMatch(html, /private original/);
+});
+
 function toolEvent(overrides: Partial<ToolCallEvent> = {}): ToolCallEvent {
   return {
     eventId: 'event-generate',

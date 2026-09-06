@@ -299,6 +299,121 @@ test('损坏的补充缓存不能通过完整备份校验', () => {
   assert.equal(backupSchema.isCompleteProjectBackup(malformedRawEntries), false);
 });
 
+function scopedBackup() {
+  const backup = completeBackup();
+  backup.novel = { id: 'novel-source', title: '安全恢复测试' };
+  backup.tables.chapters = [{ id: 'chapter-source', novel_id: 'novel-source' }];
+  backup.tables.volumes = [{ id: 'volume-source', novel_id: 'novel-source' }];
+  backup.localStorage = { version: 1, collections: {}, entries: {}, rawEntries: {} };
+  return backup;
+}
+
+const invalidLocalAttachments = [
+  [
+    'application setting',
+    (data) => {
+      data.entries.ai_novel_studio_ai_settings = {};
+    },
+  ],
+  [
+    'unknown collection',
+    (data) => {
+      data.collections.ai_novel_studio_settings = [];
+    },
+  ],
+  [
+    'raw application setting',
+    (data) => {
+      data.rawEntries.ai_novel_studio_ai_settings = '{}';
+    },
+  ],
+  [
+    'foreign chapter key',
+    (data) => {
+      data.rawEntries.ai_novel_studio_unsaved_chapter_outline_other = 'keep private';
+    },
+  ],
+  [
+    'wrong entry partition',
+    (data) => {
+      data.entries.ai_novel_studio_unsaved_chapter_outline_chapter_source = 'outline';
+    },
+  ],
+  [
+    'conflicting owner',
+    (data) => {
+      data.collections.ai_novel_studio_quality_reports = [
+        { id: 'report-local', novelId: 'other-novel', chapterId: 'chapter-source' },
+      ];
+    },
+  ],
+  [
+    'conflicting owner aliases',
+    (data) => {
+      data.collections.ai_novel_studio_generation_jobs = [
+        { id: 'job-local', novelId: 'novel-source', novel_id: 'other-novel' },
+      ];
+    },
+  ],
+  [
+    'foreign nested chapter',
+    (data) => {
+      data.entries['ai_novel_studio_drafts_list_chapter-source'] = [
+        { id: 'draft-local', novelId: 'novel-source', chapterId: 'other-chapter' },
+      ];
+    },
+  ],
+  [
+    'unknown job suffix',
+    (data) => {
+      data.entries['ai_novel_studio_generation_steps_job-foreign'] = [];
+    },
+  ],
+  [
+    'prototype key',
+    (data) => {
+      data.collections.ai_novel_studio_novels = [
+        JSON.parse('{"id":"novel-source","__proto__":{"polluted":true}}'),
+      ];
+    },
+  ],
+  ...['draftId', 'sourceDraftId', 'adoptedDraftId', 'candidateDraftId', 'input_draft_id'].map(
+    (field) => [
+      `foreign ${field} reference`,
+      (data) => {
+        data.collections.ai_novel_studio_quality_reports = [
+          {
+            id: 'report-local',
+            novelId: 'novel-source',
+            chapterId: 'chapter-source',
+            [field]: 'draft-from-another-project',
+          },
+        ];
+      },
+    ],
+  ),
+];
+
+for (const [label, mutate] of invalidLocalAttachments) {
+  test(`complete backup rejects ${label} before any LocalStorage write`, async () => {
+    const backup = scopedBackup();
+    mutate(backup.localStorage);
+    assert.equal(backupSchema.isCompleteProjectBackup(backup), false);
+    const storage = new MemoryStorage();
+    storage.setItem('unrelated', 'original');
+    await assert.rejects(
+      localStorageBackup.restoreLocalProjectData(
+        backup,
+        { 'novel-source': 'novel-restored', 'chapter-source': 'chapter-restored' },
+        storage,
+      ),
+      /备份|缓存|作用域|scope/i,
+    );
+    assert.equal(storage.length, 1);
+    assert.equal(storage.getItem('unrelated'), 'original');
+  });
+}
+
 class MemoryStorage {
   #items = new Map();
 
@@ -322,6 +437,265 @@ class MemoryStorage {
     this.#items.set(key, value);
   }
 }
+
+test('draft references must agree with their chapter, including SQL and local draft aliases', () => {
+  const backup = scopedBackup();
+  backup.tables.chapters.push({ id: 'chapter-other', novel_id: 'novel-source' });
+  backup.tables.chapter_drafts = [
+    { id: 'draft-other', novel_id: 'novel-source', chapter_id: 'chapter-other' },
+  ];
+  backup.localStorage.collections.ai_novel_studio_quality_reports = [
+    {
+      id: 'report-local',
+      novelId: 'novel-source',
+      chapterId: 'chapter-source',
+      draftId: 'draft-other',
+    },
+  ];
+  assert.equal(backupSchema.isCompleteProjectBackup(backup), false);
+  backup.localStorage.collections = {};
+  backup.localStorage.entries['ai_novel_studio_draft_chapter-source'] = {
+    id: 'draft-other',
+    novelId: 'novel-source',
+    chapterId: 'chapter-source',
+    content: 'collision',
+  };
+  assert.equal(backupSchema.isCompleteProjectBackup(backup), false);
+});
+
+test('local-only drafts are remapped before references and valid predecessor chapters remain portable', async () => {
+  const backup = scopedBackup();
+  backup.tables.chapters.push({ id: 'chapter-previous', novel_id: 'novel-source' });
+  backup.tables.chapter_drafts = [
+    { id: 'draft-previous', novel_id: 'novel-source', chapter_id: 'chapter-previous' },
+  ];
+  backup.localStorage.collections.ai_novel_studio_autonomous_story_plans = [
+    {
+      planId: 'plan-local',
+      schemaVersion: 1,
+      novelId: 'novel-source',
+      brief: { premise: 'synthetic' },
+      chapterRuns: [
+        {
+          chapterId: 'chapter-source',
+          sourceDraftId: 'draft-local',
+          predecessorDraftId: 'draft-previous',
+        },
+      ],
+    },
+  ];
+  backup.localStorage.entries['ai_novel_studio_draft_chapter-source'] = {
+    id: 'draft-local',
+    novelId: 'novel-source',
+    chapterId: 'chapter-source',
+    content: 'synthetic',
+  };
+  assert.equal(backupSchema.isCompleteProjectBackup(backup), true);
+  let sequence = 0;
+  const mapping = localStorageBackup.mergeLocalStorageIdMap(
+    backup.localStorage,
+    {
+      'novel-source': 'novel-restored',
+      'chapter-source': 'chapter-restored',
+      'chapter-previous': 'chapter-previous-restored',
+      'draft-previous': 'draft-previous-restored',
+    },
+    () => `local-restored-${++sequence}`,
+  );
+  const storage = new MemoryStorage();
+  await localStorageBackup.restoreLocalProjectData(backup, mapping, storage);
+  const plan = JSON.parse(storage.getItem('ai_novel_studio_autonomous_story_plans'))[0];
+  assert.equal(plan.chapterRuns[0].sourceDraftId, mapping['draft-local']);
+  assert.equal(plan.chapterRuns[0].predecessorDraftId, 'draft-previous-restored');
+});
+
+test('all supported schemas retain safe raw outlines and exact ID suffixes', async () => {
+  for (let schema = 2; schema <= 11; schema += 1) {
+    const backup = completeBackup(schema);
+    backup.novel = { id: 'novel-source', title: 'schema fixture' };
+    backup.tables.chapters = [{ id: 'chapter-source' }];
+    backup.localStorage = {
+      version: 1,
+      collections: {},
+      entries: {},
+      rawEntries: { 'ai_novel_studio_unsaved_chapter_outline_chapter-source': '  大纲\r\n原文\n' },
+    };
+    assert.equal(backupSchema.isCompleteProjectBackup(backup), true);
+    const storage = new MemoryStorage();
+    await localStorageBackup.restoreLocalProjectData(
+      backup,
+      {
+        'novel-source': 'novel-restored',
+        'chapter-source': 'chapter-restored',
+        // An unrelated shorter source must not rewrite the prefix or the suffix.
+        chapter: 'not-a-prefix-replacement',
+      },
+      storage,
+    );
+    assert.equal(storage.length, 1);
+    assert.equal(
+      storage.getItem('ai_novel_studio_unsaved_chapter_outline_chapter-restored'),
+      '  大纲\r\n原文\n',
+    );
+  }
+});
+
+test('restore rejects missing or colliding target IDs before any cache write', async () => {
+  for (const idMap of [
+    { 'novel-source': 'restored' },
+    { 'novel-source': 'restored', 'chapter-source': 'restored' },
+    { 'novel-source': 'novel-restored', 'chapter-source': 'chapter-source' },
+  ]) {
+    const backup = scopedBackup();
+    backup.localStorage.collections.ai_novel_studio_novels = [{ id: 'novel-source' }];
+    backup.localStorage.rawEntries['ai_novel_studio_unsaved_chapter_outline_chapter-source'] =
+      'incoming';
+    const storage = new MemoryStorage();
+    await assert.rejects(
+      localStorageBackup.restoreLocalProjectData(backup, idMap, storage),
+      /缓存/,
+    );
+    assert.equal(storage.length, 0);
+  }
+  const backup = scopedBackup();
+  backup.localStorage.rawEntries['ai_novel_studio_unsaved_chapter_outline_chapter-source'] =
+    'incoming';
+  const storage = new MemoryStorage();
+  storage.setItem('ai_novel_studio_unsaved_chapter_outline_chapter-restored', 'existing');
+  await assert.rejects(
+    localStorageBackup.restoreLocalProjectData(
+      backup,
+      {
+        'novel-source': 'novel-restored',
+        'chapter-source': 'chapter-restored',
+      },
+      storage,
+    ),
+    /已存在/,
+  );
+  assert.equal(
+    storage.getItem('ai_novel_studio_unsaved_chapter_outline_chapter-restored'),
+    'existing',
+  );
+});
+
+test('a failed planned write restores earlier cache writes without touching other projects', async () => {
+  const backup = scopedBackup();
+  backup.localStorage.collections.ai_novel_studio_novels = [
+    { id: 'novel-source', title: 'incoming' },
+  ];
+  backup.localStorage.rawEntries['ai_novel_studio_unsaved_chapter_outline_chapter-source'] =
+    'incoming outline';
+  const storage = new MemoryStorage();
+  const original = '[{"id":"other-novel","title":"unchanged"}]';
+  storage.setItem('ai_novel_studio_novels', original);
+  const originalSet = storage.setItem.bind(storage);
+  storage.setItem = (key, value) => {
+    if (key === 'ai_novel_studio_unsaved_chapter_outline_chapter-restored')
+      throw new Error('simulated quota');
+    originalSet(key, value);
+  };
+  await assert.rejects(
+    localStorageBackup.restoreLocalProjectData(
+      backup,
+      {
+        'novel-source': 'novel-restored',
+        'chapter-source': 'chapter-restored',
+      },
+      storage,
+    ),
+    /simulated quota/,
+  );
+  assert.equal(storage.length, 1);
+  assert.equal(storage.getItem('ai_novel_studio_novels'), original);
+});
+
+test('desktop service preflights before IPC and freezes attachment input across the await', async () => {
+  const { createServer } = await import('vite');
+  const calls = [];
+  let duringImport = () => {};
+  const storage = new MemoryStorage();
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const key = '__ANS_BACKUP_BOUNDARY_TEST__';
+  const previousBridge = Object.getOwnPropertyDescriptor(globalThis, key);
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    value: {
+      async call(command) {
+        calls.push(command);
+        if (command === 'import_project_backup') {
+          duringImport();
+          return {
+            novelId: 'novel-restored',
+            title: 'restored',
+            restoredRecords: {},
+            idMap: {
+              'novel-source': 'novel-restored',
+              'chapter-source': 'chapter-restored',
+            },
+          };
+        }
+        return undefined;
+      },
+    },
+  });
+  const server = await createServer({
+    configFile: false,
+    logLevel: 'silent',
+    appType: 'custom',
+    server: { middlewareMode: true, hmr: false, watch: null },
+    optimizeDeps: { noDiscovery: true },
+    plugins: [
+      {
+        name: 'isolated-backup-test-ports',
+        enforce: 'pre',
+        resolveId(id, importer) {
+          if (!importer?.replaceAll('\\', '/').endsWith('/projectBackupService.ts'))
+            return undefined;
+          if (id === '../database/db') return '\0backup-test-db';
+          if (id === '../tauri/runtime') return '\0backup-test-runtime';
+          return undefined;
+        },
+        load(id) {
+          if (id === '\0backup-test-db')
+            return `export const dbCall = (...args) => globalThis.${key}.call(...args);`;
+          if (id === '\0backup-test-runtime') return 'export const isTauriRuntime = () => true;';
+          return undefined;
+        },
+      },
+    ],
+  });
+  try {
+    const service = await server.ssrLoadModule('/src/services/backup/projectBackupService.ts');
+    for (const [, mutate] of invalidLocalAttachments) {
+      const backup = scopedBackup();
+      mutate(backup.localStorage);
+      await assert.rejects(service.restoreCompleteProjectBackup(backup), /备份/);
+    }
+    assert.deepEqual(calls, []);
+    assert.equal(storage.length, 0);
+    const backup = scopedBackup();
+    backup.localStorage.rawEntries['ai_novel_studio_unsaved_chapter_outline_chapter-source'] =
+      'frozen';
+    duringImport = () => {
+      backup.localStorage.rawEntries.ai_novel_studio_ai_settings = 'tampered';
+    };
+    await service.restoreCompleteProjectBackup(backup);
+    assert.deepEqual(calls, ['import_project_backup']);
+    assert.equal(storage.getItem('ai_novel_studio_ai_settings'), null);
+    assert.equal(
+      storage.getItem('ai_novel_studio_unsaved_chapter_outline_chapter-restored'),
+      'frozen',
+    );
+  } finally {
+    await server.close();
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+    if (previousBridge) Object.defineProperty(globalThis, key, previousBridge);
+    else Reflect.deleteProperty(globalThis, key);
+  }
+});
 
 test('项目缓存保留原始大纲、作品记录和本地 generation steps，并重写本地独有 ID', async () => {
   const backup = completeBackup();
@@ -533,7 +907,11 @@ test('项目缓存保留原始大纲、作品记录和本地 generation steps，
   assert.equal(idMap['reference-work-other'], undefined);
 
   const target = new MemoryStorage();
-  await localStorageBackup.restoreLocalProjectData(data, idMap, target);
+  await localStorageBackup.restoreLocalProjectData(
+    { ...backup, localStorage: data },
+    idMap,
+    target,
+  );
 
   const novel = JSON.parse(target.getItem('ai_novel_studio_novels'))[0];
   assert.equal(novel.id, 'novel-restored');

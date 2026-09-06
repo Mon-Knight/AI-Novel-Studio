@@ -4,6 +4,9 @@ import type { ChapterDraft } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
 import type { DraftContentState } from '../../../types/draftContentState';
 import type { DocumentSaveState, EditorDocumentState } from './editorAreaTypes';
+import { useEditorOperationScope } from './useEditorOperationScope';
+import { isComposingKeyboardEvent } from '../../../utils/keyboardEvent';
+import { hasActiveModal } from '../../common/useModalAccessibility';
 
 interface UseChapterOutlineEditorOptions {
   chapter?: Chapter;
@@ -14,23 +17,9 @@ interface UseChapterOutlineEditorOptions {
   onChapterUpdated?: (chapterId: string) => void;
 }
 
-function waitForInlineSaveFeedback(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.resolve();
-  return new Promise((resolve) => {
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve());
-      });
-    } else {
-      window.setTimeout(resolve, 0);
-    }
-  });
-}
-
 export function useChapterOutlineEditor({
   chapter,
   novelId,
-  currentDraft,
   documentState,
   effectiveContentState,
   onChapterUpdated,
@@ -39,7 +28,9 @@ export function useChapterOutlineEditor({
   const [outlineDraft, setOutlineDraft] = useState('');
   const [outlineSaveMsg, setOutlineSaveMsg] = useState('');
   const [outlineSaveState, setOutlineSaveState] = useState<DocumentSaveState>('idle');
-  const saveInFlightRef = useRef<Promise<void> | null>(null);
+  const saveInFlightRef = useRef<{ epoch: number; promise: Promise<void> } | null>(null);
+  const scopeKey = JSON.stringify([novelId, chapter?.id]);
+  const { scope, isCurrent } = useEditorOperationScope(scopeKey);
   const liveChapterIdRef = useRef(chapter?.id);
   const liveOutlineDraftRef = useRef(outlineDraft);
   liveChapterIdRef.current = chapter?.id;
@@ -51,7 +42,7 @@ export function useChapterOutlineEditor({
     setOutlineSaveMsg('');
     setOutlineSaveState('idle');
     saveInFlightRef.current = null;
-  }, [chapter?.id, currentDraft, documentState, effectiveContentState, novelId]);
+  }, [scopeKey]);
 
   const handleStartEditOutline = useCallback(() => {
     setOutlineDraft(chapter?.outline || '');
@@ -68,16 +59,28 @@ export function useChapterOutlineEditor({
   }, []);
 
   const performSaveOutline = useCallback(async () => {
-    if (!chapter || !novelId || documentState !== 'ready') return;
+    if (
+      !chapter ||
+      !novelId ||
+      documentState !== 'ready' ||
+      effectiveContentState?.status === 'unavailable'
+    )
+      return;
+    const epoch = scope.current.epoch;
     const requestChapterId = chapter.id;
     const requestOutline = outlineDraft;
     setOutlineSaveState('saving');
     setOutlineSaveMsg('保存中');
     try {
-      await waitForInlineSaveFeedback();
-      await chapterRepository.update(requestChapterId, { outline: requestOutline });
+      const savedChapter = await chapterRepository.update(requestChapterId, {
+        outline: requestOutline,
+      });
+      if (!savedChapter || savedChapter.id !== requestChapterId) {
+        throw new Error('章节大纲保存结果与目标章节不一致');
+      }
+      if (!isCurrent(epoch)) return;
       await onChapterUpdated?.(requestChapterId);
-      if (liveChapterIdRef.current !== requestChapterId) return;
+      if (!isCurrent(epoch) || liveChapterIdRef.current !== requestChapterId) return;
       if (liveOutlineDraftRef.current !== requestOutline) {
         setOutlineSaveState('editing');
         setOutlineSaveMsg('大纲已变化，请再次保存');
@@ -87,31 +90,45 @@ export function useChapterOutlineEditor({
       setOutlineSaveState('saved');
       setOutlineSaveMsg('已保存');
     } catch {
-      if (liveChapterIdRef.current !== requestChapterId) return;
+      if (!isCurrent(epoch) || liveChapterIdRef.current !== requestChapterId) return;
       setOutlineSaveState('error');
       setOutlineSaveMsg('章节大纲保存失败');
     }
-  }, [chapter, documentState, novelId, onChapterUpdated, outlineDraft]);
+  }, [
+    chapter,
+    documentState,
+    effectiveContentState?.status,
+    isCurrent,
+    novelId,
+    onChapterUpdated,
+    outlineDraft,
+    scope,
+  ]);
 
   const handleSaveOutline = useCallback((): Promise<void> => {
-    if (saveInFlightRef.current) return saveInFlightRef.current;
+    const epoch = scope.current.epoch;
+    if (saveInFlightRef.current?.epoch === epoch) return saveInFlightRef.current.promise;
     const save = performSaveOutline();
-    saveInFlightRef.current = save;
+    saveInFlightRef.current = { epoch, promise: save };
     void save.finally(() => {
-      if (saveInFlightRef.current === save) saveInFlightRef.current = null;
+      if (saveInFlightRef.current?.promise === save) saveInFlightRef.current = null;
     });
     return save;
-  }, [performSaveOutline]);
+  }, [performSaveOutline, scope]);
 
   const handleOutlineDraftChange = useCallback((value: string) => {
     setOutlineDraft(value);
-    setOutlineSaveState('editing');
-    setOutlineSaveMsg('');
+    liveOutlineDraftRef.current = value;
+    setOutlineSaveState((state) => (state === 'error' ? 'error' : 'editing'));
+    setOutlineSaveMsg((message) => (message === '章节大纲保存失败' ? message : ''));
   }, []);
 
   useEffect(() => {
     if (!isEditingOutline) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || hasActiveModal() || isComposingKeyboardEvent(event)) return;
+      if (!(event.target instanceof Element) || !event.target.closest('[data-editor-outline]'))
+        return;
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
         void handleSaveOutline();

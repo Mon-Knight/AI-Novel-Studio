@@ -1,4 +1,5 @@
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { GatewayModelEditorDraft } from './optionalModelEditorDraft';
 
 interface GatewayModelEditorProps {
@@ -57,9 +58,8 @@ export function GatewayModelEditor({ draft, onChange, onSave, onCancel }: Gatewa
           placeholder="网关访问 Token"
         />
         <span className="settings-help-text">
-          {draft.apiKey
-            ? '本次会话已绑定：' + aiSettingsService.maskApiKey(draft.apiKey)
-            : 'Key 不写入卡片或备份。'}
+          {draft.apiKey ? '当前填写：' + aiSettingsService.maskApiKey(draft.apiKey) + '。' : ''}
+          {getCredentialStorageCopy().keyHelp}
         </span>
       </label>
       <div className="settings-card-actions" style={{ gridColumn: '1 / -1' }}>

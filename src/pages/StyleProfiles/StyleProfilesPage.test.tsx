@@ -26,7 +26,8 @@ const { MemoryRouter } = await import('react-router-dom');
 
 const vite = await createServer({
   appType: 'custom',
-  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const styleServiceModule = (await vite.ssrLoadModule(
   '/src/services/styles/styleProfileService.ts',
@@ -147,12 +148,12 @@ test('initial load renders persisted styles and output profiles with accurate co
   renderPage();
 
   assert.ok(await screen.findByText('夜色叙事'));
-  assert.ok(screen.getByRole('button', { name: /风格方案\s*\(1\)/ }));
+  assert.ok(screen.getByRole('tab', { name: /风格方案\s*\(1\)/ }));
 
   await waitFor(() => {
-    assert.ok(screen.getByRole('button', { name: /输出控制\s*\(1\)/ }));
+    assert.ok(screen.getByRole('tab', { name: /输出控制\s*\(1\)/ }));
   });
-  fireEvent.click(screen.getByRole('button', { name: /输出控制\s*\(1\)/ }));
+  fireEvent.click(screen.getByRole('tab', { name: /输出控制\s*\(1\)/ }));
 
   assert.ok(await screen.findByText('冲突章节'));
   assert.ok(screen.getByText(/4,200\s*字/));
@@ -204,7 +205,7 @@ test('a custom output profile can be made default without weakening default dele
   };
 
   renderPage();
-  const outputTab = await screen.findByRole('button', { name: /输出控制\s*\(2\)/ });
+  const outputTab = await screen.findByRole('tab', { name: /输出控制\s*\(2\)/ });
   fireEvent.click(outputTab);
 
   const previousDefaultCard = getCardByTitle('默认章节');
@@ -446,7 +447,7 @@ test('output deletion is denied on cancel and performed only after confirmation'
   };
 
   renderPage();
-  const outputTab = await screen.findByRole('button', { name: /输出控制\s*\(1\)/ });
+  const outputTab = await screen.findByRole('tab', { name: /输出控制\s*\(1\)/ });
   fireEvent.click(outputTab);
   await screen.findByText('冲突章节');
   const deleteButton = within(getCardByTitle('冲突章节')).getByRole('button', {
