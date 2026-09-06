@@ -32,6 +32,28 @@ interface AiTaskView {
   provider?: string;
 }
 
+/**
+ * The success loading modal pauses its auto-close while the pointer rests on
+ * it (hover-to-read), so dismiss it the way a user would before clicking
+ * elements underneath. Resolves immediately when no modal is visible.
+ */
+async function dismissLoadingModalIfVisible(): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const dismissButton = await browser.$('[data-testid="loading-modal-dismiss"]');
+      if (!(await dismissButton.isExisting().catch(() => false))) return true;
+      if (!(await dismissButton.isDisplayed().catch(() => false))) return true;
+      try {
+        await browser.execute((element) => (element as HTMLElement).click(), dismissButton);
+      } catch {
+        // The modal auto-closed between the checks and the click.
+      }
+      return !(await dismissButton.isExisting().catch(() => true));
+    },
+    { timeout: 15000, timeoutMsg: 'loading modal did not dismiss' },
+  );
+}
+
 function normalizeTextareaLineEndings(value: string): string {
   return value.replace(/\r\n?/g, '\n');
 }
@@ -124,6 +146,7 @@ describe('candidate review and adoption', () => {
     expect(generationTask?.runtimeMode).toBe('mock');
     expect(generationTask?.provider).toBe('mock');
 
+    await dismissLoadingModalIfVisible();
     const applyButton = await waitForTestId('candidate-apply');
     expect(await applyButton.getAttribute('data-result-id')).toBe(resultId);
     expect(await applyButton.getAttribute('data-novel-id')).toBe(projectId);
@@ -179,6 +202,7 @@ describe('candidate review and adoption', () => {
     expect(draftsAfterAdoption).toHaveLength(draftsBeforeAdoption.length);
     expect(draftsAfterAdoption.filter((draft) => draft.isAdopted)).toHaveLength(1);
 
+    await dismissLoadingModalIfVisible();
     await clickTestId('candidate-apply');
     await waitForTestId('apply-confirm');
     expect(await applyButton.isEnabled()).toBe(false);

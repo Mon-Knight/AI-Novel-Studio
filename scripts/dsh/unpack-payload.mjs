@@ -17,6 +17,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { resolveTar } from './carrier-freshness.mjs';
+
 const zipPath = process.argv[2]?.trim();
 const destDir = process.argv[3]?.trim();
 if (!zipPath || !destDir || !existsSync(zipPath)) {
@@ -113,7 +115,7 @@ withUnpackLock(() => {
   rmSync(temporary, { recursive: true, force: true });
   mkdirSync(temporary, { recursive: true });
   try {
-    const extraction = spawnSync('tar', ['-xf', path.resolve(zipPath), '-C', temporary], {
+    const extraction = spawnSync(resolveTar(), ['-xf', path.resolve(zipPath), '-C', temporary], {
       stdio: 'inherit',
     });
     if (extraction.error) throw extraction.error;

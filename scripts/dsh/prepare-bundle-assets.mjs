@@ -15,7 +15,7 @@ import {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { verifyReusableCarrier } from './carrier-freshness.mjs';
+import { resolveTar, verifyReusableCarrier } from './carrier-freshness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const srcTauri = path.join(root, 'src-tauri');
@@ -139,7 +139,7 @@ console.log('[dsh-assets] creating zip64 runtime carrier');
 const entries = junctionEntries();
 stripJunctions(entries);
 try {
-  run('tar', ['-a', '-c', '-f', zip, '-C', staging, 'dsh-runtime'], { cwd: srcTauri });
+  run(resolveTar(), ['-a', '-c', '-f', zip, '-C', staging, 'dsh-runtime'], { cwd: srcTauri });
 } finally {
   restoreJunctions(entries);
 }

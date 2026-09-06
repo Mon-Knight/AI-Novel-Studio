@@ -76,7 +76,11 @@ function LoadingModal({
             </button>
           )}
           {state !== 'loading' && (
-            <button className="btn btn-secondary" onClick={onClose}>
+            <button
+              className="btn btn-secondary"
+              onClick={onClose}
+              data-testid="loading-modal-dismiss"
+            >
               {state === 'success' ? '完成' : '关闭'}
             </button>
           )}

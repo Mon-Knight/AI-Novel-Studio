@@ -55,6 +55,17 @@ export function verifyExtractedCarrierGateway({ extractedRoot, currentGateway, p
   return currentGatewaySha256;
 }
 
+// The DSH carrier is a zip64 archive: creation and extraction require bsdtar,
+// whose Windows build reads zip and accepts drive-letter paths. GNU tar (often
+// first on Git Bash PATH) can do neither, so pin the system tar on Windows.
+export function resolveTar() {
+  if (process.platform === 'win32') {
+    const systemTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+    if (existsSync(systemTar)) return systemTar;
+  }
+  return 'tar';
+}
+
 // Windows tar builds misread absolute Windows paths in the -f/-C operands as
 // remote hosts ("Cannot connect to D:"), so extraction always runs with a
 // relative archive operand and cwd positioned at the extraction directory.
@@ -79,7 +90,7 @@ export function verifyReusableCarrier({
   const extractedRoot = mkdtempSync(path.join(temporaryParent, 'ans-dsh-carrier-verify-'));
   try {
     const extraction = spawnSync(
-      'tar',
+      resolveTar(),
       [
         '-xf',
         extractArchiveOperand(extractedRoot, zip),
