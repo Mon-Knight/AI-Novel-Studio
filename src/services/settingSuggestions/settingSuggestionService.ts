@@ -1,7 +1,8 @@
 /**
  * AI Novel Studio - 设定库 AI 推演候选服务
  *
- * 候选记录保存在前端本地候选池中，避免在本轮直接变更数据库 schema。
+ * 候选记录在桌面端以 SQLite `setting_suggestions`（migration 037）为事实源，浏览器开发模式
+ * 继续使用 LocalStorage 候选池；首次在桌面端读取时把历史 LocalStorage 候选幂等迁入 SQLite。
  * 用户点击采纳后，才写入正式角色库、世界设定或规则体系。
  */
 import { createAiClient, aiSettingsService } from '../ai/aiClient';
@@ -9,7 +10,7 @@ import { aiTaskService } from '../ai/aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
 import { characterService } from '../characters/characterService';
-import { generateId, lsGet, lsSet, nowISO } from '../database/db';
+import { dbCall, generateId, getDbMode, lsGet, lsSet, nowISO } from '../database/db';
 import { safeJsonParse } from '../../utils/dataGuard';
 import type {
   GenerateSettingSuggestionsInput,
@@ -26,6 +27,8 @@ import { throwIfAiRequestCancelled } from '../ai/aiCancellation';
 import { bindAiTaskCancellation, settleAiTaskError } from '../ai/aiTaskCancellation';
 
 const KEY = 'ai_novel_studio_setting_suggestions';
+export const SETTING_SUGGESTIONS_SQLITE_MIGRATION_KEY =
+  'ai_novel_studio_setting_suggestions_sqlite_v1';
 
 const typeLabels: Record<SettingSuggestionType, string> = {
   character: '角色候选',
@@ -50,6 +53,132 @@ function getAllLocal(): SettingSuggestionRecord[] {
 function saveAllLocal(items: SettingSuggestionRecord[]): void {
   lsSet(KEY, items);
 }
+
+function fromDto(dto: Record<string, unknown>): SettingSuggestionRecord {
+  return {
+    id: String(dto.id),
+    novelId: String(dto.novelId),
+    suggestionType: dto.suggestionType as SettingSuggestionType,
+    worldType: typeof dto.worldType === 'string' ? dto.worldType : '',
+    referenceStyle: typeof dto.referenceStyle === 'string' ? dto.referenceStyle : '',
+    prompt: typeof dto.prompt === 'string' ? dto.prompt : '',
+    resultJson: typeof dto.resultJson === 'string' ? dto.resultJson : '{}',
+    item: normalizePayload(dto.item),
+    status: dto.status as SettingSuggestionRecord['status'],
+    adoptedTargetId: (dto.adoptedTargetId as string | null) ?? undefined,
+    adoptedTargetType: (dto.adoptedTargetType as SettingSuggestionTargetType | null) ?? undefined,
+    userInstruction: (dto.userInstruction as string | null) ?? undefined,
+    rawOutput: (dto.rawOutput as string | null) ?? undefined,
+    createdAt: String(dto.createdAt),
+    updatedAt: String(dto.updatedAt),
+  };
+}
+
+function toSaveInput(record: SettingSuggestionRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    novelId: record.novelId,
+    suggestionType: record.suggestionType,
+    worldType: record.worldType,
+    referenceStyle: record.referenceStyle,
+    prompt: record.prompt,
+    resultJson: record.resultJson,
+    item: record.item,
+    status: record.status,
+    adoptedTargetId: record.adoptedTargetId ?? null,
+    adoptedTargetType: record.adoptedTargetType ?? null,
+    userInstruction: record.userInstruction ?? null,
+    rawOutput: record.rawOutput ?? null,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function ensureDesktopMigrated(): Promise<void> {
+  if (lsGet<boolean>(SETTING_SUGGESTIONS_SQLITE_MIGRATION_KEY)) return;
+  for (const record of getAllLocal()) {
+    try {
+      const existing = await dbCall<Record<string, unknown> | null>('get_setting_suggestion', {
+        suggestionId: record.id,
+      });
+      if (existing) continue;
+      await dbCall('save_setting_suggestions', { inputs: [toSaveInput(record)] });
+    } catch {
+      // Candidates whose novel no longer exists stay in LocalStorage only; never block the rest.
+    }
+  }
+  lsSet(SETTING_SUGGESTIONS_SQLITE_MIGRATION_KEY, true);
+}
+
+/** 桌面端走 SQLite 命令，浏览器模式走 LocalStorage 候选池。 */
+const suggestionStore = {
+  async listByNovel(novelId: string): Promise<SettingSuggestionRecord[]> {
+    if (getDbMode() === 'tauri') {
+      await ensureDesktopMigrated();
+      const rows = await dbCall<Record<string, unknown>[]>('list_setting_suggestions', {
+        novelId,
+      });
+      return rows.map(fromDto);
+    }
+    return getAllLocal().filter((item) => item.novelId === novelId);
+  },
+
+  async getById(id: string): Promise<SettingSuggestionRecord | null> {
+    if (getDbMode() === 'tauri') {
+      await ensureDesktopMigrated();
+      const dto = await dbCall<Record<string, unknown> | null>('get_setting_suggestion', {
+        suggestionId: id,
+      });
+      return dto ? fromDto(dto) : null;
+    }
+    return getAllLocal().find((item) => item.id === id) ?? null;
+  },
+
+  /** 一次生成的候选整批落库；桌面端由 Rust 事务保证全有或全无。 */
+  async insertBatch(records: SettingSuggestionRecord[]): Promise<SettingSuggestionRecord[]> {
+    if (getDbMode() === 'tauri') {
+      await ensureDesktopMigrated();
+      const rows = await dbCall<Record<string, unknown>[]>('save_setting_suggestions', {
+        inputs: records.map(toSaveInput),
+      });
+      return rows.map(fromDto);
+    }
+    saveAllLocal([...records, ...getAllLocal()]);
+    return records;
+  },
+
+  /** pending → adopted / edited_adopted / discarded，只允许推进一次。 */
+  async decide(
+    record: SettingSuggestionRecord,
+    decision: {
+      status: 'adopted' | 'edited_adopted' | 'discarded';
+      item?: SettingSuggestionPayload;
+      adoptedTargetId?: string;
+      adoptedTargetType?: SettingSuggestionTargetType;
+    },
+  ): Promise<SettingSuggestionRecord> {
+    if (getDbMode() === 'tauri') {
+      const dto = await dbCall<Record<string, unknown>>('decide_setting_suggestion', {
+        input: {
+          id: record.id,
+          status: decision.status,
+          item: decision.item ?? null,
+          adoptedTargetId: decision.adoptedTargetId ?? null,
+          adoptedTargetType: decision.adoptedTargetType ?? null,
+        },
+      });
+      return fromDto(dto);
+    }
+    return updateRecord({
+      ...record,
+      item: decision.item ?? record.item,
+      status: decision.status,
+      adoptedTargetId: decision.adoptedTargetId,
+      adoptedTargetType: decision.adoptedTargetType,
+      updatedAt: nowISO(),
+    });
+  },
+};
 
 function stripCodeFence(text: string): string {
   const match = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -265,7 +394,7 @@ async function adoptTarget(
 
 export const settingSuggestionService = {
   async getByNovelId(novelId: string): Promise<SettingSuggestionRecord[]> {
-    return getAllLocal().filter((item) => item.novelId === novelId);
+    return suggestionStore.listByNovel(novelId);
   },
 
   async generate(
@@ -325,7 +454,7 @@ export const settingSuggestionService = {
         updatedAt: now,
       }));
 
-      saveAllLocal([...records, ...getAllLocal()]);
+      const persisted = await suggestionStore.insertBatch(records);
       await aiTaskService.markSucceeded(task?.id || '', {
         resultText: `生成 ${records.length} 条${typeLabels[input.suggestionType]}`,
         promptSnapshot: prompt,
@@ -339,7 +468,7 @@ export const settingSuggestionService = {
         tokenTotal: response.tokenTotal,
       });
 
-      return records;
+      return persisted;
     } catch (e: unknown) {
       await settleAiTaskError({
         taskId: task?.id,
@@ -357,29 +486,27 @@ export const settingSuggestionService = {
     id: string,
     editedItem?: SettingSuggestionPayload,
   ): Promise<SettingSuggestionAdoptionResult> {
-    const record = getAllLocal().find((item) => item.id === id);
+    const record = await suggestionStore.getById(id);
     if (!record) throw new Error('候选记录不存在');
     if (record.status !== 'pending') throw new Error('该候选已处理，不能重复采纳');
 
     const item = editedItem ? normalizePayload(editedItem) : record.item;
     const target = await adoptTarget(record, item);
-    const updated = updateRecord({
-      ...record,
-      item,
+    const updated = await suggestionStore.decide(record, {
       status: editedItem ? 'edited_adopted' : 'adopted',
+      item: editedItem ? item : undefined,
       adoptedTargetId: target.targetId,
       adoptedTargetType: target.targetType,
-      updatedAt: nowISO(),
     });
 
     return { record: updated, targetId: target.targetId, targetType: target.targetType };
   },
 
   async discard(id: string): Promise<SettingSuggestionRecord> {
-    const record = getAllLocal().find((item) => item.id === id);
+    const record = await suggestionStore.getById(id);
     if (!record) throw new Error('候选记录不存在');
     if (record.status !== 'pending') throw new Error('该候选已处理');
-    return updateRecord({ ...record, status: 'discarded', updatedAt: nowISO() });
+    return suggestionStore.decide(record, { status: 'discarded' });
   },
 
   _private: {

@@ -13,19 +13,19 @@
 
 ## 0. Agent 基础设施（v1.0.43 新增）
 
-AI Novel Studio 已建立完整的 Agent 工程化开发基础设施。所有开发者在开始工作前，除本文档外，还应阅读：
+AI Novel Studio 的开发规则以 `AGENTS.md` 为入口。下列目录是按任务查阅的索引，不是开工时必须全部读取的清单：
 
 - **`AGENTS.md`** — AI Agent 总入口规则（必读）
-- **`.github/instructions/`** — 6 个分领域开发指令
-- **`.github/skills/`** — 10 个多步骤 Agent 工作流
-- **`.cursor/rules/`** — 8 个 IDE 规则
+- **`.github/instructions/`** — 按领域匹配的开发指令
+- **`.github/skills/`** — 按用户目标匹配的开发工作流
+- **`.cursor/rules/`** — 在对应 IDE 中按文件范围启用的规则
 - **`docs/agent-workflow.md`** — Agent 标准工作流
 
 AI Agent 在操作本仓库时，必须：
 
 1. 先读 `AGENTS.md`
 2. 遵循 `docs/agent-workflow.md` 定义的工作流
-3. 遵守 `.cursor/rules/agent-safety.mdc` 中的安全约束
+3. 安全底线统一由 `AGENTS.md` 定义；IDE 和 Skill 仅细化当前任务，不能扩大授权或覆盖用户最新明确要求
 
 ---
 
@@ -1030,13 +1030,15 @@ v1.0.0：可正式写长篇的基础版
 
 ### 13.1 按变更范围验证
 
-- 纯文档：`npm run test:docs-sync`，必要时 `npm run test:version-sync`，并执行 Prettier、diff 和范围检查；
-- 前端/TypeScript：相关动态测试、`npm run lint:ci`、`npm run build`；
-- Rust/SQLite：`cargo check --locked --manifest-path src-tauri/Cargo.toml`、相关动态测试；版本验收在准备固定载体与当前 Gateway 后运行完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1`；
-- Tauri/DSH payload/打包：真实桌面 E2E 与生产构建；
-- 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵和 clean working tree。
+日常入口为 `npm run verify:change`（先 `-- --dry-run` 查看选择理由），本地与 PR CI 共用 `scripts/quality/verification-scopes.mjs` 的模块归属表：
 
-不得用 `npm run dev` 或一次手动演示代替动态测试；也不要求纯文档或局部代码任务运行无关的完整 Tauri 发布构建。
+- 纯文档/开发指令：`npm run test:docs-sync`，涉及版本时 `npm run test:version-sync`，并对改动文件执行 Prettier 与 `git diff --check`；
+- 局部前端/TypeScript：相邻或所属模块行为测试、改动文件 ESLint、一次类型检查；用户交互/写作流程变化加对应真实桌面场景；
+- Rust/SQLite：`cargo check --locked --manifest-path src-tauri/Cargo.toml` 与有非零匹配证明的相关 Rust 测试；migration、共享持久化与 DSH 在准备固定载体与当前 Gateway 后运行完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1`；
+- 构建配置/依赖图/打包：受影响的完整测试与构建门禁，打包变化验证 `npm run tauri:build`；
+- 发布/明确完整验收：`scripts/agent-workflow/verify_project.ps1` 完整矩阵运行一次和 clean working tree。
+
+未映射的代码路径必须补充行为归属，不能以零测试通过，也不自动扩大为全仓检查。同一批未变化且已通过的检查不重复运行；失败修复只复测受影响项。不得用 `npm run dev` 或一次手动演示代替动态测试；也不要求纯文档或局部代码任务运行无关的完整 Tauri 发布构建。
 
 ---
 

@@ -1,6 +1,6 @@
 import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, BookOpenText, Compass, FileText, PenLine, Sparkles } from 'lucide-react';
+import { ArrowLeft, BookOpenText, PenLine } from 'lucide-react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
@@ -264,7 +264,7 @@ function NovelDetailPage() {
           <BookOpenText aria-hidden="true" size={32} strokeWidth={1.8} />
         </div>
         <div className="detail-info">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="detail-title-row">
             <div className="detail-title">{novel.title}</div>
             <span className="detail-genre">{novel.genre || '未分类'}</span>
           </div>
@@ -311,6 +311,7 @@ function NovelDetailPage() {
                 返回作品列表
               </button>
             )}
+            {/* 设定推演 / 自主创作 / 参考资料等入口由项目标签条统一提供。 */}
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -318,30 +319,6 @@ function NovelDetailPage() {
             >
               <PenLine aria-hidden="true" size={13} strokeWidth={1.8} />
               进入写作工作台
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}
-            >
-              <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
-              设定推演
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/autonomous-planning`)}
-            >
-              <Compass aria-hidden="true" size={13} strokeWidth={1.8} />
-              自主规划
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/references`)}
-            >
-              <FileText aria-hidden="true" size={13} strokeWidth={1.8} />
-              参考资料
             </button>
           </div>
         </div>

@@ -2,7 +2,7 @@
  * AI Novel Studio - 右侧工具栏与弹出面板样式
  */
 
-/* === 右侧固定工具栏 === */
+/* === 右侧固定工具栏：与全局 56px 图标轨同一规格 === */
 .right-toolbar {
   width: var(--right-toolbar-width);
   min-width: var(--right-toolbar-width);
@@ -12,8 +12,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--spacing-sm) 0;
-  gap: 2px;
+  padding: 8px 0;
+  gap: 4px;
   overflow-y: auto;
   overflow-x: hidden;
   z-index: var(--z-right-toolbar);
@@ -21,8 +21,8 @@
 }
 
 .right-toolbar-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -38,18 +38,18 @@
   color: var(--color-text-secondary);
   font: inherit;
   cursor: pointer;
-  gap: 1px;
+  gap: 2px;
   position: relative;
 }
 
 .right-toolbar-btn::before {
   position: absolute;
   top: 50%;
-  left: 0;
-  width: 3px;
-  height: 20px;
+  left: -6px;
+  width: 2px;
+  height: 18px;
   border-radius: 0 2px 2px 0;
-  background: var(--color-primary);
+  background: var(--color-text-primary);
   content: '';
   opacity: 0;
   transform: translateY(-50%) scaleY(0.55);
@@ -64,8 +64,8 @@
 }
 
 .right-toolbar-btn.active {
-  background: var(--color-bg-active);
-  color: var(--color-primary);
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
 }
 
 .right-toolbar-btn.active::before {
@@ -105,7 +105,8 @@
 /* === 右侧弹出面板 === */
 .right-panel-overlay {
   position: fixed;
-  top: var(--topbar-height);
+  /* The shell frame bar sits above the workspace topbar. */
+  top: calc(var(--frame-bar-height) + var(--topbar-height));
   left: 0;
   right: 0;
   bottom: var(--statusbar-height);
@@ -120,9 +121,9 @@
   right: var(--right-toolbar-width);
   bottom: 0;
   width: var(--right-panel-width);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-sidebar);
   border-left: 1px solid var(--color-border);
-  box-shadow: -4px 0 16px var(--color-shadow);
+  box-shadow: -12px 0 32px var(--color-shadow);
   display: flex;
   flex-direction: column;
   z-index: var(--z-right-panel);
@@ -155,12 +156,15 @@
   pointer-events: none;
 }
 
+/* 头部与工作台右侧面板（.workbench-side-view-header）同规格 */
 .right-panel-header {
-  padding: var(--spacing-md) var(--spacing-lg);
+  flex: 0 0 auto;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border-light);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-height: 44px;
 }
 
@@ -168,12 +172,17 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: var(--font-size-md);
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .right-panel-close {
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -194,8 +203,9 @@
 
 .right-panel-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--spacing-lg);
+  padding: 12px;
 }
 
 /* === 面板内通用样式 === */
@@ -209,9 +219,9 @@
   gap: 6px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
   margin-bottom: var(--spacing-sm);
   padding-bottom: var(--spacing-xs);
   border-bottom: 1px solid var(--color-border-light);
@@ -1000,13 +1010,13 @@
 /* 2K 及以上分辨率下增大面板宽度和间距 */
 @media (min-width: 2048px) {
   :root {
-    --right-panel-width: 380px;
-    --right-toolbar-width: 48px;
+    --right-panel-width: 400px;
+    --right-toolbar-width: 56px;
   }
 
   .right-toolbar-btn {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
   }
 
   .right-toolbar-btn .tb-icon {
@@ -1088,8 +1098,8 @@
 /* 4K 及以上分辨率 */
 @media (min-width: 3200px) {
   :root {
-    --right-panel-width: 420px;
-    --right-toolbar-width: 52px;
+    --right-panel-width: 440px;
+    --right-toolbar-width: 60px;
   }
 }
 

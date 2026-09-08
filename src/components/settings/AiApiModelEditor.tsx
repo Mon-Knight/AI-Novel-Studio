@@ -44,7 +44,7 @@ export function AiApiModelEditor({ draft, onChange, onSave, onCancel }: AiApiMod
       </div>
       <div className="settings-field">
         <label className="panel-field-label" htmlFor="saved-api-model-url">
-          API Base URL <span style={{ color: 'var(--color-error)' }}>*</span>
+          API Base URL <span className="resource-text-error">*</span>
         </label>
         <input
           id="saved-api-model-url"
@@ -57,7 +57,7 @@ export function AiApiModelEditor({ draft, onChange, onSave, onCancel }: AiApiMod
       </div>
       <div className="settings-field">
         <label className="panel-field-label" htmlFor="saved-api-model-key">
-          API Key <span style={{ color: 'var(--color-error)' }}>*</span>
+          API Key <span className="resource-text-error">*</span>
         </label>
         <input
           id="saved-api-model-key"
@@ -74,7 +74,7 @@ export function AiApiModelEditor({ draft, onChange, onSave, onCancel }: AiApiMod
       </div>
       <div className="settings-field">
         <label className="panel-field-label" htmlFor="saved-api-model-name">
-          模型名称 <span style={{ color: 'var(--color-error)' }}>*</span>
+          模型名称 <span className="resource-text-error">*</span>
         </label>
         <input
           id="saved-api-model-name"

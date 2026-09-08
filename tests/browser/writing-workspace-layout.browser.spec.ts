@@ -163,7 +163,7 @@ describe('writing workspace layout', () => {
       expect(layout.workspace.right).toBeLessThanOrEqual(layout.viewport.width + 1);
       expect(layout.chapterTree.width).toBeGreaterThanOrEqual(239);
       expect(layout.chapterTree.width).toBeLessThanOrEqual(241);
-      expect(layout.editor.width).toBeGreaterThanOrEqual(viewport.width - 56 - 240 - 48 - 1);
+      expect(layout.editor.width).toBeGreaterThanOrEqual(viewport.width - 56 - 240 - 56 - 1);
       expect(layout.topbar.height).toBeGreaterThanOrEqual(43);
       expect(layout.topbar.height).toBeLessThanOrEqual(45);
       expect(layout.paper.width).toBeLessThanOrEqual(922);

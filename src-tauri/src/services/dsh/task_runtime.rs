@@ -48,6 +48,11 @@ pub(super) const ALLOWED_TOOLS: &str =
     "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
 pub(super) const CANONICAL_ALLOWED_TOOLS: &str =
     "novel.read,structure.read,context.read,memory.search";
+/// Writing SubAgent 契约：只读工具 + 唯一候选工具，不暴露其他 `generate_*`。
+pub(super) const CHAPTER_WRITE_ALLOWED_TOOLS: &str =
+    "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_chapter";
+pub(super) const CHAPTER_POLISH_ALLOWED_TOOLS: &str =
+    "novel.read_context,chapter.read_outline,get_character_states,search_memory,polish_chapter";
 const CANDIDATE_TOOLS: &str =
     "generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
 const MAX_CANDIDATE_TOOL_ATTEMPTS: usize = 3;
@@ -161,17 +166,70 @@ fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
             "存在变化时补充 characterChanges 与 contextRecords。没有采用正文时停止且不提交候选。"
         )
         .to_string(),
+        "chapter_write" | "chapter_polish" => {
+            let mut instruction = if input.task_kind == "chapter_write" {
+                concat!(
+                    "由你完整写出本章正文并作为 candidateText 提交：以 chapter.read_outline 的章节大纲为骨架，",
+                    "遵守 novel.read_context 读取的世界、规则、主角与风格设定，用 get_character_states 保持人物状态一致，",
+                    "用 search_memory 衔接前文伏笔；正文只写小说内容，不加标题、说明或 Markdown；候选只供人工审阅，不得修改正式事实。"
+                )
+                .to_string()
+            } else {
+                concat!(
+                    "由你对当前章节正文做整体润色并作为 candidateText 提交：保持剧情、人物、关键事件与章节大纲不变，",
+                    "只改善语言、节奏与描写；正文只写小说内容，不加标题、说明或 Markdown；候选只供人工审阅。"
+                )
+                .to_string()
+            };
+            if let Some(range) = &input.chapter_word_range {
+                instruction.push_str(&format!(
+                    "宿主字数区间：目标 {} 字，正文必须落在 {}～{} 字之间（按中文字数计），越界会被拒收且不进入审阅。",
+                    range.target, range.minimum, range.maximum
+                ));
+            }
+            instruction
+        }
         _ => "未知任务类型；停止且不调用候选工具。".to_string(),
     }
 }
 
 fn workbench_turn_prompt(input: &StartTaskTurnInput) -> String {
-    workbench_turn_prompt_for_attempt(input, 0)
+    workbench_turn_prompt_for_attempt(input, 0, 0)
+}
+
+/// Number of failed or cancelled runs already recorded for this user turn. The DSH
+/// session is shared by the whole conversation, so a retry replays the interrupted
+/// transcript (including its tool calls) ahead of the new prompt; the host still counts
+/// required reads per run, which is why the prompt must demand fresh reads (GAP-19).
+fn previous_terminal_run_count(
+    connection: &rusqlite::Connection,
+    conversation_id: &str,
+    turn_id: &str,
+) -> Result<usize, String> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM task_runs
+             WHERE conversation_id=?1 AND turn_id=?2 AND status IN ('failed', 'cancelled')",
+            rusqlite::params![conversation_id, turn_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| usize::try_from(count).unwrap_or(0))
+        .map_err(|_| "DSH_RETRY_STATE_READ_FAILED".to_string())
+}
+
+fn user_retry_instruction(previous_terminal_runs: usize, protocol_recovery_retry: usize) -> String {
+    if previous_terminal_runs == 0 || protocol_recovery_retry > 0 {
+        return String::new();
+    }
+    format!(
+        "\n\n用户重试：同一目标此前已有 {previous_terminal_runs} 次失败或中断的运行。会话中较早回合的工具读取结果已失效，宿主只承认本回合内完成的读取。第一阶段必须在同一模型响应中重新并行调用本轮全部必需读取工具，禁止沿用此前读取结果直接调用候选工具；全部 Tool Result 返回后再进入候选阶段。"
+    )
 }
 
 fn workbench_turn_prompt_for_attempt(
     input: &StartTaskTurnInput,
     protocol_recovery_retry: usize,
+    previous_terminal_runs: usize,
 ) -> String {
     let chapter = input
         .chapter_id
@@ -203,8 +261,9 @@ fn workbench_turn_prompt_for_attempt(
             "\n\n协议自动恢复：这是第 {protocol_recovery_retry}/{MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES} 次有限重试。上一 Run 已保留为失败事实，且没有创建候选 Artifact。请保持原用户意图与自动总结语义不变。第一阶段必须在同一模型响应中并行重新调用本轮全部必需读取工具，严禁调用候选工具；等待全部 Tool Result 返回后，第二阶段只调用且必须调用唯一候选工具。"
         )
     };
+    let retry_instruction = user_retry_instruction(previous_terminal_runs, protocol_recovery_retry);
     format!(
-        "小说 ID：{novel}\n章节 ID：{chapter}\n用户意图：{goal}\n\n宿主契约：\n- taskKind：{task_kind}\n- 唯一候选工具：{expected_tool}\n- 预期产物：{expected_artifact}\n- 必需读取：{required_reads}\n{execution_rule}\n宿主将校验工具、读取顺序、调用次数、作用域和产物。\n\n本轮最小要求：{task_instruction}{recovery_instruction}",
+        "小说 ID：{novel}\n章节 ID：{chapter}\n用户意图：{goal}\n\n宿主契约：\n- taskKind：{task_kind}\n- 唯一候选工具：{expected_tool}\n- 预期产物：{expected_artifact}\n- 必需读取：{required_reads}\n{execution_rule}\n宿主将校验工具、读取顺序、调用次数、作用域和产物。\n\n本轮最小要求：{task_instruction}{recovery_instruction}{retry_instruction}",
         novel = input.novel_id,
         chapter = chapter,
         goal = input.goal,
@@ -215,6 +274,7 @@ fn workbench_turn_prompt_for_attempt(
         execution_rule = execution_rule,
         task_instruction = task_instruction,
         recovery_instruction = recovery_instruction,
+        retry_instruction = retry_instruction,
     )
 }
 
@@ -248,14 +308,61 @@ pub struct StartTaskTurnInput {
     pub required_read_tools: Vec<String>,
     #[serde(skip)]
     pub(crate) book_word_goal: Option<ai_task_service::BookWordGoal>,
+    /// Writing SubAgent（`chapter_write / chapter_polish`）的宿主字数区间；其他任务类型忽略。
+    #[serde(default)]
+    pub chapter_word_range: Option<ChapterWordRangeInput>,
     pub model_snapshot: Value,
     pub request_policy: TaskRequestPolicyInput,
     #[serde(default)]
     pub api_key: String,
 }
 
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterWordRangeInput {
+    pub target: i64,
+    pub minimum: i64,
+    pub maximum: i64,
+}
+
 fn default_task_kind() -> String {
     "read".to_string()
+}
+
+/// Writing SubAgent 任务类型：只读工具 + 单一候选工具，产物固定为 `chapter_text`。
+fn is_chapter_writing_turn(input: &StartTaskTurnInput) -> bool {
+    matches!(input.task_kind.as_str(), "chapter_write" | "chapter_polish")
+}
+
+/// 字数统计与 `draft_service::word_count` 同源：CJK 逐字、ASCII 连续字母数字算一个词。
+fn validate_chapter_candidate_length(
+    input: &StartTaskTurnInput,
+    text: &str,
+) -> Result<(), AppError> {
+    if !is_chapter_writing_turn(input) {
+        return Ok(());
+    }
+    let Some(range) = input.chapter_word_range.as_ref() else {
+        return Ok(());
+    };
+    let count = crate::services::draft_service::word_count(text);
+    if count < range.minimum || count > range.maximum {
+        return Err(AppError::new(
+            "DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED",
+            format!(
+                "章节候选 {} 字，超出宿主区间 {}～{} 字（目标 {} 字）",
+                count, range.minimum, range.maximum, range.target
+            ),
+            false,
+        )
+        .with_details(serde_json::json!({
+            "wordCount": count,
+            "minimum": range.minimum,
+            "maximum": range.maximum,
+            "target": range.target,
+        })));
+    }
+    Ok(())
 }
 
 fn is_canonical_only_turn(input: &StartTaskTurnInput) -> bool {
@@ -267,6 +374,10 @@ fn is_canonical_only_turn(input: &StartTaskTurnInput) -> bool {
 fn turn_allowed_tools(input: &StartTaskTurnInput) -> &'static str {
     if is_canonical_only_turn(input) {
         CANONICAL_ALLOWED_TOOLS
+    } else if input.task_kind == "chapter_write" {
+        CHAPTER_WRITE_ALLOWED_TOOLS
+    } else if input.task_kind == "chapter_polish" {
+        CHAPTER_POLISH_ALLOWED_TOOLS
     } else {
         ALLOWED_TOOLS
     }
@@ -299,6 +410,8 @@ fn expected_contract_for_task_kind(
         "event_suggest" => Ok(Some(("suggest_events", "event_candidates"))),
         "quality_check" => Ok(Some(("check_quality", "quality_report"))),
         "chapter_summary" => Ok(Some(("summarize_chapter", "chapter_summary"))),
+        "chapter_write" => Ok(Some(("generate_chapter", "chapter_text"))),
+        "chapter_polish" => Ok(Some(("polish_chapter", "chapter_text"))),
         _ => Err(format!(
             "DSH_TASK_CONTRACT_INVALID: 未知任务类型 {}",
             task_kind
@@ -346,13 +459,21 @@ fn validate_turn_contract(input: &StartTaskTurnInput) -> Result<(), String> {
     }
     if matches!(
         input.task_kind.as_str(),
-        "event_suggest" | "quality_check" | "chapter_summary"
+        "event_suggest" | "quality_check" | "chapter_summary" | "chapter_write" | "chapter_polish"
     ) && input.chapter_id.is_none()
     {
         return Err(format!(
             "DSH_TASK_CONTRACT_INVALID: {} 必须绑定章节",
             input.task_kind
         ));
+    }
+    if let Some(range) = input.chapter_word_range.as_ref() {
+        if !is_chapter_writing_turn(input) {
+            return Err("DSH_TASK_CONTRACT_INVALID: 只有章节写作任务可以携带字数区间".to_string());
+        }
+        if range.minimum <= 0 || range.minimum > range.target || range.target > range.maximum {
+            return Err("DSH_TASK_CONTRACT_INVALID: 章节字数区间非法".to_string());
+        }
     }
 
     let context_read_tools = turn_context_read_tools(input);
@@ -2230,6 +2351,7 @@ fn read_generated_chapter_result(
     if candidate_tool == "generate_characters" && requires_primary_protagonist(input) {
         validate_primary_protagonist_candidate(text.unwrap_or_default())?;
     }
+    validate_chapter_candidate_length(input, text.unwrap_or_default())?;
     Ok(Some(GeneratedChapterResult {
         text: text.unwrap_or_default().to_string(),
         structured,
@@ -3284,6 +3406,7 @@ fn execute(
     notifier: Option<TaskProjectionObserver>,
     model_tool_attestation: ModelToolAttestation,
     protocol_recovery_retry: usize,
+    previous_terminal_runs: usize,
 ) -> Result<TaskRuntimeResult, String> {
     let turn_error = Arc::new(Mutex::new(None));
     let runtime = process.runtime.clone();
@@ -3313,6 +3436,7 @@ fn execute(
                 "contentBlocks":[{"type":"text","text":workbench_turn_prompt_for_attempt(
                     &input,
                     protocol_recovery_retry,
+                    previous_terminal_runs,
                 )}],
                 "route":{
                     "provider":route.harness_provider,
@@ -3575,6 +3699,8 @@ pub fn start_with_observer(
             let mut connection = crate::db::get_connection()
                 .lock()
                 .map_err(|_| "数据库锁失败".to_string())?;
+            let previous_terminal_runs =
+                previous_terminal_run_count(&connection, &input.conversation_id, &input.turn_id)?;
             conversation_service::create_run(
                 &mut connection,
                 CreateRunInput {
@@ -3583,6 +3709,7 @@ pub fn start_with_observer(
                     turn_id: input.turn_id.clone(),
                     model_snapshot: input.model_snapshot.clone(),
                     worker_id: worker_id.clone(),
+                    chapter_id: input.chapter_id.clone(),
                     created_at: now(),
                 },
             )
@@ -3600,12 +3727,15 @@ pub fn start_with_observer(
             )
             .map_err(|error| error.to_string())?;
             worker.status = "running".to_string();
-            Ok::<(), String>(())
+            Ok::<usize, String>(previous_terminal_runs)
         })();
-        if let Err(error) = run_created {
-            update_active(&input.conversation_id, "idle", Some(error.clone()));
-            return Err(error);
-        }
+        let previous_terminal_runs = match run_created {
+            Ok(count) => count,
+            Err(error) => {
+                update_active(&input.conversation_id, "idle", Some(error.clone()));
+                return Err(error);
+            }
+        };
         notify_projection(notifier.as_ref(), &input.conversation_id, &run_id, "run")?;
         let result = execute(
             input.clone(),
@@ -3618,6 +3748,7 @@ pub fn start_with_observer(
             notifier.clone(),
             model_tool_attestation.clone(),
             protocol_recovery_retry,
+            previous_terminal_runs,
         );
         let raw_error = match result {
             Ok(outcome) => {
@@ -4019,6 +4150,7 @@ fn probe_input(
         expected_artifact_type: None,
         required_read_tools: Vec::new(),
         book_word_goal: None,
+        chapter_word_range: None,
         model_snapshot: snapshot,
         request_policy: TaskRequestPolicyInput {
             max_requests_per_minute: 12,

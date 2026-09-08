@@ -13,15 +13,7 @@ import { inspectChapterCandidateIntegrity } from '../generation/chapterCandidate
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { taskConversationService } from './taskConversationService';
 import { findPreviousChapterForContinuity } from './workbenchChapterWriter';
-import { isContextCompressionCandidate } from '../context/novelContextCompressionProvider';
-
-const STRUCTURED_APPLY_TYPES = new Set([
-  'outline',
-  'character_candidates',
-  'event_candidates',
-  'setting_candidates',
-  'chapter_summary',
-]);
+import { planStructuredApply, STRUCTURED_APPLY_REJECTION_MESSAGES } from './structuredApplyPolicy';
 
 export interface AdoptReviewAuthorizedDraftInput {
   authorizationId: string;
@@ -367,38 +359,21 @@ export const artifactDecisionService = {
 
     const bundle = await aiTaskRuntimeService.getArtifact(input.artifactId);
     const { artifact } = bundle;
-    if (['quality_report', 'style_analysis'].includes(artifact.artifactType)) {
-      throw new Error('质量或风格报告不能应用到小说正式事实。');
-    }
-    const isContextCompression =
-      artifact.artifactType === 'generic_json' &&
-      isContextCompressionCandidate(bundle.structuredPayloadJson) &&
-      bundle.structuredPayloadJson.valid;
-    if (!STRUCTURED_APPLY_TYPES.has(artifact.artifactType) && !isContextCompression) {
-      throw new Error(`当前产物类型不支持原子应用：${artifact.artifactType}`);
-    }
-    if (!['valid', 'valid_with_warnings'].includes(artifact.processingStatus)) {
-      throw new Error('产物尚未通过结构校验，不能申请应用。');
-    }
-    if (artifact.sourceNovelId !== input.novelId) {
-      throw new Error('产物与当前作品不匹配。');
-    }
-
-    const chapterScoped =
-      artifact.artifactType === 'event_candidates' ||
-      artifact.artifactType === 'chapter_summary' ||
-      (artifact.artifactType === 'outline' && Boolean(artifact.sourceChapterId));
-    const authoritativeChapterId = artifact.sourceChapterId;
-    if (chapterScoped && !authoritativeChapterId) {
-      throw new Error('章节级结构化产物缺少权威章节来源。');
-    }
-    const authoritativeTargetId = chapterScoped ? authoritativeChapterId : artifact.sourceNovelId;
-    if (
-      input.targetType !== 'asset' ||
-      input.targetId !== authoritativeTargetId ||
-      input.chapterId !== authoritativeChapterId
-    ) {
-      throw new Error('结构化产物的应用目标与持久化来源不一致。');
+    const planned = planStructuredApply({
+      artifact,
+      payload: bundle.structuredPayloadJson,
+      requested: {
+        novelId: input.novelId,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        chapterId: input.chapterId,
+      },
+    });
+    if (!planned.ok) {
+      const message = STRUCTURED_APPLY_REJECTION_MESSAGES[planned.reason];
+      throw new Error(
+        planned.reason === 'TYPE_UNSUPPORTED' ? `${message}：${artifact.artifactType}` : message,
+      );
     }
 
     const createdAt = nowISO();
@@ -411,10 +386,10 @@ export const artifactDecisionService = {
         conversationId: input.conversationId,
         idempotencyKey: `${input.cardId}:request_apply:atomic-v1`,
         actor: 'user',
-        targetType: 'asset',
-        targetId: authoritativeTargetId,
+        targetType: planned.plan.targetType,
+        targetId: planned.plan.targetId,
         novelId: artifact.sourceNovelId,
-        chapterId: authoritativeChapterId,
+        chapterId: planned.plan.chapterId,
         baseRevision: artifact.sourceBaseContentHash,
         createdAt,
       },

@@ -302,7 +302,7 @@ function DraftHistoryPanel({
                         </span>
                       )}
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                       {formatNumber(draft.wordCount)} 字
                     </span>
                   </div>

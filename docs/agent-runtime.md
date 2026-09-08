@@ -7,8 +7,8 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 <!-- ans-current-canonical:end -->
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.6.2
-> 当前状态：v3.6.2 Canonical 只读链路收口补丁；v3.6.0 保持为 Agent Runtime 功能基线
+> 版本：v3.7.0
+> 当前状态：v3.7.0 Writing SubAgent 开放（桌面 + 真实 API 模型的 chapter_write 默认经 DSH candidate-only 回合）；v3.6.0 保持为 Agent Runtime 功能基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---

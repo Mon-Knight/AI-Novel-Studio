@@ -182,12 +182,12 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
               {item.rawText || item.description}
             </div>
             {item.usageInChapter && (
-              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-text-muted)' }}>
+              <div style={{ fontSize: 12, marginTop: 4, color: 'var(--color-text-muted)' }}>
                 本章用途：{item.usageInChapter}
               </div>
             )}
             {item.risk && (
-              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-warning)' }}>
+              <div style={{ fontSize: 12, marginTop: 4, color: 'var(--color-warning)' }}>
                 风险：{item.risk}
               </div>
             )}

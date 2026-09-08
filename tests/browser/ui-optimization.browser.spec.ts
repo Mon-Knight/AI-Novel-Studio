@@ -351,6 +351,9 @@ describe('UI optimization browser acceptance', () => {
         expect(box.top).toBeGreaterThanOrEqual(0);
         expect(box.bottom).toBeLessThanOrEqual(viewport.height + 1);
       }
+      // Templates live in the composer "+" menu; open it before using the chips.
+      await (await $('[data-testid="workbench-composer-attach"]')).click();
+      await (await $('[data-testid="workbench-template-generate-chapter"]')).waitForDisplayed();
       await (await $('[data-testid="workbench-template-generate-chapter"]')).click();
       await expect(input).toHaveValue(longGoal, { trim: false });
       await (await $('button=替换目标')).click();

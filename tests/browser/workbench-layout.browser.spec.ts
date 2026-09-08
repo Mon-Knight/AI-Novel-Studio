@@ -253,8 +253,8 @@ describe('creative workbench layout', () => {
           viewport: { width: window.innerWidth, height: window.innerHeight },
           shellLayout: document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.dataset
             .layout,
-          topbarPresent: Boolean(document.querySelector('.app-topbar')),
-          rail: rect('.app-sidebar'),
+          frameBarPresent: Boolean(document.querySelector('.app-frame-bar')),
+          globalSidebarPresent: Boolean(document.querySelector('.app-sidebar')),
           page: rect('.workbench-page'),
           tree: rect('.workbench-tree'),
           main: rect('.workbench-main'),
@@ -279,14 +279,15 @@ describe('creative workbench layout', () => {
         };
       });
 
-      const expectedTreeWidth = layout.viewport.width >= 1920 ? 304 : 272;
+      // The workbench route owns a single sidebar (quick actions + project/task tree);
+      // the global sidebar is not rendered there and the frame bar spans every route.
+      const expectedTreeWidth = 248;
       expect(layout.shellLayout).toBe('workbench');
-      expect(layout.topbarPresent).toBe(false);
-      expect(layout.rail.width).toBeGreaterThanOrEqual(55);
-      expect(layout.rail.width).toBeLessThanOrEqual(57);
+      expect(layout.frameBarPresent).toBe(true);
+      expect(layout.globalSidebarPresent).toBe(false);
       expect(layout.tree.width).toBeGreaterThanOrEqual(expectedTreeWidth - 1);
       expect(layout.tree.width).toBeLessThanOrEqual(expectedTreeWidth + 1);
-      const availableMainWidth = layout.viewport.width - layout.rail.width - layout.tree.width;
+      const availableMainWidth = layout.viewport.width - layout.tree.width;
       expect(layout.main.width).toBeGreaterThanOrEqual(640);
       expect(Math.abs(layout.main.width - availableMainWidth)).toBeLessThanOrEqual(2);
       expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.viewport.width);
@@ -327,6 +328,70 @@ describe('creative workbench layout', () => {
       );
     });
   }
+
+  it('docks every side-panel view in the right column and overlays it in narrow windows', async () => {
+    const panelRect = async () =>
+      browser.execute(() => {
+        const page = document.querySelector<HTMLElement>('.workbench-page');
+        const panel = document.querySelector<HTMLElement>('.workbench-side-panel');
+        const tree = document.querySelector<HTMLElement>('.workbench-tree');
+        const main = document.querySelector<HTMLElement>('.workbench-main');
+        if (!page || !panel || !tree || !main) throw new Error('Missing side panel layout node');
+        const rect = panel.getBoundingClientRect();
+        return {
+          view: page.dataset.sidePanel,
+          viewportWidth: window.innerWidth,
+          panelLeft: rect.left,
+          panelRight: rect.right,
+          panelTop: rect.top,
+          panelWidth: rect.width,
+          treeRight: tree.getBoundingClientRect().right,
+          treeBottom: tree.getBoundingClientRect().bottom,
+          mainRight: main.getBoundingClientRect().right,
+          position: getComputedStyle(panel).position,
+        };
+      });
+
+    await browser.setWindowSize(1440, 900);
+    await browser.pause(80);
+    await (await $('[data-testid="workbench-toggle-side-panel"]')).click();
+    await (await $('[data-testid="workbench-side-open-context"]')).waitForDisplayed();
+    for (const view of ['context', 'artifacts', 'events'] as const) {
+      await (await $(`[data-testid="workbench-side-open-${view}"]`)).click();
+      await (await $('[data-testid="workbench-side-back"]')).waitForDisplayed();
+      const wide = await panelRect();
+      expect(wide.view).toBe(view);
+      // Wide window: the panel is the third grid column, flush with the viewport's right edge
+      // and sharing the top edge with the tree, never wrapping under it.
+      expect(Math.abs(wide.panelWidth - 360)).toBeLessThanOrEqual(1);
+      expect(Math.abs(wide.panelRight - wide.viewportWidth)).toBeLessThanOrEqual(1);
+      expect(wide.panelLeft).toBeGreaterThanOrEqual(wide.treeRight + 200);
+      expect(wide.panelTop).toBeLessThan(wide.treeBottom - 100);
+      expect(Math.abs(wide.mainRight - wide.panelLeft)).toBeLessThanOrEqual(1);
+      await browser.saveScreenshot(
+        path.join(screenshotDirectory, `workbench-side-${view}-1440x900.png`),
+      );
+      await (await $('[data-testid="workbench-side-back"]')).click();
+      await (await $('[data-testid="workbench-side-open-context"]')).waitForDisplayed();
+    }
+
+    await (await $('[data-testid="workbench-side-open-context"]')).click();
+    await (await $('[data-testid="workbench-side-back"]')).waitForDisplayed();
+    await browser.setWindowSize(1024, 700);
+    await browser.pause(120);
+    const narrow = await panelRect();
+    // Narrow window: the two-column grid stays intact and the panel overlays the transcript.
+    expect(narrow.position).toBe('absolute');
+    expect(Math.abs(narrow.panelRight - narrow.viewportWidth)).toBeLessThanOrEqual(1);
+    expect(narrow.panelTop).toBeLessThan(narrow.treeBottom - 100);
+    expect(narrow.mainRight).toBeGreaterThan(narrow.panelLeft + 100);
+    await browser.saveScreenshot(
+      path.join(screenshotDirectory, 'workbench-side-context-1024x700.png'),
+    );
+    await (await $('[data-testid="workbench-side-close"]')).click();
+    await browser.setWindowSize(1440, 900);
+    await browser.pause(80);
+  });
 
   it('highlights only artifacts appended to the active task once', async () => {
     await seedWorkbenchConversation();
@@ -848,7 +913,7 @@ describe('creative workbench layout', () => {
     await browser.execute(() => window.localStorage.removeItem('ai_novel_studio_ai_settings'));
   });
 
-  it('restores the standard desktop shell away from the workbench route', async () => {
+  it('uses the resource-center shell away from the workbench route', async () => {
     await browser.setWindowSize(1440, 900);
     await browser.url('/#/settings');
     await waitForStartupSplashRemoval();
@@ -856,22 +921,26 @@ describe('creative workbench layout', () => {
     await browser.waitUntil(async () => {
       const width = await browser.execute(
         () =>
-          document.querySelector<HTMLElement>('.app-sidebar')?.getBoundingClientRect().width ?? 0,
+          document.querySelector<HTMLElement>('.settings-sidebar')?.getBoundingClientRect().width ??
+          0,
       );
-      return width >= 219;
+      return width >= 231;
     });
     const shell = await browser.execute(() => {
-      const sidebar = document.querySelector<HTMLElement>('.app-sidebar');
-      const topbar = document.querySelector<HTMLElement>('.app-topbar');
+      const hubSidebar = document.querySelector<HTMLElement>('.settings-sidebar');
+      const frameBar = document.querySelector<HTMLElement>('.app-frame-bar');
       return {
         layout: document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.dataset.layout,
-        sidebarWidth: sidebar?.getBoundingClientRect().width ?? 0,
-        topbarVisible: Boolean(topbar && topbar.getBoundingClientRect().height > 0),
+        hubSidebarWidth: hubSidebar?.getBoundingClientRect().width ?? 0,
+        globalSidebarPresent: Boolean(document.querySelector('.app-sidebar')),
+        frameBarHeight: frameBar?.getBoundingClientRect().height ?? 0,
       };
     });
-    expect(shell.layout).toBe('standard');
-    expect(shell.sidebarWidth).toBeGreaterThanOrEqual(219);
-    expect(shell.sidebarWidth).toBeLessThanOrEqual(221);
-    expect(shell.topbarVisible).toBe(true);
+    expect(shell.layout).toBe('hub');
+    expect(shell.hubSidebarWidth).toBeGreaterThanOrEqual(231);
+    expect(shell.hubSidebarWidth).toBeLessThanOrEqual(233);
+    expect(shell.globalSidebarPresent).toBe(false);
+    expect(shell.frameBarHeight).toBeGreaterThanOrEqual(37);
+    expect(shell.frameBarHeight).toBeLessThanOrEqual(39);
   });
 });

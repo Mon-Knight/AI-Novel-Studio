@@ -1025,13 +1025,15 @@ ComingSoon 页面
 
 # 28. 测试与验证规则
 
-每次完成任务后按变更范围验证：
+每次完成任务后运行 `npm run verify:change`（可先 `-- --dry-run` 查看选择理由），由 `scripts/quality/verification-scopes.mjs` 按变更范围选择检查：
 
-- 纯文档：docs/version sync、Prettier、diff 和范围检查；
-- 前端：相关动态测试、`npm run lint:ci`、`npm run build`；
-- Rust/SQLite：`cargo check` 与相关测试；
-- Tauri/DSH payload：真实桌面与生产构建门禁；
-- 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵。
+- 纯文档/开发指令：docs sync、改动文件 Prettier、diff 检查；涉及版本时加 version sync；
+- 局部前端：相邻或所属模块行为测试、改动文件 ESLint、一次类型检查；用户交互变化加对应真实桌面场景；
+- Rust/SQLite：`cargo check --locked` 与有非零匹配证明的相关 Rust 测试；
+- Migration/共享持久化/DSH/打包配置：扩大到对应完整领域门禁；打包变化验证生产构建；
+- 发布/明确完整验收：`scripts/agent-workflow/verify_project.ps1` 完整矩阵运行一次。
+
+同一批未变化且已通过的检查不重复运行；失败修复后只复测受影响项。
 
 每次完成版本后，应说明：
 

@@ -1,7 +1,7 @@
 ---
 description: AI Novel Studio 任务书编写规则 — 任务书必须自包含，不能依赖对话上下文
 globs: .github/prompts/**,.github/skills/agent-task-writer/**
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Task Writing Rules

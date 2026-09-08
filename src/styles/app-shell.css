@@ -1,12 +1,24 @@
 /**
  * AI Novel Studio - 应用外壳布局样式
+ *
+ * 结构：顶部标签栏（frame bar）+ 下方主体（侧栏 + 内容）。
+ * 侧栏视觉见 frame.css；本文件只负责布局骨架与共享页面网格。
  */
 
 .app-shell {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  background: var(--color-bg-app);
+}
+
+.app-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 .startup-dialog-overlay {
@@ -26,7 +38,7 @@
   overflow: auto;
   padding: 24px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-card);
   box-shadow: 0 18px 48px var(--color-shadow-hover);
   animation: startup-dialog-enter var(--motion-normal) var(--ease-enter) both;
@@ -79,188 +91,6 @@
   }
 }
 
-/* === 左侧导航栏 === */
-.app-sidebar {
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
-  height: 100vh;
-  background-color: var(--color-bg-sidebar);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  z-index: var(--z-sidebar);
-  user-select: none;
-}
-
-/* 创作工作台和章节审阅自身已有目录，全局导航收敛为固定图标轨；审阅保留顶部栏。 */
-.app-sidebar.app-sidebar--compact {
-  width: 56px;
-  min-width: 56px;
-}
-
-.app-sidebar--compact .sidebar-brand {
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-}
-
-.app-sidebar--compact .sidebar-brand-text,
-.app-sidebar--compact .sidebar-nav-section,
-.app-sidebar--compact .sidebar-nav-item .nav-label,
-.app-sidebar--compact .sidebar-footer {
-  display: none;
-}
-
-.app-sidebar--compact .sidebar-nav {
-  overflow-x: hidden;
-  padding: var(--spacing-sm) 0;
-}
-
-.app-sidebar--compact .sidebar-nav-item {
-  box-sizing: border-box;
-  width: 36px;
-  height: 36px;
-  justify-content: center;
-  gap: 0;
-  margin: 2px auto;
-  padding: 0;
-}
-
-.app-sidebar--compact .sidebar-nav-item .nav-icon {
-  width: 20px;
-  height: 20px;
-  line-height: 1;
-}
-
-.sidebar-brand {
-  height: var(--topbar-height);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--spacing-lg);
-  border-bottom: 1px solid var(--color-border-light);
-  gap: var(--spacing-sm);
-}
-
-.sidebar-brand-icon {
-  width: 28px;
-  height: 28px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 34%, var(--color-border));
-  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-sidebar));
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
-  flex-shrink: 0;
-}
-
-.sidebar-brand-text {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  white-space: nowrap;
-}
-
-.sidebar-nav {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--spacing-sm) 0;
-}
-
-.sidebar-nav-section {
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-xs);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.sidebar-nav-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-lg);
-  margin: 1px var(--spacing-sm);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
-  text-decoration: none;
-}
-
-.sidebar-nav-item::before {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 3px;
-  height: 18px;
-  border-radius: 0 2px 2px 0;
-  background: var(--color-primary);
-  content: '';
-  opacity: 0;
-  transform: translateY(-50%) scaleY(0.55);
-  transition:
-    opacity var(--transition-fast),
-    transform var(--transition-fast);
-}
-
-.sidebar-nav-item:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.sidebar-nav-item.active {
-  background-color: var(--color-bg-active);
-  color: var(--color-primary);
-  font-weight: var(--font-weight-medium);
-}
-
-.sidebar-nav-item.active::before {
-  opacity: 1;
-  transform: translateY(-50%) scaleY(1);
-}
-
-.sidebar-nav-item:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-}
-
-.sidebar-nav-item .nav-icon {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.sidebar-nav-item .nav-icon svg {
-  display: block;
-}
-
-.sidebar-nav-item .nav-label {
-  white-space: nowrap;
-}
-
-.sidebar-footer {
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-top: 1px solid var(--color-border-light);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.sidebar-footer .version {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
 /* === 主内容区 === */
 .app-main {
   flex: 1;
@@ -270,73 +100,35 @@
   min-width: 0;
 }
 
-/* === 顶部状态栏 === */
-.app-topbar {
-  height: var(--topbar-height);
-  min-height: var(--topbar-height);
-  background-color: var(--color-bg-sidebar);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--spacing-xl);
-  gap: var(--spacing-lg);
-  z-index: var(--z-topbar);
-  user-select: none;
-}
-
-.topbar-title {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.topbar-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.topbar-breadcrumb span {
-  color: var(--color-text-muted);
-}
-
-.topbar-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-}
-
-/* === 内容区域 === */
 .app-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
 }
 
-.app-shell--workbench .app-content {
+.app-shell--workbench .app-content,
+.app-shell--hub .app-content,
+.app-shell--writing .app-content {
   overflow: hidden;
 }
 
-/* workbench.css 仍兼容标准 TopBar；根路由隐藏 TopBar 后由壳层恢复全高。 */
 .app-shell--workbench .workbench-page {
   height: 100%;
 }
 
+/* 顶部标签栏的“收起侧栏”在工作台路由作用于项目/任务树。 */
+.app-shell--workbench[data-sidebar='collapsed'] .workbench-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell--workbench[data-sidebar='collapsed'] .workbench-tree {
+  display: none;
+}
+
 /* ================================================================
-   v1.7.7 响应式布局 — 窗口大小控制与 2K 适配
+   响应式布局 — 窗口大小控制与 2K 适配
    ================================================================ */
 
-/* --- 响应式断点 ---
-   < 1024px：小窗口
-   1024px ～ 1439px：普通窗口
-   1440px ～ 1919px：大窗口
-   >= 1920px：2K / 大屏窗口
-*/
-
-/* --- 页面内容区最大宽度约束 --- */
 .page-container {
   width: 100%;
   max-width: 1440px;
@@ -350,7 +142,6 @@
   }
 }
 
-/* --- 自适应卡片网格 --- */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -370,14 +161,12 @@
   }
 }
 
-/* --- 统计卡片网格（更紧凑） --- */
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--spacing-md);
 }
 
-/* --- 表单页面约束 --- */
 .form-page {
   max-width: 720px;
   margin: 0 auto;
@@ -396,7 +185,6 @@
   }
 }
 
-/* --- 阅读/长文本页面约束 --- */
 .reading-page {
   max-width: 780px;
   margin: 0 auto;
@@ -410,7 +198,6 @@
   }
 }
 
-/* --- 表格容器 --- */
 .table-container {
   width: 100%;
   overflow-x: auto;
@@ -429,7 +216,6 @@
   }
 }
 
-/* --- 双栏布局（大屏并排，小窗纵向） --- */
 .two-column {
   display: grid;
   grid-template-columns: 1fr;
@@ -442,7 +228,6 @@
   }
 }
 
-/* --- 三栏布局 --- */
 .three-column {
   display: grid;
   grid-template-columns: 1fr;
@@ -458,32 +243,5 @@
 @media (min-width: 1440px) {
   .three-column {
     grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-/* --- 小窗口侧栏压缩 --- */
-@media (max-width: 1023px) {
-  .app-sidebar {
-    width: 60px;
-    min-width: 60px;
-  }
-
-  .sidebar-brand-text,
-  .sidebar-nav-section,
-  .sidebar-nav-item .nav-label,
-  .sidebar-footer .version {
-    display: none;
-  }
-
-  .sidebar-nav-item {
-    justify-content: center;
-    padding: var(--spacing-sm);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-nav-item,
-  .sidebar-nav-item::before {
-    transition: none;
   }
 }

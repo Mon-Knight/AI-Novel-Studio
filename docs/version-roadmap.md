@@ -3,8 +3,8 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v3.6.2（Canonical 只读链路与桌面体验收口补丁）
-> 当前状态：v3.6.2 Canonical 只读链路放行、桌面体验与 R4 文档口径收口；v3.6.0 保持为功能基线
+> 当前版本：v3.7.0（Writing SubAgent 开放与 ZCode 工作台）
+> 当前状态：v3.7.0 开放 Writing SubAgent（桌面 + 真实 API 模型默认经 DSH 提交 candidate-only 正文）、ZCode 形态工作台、双真相收敛与运行章节目标持久化；v3.6.0 保持为功能基线
 
 > 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 继续收敛 Canonical 能力契约。
 
@@ -150,7 +150,8 @@ v3.2.1  发布资产 URL 热修复
 v3.5.0  对话式创作工作台与审阅收敛
 v3.6.0  智能体创作平台与长篇小说记忆层功能基线
 v3.6.1  SQLite 安全与 Runtime 固定模型恢复补丁
-v3.6.2  Canonical 只读链路与桌面体验收口补丁（当前）
+v3.6.2  Canonical 只读链路与桌面体验收口补丁
+v3.7.0  Writing SubAgent 开放与 ZCode 工作台（当前）
 ```
 
 ---
@@ -505,7 +506,7 @@ v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用�
 
 ---
 
-## 7. v3.3.0+ 对话式并发创作工作台路线（当前版本：v3.6.2；功能基线：v3.6.0）
+## 7. v3.3.0+ 对话式并发创作工作台路线（当前版本：v3.7.0；功能基线：v3.6.0）
 
 v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6.0 版本基线完成 Agent 能力契约校准，同时保留后续放行门禁。
 
@@ -527,13 +528,13 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 
 **版本边界：** 不在 v3.3.0 同时删除旧 AI 面板，不扩展所有领域任务，不建设通用软件工程 Agent；当前插件只读显示不扩展为安装、卸载、启停、配置、更新或插件市场；不完整 Fork 或嵌入 Harness UI，也不在本版本顺带升级固定 DSH commit。
 
-### v3.4.0：确认、应用与章节审阅闭环（章节链路完成；通用结构化应用未开放）
+### v3.4.0：确认、应用与章节审阅闭环（章节链路完成；通用结构化应用当时未开放，v3.6.0 起按白名单开放）
 
 **单一版本目标：让对话产物通过可审计决定进入正式小说事实。**
 
 - 产物确认、拒绝、修订与 append-only 决定事实已落地；
 - 章节候选通过 `ReviewAuthorization` 进入审阅，并由单一 Rust/SQLite 事务消费授权、复验草稿版本/hash、采用正文和收敛任务状态；
-- 通用结构化 `request_apply` 尚未完成“领域写入 + `ArtifactDecision`”同事务迁移，当前桌面端固定返回 `STRUCTURED_APPLY_ATOMIC_UNAVAILABLE`，浏览器返回 `BROWSER_APPLY_UNSUPPORTED`，且不执行领域写入；
+- 本版本内通用结构化 `request_apply` 尚未开放（桌面端固定返回 `STRUCTURED_APPLY_ATOMIC_UNAVAILABLE`，浏览器返回 `BROWSER_APPLY_UNSUPPORTED`）。该限制已在 v3.6.0 基线解除：桌面端对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 与精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务内执行“领域写入 + `ArtifactDecision`”，其余类型与浏览器回退继续失败关闭且零领域写入；
 - 基线 revision 漂移和同目标并发冲突提示；
 - 审计报告转后续修复任务；
 - 任务恢复、失败重试、Provider 与预算反馈；
@@ -571,12 +572,20 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 - 结构化产物决定后的章节刷新与资产结算位于 `src/features/workbench/`，生产页面满足 500 行门禁；
 - Release tag 的复用工作流必须执行完整 Windows 桌面 E2E，补丁不放行 Canonical 或 Main Agent 新能力。
 
-### v3.6.2：Canonical 只读链路与桌面体验收口补丁（当前版本）
+### v3.6.2：Canonical 只读链路与桌面体验收口补丁（已完成）
 
 - 会话模型凭据 DPAPI 持久化、产物卡片候选选项解析、中心页面与作品详情 UI 风格统一、AI 任务清空外键修复、作品详情新建异常修复；
 - Canonical catalog/manifest 四项只读 Tool 放行 `stable` + `working`；DSH `read` 回合在 start 契约、Worker 环境与工具授权三处一致注入 Canonical-only allowlist，Gateway `tools/list` 随之列出四项 Canonical 名；
 - 仓内 loopback E2E 证明只读回合零产物、零采用、章节字数不变、零凭据泄漏；R4 文档口径同步收口，live 云端验收仍 NOT VERIFIED，判定标准见架构文档 §14.5；
 - 不放行 Writing SubAgent / `chapter_write` 走 DSH；结构化写入维持 Safe Apply 失败关闭与显式审核不变式。
+
+### v3.7.0：Writing SubAgent 开放与 ZCode 工作台（当前版本）
+
+- 桌面 Agent 工作台重构为 ZCode 形态（深色优先中性令牌、常驻标签栏与自绘标题栏、分组侧栏、悬浮输入卡、右侧可内联打开的创作上下文 / 本任务产物 / 运行日志面板），资源中心五页、设置卡片、作品详情卡片统一为类驱动规格，浏览器布局基线重标；
+- Writing SubAgent 正式开放：桌面端 + 真实 API 模型的 `chapter_write` 默认经 DSH `chapter_write / chapter_polish` 任务类型执行，allowlist 收窄为四个只读工具 + 唯一候选工具，宿主校验章节绑定、必需读取、字数硬区间与 candidate-only 契约；mock / 本地模型、浏览器模式走确定性 Writer，`localStorage` 置 `0` 可关闭。放行依据：E-4a 客户端 Gemini 卡片正向真实验收、E-4b 六个负例/恢复故障注入场景（越权工具、跨书候选、上游瞬时/持续失败、字数越界、进程强杀后重启恢复）全部通过；
+- 审计缺口收口：GAP-10（apply 策略单一来源）、GAP-11（大纲 ownership 校验）、GAP-15（migration 037：用户模板/设定建议 SQLite 事实源，导入资产/润色记录命令化）、GAP-16（TXT 导入单事务）、GAP-18（migration 038：任务运行持久化章节目标，失败运行可安全重试）、GAP-19（重试提示显式要求本回合重读）；
+- 新增 opt-in 生产载体：真实配置验收（复用客户端模型卡片与 DPAPI 保管库，密钥不出应用）与隔离配置故障注入验收（回环脚本上游，零网络零凭据）；
+- 仍未放行：R4 live 云端只读验收（NOT VERIFIED）、SubAgent 预算内自动修正回合（完整性问题目前以助手回合提示 + 人工「要求修改」处理）、需要新依赖的 EPUB/PDF 参考格式、系统托盘与出版导出。
 
 ### Next / R4：Canonical Catalog 已放行；仓内只读闭环已证明，live 云端验收进行中
 
@@ -584,6 +593,7 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 - **R4 仓内只读闭环（已证明）**：`read` intent 请求 Canonical-only allowlist；宿主 `dsh_start_task_turn` 在 start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS` 与工具授权三处一致注入 Canonical 名，Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；Rust loopback E2E 经真实 Worker 启动链证明模型自主调用四个 Canonical 只读工具、零产物、零采用、章节字数不变、零凭据泄漏。候选与审计回合保持 legacy `ALLOWED_TOOLS` 不变；`mainAgentRuntimeService` 启发式脚手架不是 R4 证据。
 - **R4 live 云端验收（进行中，NOT VERIFIED）**：真实云端 Provider 只读回合尚未验收；判定标准（前置凭据、opt-in cloud profile 执行、通过条件与脱敏证据要求）见 `docs/architecture/conversational-creative-workbench.md` §14.5。标准满足前不得宣称 R4 VERIFIED。
 - **后续规划**：Writing SubAgent、`chapter_write` 走 DSH 与其余状态变更 SubAgent 继续后置；结构化写入继续维持 Safe Apply 失败关闭与显式审核不变式。
+- **结构化写入边界加固（Unreleased，审计 GAP-10/11）**：前端“可应用类型 / 章节作用域 / 目标解析”收敛为单一策略源 `src/services/conversation/structuredApplyPolicy.ts`，与 Rust `validate_static_scope` 的白名单和 `expected_target` 一一对应；大纲写命令 `save_master/volume/chapter_outline` 改为事务内校验作品存在且未删除、卷/章节/上级纲要属于同一作品，不匹配返回 `OUTLINE_SCOPE_MISMATCH` 且零写入。
 
 详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 功能基线、v3.6.1 安全补丁、Canonical catalog exposure、R4 仓内只读闭环证据，以及 live 云端验收仍未完成的真实边界。
 
