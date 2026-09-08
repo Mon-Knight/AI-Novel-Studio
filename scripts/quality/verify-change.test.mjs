@@ -94,6 +94,33 @@ test('script-only package changes do not select native tests or packaging', () =
   assert.equal(plan.desktopFull, false);
 });
 
+test('coverage thresholds run only on the calibrated Windows toolchain; other platforms run the full matrix', () => {
+  const plan = createVerificationPlan(['package.json'], tests, {
+    packageJson: {
+      before: { version: '3.6.2', scripts: { test: 'node --test' } },
+      after: {
+        version: '3.6.2',
+        scripts: { test: 'node --test', 'verify:change': 'node selector.mjs' },
+      },
+    },
+  });
+  const step = (platform) =>
+    verificationCommands(plan, {
+      root,
+      lane: 'frontend',
+      source: () => nodeTest,
+      platform,
+    }).find(({ id }) => id === 'coverage');
+  const windows = step('win32');
+  assert.ok(windows.args.includes('test:coverage'));
+  assert.equal(windows.note, undefined);
+  const linux = step('linux');
+  assert.ok(linux.args.includes('test:all'));
+  assert.ok(!linux.args.includes('test:coverage'));
+  assert.match(linux.note, /Windows release toolchain/u);
+  assert.equal(linux.requiresCases, true);
+});
+
 test('ordinary native services select only their validated module filters', () => {
   const plan = createVerificationPlan(
     ['src-tauri/src/services/memory_service.rs', 'src-tauri/src/repositories/memory_repository.rs'],

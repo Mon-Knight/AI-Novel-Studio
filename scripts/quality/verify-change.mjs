@@ -176,9 +176,28 @@ export function createVerificationPlan(
   return plan;
 }
 
+/**
+ * The C8 coverage thresholds (`test:coverage`) are calibrated on the Windows/Node 24
+ * release toolchain; on Linux, C8 does not attribute the `tsx --test` child-process
+ * coverage the same way and the core-set gate reports ~10 points lower for identical
+ * tests. Other platforms therefore execute the identical full matrix (`test:all`) and
+ * leave threshold enforcement to the Windows release gate, exactly as before the
+ * change-scoped selector existed.
+ */
+export function coverageCommandFor(platform) {
+  return platform === 'win32'
+    ? { script: 'test:coverage', thresholds: true }
+    : { script: 'test:all', thresholds: false };
+}
+
 export function verificationCommands(
   plan,
-  { root, lane = 'all', source = (file) => fs.readFileSync(path.join(root, file), 'utf8') },
+  {
+    root,
+    lane = 'all',
+    source = (file) => fs.readFileSync(path.join(root, file), 'utf8'),
+    platform = process.platform,
+  },
 ) {
   if (!['all', 'frontend', 'native', 'desktop'].includes(lane))
     throw new Error(`Unknown verification lane: ${lane}`);
@@ -202,9 +221,17 @@ export function verificationCommands(
   }
   if (plan.version)
     add('version-sync', 'native', ps('scripts/agent-workflow/check_version_sync.ps1'));
-  if (plan.coverage)
-    add('coverage', 'frontend', npmCommand('test:coverage'), { requiresCases: true });
-  else {
+  if (plan.coverage) {
+    const coverage = coverageCommandFor(platform);
+    add('coverage', 'frontend', npmCommand(coverage.script), {
+      requiresCases: true,
+      ...(coverage.thresholds
+        ? {}
+        : {
+            note: 'coverage thresholds are calibrated on the Windows release toolchain; this platform runs the same full matrix without threshold enforcement',
+          }),
+    });
+  } else {
     const entries = plan.tests.map((file) => ({
       file,
       runner: importedRunner(file, source(file)),
@@ -291,6 +318,7 @@ export async function executeVerification(steps, root, run = runVerificationComm
   const results = [];
   for (const step of steps) {
     console.log(`[verify:change] ${step.id}: ${JSON.stringify([step.executable, ...step.args])}`);
+    if (step.note) console.log(`[verify:change] ${step.id}: ${step.note}`);
     try {
       const result = await run(step, root);
       const empty = step.requiresCases && result.exitCode === 0 && !result.cases;
@@ -406,8 +434,10 @@ async function main() {
   );
   if (options['dry-run']) {
     if (!options.json)
-      for (const step of steps)
+      for (const step of steps) {
         console.log(`  ${step.id}: ${JSON.stringify([step.executable, ...step.args])}`);
+        if (step.note) console.log(`    ${step.note}`);
+      }
     return;
   }
   const results = await executeVerification(steps, root);
