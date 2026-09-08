@@ -132,6 +132,23 @@ test('ordinary native services select only their validated module filters', () =
   assert.ok(commands(plan).some(({ id }) => id === 'rust-check'));
 });
 
+test('Rust compilation always prepares dist/ in the native lane before cargo runs', () => {
+  const rustOnly = createVerificationPlan(
+    ['src-tauri/src/services/memory_service.rs', 'src-tauri/src/repositories/memory_repository.rs'],
+    tests,
+  );
+  const nativeIds = commands(rustOnly, 'native').map(({ id }) => id);
+  assert.ok(nativeIds.indexOf('dist-prepare') >= 0);
+  assert.ok(nativeIds.indexOf('dist-prepare') < nativeIds.indexOf('rust-check'));
+  assert.ok(!commands(rustOnly, 'frontend').some(({ id }) => id === 'dist-prepare'));
+  const prepare = commands(rustOnly, 'native').find(({ id }) => id === 'dist-prepare');
+  assert.ok(prepare.args.some((arg) => arg.endsWith('ensure-dist.mjs')));
+  assert.match(prepare.note, /no-op when present/u);
+
+  const docsOnly = createVerificationPlan(['docs/development-rules.md'], tests);
+  assert.ok(!commands(docsOnly).some(({ id }) => id === 'dist-prepare'));
+});
+
 test('a successful process with no executed cases cannot satisfy a behavior check', async () => {
   const result = await executeVerification(
     [{ id: 'behavior', executable: 'fixture', args: [], requiresCases: true }],

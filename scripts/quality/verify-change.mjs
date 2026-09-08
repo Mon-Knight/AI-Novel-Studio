@@ -260,8 +260,15 @@ export function verificationCommands(
     executable: 'cargo',
     args: [...args, '--manifest-path', 'src-tauri/Cargo.toml'],
   });
-  if (plan.rustCheck || plan.rustFull || plan.rustFilters.length)
-    add('rust-check', 'native', cargo(['check', '--locked']));
+  const compilesRust = plan.rustCheck || plan.rustFull || plan.rustFilters.length > 0;
+  // `tauri::generate_context!` panics at compile time when `distDir` (`dist/`) is absent. The
+  // native lane may run on its own machine, so it prepares dist/ itself; the step is a no-op
+  // when a build already exists (e.g. the frontend lane just produced it in the same run).
+  if (compilesRust)
+    add('dist-prepare', 'native', node(['scripts/quality/ensure-dist.mjs']), {
+      note: 'ensures dist/ exists so tauri::generate_context! can compile (no-op when present)',
+    });
+  if (compilesRust) add('rust-check', 'native', cargo(['check', '--locked']));
   if (plan.rustFull) {
     add('gateway-clean', 'native', cargo(['clean', '-p', 'novel-domain-gateway']));
     add('gateway-build', 'native', cargo(['build', '--locked', '-p', 'novel-domain-gateway']));
