@@ -51,7 +51,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 | Migration、共享持久化、DSH、打包配置 | 扩大到对应完整领域门禁；打包变化验证生产构建               |
 | 发布、定时完整验收                   | 完整矩阵（`--full`），各测试集合执行一次                   |
 
-选择器的失败关闭边界：未映射路径抛出 `Unmapped change`，需在归属表补充行为归属；有归属但没有行为测试抛出 `No behavior tests`；零执行用例的成功进程记为 FAIL；任一检查失败传播非零退出码，失败的前端构建或 Gateway 重建会阻断依赖它们的后续步骤并把它们记为 `NOT_RUN`。完整门禁（覆盖率、完整 Rust、完整桌面）吸收对应的定向选择，避免同一测试执行两次。`--lane frontend|native|desktop` 用于 CI 分工，三条车道的命令集合互不重叠且合并后等于完整选择。行为测试见 `scripts/quality/verify-change.test.mjs`、`run-cargo-tests.test.mjs`、`test-ownership.test.mjs` 与 `scripts/e2e/spec-selection.test.ts`。
+选择器的失败关闭边界：未映射路径抛出 `Unmapped change`，需在归属表补充行为归属；有归属但没有行为测试抛出 `No behavior tests`；零执行用例的成功进程记为 FAIL；任一检查失败传播非零退出码，失败的前端构建或 Gateway 重建会阻断依赖它们的后续步骤并把它们记为 `NOT_RUN`。完整门禁（覆盖率、完整 Rust、完整桌面）吸收对应的定向选择，避免同一测试执行两次。`--lane frontend|native|desktop` 用于 CI 分工，三条车道的命令集合互不重叠且合并后等于完整选择。覆盖率步骤按平台切换：Windows 运行带阈值的 `test:coverage`，其他平台运行同一批测试的 `test:all` 并在输出中注明阈值未在该平台执行（Linux 上 C8 对 `tsx --test` 子进程的归因偏低，核心集合会比 Windows 低约 10 个百分点，阈值只在校准过的 Windows 工具链上有意义）。行为测试见 `scripts/quality/verify-change.test.mjs`、`run-cargo-tests.test.mjs`、`test-ownership.test.mjs` 与 `scripts/e2e/spec-selection.test.ts`。
 
 同一批代码/配置未变化且已通过的检查不重复运行；失败修复或出现具体新风险时只复测受影响项。功能开发脚本 `run_feature_workflow.ps1` 默认只做开工检查，`-Phase Verify` 才调用选择器；完整发布脚本保持独立。
 
@@ -833,7 +833,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 `verify_project.ps1` 只用于发布或明确完整验收，会顺序运行版本同步、文档同步、覆盖率（含关键组件阈值）、组件体积、ESLint、前端构建、包体预算、`cargo check --locked`、Gateway 清理与重建、所需 Rust 回归用例存在性校验（`run-cargo-tests.mjs --list-only`，AI Task 删除与项目备份用例由随后的完整 `cargo test` 实际执行，不再提前重复运行）、完整串行 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
 
-GitHub Actions 分为四层，PR 与 `main`/发布使用不同强度：`ci.yml` 在 Pull Request 上用 `verify:change --base <PR base> --lane frontend` 只运行前端归属检查，在 `main` 推送时运行完整 lint / coverage / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Pull Request 上以 `--lane native` 与 `--lane desktop` 运行 Rust、文档与桌面归属检查（不适用时输出 `NOT_APPLICABLE`），在 `main` 推送、定时和 `workflow_call` 时运行版本、文档、Rust、无 bundle 生产构建和完整真实 Tauri E2E（`main` 推送的前端覆盖率由 Linux 作业负责，Windows 不重复）；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，复验 `verified_sha` 与发布提交一致后再构建 MSI、签名 updater 与回滚 manifest，签名、产物与通道检查仍独立执行。required check 名称保持稳定；缺工具、零匹配和实际失败不能伪装为通过。浏览器快速 CI 通过不等于桌面发布通过。
+GitHub Actions 分为四层，PR 与 `main`/发布使用不同强度：`ci.yml` 在 Pull Request 上用 `verify:change --base <PR base> --lane frontend` 只运行前端归属检查，在 `main` 推送时运行完整 lint / coverage / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Pull Request 上以 `--lane native` 与 `--lane desktop` 运行 Rust、文档与桌面归属检查（不适用时输出 `NOT_APPLICABLE`），在 `main` 推送、定时和 `workflow_call` 时运行版本、文档、Rust、无 bundle 生产构建和完整真实 Tauri E2E（Linux 前端作业执行完整 `test:all` 矩阵；C8 覆盖率阈值只在校准过的 Windows 工具链执行，选择器按平台切换 `test:coverage` / `test:all`）；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，复验 `verified_sha` 与发布提交一致后再构建 MSI、签名 updater 与回滚 manifest，签名、产物与通道检查仍独立执行。required check 名称保持稳定；缺工具、零匹配和实际失败不能伪装为通过。浏览器快速 CI 通过不等于桌面发布通过。
 
 辅助脚本不替代第 2 节的定向动态测试。发布汇报必须逐项记录真实命令、退出码与失败信息，不能只写“综合验证通过”。
 
