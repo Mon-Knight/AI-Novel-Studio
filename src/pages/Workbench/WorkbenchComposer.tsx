@@ -1,7 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 import type { WorkbenchAssetScopeSummary } from '../../services/conversation/workbenchAssetScopeService';
-import { ArrowUp, ChevronDown, CircleAlert, Database, LoaderCircle, Square } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  CircleAlert,
+  Database,
+  LoaderCircle,
+  Plus,
+  Puzzle,
+  Square,
+} from 'lucide-react';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
 import type { TaskModelSnapshot } from '../../types/conversation';
@@ -61,6 +70,8 @@ interface WorkbenchComposerProps {
   onCancel: () => void;
   onRefreshAssetScope: () => void;
   onOpenAssetScopePath: (path: string) => void;
+  /** Opens the current-plugin view; offered from the "+" menu when provided. */
+  onShowPlugins?: () => void;
 }
 
 export function WorkbenchComposer({
@@ -93,8 +104,34 @@ export function WorkbenchComposer({
   onCancel,
   onRefreshAssetScope,
   onOpenAssetScopePath,
+  onShowPlugins,
 }: WorkbenchComposerProps) {
   const [assetScopeOpen, setAssetScopeOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!attachOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (attachMenuRef.current?.contains(target) || attachButtonRef.current?.contains(target))
+        return;
+      setAttachOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isComposingKeyboardEvent(event)) return;
+      // The template confirm strip handles its own Escape first and stops propagation.
+      setAttachOpen(false);
+      attachButtonRef.current?.focus();
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [attachOpen]);
   const composerState = selectedConversationRunning
     ? 'running'
     : selectedConversationPreparing
@@ -133,17 +170,46 @@ export function WorkbenchComposer({
     <footer
       className="workbench-composer agent-console-composer"
       data-composer-state={composerState}
+      data-attach-open={attachOpen ? 'true' : 'false'}
     >
-      <WorkbenchTemplateControls
-        key={scopeKey}
-        templates={templates}
-        hasChapter={hasChapter}
-        disabled={templatesDisabled}
-        value={draft}
-        onChange={onDraftChange}
-      />
-
       <div className="workbench-composer-surface">
+        <div
+          id="workbench-composer-attach-menu"
+          className="workbench-attach-menu"
+          data-testid="workbench-composer-attach-menu"
+          ref={attachMenuRef}
+          hidden={!attachOpen}
+          aria-label="插入内容"
+        >
+          <div className="workbench-attach-section">
+            <div className="workbench-attach-section-title">任务模板</div>
+            <WorkbenchTemplateControls
+              key={scopeKey}
+              templates={templates}
+              hasChapter={hasChapter}
+              disabled={templatesDisabled}
+              value={draft}
+              onChange={onDraftChange}
+            />
+          </div>
+          {onShowPlugins && (
+            <div className="workbench-attach-section">
+              <div className="workbench-attach-section-title">运行时</div>
+              <button
+                type="button"
+                className="workbench-attach-action"
+                data-testid="workbench-composer-attach-plugins"
+                onClick={() => {
+                  setAttachOpen(false);
+                  onShowPlugins();
+                }}
+              >
+                <Puzzle aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>查看当前插件与模型目录</span>
+              </button>
+            </div>
+          )}
+        </div>
         {contextPending && (
           <div
             className="workbench-readiness-hint"
@@ -253,6 +319,20 @@ export function WorkbenchComposer({
         />
 
         <div className="workbench-composer-toolbar">
+          <button
+            type="button"
+            ref={attachButtonRef}
+            className={`workbench-composer-attach ${attachOpen ? 'is-open' : ''}`.trim()}
+            data-testid="workbench-composer-attach"
+            aria-label={attachOpen ? '关闭插入菜单' : '插入模板或打开运行时'}
+            aria-expanded={attachOpen}
+            aria-controls="workbench-composer-attach-menu"
+            title="任务模板与运行时"
+            disabled={composerDisabled}
+            onClick={() => setAttachOpen((open) => !open)}
+          >
+            <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
+          </button>
           <button
             type="button"
             className={`workbench-asset-scope-toggle ${assetScopeOpen ? 'is-open' : ''}`.trim()}

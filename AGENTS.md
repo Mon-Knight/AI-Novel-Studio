@@ -15,8 +15,8 @@
 
 3. 保留用户已有修改。与目标文件重叠时先读取差异；遇到无法判断归属的冲突先询问，不执行覆盖、重置或清理。
 4. 从 `package.json` 查看版本、依赖和可用脚本；版本交叉核对 `src-tauri/Cargo.toml`，完整镜像由 `npm run test:version-sync` 检查。
-5. 首次进入仓库先读产品、UI、数据模型文档的开头和当前版本覆盖章节，再按下表深入任务相关部分；不要求每次通读整个 `docs/`。
-6. 修改前说明影响范围和验证计划。明确、低风险的任务可直接执行；需求含糊、需要架构决策、破坏性操作或扩大范围时先确认。
+5. 首次进入仓库按下表定位任务相关文档，先核对其适用版本与当前覆盖章节；产品、UI、数据模型仅在任务涉及对应领域时读取，不通读整个 `docs/`。
+6. 修改前说明影响范围和验证计划。已授权且明确的任务直接继续；只有尚未解决的关键需求/架构取舍、缺失的破坏性操作授权或扩大范围需要询问，不重复确认会话中已有的决定。
 
 ## 2. 文档查阅与冲突处理
 
@@ -67,7 +67,7 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 - 默认 `/` 是**创作工作台**：小说项目/任务树 + 独立任务对话；模型选择靠近输入区，工具调用、错误与产物卡片在对话内显示，不展示隐藏推理。
 - **写作工作台**用于章节人工审阅、显式编辑、保存、采用及章节准备/总结，不恢复旧生成类 AI 面板为主流程。
 - **当前插件**只读展示 Runtime Registry 实际加载的功能、模型与其他插件，不扩展成管理、市场或独立工具执行面板。
-- 生产写章继续由确定性 Writer 编排；Canonical 只读链路、实验 Harness、Writing SubAgent 与 live Provider 验收是不同边界。当前准入和证据查阅对话工作台架构第 13～14 节，不凭目录存在或 Mock 通过宣称 R4 VERIFIED。
+- 生产写章分两条路径：桌面端 + 真实 API 模型默认经 Writing SubAgent 走 DSH candidate-only 回合（v3.7.0 起，契约与验收见 `docs/architecture/writing-subagent-contract.md`）；mock / 本地模型与浏览器模式仍由确定性 Writer 编排。Canonical 只读链路、实验 Harness 与 live Provider 验收是不同边界。当前准入和证据查阅对话工作台架构第 13～14 节，不凭目录存在或 Mock 通过宣称 R4 VERIFIED。
 - 保持 Windows 桌面写作体验、既有主题和样式 Token、轻量边框、克制阴影、2K 可用性与正文舒适阅读；不做移动优先、无限宽表单、大面积渐变或表格后台风格。
 
 ## 4. 修改范围与安全底线
@@ -98,16 +98,21 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 
 ## 6. 验证矩阵
 
-先运行直接覆盖变更的检查，再叠加适用层级；命令以 `package.json` 和 [测试策略](docs/technical/testing.md) 为准。
+日常入口为 `npm run verify:change`，可先加 `-- --dry-run` 查看选择理由；本地与 PR CI 共用 `scripts/quality/verification-scopes.mjs` 的行为归属。先运行直接覆盖变更的检查，再叠加适用层级；完整发布入口不作为普通开工检查。
 
-| 变更范围               | 必要验证                                                                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 纯文档                 | `npm run test:docs-sync`；改动文件的 Prettier；`git diff --check`；涉及版本/路线/发布口径时加 `npm run test:version-sync` |
-| 前端/TypeScript        | 相关动态测试 + `npm run lint:ci` + `npm run build`；交互变化加相关 UI/E2E                                                 |
-| Rust/SQLite            | `cargo check --locked --manifest-path src-tauri/Cargo.toml` + 相关测试；版本验收运行完整串行 Rust 测试                    |
-| Tauri/DSH payload/打包 | 相关动态测试、真实 Windows Tauri E2E、`npm run tauri:build`                                                               |
-| 发布                   | `scripts/agent-workflow/verify_project.ps1` 完整矩阵与 clean working tree                                                 |
+| 变更范围                  | 必要验证                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 纯文档/开发指令           | 文档同步、改动文件 Prettier、`git diff --check`；涉及版本/路线/发布口径时加版本同步                             |
+| 局部前端/TypeScript       | 相邻或所属模块行为测试、改动文件 ESLint、一次类型检查；用户交互变化加对应真实桌面场景                           |
+| 工作台会话/Canonical 契约 | 对应会话行为与安全回归；Canonical/DSH 变更加完整相关领域检查，不因普通工作台小改动固定运行整个 `test:workbench` |
+| Rust/SQLite 逻辑          | `cargo check --locked --manifest-path src-tauri/Cargo.toml`、有非零匹配证明的相关 Rust 测试                     |
+| Migration/共享持久化/DSH  | 对应完整 Rust 领域检查及真实 SQLite/桌面场景；DSH 先准备固定载体和当前 Gateway                                  |
+| 构建配置/依赖图/打包      | 受影响的完整测试与构建门禁；打包变化验证生产产物                                                                |
+| 发布/明确完整验收         | `scripts/agent-workflow/verify_project.ps1` 完整矩阵；发布终态要求 clean working tree                           |
 
+同一批代码/配置未变化且已通过的检查不反复运行；修复失败或出现具体新风险时，只复测受影响项。聚合器已包含的测试不再手动重复，覆盖率从首次测试执行采集，报告阶段不重跑测试。新模块需声明行为归属，未知范围、零测试、缺工具或失败不能被当作通过。
+
+默认桌面验收保持生产界面，使用真实 Tauri、隔离 SQLite 和固定模型响应；旧面板只由显式兼容性用例启用。编译、源码字符串检查和旧 UI 测试不能替代当前用户流程。
 文档任务示例（将路径替换为本次实际修改的文件，不运行全仓库格式化）：
 
 ```powershell

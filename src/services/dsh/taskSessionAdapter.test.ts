@@ -6,6 +6,11 @@ import type {
   TaskRun,
 } from '../../types/conversation';
 import { taskConversationService } from '../conversation/taskConversationService';
+import { taskRuntimeAdapter, type TaskRuntimeInput } from '../conversation/taskRuntimeAdapter';
+import { WRITING_SUBAGENT_FLAG_KEY } from '../agents/writingSubAgentContract';
+import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
+import { chapterRepository } from '../database/chapterRepository';
+import { volumeRepository } from '../database/volumeRepository';
 import {
   captureLocalConversationalSnapshot,
   isActiveDshTaskRuntimeStatus,
@@ -308,6 +313,212 @@ test('read-intent desktop startTurn requests Canonical-only DSH tools', async ()
   } finally {
     taskSessionAdapter.clear('conversation-read-canonical');
     dshTaskRuntimeService.start = originalStart;
+    restoreWindow(originalWindow);
+  }
+});
+
+function mockFlagStorage(value: string | null): PropertyDescriptor | undefined {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (key: string) => (key === WRITING_SUBAGENT_FLAG_KEY ? value : null) },
+  });
+  return original;
+}
+
+function restoreFlagStorage(original: PropertyDescriptor | undefined): void {
+  if (original) Object.defineProperty(globalThis, 'localStorage', original);
+  else Reflect.deleteProperty(globalThis, 'localStorage');
+}
+
+test('chapter_write keeps the deterministic writer for mock models and for an explicit opt-out', async () => {
+  const originalWindow = mockTauriWindow();
+  const originalDshStart = dshTaskRuntimeService.start;
+  const originalWriterStart = taskRuntimeAdapter.start;
+  let dshCalls = 0;
+  const writerCalls: TaskRuntimeInput[] = [];
+  dshTaskRuntimeService.start = async () => {
+    dshCalls += 1;
+    throw new Error('DSH must not be used for chapter_write on this path');
+  };
+  taskRuntimeAdapter.start = async (input) => {
+    writerCalls.push(input);
+    return { runId: 'run-writer', status: 'completed' } as unknown as TaskRun;
+  };
+  const mockModel: TaskModelSnapshot = {
+    ...readModelSnapshot,
+    providerId: 'mock',
+    modelId: 'Mock',
+    runtimeMode: 'mock',
+    baseUrl: undefined,
+  };
+  let originalStorage = mockFlagStorage(null);
+  try {
+    // Default flag + mock model snapshot: the DSH runtime only accepts API models.
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-chapter-writer',
+      novelId: 'novel-1',
+      turnId: 'turn-chapter',
+      goal: '写第一章正文',
+      chapterId: 'ch-1',
+      modelSnapshot: mockModel,
+    });
+    assert.equal(dshCalls, 0);
+    assert.equal(writerCalls.length, 1);
+    assert.equal(writerCalls[0].workerId, 'worker-conversation-chapter-writer');
+
+    // Explicit opt-out keeps the writer even for a real API model.
+    restoreFlagStorage(originalStorage);
+    originalStorage = mockFlagStorage('0');
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-chapter-writer',
+      novelId: 'novel-1',
+      turnId: 'turn-chapter-2',
+      goal: '写第一章正文',
+      chapterId: 'ch-1',
+      modelSnapshot: readModelSnapshot,
+    });
+    assert.equal(dshCalls, 0);
+    assert.equal(writerCalls.length, 2);
+  } finally {
+    taskSessionAdapter.clear('conversation-chapter-writer');
+    dshTaskRuntimeService.start = originalDshStart;
+    taskRuntimeAdapter.start = originalWriterStart;
+    restoreFlagStorage(originalStorage);
+    restoreWindow(originalWindow);
+  }
+});
+
+test('desktop chapter_write with an API model starts a candidate-only DSH turn by default with the narrowed writing allowlist', async () => {
+  const originalWindow = mockTauriWindow();
+  // No flag set: v3.7.0 opens the SubAgent for real API models.
+  const originalStorage = mockFlagStorage(null);
+  const originalDshStart = dshTaskRuntimeService.start;
+  const originalWriterStart = taskRuntimeAdapter.start;
+  const captured: DshTaskRuntimeInput[] = [];
+  dshTaskRuntimeService.start = async (input) => {
+    captured.push(input);
+    return fakeDshStartResult(input, input.conversationId);
+  };
+  taskRuntimeAdapter.start = async () => {
+    throw new Error('the deterministic writer must not run for a desktop API-model chapter_write');
+  };
+  try {
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-chapter-subagent',
+      novelId: 'novel-1',
+      turnId: 'turn-chapter-subagent',
+      goal: '写第一章正文',
+      chapterId: 'ch-1',
+      modelSnapshot: readModelSnapshot,
+    });
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].taskKind, 'chapter_write');
+    assert.equal(captured[0].expectedTool, 'generate_chapter');
+    assert.equal(captured[0].expectedArtifactType, 'chapter_text');
+    assert.deepEqual(captured[0].requiredReadTools, [
+      'novel.read_context',
+      'chapter.read_outline',
+      'get_character_states',
+      'search_memory',
+    ]);
+    assert.deepEqual(
+      [...captured[0].allowedTools!],
+      [
+        'novel.read_context',
+        'chapter.read_outline',
+        'get_character_states',
+        'search_memory',
+        'generate_chapter',
+      ],
+    );
+    assert.equal(
+      captured[0].allowedTools?.some((tool) =>
+        ['generate_outline', 'expand_settings', 'polish_chapter', 'summarize_chapter'].includes(
+          tool,
+        ),
+      ),
+      false,
+    );
+
+    // Without a bound chapter the flag is irrelevant: the writer path stays authoritative.
+    let writerFallback = 0;
+    taskRuntimeAdapter.start = async () => {
+      writerFallback += 1;
+      return { runId: 'run-writer', status: 'completed' } as unknown as TaskRun;
+    };
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-chapter-unbound',
+      novelId: 'novel-1',
+      turnId: 'turn-chapter-unbound',
+      goal: '写第一章正文',
+      modelSnapshot: readModelSnapshot,
+    });
+    assert.equal(captured.length, 1);
+    assert.equal(writerFallback, 1);
+  } finally {
+    taskSessionAdapter.clear('conversation-chapter-subagent');
+    taskSessionAdapter.clear('conversation-chapter-unbound');
+    dshTaskRuntimeService.start = originalDshStart;
+    taskRuntimeAdapter.start = originalWriterStart;
+    restoreFlagStorage(originalStorage);
+    restoreWindow(originalWindow);
+  }
+});
+
+test('flagged chapter_write surfaces integrity errors on the persisted candidate without touching it', async () => {
+  const originalWindow = mockTauriWindow();
+  const originalStorage = mockFlagStorage('1');
+  const originalDshStart = dshTaskRuntimeService.start;
+  const originalGetArtifact = aiTaskRuntimeService.getArtifact;
+  const originalAppendTurn = taskConversationService.appendTurn;
+  const originalChapters = chapterRepository.getByNovelId;
+  const originalVolumes = volumeRepository.getByNovelId;
+  const appended: Array<{ role: string; content: string }> = [];
+  dshTaskRuntimeService.start = async (input) => ({
+    ...fakeDshStartResult(input, input.conversationId),
+    artifactId: 'artifact-chapter-1',
+  });
+  aiTaskRuntimeService.getArtifact = async (artifactId) =>
+    ({
+      artifact: { artifactId, artifactType: 'chapter_text' },
+      rawContent: '沈砚推开档案馆的门，灰尘在光柱里翻滚。她转身离开。（未完待续）',
+      issues: [],
+    }) as unknown as Awaited<ReturnType<typeof aiTaskRuntimeService.getArtifact>>;
+  taskConversationService.appendTurn = (async (
+    _conversationId: string,
+    role: string,
+    content: string,
+  ) => {
+    appended.push({ role, content });
+    return { turnId: 'turn-review', role, content } as unknown as Awaited<
+      ReturnType<typeof taskConversationService.appendTurn>
+    >;
+  }) as typeof taskConversationService.appendTurn;
+  chapterRepository.getByNovelId = async () => [];
+  volumeRepository.getByNovelId = async () => [];
+  try {
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-chapter-integrity',
+      novelId: 'novel-1',
+      turnId: 'turn-chapter-integrity',
+      goal: '写第一章正文',
+      chapterId: 'ch-1',
+      modelSnapshot: readModelSnapshot,
+    });
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].role, 'assistant');
+    assert.match(appended[0].content, /候选完整性检查发现 1 项/u);
+    assert.match(appended[0].content, /chapter_tail_pollution/u);
+    assert.match(appended[0].content, /要求修改/u);
+  } finally {
+    taskSessionAdapter.clear('conversation-chapter-integrity');
+    dshTaskRuntimeService.start = originalDshStart;
+    aiTaskRuntimeService.getArtifact = originalGetArtifact;
+    taskConversationService.appendTurn = originalAppendTurn;
+    chapterRepository.getByNovelId = originalChapters;
+    volumeRepository.getByNovelId = originalVolumes;
+    restoreFlagStorage(originalStorage);
     restoreWindow(originalWindow);
   }
 });

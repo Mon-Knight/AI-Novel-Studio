@@ -1,0 +1,419 @@
+/**
+ * AI Novel Studio - 顶部标签栏与 ZCode 风格侧栏
+ */
+
+/* === 顶部标签栏（同时是无边框窗口的标题栏） === */
+.app-frame-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: var(--frame-bar-height);
+  padding: 0 0 0 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-frame);
+  color: var(--color-text-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: var(--z-topbar);
+}
+
+/* 空白处可拖动窗口（Tauri 拖动脚本只识别直接命中的元素）。 */
+.app-frame-bar[data-tauri-drag-region],
+.app-frame-bar [data-tauri-drag-region] {
+  cursor: default;
+}
+
+/* 无边框窗口没有系统边框：用 1px 边缘与桌面区分；最大化时贴边不画。 */
+.app-shell[data-window-frame='custom'] {
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+
+.app-shell[data-window-frame='custom'][data-window-maximized='true'] {
+  box-shadow: none;
+}
+
+.frame-window-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin-left: 4px;
+}
+
+.frame-window-button {
+  display: inline-grid;
+  width: 46px;
+  height: 100%;
+  place-items: center;
+  color: var(--color-text-secondary);
+  cursor: default;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.frame-window-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.frame-window-button:active {
+  background: var(--color-bg-active);
+}
+
+.frame-window-button.is-close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.frame-window-button.is-close:active {
+  background: #c50f1f;
+  color: #ffffff;
+}
+
+.frame-window-button:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.frame-brand {
+  display: flex;
+  align-items: center;
+  margin-right: 2px;
+}
+
+.frame-brand-mark,
+.sidebar-avatar,
+.frame-tab-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--color-text-primary);
+  color: var(--color-bg-app);
+  font-size: 12px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0;
+}
+
+.frame-icon-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.frame-icon-button:hover,
+.frame-icon-button.is-active {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.frame-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+}
+
+.frame-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.frame-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frame-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.frame-tab.is-active {
+  border-color: var(--color-border);
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
+}
+
+.frame-tab.is-page {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frame-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+}
+
+.frame-version {
+  padding: 0 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* === 快捷操作（侧栏与工作台树共用） === */
+.shell-quick-actions {
+  display: grid;
+  gap: 2px;
+  padding: 10px 8px 6px;
+}
+
+.shell-quick-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.shell-quick-action:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.shell-quick-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.shell-quick-action-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-kbd {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-family);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+/* === 左侧导航栏 === */
+.app-sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  height: 100%;
+  background-color: var(--color-bg-sidebar);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-sidebar);
+  user-select: none;
+}
+
+.app-sidebar.app-sidebar--compact {
+  width: var(--sidebar-rail-width);
+  min-width: var(--sidebar-rail-width);
+}
+
+.app-sidebar--compact .sidebar-nav-section,
+.app-sidebar--compact .sidebar-nav-item .nav-label,
+.app-sidebar--compact .sidebar-footer-copy {
+  display: none;
+}
+
+.app-sidebar--compact .sidebar-nav {
+  overflow-x: hidden;
+  padding: var(--spacing-sm) 0;
+}
+
+.app-sidebar--compact .sidebar-group + .sidebar-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.app-sidebar--compact .sidebar-nav-item {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  gap: 0;
+  margin: 2px auto;
+  padding: 0;
+}
+
+.app-sidebar--compact .sidebar-footer {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 var(--spacing-sm);
+}
+
+.sidebar-group + .sidebar-group {
+  margin-top: 6px;
+}
+
+.sidebar-nav-section {
+  padding: 10px 18px 4px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+.sidebar-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  margin: 1px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+  text-decoration: none;
+}
+
+.sidebar-nav-item:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-nav-item.active {
+  background-color: var(--color-bg-selected);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.sidebar-nav-item:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.sidebar-nav-item .nav-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.sidebar-nav-item.active .nav-icon,
+.sidebar-nav-item:hover .nav-icon {
+  color: inherit;
+}
+
+.sidebar-nav-item .nav-icon svg {
+  display: block;
+}
+
+.sidebar-nav-item .nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.sidebar-footer-copy {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.sidebar-footer-name {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer .version {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 1023px) {
+  .app-sidebar:not(.app-sidebar--compact) {
+    width: var(--sidebar-rail-width);
+    min-width: var(--sidebar-rail-width);
+  }
+
+  .app-sidebar:not(.app-sidebar--compact) .shell-quick-actions,
+  .app-sidebar:not(.app-sidebar--compact) .sidebar-nav-section,
+  .app-sidebar:not(.app-sidebar--compact) .sidebar-nav-item .nav-label,
+  .app-sidebar:not(.app-sidebar--compact) .sidebar-footer-copy {
+    display: none;
+  }
+
+  .app-sidebar:not(.app-sidebar--compact) .sidebar-nav-item {
+    justify-content: center;
+    width: 36px;
+    margin: 2px auto;
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-nav-item,
+  .frame-tab,
+  .frame-icon-button,
+  .frame-window-button,
+  .shell-quick-action {
+    transition: none;
+  }
+}

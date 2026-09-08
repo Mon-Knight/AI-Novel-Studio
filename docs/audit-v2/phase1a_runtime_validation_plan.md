@@ -184,7 +184,7 @@ npm run test:agent-runtime:real
 - API Key 仅进程内存；`model_snapshot`、TaskRun、ToolCallEvent、JSONL session、报告和 E2E artifact 均不得含凭据字段。
 - 本地模型 Base URL 必须是 loopback；禁止任意远程 URL 通过“local” profile 绕过治理代理。
 - 使用临时数据库/worker/session 目录；测试结束销毁或保留在明确的失败 artifact 目录，绝不写用户作品库。
-- 工具权限保持只读；R4 不新增 candidate/adopt/save/write 工具。章节采用继续使用已经完成的显式 `ReviewAuthorization` 原子事务，通用结构化 `request_apply` 继续失败关闭。
+- 工具权限保持只读；R4 不新增 candidate/adopt/save/write 工具。章节采用继续使用已经完成的显式 `ReviewAuthorization` 原子事务，通用结构化 `request_apply` 维持“白名单同事务写入、其余失败关闭”的边界不变，R4 不扩大该边界。
 - 默认 Mock E2E 的网络阻断、模型快照和断言保持不变；真实 profile 与默认 profile 不能共享环境变量残留。
 
 ## 结论

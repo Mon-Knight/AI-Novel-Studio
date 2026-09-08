@@ -115,18 +115,17 @@ $npmSteps = @(
     @{ Name = "npm run test:component-size"; Arguments = @("run", "test:component-size") },
     @{ Name = "npm run lint:ci"; Arguments = @("run", "lint:ci") },
     @{ Name = "npm run build"; Arguments = @("run", "build") },
-    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") },
-    @{ Name = "npm run test:ai-tasks-delete"; Arguments = @("run", "test:ai-tasks-delete") },
-    @{ Name = "npm run test:project-backup"; Arguments = @("run", "test:project-backup") }
+    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") }
 )
 
 foreach ($step in $npmSteps) {
     Invoke-VerificationStep -Name $step.Name -WorkingDirectory $ProjectRoot -Executable $npm -Arguments $step.Arguments
 }
 
-Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check")
+Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check", "--locked")
 Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")
 Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")
+Invoke-VerificationStep -Name "required Rust regression discovery" -WorkingDirectory $ProjectRoot -Executable "node" -Arguments @("scripts/quality/run-cargo-tests.mjs", "--list-only", "--filter", "ai_task_delete", "--filter", "project_backup_")
 Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")
 
 # The complete desktop suite is a release gate, not a substitute for Node or Rust tests.

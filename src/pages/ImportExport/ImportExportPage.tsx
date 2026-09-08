@@ -83,10 +83,11 @@ function ImportExportPage() {
   const pageActions = (
     <>
       {activeTab === 'import' && (
-        <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+        <div className="resource-row resource-row--wrap">
           <button
             type="button"
             className="btn btn-primary btn-sm"
+            data-testid="project-import-txt"
             onClick={() => setShowTxtImport(true)}
           >
             <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
@@ -115,30 +116,12 @@ function ImportExportPage() {
       />
 
       {msg && (
-        <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: 'var(--color-primary-light, #e0e7ff)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: 'var(--color-primary, #4338ca)',
-          }}
-        >
+        <div className="resource-notice resource-notice--success" role="status">
           {msg}
         </div>
       )}
       {err && (
-        <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: 'var(--color-error-bg, #fee2e2)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: 'var(--color-error, #b91c1c)',
-          }}
-        >
+        <div className="resource-notice resource-notice--error" role="alert">
           {err}
         </div>
       )}

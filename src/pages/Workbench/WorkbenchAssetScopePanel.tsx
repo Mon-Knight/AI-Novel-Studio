@@ -91,18 +91,21 @@ export function WorkbenchAssetScopePanel({
   error,
   onRefresh,
   onOpen,
+  id = 'workbench-asset-scope-panel',
 }: {
   summary: WorkbenchAssetScopeSummary | null;
   loading: boolean;
   error: string;
   onRefresh: () => void;
   onOpen: (path: string) => void;
+  /** The side panel hosts a second instance and must not reuse the composer's id. */
+  id?: string;
 }) {
   return (
     <section
-      id="workbench-asset-scope-panel"
+      id={id}
       className="workbench-asset-scope-panel"
-      data-testid="workbench-asset-scope-panel"
+      data-testid={id}
       data-context-stage="preflight-preview"
       aria-label="生成前资产状态"
     >

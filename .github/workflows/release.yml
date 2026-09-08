@@ -51,6 +51,7 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_CHANNEL: ${{ needs.release-context.outputs.channel }}
+      VERIFIED_SHA: ${{ needs.desktop-gate.outputs.verified_sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,10 +65,13 @@ jobs:
           rustup default stable
       - run: npm ci
       - run: npm run test:version-sync
-      - run: npm run lint:ci
-      - run: npm run test:all
-      - run: npm run build
-      - run: npm run test:bundle-size
+      - name: Require evidence for the exact release commit
+        shell: pwsh
+        run: |
+          $actualSha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $env:VERIFIED_SHA -or $actualSha -ne $env:VERIFIED_SHA) {
+            throw 'The successful full desktop gate does not verify this release commit.'
+          }
 
       - name: Checkout pinned DSH runtime source
         uses: actions/checkout@v4
@@ -90,9 +94,6 @@ jobs:
 
       - name: Build current novel-domain gateway
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
-
-      - name: Run Rust tests
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 
       - name: Prepare signed updater configuration
         shell: pwsh
@@ -138,6 +139,9 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         # Tauri 1's Windows bundler supports MSI plus the signed updater archive.
         run: npm run tauri:build:release -- --config "$env:TAURI_RELEASE_CONFIG"
+
+      - name: Enforce signed build bundle budgets
+        run: npm run test:bundle-size
 
       - name: Verify signed Windows artifacts
         shell: pwsh

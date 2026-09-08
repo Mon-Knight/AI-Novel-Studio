@@ -3,7 +3,7 @@
 > 文件：`docs/ai-agent-roadmap.md`  
 > 用途：规划 AI Agent 能力的演进路线  
 > 适用：产品规划 + 技术决策
-> 当前版本：v3.6.1；v3.6.0 保持为功能基线。本文的“已完成”只表示已经进入当前版本的能力，后续阶段仍以各自门禁为准
+> 当前版本：v3.7.0；v3.6.0 保持为功能基线。本文的“已完成”只表示已经进入当前版本的能力，后续阶段仍以各自门禁为准
 
 ---
 
@@ -184,7 +184,7 @@ AI 面向用户的回复、工具调用、错误和产物共同构成任务对�
 - 普通回复不能直接修改小说正式事实。
 - 产物形成后在对话中推送专用卡片。
 - 章节候选先由用户确认进入人工审阅，再显式编辑、保存和采用；桌面端由一个 Rust/SQLite 事务同时消费 `ReviewAuthorization`、复验草稿版本/hash 并采用正文。
-- 通用结构化产物可以记录确认或申请应用决定，但“领域写入 + `ArtifactDecision`”尚未完成同事务迁移；当前 `request_apply` 固定失败关闭且不产生领域写入。
+- 通用结构化产物可以记录确认、修订、拒绝或申请应用决定。桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 与精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务内执行“领域写入 + `ArtifactDecision`”；质量/风格报告、其他 `generic_json`、未知类型与浏览器回退失败关闭且零领域写入。前端的类型白名单、章节作用域与目标解析统一由 `structuredApplyPolicy` 提供，与 Rust `validate_static_scope` 保持一致。
 - 基线漂移、重复应用和并发写入继续由 revision、CAS 和幂等事务处理。
 
 ### 5.5 DSH 与内部 Runtime 边界

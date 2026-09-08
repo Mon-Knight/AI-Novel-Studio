@@ -208,9 +208,9 @@ export default function GenerationTracePanel({
               <div
                 data-testid="trace-fallback-alert"
                 style={{
-                  background: '#fffbeb',
-                  border: '1px solid #fde68a',
-                  color: '#b45309',
+                  background: 'var(--color-warning-bg)',
+                  border: '1px solid var(--color-warning-border)',
+                  color: 'var(--color-warning-text)',
                   borderRadius: 6,
                   padding: 10,
                   fontSize: 12,
@@ -324,7 +324,7 @@ export default function GenerationTracePanel({
                       style={{
                         marginTop: 2,
                         fontFamily: 'monospace',
-                        fontSize: 11,
+                        fontSize: 12,
                         background: 'var(--color-bg-subtle, #f1f5f9)',
                         padding: '4px 8px',
                         borderRadius: 4,

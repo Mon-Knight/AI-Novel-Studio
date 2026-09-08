@@ -38,7 +38,10 @@ export type DshTaskKind =
   | 'character_generate'
   | 'event_suggest'
   | 'quality_check'
-  | 'chapter_summary';
+  | 'chapter_summary'
+  /** Writing SubAgent（特性开关，默认关闭）：只读工具 + 单一章节候选工具。 */
+  | 'chapter_write'
+  | 'chapter_polish';
 
 export interface CandidateToolChoice {
   name: CandidateToolName;

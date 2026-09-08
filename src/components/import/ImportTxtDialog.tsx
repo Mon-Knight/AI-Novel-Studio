@@ -8,7 +8,11 @@ import { novelService } from '../../services/novels/novelService';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
-import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtImportService';
+import {
+  analyzeTxtForChapters,
+  importTxtNovel,
+  readTextFile,
+} from '../../services/import/txtImportService';
 import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
 import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
@@ -74,45 +78,35 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         },
         async ({ setMessage, setStage, setPercent }) => {
           setStage('创建作品……');
-          const novel = await novelService.createNovel({
-            title: novelTitle.trim(),
-            genre: genre.trim() || undefined,
-            description: desc.trim() || '由 TXT 导入',
-          });
-          const volume = await volumeRepository.create({
-            novelId: novel.id,
-            title: '第一卷',
-            orderIndex: 1,
-          });
-          let count = 0;
-          const totalCh = analyzeResult.chapters.length;
-          for (const ch of analyzeResult.chapters) {
-            setStage(`正在写入：${ch.title}`);
-            setMessage(`正在导入章节 ${count + 1} / ${totalCh}……`);
-            setPercent(Math.round(((count + 1) / totalCh) * 90));
-            const chapter = await chapterRepository.create({
-              novelId: novel.id,
-              volumeId: volume.id,
-              title: ch.title,
-              orderIndex: ch.orderIndex,
-              targetWordCount: undefined,
-              outline: '',
-            });
-            await draftVersionService.create({
-              novelId: novel.id,
-              chapterId: chapter.id,
-              content: ch.content,
-              source: 'imported',
-            });
-            count++;
-          }
+          // 桌面端由 Rust 在单一事务内写入作品、卷、章节与草稿；浏览器模式逐步写入并在失败时级联回收。
+          const result = await importTxtNovel(
+            {
+              title: novelTitle.trim(),
+              genre: genre.trim() || undefined,
+              description: desc.trim() || undefined,
+              chapters: analyzeResult.chapters,
+            },
+            {
+              createNovel: (input) => novelService.createNovel(input),
+              createVolume: (input) => volumeRepository.create(input),
+              createChapter: (input) =>
+                chapterRepository.create({ ...input, targetWordCount: undefined, outline: '' }),
+              createDraft: (input) => draftVersionService.create({ ...input, source: 'imported' }),
+              deleteNovelCascade: (novelId) => novelService.deleteNovelCascade(novelId),
+            },
+            (progress) => {
+              setStage(progress.stage);
+              setMessage(progress.message);
+              setPercent(progress.percent);
+            },
+          );
           setPercent(100);
           setImporting(false);
-          setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
+          setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${result.chapterCount} 章。`);
           setStep('done');
           closeTimer.current = setTimeout(() => {
             onClose();
-            navigate(`/novels/${novel.id}`);
+            navigate(`/novels/${result.novel.id}`);
           }, 1500);
         },
       );
@@ -142,6 +136,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             </button>
             <button
               className="btn btn-primary btn-sm"
+              data-testid="txt-import-confirm"
               onClick={handleImport}
               disabled={importing || !novelTitle.trim()}
             >
@@ -194,9 +189,10 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             ref={fileInputRef}
             type="file"
             aria-label="选择 TXT 文件"
+            data-testid="txt-import-file"
             accept=".txt,.TXT"
             onChange={handleFileSelect}
-            style={{ display: 'none' }}
+            hidden
           />
         </div>
       )}
@@ -309,7 +305,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
       )}
 
       {step === 'done' && (
-        <div style={{ textAlign: 'center', padding: 32 }}>
+        <div style={{ textAlign: 'center', padding: 32 }} data-testid="txt-import-done">
           <CircleCheck
             aria-hidden="true"
             size={40}

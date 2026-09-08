@@ -177,51 +177,29 @@ function AiProviderSettingsCard({
       </p>
 
       <div
-        style={{
-          padding: '10px 14px',
-          borderRadius: 8,
-          marginBottom: 12,
-          background:
-            settings.runtimeMode === 'mock' ? 'var(--color-success-bg)' : 'var(--color-info-bg)',
-          border:
-            settings.runtimeMode === 'mock'
-              ? '1px solid var(--color-success-border)'
-              : '1px solid var(--color-info-border)',
-        }}
+        className={`settings-mode-banner ${settings.runtimeMode === 'mock' ? 'is-mock' : 'is-live'}`}
       >
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
+        <div className="settings-mode-banner-title">
           当前模式：{settings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API 模式'}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+        <div className="settings-mode-banner-text">
           {settings.runtimeMode === 'mock'
             ? '所有 AI 功能使用本地模拟，不请求外部 API。'
             : '当前使用已保存卡片中的模型；参数仅在添加或编辑时填写。'}
         </div>
       </div>
 
-      <label
-        htmlFor="mockMode"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 14px',
-          marginBottom: 12,
-          background: 'var(--color-bg-hover)',
-          borderRadius: 8,
-          border: '1px solid var(--color-border)',
-        }}
-      >
+      <label htmlFor="mockMode" className="settings-toggle-row">
         <input
           type="checkbox"
           id="mockMode"
+          className="settings-checkbox"
           checked={settings.runtimeMode === 'mock'}
           onChange={(event) => update({ runtimeMode: event.target.checked ? 'mock' : 'api' })}
-          style={{ width: 18, height: 18, cursor: 'pointer' }}
         />
         <span>
           <strong>Mock 模式</strong>
-          <span className="settings-help-text" style={{ display: 'block', marginTop: 2 }}>
+          <span className="settings-help-text settings-help-block">
             开启后使用本地模拟；关闭后使用当前选中的 API 模型卡片。
           </span>
         </span>
@@ -263,25 +241,20 @@ function AiProviderSettingsCard({
 
       {message && (
         <div
-          className="settings-help-text"
+          className={`settings-result ${
+            message.includes('失败') || message.includes('错误')
+              ? 'is-error'
+              : message.includes('成功') || message.includes('已保存')
+                ? 'is-ok'
+                : 'is-info'
+          }`}
           role="status"
-          style={{
-            marginTop: 8,
-            padding: '6px 12px',
-            borderRadius: 6,
-            background:
-              message.includes('失败') || message.includes('错误')
-                ? 'var(--color-error-bg)'
-                : message.includes('成功') || message.includes('已保存')
-                  ? 'var(--color-success-bg)'
-                  : 'var(--color-primary-light)',
-          }}
         >
           {message}
         </div>
       )}
 
-      <div className="settings-card-actions" style={{ marginTop: 12 }}>
+      <div className="settings-card-actions resource-gap-top">
         <button
           type="button"
           className="btn btn-secondary btn-sm"

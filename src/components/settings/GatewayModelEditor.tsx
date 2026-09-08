@@ -30,7 +30,7 @@ export function GatewayModelEditor({ draft, onChange, onSave, onCancel }: Gatewa
           placeholder="ai_gateway"
         />
       </label>
-      <label className="settings-field" style={{ gridColumn: '1 / -1' }}>
+      <label className="settings-field settings-span-full">
         <span>Endpoint Base URL</span>
         <input
           className="form-input"
@@ -62,7 +62,7 @@ export function GatewayModelEditor({ draft, onChange, onSave, onCancel }: Gatewa
           {getCredentialStorageCopy().keyHelp}
         </span>
       </label>
-      <div className="settings-card-actions" style={{ gridColumn: '1 / -1' }}>
+      <div className="settings-card-actions settings-span-full">
         <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel}>
           取消
         </button>

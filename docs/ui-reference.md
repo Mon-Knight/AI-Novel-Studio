@@ -1429,6 +1429,22 @@ v3.6.0 的动效语言是“安静、快速、连续、可中断”。普通交�
 - 大纲候选到达只显示“已就绪”提示，由用户点击查看；点击定位尊重 `prefers-reduced-motion`。Toast 与 LoadingModal 各只有一个关闭计时源，悬停/焦点暂停，重要错误不自动消失，未知进度只显示 Spinner。
 - 页面容器分为资源页、表单页和审阅页规格；静态分组卡不模拟可点击入口，导航/资源卡使用明确的按钮和焦点状态。辅助文字、按钮命中区及系统强调色按浅色/深色主题分别验收。
 
+## 18.11 Agent 工作台式桌面壳层（当前基线）
+
+当前壳层以桌面 Agent 工作台（ZCode 一类产品）的形态组织，所有页面共享同一套令牌、壳层与页面框架，功能集中在“会话”与“项目”两个入口，其余能力收进“资源中心”：
+
+- **设计令牌**：深色优先的低饱和中性面板（`--color-bg-app / -sidebar / -panel / -card / -elevated / -composer`）、细边框（`--color-border / -strong`）、6～16px 圆角（`--radius-sm～xl`）、克制阴影与统一 80～260ms 动效；选中态使用中性 `--color-bg-selected`，强调色只用于主按钮、进度和状态。浅色主题使用同一组语义令牌。
+- **顶部标签栏即窗口标题栏** `.app-frame-bar`（38px，`data-testid="app-frame-bar"`）：主窗口 `decorations: false`，标签栏空白区带 `data-tauri-drag-region`（拖动窗口、双击最大化），按钮与链接不带；内容为品牌标记、收起/展开侧栏、工作区标签（会话 / 项目）与当前页面标签、版本、资源中心入口，桌面端最右侧为自绘最小化 / 最大化（还原） / 关闭（46px 宽，关闭悬停红底），关闭经 `appWindow.close()` 进入既有 `onCloseRequested` 离开保护。窗口控制由 `useWindowChrome` 提供，浏览器模式不渲染；壳层根节点以 `data-window-frame="custom|browser"`、`data-window-maximized` 标记，无边框窗口非最大化时用 1px 内边缘与桌面区分。允许列表：`window.close / minimize / maximize / unmaximize / startDragging`。
+- **侧栏**：快捷操作（新建任务 Ctrl+N、搜索 Ctrl+K、自主创作、项目库）+ 分组导航（工作区：会话 / 项目 / 资源中心；进入某作品后追加“当前项目”七个页面）+ 底部身份行。创作工作台路由不渲染全局侧栏，由项目/任务树承担同一套快捷操作与身份行；章节审阅路由使用 56px 图标轨；资源中心路由使用自己的分组导航。
+- **创作工作台**：任务行只保留标题、相对时间与状态色点；对话流居中（860px），用户回合为卡片气泡、Agent 回合为纯文本、运行块与产物卡为 12px 圆角卡；输入框为悬浮 16px 圆角卡片——左侧「+」插入菜单收纳任务模板与运行时入口（关闭时控件保留在 DOM 并 `hidden`），上下文 pill 紧随其后，模型 pill（带可用/刷新/不可用状态点）与圆形发送按钮在右；模型目录不可用以一行状态条呈现，可展开完整说明，同排提供「新建任务 / 重试 / 设置」。任务头部可打开右侧面板：启动页列出创作上下文、本任务产物、运行日志、当前插件（均在面板内打开，带返回/关闭）以及章节审阅、作品概览、AI 任务记录（跳转）；产物列表点击后定位并高亮对话中的产物卡。
+- **项目框架** `.project-frame`：作品概览、章节审阅、大纲、设定推演、参考资料、故事资产、自主创作共用一条横向标签条（`/novels/:id/*`，章节审阅保持全屏编辑器）。
+- **章节审阅右侧工具轨** `.right-toolbar` / `.right-panel`：工具轨与全局图标轨同为 56px（`--right-toolbar-width` = `--sidebar-rail-width`），按钮 44px（图标 + 12px 标签），激活态为中性选中底色与左侧细指示条；工具面板以 360px（`--right-panel-width` = `--side-panel-width`）覆盖在编辑区右侧，头部 44px（14px 标题、28px 关闭按钮）、正文 12px 内边距，与工作台右侧面板 `.workbench-side-view-header` 同规格；面板保持 opacity/transform 过渡、点击外部关闭与 `aria-pressed/expanded` 契约。
+- **资源中心** `.hub-layout`：风格方案、模板中心、创作资产、导入导出、AI 任务记录与设置五类共用左侧分组导航（“返回工作区”置顶），设置分类由 `?tab=` 驱动，可从侧栏直接进入。
+- **资源页组件规格**（`page-layout.css`，随 `PageLayout` 加载）：五页内部只使用同一组类——`resource-grid`（300px 自适应栅格）、`resource-card`（12px 圆角、细边框、内容组 + 动作行；`--flow` 为未分组卡片把动作钉在底部，`--roomy` 20px 内边距，`--interactive` 悬停加深边框，`.is-active` 表示“当前 / 默认”）、`resource-card-header / -title(--lg) / -description`、`resource-pill`（20px 高圆角状态标签，`--primary / --success / --warning / --error` 变体）、`resource-meta`（12px 辅助文字）、`resource-actions / resource-footer / resource-toolbar`、`resource-form / resource-form-grid(--3) / resource-field(-label) / resource-editor(-header/-footer) / resource-icon-button(28px)`、`resource-pre`（等宽预览块）、`resource-notice(--success/--error/--after)`、`resource-empty`（虚线空态）、`resource-list(-item)`、`resource-stat-card`（创作资产统计卡）、`resource-trace`（风格来源追溯，按 `data-source-state` 着色）。AI 任务记录卡 `.ai-task-record` 以 `data-status` 驱动左侧 3px 状态条、`data-selected` 驱动选中底色；`.btn-xs` 为 12px / 最小 28px 高的筛选按钮。页面内不允许再出现 `style={{}}`，尺寸与颜色只来自令牌。
+- **设置卡片规格**（`hub.css`）：`settings-card-block / settings-card-header / settings-card-title / settings-card-text / settings-card-paragraph / settings-card-note`、子块 `settings-subcard(-title)`、开关行 `settings-toggle-row(--plain)` + `settings-checkbox`（18px）、结果条 `settings-result.is-ok|is-error|is-info`、模式横幅 `settings-mode-banner.is-mock|is-live`、危险提示 `settings-danger-card / -text / -list`、编辑器跨列 `settings-span-full`。AI 运行时概览 `runtime-overview` 使用中性底色，优先级链 `runtime-priority-step[data-active]` 与四个 `runtime-tile` 的状态文字（`data-tone=ok|info|warn|error|off`）是唯一的彩色元素。
+- **作品详情卡片规格**（`novel-detail.css`）：`detail-card-header(--roomy) / detail-card-title`、表单 `detail-form(--tight/--compact) / detail-form-grid(--tight/--3/--gap-top) / detail-form-actions / detail-fill / detail-input-title / detail-textarea(--sm/--md/--lg/--xl)`、事实展示 `detail-fact-value(--strong) / detail-fact-text(--pre/--sm) / detail-fact-grid`、子项 `detail-list-item(--inset/--sm/.is-editing) / detail-list-item-header / -title / -main`、小节标题 `detail-subsection-title(--md/--tight)`、`detail-tag / detail-badge / detail-divider / detail-empty-hint / detail-save-status(.is-ok)`、角色库 `detail-avatar / detail-character-*`。
+- 既有 `data-testid`、路由与 IPC 契约保持不变；浏览器布局规格按新壳层重新标定（树宽 248px、资源中心导航 232px、标签栏 38px）。
+
 ---
 
 # 19. UI 最高优先级总结

@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 36] {
+fn migrations() -> [Migration; 38] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -203,6 +203,16 @@ fn migrations() -> [Migration; 36] {
             id: "036_artifact_decisions_and_review_auth",
             definition: "conversation_artifact_decisions_v1(artifact_decisions,review_authorizations,append_only_decisions,authorization_status_edges,indexes)",
             apply: apply_artifact_decisions_and_review_auth,
+        },
+        Migration {
+            id: "037_user_templates_and_setting_suggestions",
+            definition: "user_templates_and_setting_suggestions_v1(user_templates(id,name,type,description,content,tags_json,variables_json,source,file_name,created_at,updated_at),setting_suggestions(id,novel_id,suggestion_type,world_type,reference_style,prompt,result_json,item_json,status,adopted_target_id,adopted_target_type,user_instruction,raw_output,created_at,updated_at),indexes,novel_scope_foreign_key,status_edges)",
+            apply: apply_user_templates_and_setting_suggestions,
+        },
+        Migration {
+            id: "038_task_runs_chapter_binding",
+            definition: "task_runs_chapter_binding_v1(task_runs.chapter_id nullable,index_chapter_runs,immutable_identity_includes_chapter)",
+            apply: apply_task_runs_chapter_binding,
         },
     ]
 }
@@ -3456,6 +3466,102 @@ fn apply_conversation_tool_call_identity(transaction: &Transaction<'_>) -> Resul
         .map_err(AppError::database)
 }
 
+/// 任务运行此前不持久化冻结的章节目标（审计 GAP-18）：DSH 运行若在任何工具调用或候选产生前失败，
+/// 重试只能靠回合文本定位章节。本迁移为 `task_runs` 增加可空的 `chapter_id`，并把它纳入运行身份的
+/// 不可变约束；归属校验（章节须属于对话所在作品且未删除）在 `create_run` 中执行。
+fn apply_task_runs_chapter_binding(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    if !table_has_column(transaction, "task_runs", "chapter_id")? {
+        transaction
+            .execute("ALTER TABLE task_runs ADD COLUMN chapter_id TEXT", [])
+            .map_err(AppError::database)?;
+    }
+    transaction
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_task_runs_chapter
+                 ON task_runs(chapter_id, created_at)
+                 WHERE chapter_id IS NOT NULL;
+             DROP TRIGGER IF EXISTS trg_task_runs_immutable_identity;
+             CREATE TRIGGER trg_task_runs_immutable_identity
+                 BEFORE UPDATE ON task_runs
+                 WHEN OLD.run_id <> NEW.run_id
+                   OR OLD.conversation_id <> NEW.conversation_id
+                   OR OLD.turn_id <> NEW.turn_id
+                   OR OLD.model_snapshot_json <> NEW.model_snapshot_json
+                   OR OLD.worker_id <> NEW.worker_id
+                   OR OLD.created_at <> NEW.created_at
+                   OR OLD.chapter_id IS NOT NEW.chapter_id
+                 BEGIN SELECT RAISE(ABORT, 'task run identity is immutable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+/// 用户模板与设定建议此前只存在于 LocalStorage（审计 GAP-15）；本迁移为它们建立 SQLite 正式事实表。
+/// 设定建议的状态只允许 pending → adopted / edited_adopted / discarded 一次性推进，由触发器兜底。
+fn apply_user_templates_and_setting_suggestions(
+    transaction: &Transaction<'_>,
+) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS user_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL,
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                variables_json TEXT NOT NULL DEFAULT '[]',
+                source TEXT NOT NULL DEFAULT 'user_created',
+                file_name TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (json_valid(tags_json) AND json_type(tags_json) = 'array'),
+                CHECK (json_valid(variables_json) AND json_type(variables_json) = 'array'),
+                CHECK (source IN ('system', 'user_imported', 'user_created'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_templates_type_updated
+                ON user_templates(type, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS setting_suggestions (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                suggestion_type TEXT NOT NULL,
+                world_type TEXT NOT NULL DEFAULT '',
+                reference_style TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL DEFAULT '',
+                result_json TEXT NOT NULL DEFAULT '{}',
+                item_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                adopted_target_id TEXT,
+                adopted_target_type TEXT,
+                user_instruction TEXT,
+                raw_output TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (suggestion_type IN ('character', 'faction', 'location', 'rule')),
+                CHECK (status IN ('pending', 'adopted', 'edited_adopted', 'discarded')),
+                CHECK (adopted_target_type IS NULL
+                       OR adopted_target_type IN ('character', 'world_setting', 'rule_system')),
+                CHECK (json_valid(item_json) AND json_type(item_json) = 'object'),
+                FOREIGN KEY (novel_id) REFERENCES novels(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_setting_suggestions_novel_created
+                ON setting_suggestions(novel_id, created_at DESC);
+
+            DROP TRIGGER IF EXISTS trg_setting_suggestions_status_edges;
+            CREATE TRIGGER trg_setting_suggestions_status_edges
+                BEFORE UPDATE OF status ON setting_suggestions
+                WHEN OLD.status <> 'pending' AND NEW.status <> OLD.status
+                BEGIN SELECT RAISE(ABORT, 'setting suggestion status is final once decided'); END;
+            DROP TRIGGER IF EXISTS trg_setting_suggestions_immutable_identity;
+            CREATE TRIGGER trg_setting_suggestions_immutable_identity
+                BEFORE UPDATE ON setting_suggestions
+                WHEN OLD.id <> NEW.id OR OLD.novel_id <> NEW.novel_id
+                  OR OLD.suggestion_type <> NEW.suggestion_type OR OLD.created_at <> NEW.created_at
+                BEGIN SELECT RAISE(ABORT, 'setting suggestion identity is immutable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3464,7 +3570,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 36] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 38] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -3608,6 +3714,14 @@ mod tests {
         (
             "036_artifact_decisions_and_review_auth",
             "10dbc72d0f9a861972fb21c963ec468935cc3c2106f1c74677edbd499a99783c",
+        ),
+        (
+            "037_user_templates_and_setting_suggestions",
+            "014aa444b946d1a6e9f89334441238ffa0ea39992938550592e81b6d9ca0fdea",
+        ),
+        (
+            "038_task_runs_chapter_binding",
+            "fc9b8fc49ac1ea8dd5c6ece3f179ab0921a523ee54de99577e0a798658cc749a",
         ),
     ];
 

@@ -48,6 +48,8 @@ export interface DshTaskRuntimeInput {
    * Structured write/audit omit this field so DSH keeps the legacy allowlist.
    */
   allowedTools?: readonly string[];
+  /** Writing SubAgent turns: the host enforces this word range on the chapter candidate. */
+  chapterWordRange?: { target: number; minimum: number; maximum: number };
 }
 
 /** Canonical-only tools requested by desktop read-intent DSH turns. */

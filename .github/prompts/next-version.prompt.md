@@ -50,17 +50,16 @@
 
 ## 四、测试要求
 
-- [ ] cargo check
-- [ ] npm run build
-- [ ] npm run tauri build
-- [ ] git status
+- [ ] 开发期间：`npm run verify:change` 按变更范围选择的检查（行为测试、改动文件 ESLint、类型检查；涉及 Rust/SQLite 时加 `cargo check --locked` 与相关 Rust 测试；用户交互变化加对应真实桌面场景）
+- [ ] 版本发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵运行一次，clean working tree
+- [ ] 新增模块已在 `scripts/quality/verification-scopes.mjs` 声明行为归属
 
 ## 五、完成标准
 
 - [ ] 功能正常运行
-- [ ] 所有测试通过
+- [ ] 适用检查全部通过，失败项已修复或如实记录
 - [ ] CHANGELOG 已更新
-- [ ] Git tag 已创建
+- [ ] 发布动作（commit / push / PR / tag）仅在明确授权后按 Git 治理执行
 ```
 
 ## 约束

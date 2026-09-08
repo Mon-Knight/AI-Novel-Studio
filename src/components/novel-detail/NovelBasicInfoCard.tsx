@@ -90,17 +90,10 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
       data-saving={saving ? 'true' : 'false'}
       data-editing={editing ? 'true' : 'false'}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="detail-card-header detail-card-header--roomy">
+        <div className="detail-card-title">
           <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>作品信息</span>
+          <span>作品信息</span>
         </div>
         {!editing ? (
           <button
@@ -115,7 +108,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
       </div>
 
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="detail-form">
           <div>
             <label className="panel-field-label">作品名称 *</label>
             <input
@@ -123,21 +116,19 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
               data-testid="project-name-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="form-input"
+              className="form-input detail-input-title"
               placeholder="请输入作品名称"
-              style={{ width: '100%', fontSize: 15, fontWeight: 500 }}
             />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="detail-form-grid">
             <div>
               <label className="panel-field-label">副标题</label>
               <input
                 type="text"
                 value={subtitle}
                 onChange={(e) => setSubtitle(e.target.value)}
-                className="form-input"
+                className="form-input detail-fill"
                 placeholder="可选"
-                style={{ width: '100%' }}
               />
             </div>
             <div>
@@ -146,9 +137,8 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
                 type="text"
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
-                className="form-input"
+                className="form-input detail-fill"
                 placeholder="如：科幻、仙侠、悬疑"
-                style={{ width: '100%' }}
               />
             </div>
           </div>
@@ -157,12 +147,11 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="form-textarea"
+              className="form-textarea detail-textarea detail-textarea--md"
               placeholder="简要介绍作品背景和主要情节方向"
-              style={{ width: '100%', height: 100, resize: 'vertical' }}
             />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="detail-form-grid">
             <div>
               <label className="panel-field-label">作品状态</label>
               <select
@@ -183,14 +172,13 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
                 type="number"
                 value={targetWordCount}
                 onChange={(e) => setTargetWordCount(Number(e.target.value))}
-                className="form-input"
+                className="form-input detail-fill"
                 placeholder="如：300000"
-                style={{ width: '100%' }}
                 min={0}
               />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="detail-form-actions">
             <button className="btn btn-secondary btn-sm" onClick={handleCancel}>
               取消
             </button>
@@ -212,15 +200,15 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div className="detail-form detail-form--compact">
+          <div className="detail-form-grid detail-form-grid--tight">
             <div>
               <span className="text-sm text-muted">作品名称</span>
-              <div style={{ fontSize: 15, fontWeight: 500 }}>{novel.title}</div>
+              <div className="detail-fact-value detail-fact-value--strong">{novel.title}</div>
             </div>
             <div>
               <span className="text-sm text-muted">题材</span>
-              <div style={{ fontSize: 15 }}>{novel.genre || '未设置'}</div>
+              <div className="detail-fact-value">{novel.genre || '未设置'}</div>
             </div>
           </div>
           {novel.subtitle && (
@@ -231,11 +219,9 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
           )}
           <div>
             <span className="text-sm text-muted">简介</span>
-            <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-              {novel.description || '暂无简介'}
-            </div>
+            <div className="detail-fact-text">{novel.description || '暂无简介'}</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <div className="detail-form-grid detail-form-grid--tight detail-form-grid--3">
             <div>
               <span className="text-sm text-muted">状态</span>
               <div>
@@ -256,11 +242,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
       {message && (
         <div
           data-testid={message === '保存成功' ? 'success-notice' : 'error-notice'}
-          style={{
-            fontSize: 13,
-            marginTop: 10,
-            color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)',
-          }}
+          className={`detail-save-status${message === '保存成功' ? ' is-ok' : ''}`}
         >
           {message}
         </div>

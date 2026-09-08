@@ -49,7 +49,9 @@ export function checkCapabilityDeclarations({ manifest, hostSource, documents })
   if (
     JSON.stringify(allowlist) !==
       JSON.stringify(expected.map((identity) => identity.split('@')[0]).sort()) ||
-    !/fn turn_allowed_tools\([^]*?if is_canonical_only_turn\(input\)\s*\{\s*CANONICAL_ALLOWED_TOOLS\s*\}\s*else\s*\{\s*ALLOWED_TOOLS/u.test(
+    // Canonical-only read turns must be the first branch and the legacy allowlist the final
+    // fallback; narrower flagged branches (Writing SubAgent) may sit in between.
+    !/fn turn_allowed_tools\([^]*?if is_canonical_only_turn\(input\)\s*\{\s*CANONICAL_ALLOWED_TOOLS\s*\}(?:\s*else if [^{]*\{[^}]*\})*\s*else\s*\{\s*ALLOWED_TOOLS/u.test(
       hostSource,
     ) ||
     !/fn is_canonical_only_turn\([^]*?input\.task_kind\s*==\s*"read"/u.test(hostSource)

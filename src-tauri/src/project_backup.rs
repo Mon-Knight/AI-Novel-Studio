@@ -1136,6 +1136,7 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
             has_non_empty_text("conversation_id")
                 && has_non_empty_text("turn_id")
                 && has_non_empty_text("worker_id")
+                && optional_non_empty_text("chapter_id")
                 && text_is_one_of(
                     "status",
                     &[
@@ -2854,7 +2855,8 @@ mod tests {
     fn project_backup_rejects_unsafe_local_attachments_before_any_sqlite_write() {
         let source = test_connection();
         seed_minimal_backup_project(&source, "novel-source");
-        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
         let mut target = test_connection();
         let before: i64 = target
             .query_row("SELECT total_changes()", [], |row| row.get(0))
@@ -2899,7 +2901,8 @@ mod tests {
                  VALUES ('draft-second', 'novel-source', 'chapter-2', '2026-01-01', '2026-01-01');",
             )
             .expect("seed trusted draft");
-        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
         let mut target = test_connection();
         let before: i64 = target
             .query_row("SELECT total_changes()", [], |row| row.get(0))
@@ -2933,7 +2936,8 @@ mod tests {
     fn project_backup_legacy_schemas_keep_scoped_local_only_records() {
         let source = test_connection();
         seed_minimal_backup_project(&source, "novel-source");
-        let backup = export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
+        let backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export fixture");
         let local = serde_json::json!({
             "version": 1,
             "collections": {
@@ -3518,6 +3522,7 @@ mod tests {
                 turn_id: "turn-backup".to_string(),
                 model_snapshot,
                 worker_id: "worker-backup".to_string(),
+                chapter_id: None,
                 created_at: created_at.clone(),
             },
         )

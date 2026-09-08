@@ -1,0 +1,1048 @@
+/**
+ * AI Novel Studio - 创作工作台 ZCode 视觉层
+ *
+ * 在 workbench.css 之后加载，只覆盖视觉与布局形态：
+ * 单列侧栏（快捷操作 + 项目/任务树 + 身份行）、居中对话流、悬浮输入卡片、
+ * 右侧「打开标签页」面板。所有 data-testid 与交互契约保持不变。
+ */
+
+.workbench-page {
+  --workbench-content-width: 860px;
+  --workbench-reading-width: 760px;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: var(--color-bg-app);
+}
+
+/* 任何已打开的侧面板视图（launcher / plugins / context / artifacts / events）都占第三列 */
+.workbench-page[data-side-panel]:not([data-side-panel='closed']) {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--side-panel-width);
+}
+
+/* 窄窗口：保持两列，侧面板改为覆盖在对话流右侧，避免把对话流压扁 */
+@media (max-width: 1180px) {
+  .workbench-page[data-side-panel]:not([data-side-panel='closed']) {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+
+  .workbench-page[data-side-panel]:not([data-side-panel='closed']) > .workbench-side-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(var(--side-panel-width), calc(100% - var(--sidebar-width)));
+    z-index: var(--z-right-panel);
+    box-shadow: -12px 0 32px var(--color-shadow);
+  }
+}
+
+/* === 左侧：快捷操作 + 项目/任务树 === */
+.workbench-tree {
+  background: var(--color-bg-sidebar);
+}
+
+.workbench-tree-header {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.workbench-tree-tools {
+  gap: 6px;
+  padding: 4px 10px 10px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.workbench-task-search {
+  height: 30px;
+  border-color: var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-app);
+}
+
+.workbench-archive-switch {
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-app);
+}
+
+.workbench-archive-switch button.is-active {
+  background: var(--color-bg-card);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.workbench-tree-scroll {
+  padding: 8px 8px 12px;
+}
+
+.workbench-project {
+  margin-bottom: 4px;
+}
+
+.workbench-project-row {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+}
+
+.workbench-project-row.is-active {
+  color: var(--color-text-primary);
+}
+
+.workbench-project-mark {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.workbench-project-count {
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-task-row {
+  min-height: 34px;
+  padding: 4px 30px 4px 32px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.workbench-task-row.is-active {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
+}
+
+.workbench-task-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.workbench-task-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.workbench-task-copy time {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* 状态用文字会拉宽行；ZCode 只保留颜色点，文字保留给可访问名称。 */
+.workbench-task-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.workbench-status-dot {
+  width: 7px;
+  height: 7px;
+  background: transparent;
+}
+
+.workbench-task-menu-trigger {
+  top: 6px;
+  right: 4px;
+}
+
+.workbench-tree-footer {
+  padding: 10px 12px;
+}
+
+.workbench-library-link {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.workbench-library-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* === 中间：任务头部与对话流 === */
+.workbench-main,
+.agent-console-main {
+  background: var(--color-bg-app);
+}
+
+.workbench-task-header {
+  min-height: 52px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-app);
+}
+
+.workbench-task-header-inner {
+  min-height: 52px;
+  padding: 6px 0;
+}
+
+.workbench-task-header h2 {
+  font-size: 15px;
+}
+
+.workbench-header-icon-button {
+  border-radius: var(--radius-sm);
+}
+
+.workbench-header-icon-button.is-active {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
+}
+
+.workbench-run-badge {
+  border-radius: var(--radius-full);
+  font-size: 12px;
+}
+
+.workbench-message-scroll {
+  padding: 20px 24px 12px;
+}
+
+.workbench-turn {
+  margin-bottom: 26px;
+}
+
+.workbench-turn-meta {
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-turn-content {
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.workbench-turn.is-user .workbench-turn-content {
+  max-width: min(84%, 680px);
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+}
+
+.workbench-run-block {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-left-width: 1px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+}
+
+.workbench-run-heading {
+  font-size: 12px;
+}
+
+.workbench-run-state {
+  border-radius: var(--radius-full);
+}
+
+.workbench-tool-event {
+  border-radius: var(--radius-sm);
+}
+
+.workbench-tool-event:hover,
+.workbench-tool-event[open] {
+  background: var(--color-bg-hover);
+}
+
+.workbench-artifact-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  box-shadow: none;
+}
+
+.workbench-artifact-card.is-chapter {
+  border-color: var(--color-border-strong);
+}
+
+.workbench-inline-error,
+.workbench-conflict-hint,
+.workbench-readiness-hint {
+  border-radius: var(--radius-md);
+}
+
+.workbench-latest-dock {
+  background: transparent;
+}
+
+.workbench-latest-button {
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-md);
+}
+
+/* === 底部：悬浮输入卡片 === */
+.workbench-composer,
+.agent-console-composer {
+  padding: 4px 24px 18px;
+  border-top: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 「+」插入菜单：在输入卡内展开，收纳任务模板与运行时入口。 */
+.workbench-composer-attach {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.workbench-composer-attach:hover:not(:disabled),
+.workbench-composer-attach.is-open {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.workbench-composer-attach.is-open {
+  transform: rotate(45deg);
+}
+
+.workbench-composer-attach:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.workbench-attach-menu {
+  display: grid;
+  gap: 12px;
+  margin: 10px 10px 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  animation: workbench-item-enter 140ms ease-out both;
+}
+
+.workbench-attach-menu[hidden] {
+  display: none;
+}
+
+.workbench-attach-section {
+  display: grid;
+  gap: 8px;
+}
+
+.workbench-attach-section-title {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+}
+
+.workbench-attach-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workbench-attach-action:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.workbench-attach-menu .workbench-template-controls {
+  width: auto;
+  max-width: none;
+}
+
+.workbench-attach-menu .workbench-template-row {
+  margin-bottom: 0;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.workbench-template-chip {
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+}
+
+.workbench-composer-surface {
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-composer);
+  box-shadow: var(--shadow-composer);
+}
+
+.workbench-composer-surface:focus-within {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-composer);
+}
+
+.workbench-composer-surface textarea {
+  padding: 14px 16px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.7;
+  resize: none;
+}
+
+.workbench-composer-surface textarea::placeholder {
+  color: var(--color-text-placeholder);
+}
+
+.workbench-composer-toolbar {
+  gap: 6px;
+  min-height: 44px;
+  padding: 4px 10px 10px 12px;
+}
+
+.workbench-asset-scope-toggle {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.workbench-asset-scope-toggle:hover:not(:disabled),
+.workbench-asset-scope-toggle.is-open {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.workbench-asset-scope-core {
+  border-radius: var(--radius-full);
+}
+
+/* 模型目录状态条：一行摘要 + 同排动作，展开后显示完整说明。 */
+.workbench-model-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: 8px 10px 0;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workbench-model-status.is-warning {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.workbench-model-status .workbench-readiness-icon {
+  flex: 0 0 auto;
+}
+
+.workbench-model-status-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-model-status.is-expanded .workbench-model-status-copy {
+  white-space: normal;
+}
+
+.workbench-model-status-expand {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: transform var(--transition-fast);
+}
+
+.workbench-model-status.is-expanded .workbench-model-status-expand {
+  transform: rotate(180deg);
+}
+
+.workbench-model-status-expand:hover {
+  background: rgba(0, 0, 0, 0.08);
+  opacity: 1;
+}
+
+.workbench-model-status .workbench-recovery-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0;
+}
+
+.workbench-model-status .workbench-recovery-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workbench-model-status .workbench-recovery-action:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.workbench-model-status .workbench-recovery-action.is-primary {
+  border-color: transparent;
+  background: var(--color-text-primary);
+  color: var(--color-bg-app);
+}
+
+.workbench-model-status .workbench-recovery-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workbench-model-status .is-spinning {
+  animation: workbench-model-status-spin 1s linear infinite;
+}
+
+@keyframes workbench-model-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@container workbench-main (max-width: 720px) {
+  .workbench-model-status .workbench-recovery-action span {
+    display: none;
+  }
+
+  .workbench-model-status .workbench-recovery-action {
+    padding: 0 7px;
+  }
+}
+
+.workbench-model-status-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+
+.workbench-model-control.is-refreshing .workbench-model-status-dot {
+  background: var(--color-info);
+  animation: workbench-status-pulse 1.4s ease-in-out infinite;
+}
+
+.workbench-model-control.is-unavailable .workbench-model-status-dot {
+  background: var(--color-warning);
+}
+
+.workbench-model-control {
+  margin-left: auto;
+  padding: 0 4px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.workbench-model-control:hover {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+}
+
+.workbench-model-control select {
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.workbench-composer-note {
+  order: 2;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-model-control + .workbench-composer-note {
+  margin-left: 0;
+}
+
+.workbench-send-button {
+  order: 3;
+  width: 32px;
+  height: 32px;
+  margin-left: 0;
+  border-radius: 50%;
+}
+
+.workbench-send-button:disabled {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+.workbench-send-button.is-stop {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-bg-app);
+}
+
+/* === 右侧：打开标签页 / 当前插件 === */
+.workbench-side-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+  animation: workbench-side-panel-enter var(--motion-panel) var(--ease-enter) both;
+}
+
+.workbench-side-panel .workbench-plugin-panel {
+  position: static;
+  width: auto;
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.workbench-side-launcher {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 14px 16px;
+  overflow: auto;
+}
+
+.workbench-side-launcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.workbench-side-launcher-header h2 {
+  margin: 0 0 4px;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.workbench-side-launcher-header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-side-launcher-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workbench-side-launcher-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.workbench-side-launcher-card:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.workbench-side-launcher-card:active {
+  transform: translateY(1px);
+}
+
+.workbench-side-launcher-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+}
+
+.workbench-side-launcher-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workbench-side-launcher-label {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+}
+
+.workbench-side-launcher-description {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 侧面板内的具体视图：返回/标题/关闭 + 可滚动正文 */
+.workbench-side-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.workbench-side-view-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.workbench-side-view-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-side-view-body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+/* 侧面板内的创作上下文：纵向单列、去掉输入区里的高度上限与分隔底色 */
+.workbench-side-view-body .workbench-asset-scope-panel {
+  margin: 0;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.workbench-side-view-body .workbench-asset-scope-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.workbench-side-view-body .workbench-asset-scope-header > div {
+  flex-wrap: wrap;
+}
+
+.workbench-side-view-body .workbench-asset-scope-groups {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.workbench-side-view-body .workbench-asset-scope-group {
+  padding: 8px 10px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.workbench-side-view-body .workbench-asset-scope-group h3 {
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+}
+
+.workbench-side-view-body .workbench-asset-scope-item {
+  min-height: 40px;
+  grid-template-columns: 64px minmax(0, 1fr) 22px;
+}
+
+.workbench-side-view-body .workbench-asset-scope-item-copy strong,
+.workbench-side-view-body .workbench-asset-scope-item-copy > span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.workbench-side-empty,
+.workbench-side-error {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workbench-side-error {
+  border-style: solid;
+  border-color: var(--color-error-border);
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.workbench-side-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workbench-side-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.workbench-side-row:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.workbench-side-row > svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.workbench-side-row-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workbench-side-row-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-side-row-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-side-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workbench-side-badge.is-confirmed,
+.workbench-side-badge.is-completed {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.workbench-side-badge.is-rejected,
+.workbench-side-badge.is-failed,
+.workbench-side-badge.is-cancelled {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.workbench-side-badge.is-candidate,
+.workbench-side-badge.is-running,
+.workbench-side-badge.is-queued {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.workbench-side-runs {
+  display: grid;
+  gap: 10px;
+}
+
+.workbench-side-run {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.workbench-side-run-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--color-text-primary);
+}
+
+.workbench-side-run-heading > svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.workbench-side-run-heading .workbench-side-row-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.workbench-side-events {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workbench-side-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.workbench-side-event > svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.workbench-side-event.is-succeeded > svg {
+  color: var(--color-success);
+}
+
+.workbench-side-event.is-failed > svg {
+  color: var(--color-error);
+}
+
+.workbench-side-event-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-family-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-side-run .workbench-side-error {
+  margin-top: 8px;
+}
+
+.workbench-artifact-card.is-side-highlighted {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
+  transition: box-shadow var(--transition-normal);
+}
+
+@keyframes workbench-side-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+
+@container workbench-main (max-width: 720px) {
+  .workbench-turn.is-user .workbench-turn-content {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-side-panel {
+    animation: none;
+  }
+}

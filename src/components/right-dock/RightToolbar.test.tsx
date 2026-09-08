@@ -2,9 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import RightToolbar from './RightToolbar';
 
+const LEGACY_PANEL_FLAG = 'ai_novel_studio_e2e_legacy_workspace_panels';
+
 describe('RightToolbar', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    localStorage.removeItem(LEGACY_PANEL_FLAG);
   });
 
   it('keeps review commands without exposing legacy history or AI panels in production', () => {
@@ -41,8 +44,27 @@ describe('RightToolbar', () => {
     expect(onTogglePanel).not.toHaveBeenCalledWith('draft-history');
   });
 
-  it('keeps legacy history and AI panels available only in the E2E build', () => {
+  it('keeps the production toolbar in an ordinary E2E build without the compatibility opt-in', () => {
     vi.stubEnv('VITE_AI_NOVEL_STUDIO_E2E', '1');
+
+    render(
+      <RightToolbar
+        activePanel="draft-history"
+        onTogglePanel={vi.fn()}
+        onRunCommand={vi.fn()}
+        onToggleReadiness={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '收起草稿' })).toBeNull();
+    expect(screen.queryByText('AI生成')).toBeNull();
+    expect(screen.getByText('保存')).not.toBeNull();
+    expect(screen.getByText('采用')).not.toBeNull();
+  });
+
+  it('restores legacy history and AI panels only for an explicit E2E compatibility fixture', () => {
+    vi.stubEnv('VITE_AI_NOVEL_STUDIO_E2E', '1');
+    localStorage.setItem(LEGACY_PANEL_FLAG, 'enabled');
     const onTogglePanel = vi.fn();
 
     render(
@@ -60,6 +82,23 @@ describe('RightToolbar', () => {
     expect(screen.getByText('设定')).not.toBeNull();
     expect(screen.getByText('检查')).not.toBeNull();
     expect(onTogglePanel).toHaveBeenCalledWith('draft-history');
+  });
+
+  it('ignores the compatibility opt-in outside an E2E build', () => {
+    vi.stubEnv('VITE_AI_NOVEL_STUDIO_E2E', '0');
+    localStorage.setItem(LEGACY_PANEL_FLAG, 'enabled');
+
+    render(
+      <RightToolbar
+        activePanel="draft-history"
+        onTogglePanel={vi.fn()}
+        onRunCommand={vi.fn()}
+        onToggleReadiness={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '收起草稿' })).toBeNull();
+    expect(screen.queryByText('AI生成')).toBeNull();
   });
 
   it('exposes icon actions and toggle state without relying on symbol text', () => {

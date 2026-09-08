@@ -576,7 +576,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 - 宿主 `mainAgentRuntimeService` 只读脚手架存在（默认启发式选工具），未接入生产发送路径，也不能代替 DSH Agent Loop；
 - 宿主对 `read` 回合已在三处一致注入 Canonical-only allowlist（DSH start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS`、宿主侧工具授权与必需读取），Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；候选生成与审计回合继续注入 legacy `ALLOWED_TOOLS`；
 - R4 仓内只读闭环已完成：Rust loopback E2E（`canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts`）经真实 Worker 启动链证明只读回合记录四个 Canonical 工具名、不调用 `generate_chapter` 或 legacy 只读别名、零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变，且证据不含凭据；live 云端 Provider 仍 NOT VERIFIED，判定标准见 §14.5；
-- 当前门禁是 R4 live 云端验收。Writing/Context/Quality SubAgent 与 `chapter_write` 走 DSH 仍后置；当前真实章节证据属于确定性 Writer 路径。
+- 当前门禁是 R4 live 云端验收。v3.7.0 起 Writing SubAgent 已开放：桌面端 + 真实 API 模型的 `chapter_write` 默认走 DSH candidate-only 回合（真实章节证据见 `writing-subagent-contract.md` §3.1/§3.2）；Context/Quality SubAgent 仍后置；mock / 本地模型与浏览器模式的章节证据属于确定性 Writer 路径。
 
 ---
 
@@ -625,7 +625,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
   2. 执行：设置 `DSH_E2E_BASE_URL` 为真实 Provider endpoint 并显式开启 cloud profile 后运行 `npm run test:agent-runtime:real`（当前脚本对非回环地址失败关闭，cloud profile 执行路径待单独实现；实现并完成真实运行前，本标准不产生 VERIFIED 结论）；
   3. 通过条件：真实模型只读回合自主调用 `novel.read / structure.read / context.read / memory.search` 完成作品与章节上下文读取，不调用 `generate_chapter` 与 legacy 只读别名，零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变；
   4. 证据：只留存工具名、计数、状态码与内容 hash 等脱敏标量；不保存提示词、正文、完整路径与任何形式的凭据；
-- Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
+- Writing SubAgent 与 `chapter_write` 走 DSH 已于 v3.7.0 开放（桌面端 + 真实 API 模型默认启用，`localStorage` 置 `0` 关闭）；其 candidate-only 契约与 E-0～E-4 分步接入方案见 [`writing-subagent-contract.md`](writing-subagent-contract.md)（E-0～E-3：契约、Rust `chapter_write / chapter_polish` 任务类型与字数校验、TS 完整性复核、适配器接线均已落地，特性开关默认关闭，生产路径未变；E-4a 已于 2026-09-08 用客户端 `gemini-3.7-flash-high` 卡片在生产 EXE 真实配置上通过正向链路，E-4b 六个负例/恢复场景同日经生产 EXE + 隔离配置 + 回环故障注入上游全部通过，验收发现的 GAP-18 / GAP-19 已同日收口（migration 038 持久化运行章节目标；重试提示显式要求本回合重读）；v3.7.0 起默认开放）。
 
 各版本必须独立提交、验证和发布。下一版本不能以“最终形态”为理由同时实现后续阶段。
 

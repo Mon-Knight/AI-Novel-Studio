@@ -400,7 +400,7 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
 
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--color-text-muted)',
           textAlign: 'center',
           marginTop: 12,

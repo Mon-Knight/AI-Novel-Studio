@@ -1,21 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkbenchTaskMenu } from './WorkbenchTaskMenu';
-import {
-  ArrowUpRight,
-  Check,
-  ChevronRight,
-  Ellipsis,
-  Library,
-  Plus,
-  Search,
-  X,
-} from 'lucide-react';
+import { Check, ChevronRight, Ellipsis, Library, Search, X } from 'lucide-react';
 import type { Novel } from '../../types/novel';
 import type { TaskConversation } from '../../types/conversation';
-import { statusLabel } from './workbenchHelpers';
+import { formatRecentActivity, statusLabel } from './workbenchHelpers';
 import { WorkbenchDirectoryFeedback } from './WorkbenchDirectoryFeedback';
 import type { WorkbenchConversationDirectory } from '../../features/workbench/useWorkbenchConversationDirectory';
 import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
+import { SidebarFooter } from '../../components/layout/SidebarFooter';
+import { SidebarQuickActions } from '../../components/layout/SidebarQuickActions';
 
 interface WorkbenchNavigationProps {
   directory: WorkbenchConversationDirectory & { initializing: boolean };
@@ -29,6 +22,8 @@ interface WorkbenchNavigationProps {
   projectsError: string;
   conversationsError: string;
   creatingTask: boolean;
+  /** Increments when the shell asks the tree to focus its search field. */
+  searchFocusToken?: number;
   onCreateTask: () => void;
   onSelectProject: (novelId: string) => void;
   onSelectTask: (novelId: string, conversationId: string) => void;
@@ -54,20 +49,6 @@ function NavigationSkeleton() {
   );
 }
 
-function formatRecentActivity(value: string): string {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return '';
-  const elapsed = Math.max(0, Date.now() - timestamp);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (elapsed < minute) return '刚刚';
-  if (elapsed < hour) return `${Math.floor(elapsed / minute)}分钟前`;
-  if (elapsed < day) return `${Math.floor(elapsed / hour)}小时前`;
-  if (elapsed < 7 * day) return `${Math.floor(elapsed / day)}天前`;
-  return new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
-}
-
 export function WorkbenchNavigation({
   directory,
   novels,
@@ -80,6 +61,7 @@ export function WorkbenchNavigation({
   projectsError,
   conversationsError,
   creatingTask,
+  searchFocusToken = 0,
   onCreateTask,
   onSelectProject,
   onSelectTask,
@@ -98,8 +80,13 @@ export function WorkbenchNavigation({
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = directory.displayQuery.trim().toLocaleLowerCase();
   const displayedArchive = directory.displayArchive;
+
+  useEffect(() => {
+    if (searchFocusToken > 0) searchInputRef.current?.focus();
+  }, [searchFocusToken]);
 
   const visibleConversations = useMemo(
     () =>
@@ -218,28 +205,21 @@ export function WorkbenchNavigation({
   return (
     <aside className="workbench-tree" aria-label="小说项目与创作任务">
       <div className="workbench-tree-header">
-        <div>
-          <div className="workbench-eyebrow">创作工作台</div>
-          <h1>创作任务</h1>
-        </div>
-        <button
-          type="button"
-          className="workbench-new-task"
-          data-testid="workbench-create-task"
-          aria-label="新建创作任务"
-          aria-busy={creatingTask}
-          title="新建创作任务"
-          disabled={projectsLoading || conversationsLoading || creatingTask || novels.length === 0}
-          onClick={onCreateTask}
-        >
-          <Plus aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
+        <SidebarQuickActions
+          onNewTask={onCreateTask}
+          onSearch={() => searchInputRef.current?.focus()}
+          newTaskBusy={creatingTask}
+          newTaskDisabled={
+            projectsLoading || conversationsLoading || creatingTask || novels.length === 0
+          }
+        />
       </div>
 
       <div className="workbench-tree-tools">
         <label className="workbench-task-search">
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
           <input
+            ref={searchInputRef}
             type="search"
             aria-label="搜索创作任务"
             value={query}
@@ -472,11 +452,20 @@ export function WorkbenchNavigation({
         )}
       </div>
 
-      <button type="button" className="workbench-library-link" onClick={onOpenLibrary}>
-        <Library aria-hidden="true" size={14} strokeWidth={1.8} />
-        <span>管理小说作品</span>
-        <ArrowUpRight aria-hidden="true" size={13} strokeWidth={1.8} />
-      </button>
+      <SidebarFooter
+        className="workbench-tree-footer"
+        action={
+          <button
+            type="button"
+            className="workbench-library-link"
+            aria-label="管理小说作品"
+            title="管理小说作品"
+            onClick={onOpenLibrary}
+          >
+            <Library aria-hidden="true" size={15} strokeWidth={1.8} />
+          </button>
+        }
+      />
       {openMenuConversation && (
         <WorkbenchTaskMenu
           conversation={openMenuConversation}

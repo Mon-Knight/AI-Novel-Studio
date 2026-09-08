@@ -126,7 +126,6 @@ export function StyleProfilesContent({
           </button>
           <button
             className="btn btn-secondary btn-sm"
-            style={{ marginLeft: 8 }}
             onClick={() => {
               setAnalyzeText('');
               setAnalyzeResult(null);
@@ -170,16 +169,7 @@ export function StyleProfilesContent({
         actions={pageActions}
       />
       {msg && (
-        <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: 'var(--color-primary-light)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: 'var(--color-primary)',
-          }}
-        >
+        <div className="resource-notice resource-notice--success" role="status">
           {msg}
         </div>
       )}
@@ -201,73 +191,41 @@ export function StyleProfilesContent({
       >
         {/* 风格列表 */}
         {tab === 'styles' && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: 12,
-            }}
-          >
+          <div className="resource-grid">
             {styles.map((s) => (
               <div
                 key={s.id}
-                style={{
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 10,
-                  padding: 16,
-                  background: s.isActive ? 'var(--color-primary-light)' : 'var(--color-bg-card)',
-                }}
+                className={`resource-card resource-card--flow${s.isActive ? ' is-active' : ''}`}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>{s.name}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="resource-card-header">
+                  <span className="resource-card-title">{s.name}</span>
+                  <div className="resource-pill-row resource-shrink">
                     {s.isActive && (
-                      <span
-                        style={{ fontSize: 12, color: 'var(--color-primary)', fontWeight: 600 }}
-                      >
-                        当前
-                      </span>
+                      <span className="resource-pill resource-pill--primary">当前</span>
                     )}
-                    <span
-                      style={{
-                        fontSize: 12,
-                        padding: '1px 8px',
-                        borderRadius: 10,
-                        background: 'var(--color-bg-hover)',
-                        color: 'var(--color-text-secondary)',
-                      }}
-                    >
-                      {sourceTypeLabel(s)}
-                    </span>
+                    <span className="resource-pill">{sourceTypeLabel(s)}</span>
                   </div>
                 </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    color: 'var(--color-text-secondary)',
-                    marginTop: 8,
-                    lineHeight: 1.6,
-                  }}
-                >
+                <div className="resource-card-description">
                   {s.narrativePerspective && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div className="resource-row">
                       <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
                       {s.narrativePerspective}
                     </div>
                   )}
                   {s.tone && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div className="resource-row">
                       <Drama aria-hidden="true" size={14} strokeWidth={1.8} />
                       {s.tone}
                     </div>
                   )}
                   {s.pace && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div className="resource-row">
                       <Gauge aria-hidden="true" size={14} strokeWidth={1.8} />
                       {s.pace}
                     </div>
                   )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div className="resource-row">
                     <MessageCircle aria-hidden="true" size={14} strokeWidth={1.8} />
                     {Math.round(s.dialogueRatio * 100)}% ·
                     <PenLine aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -275,7 +233,7 @@ export function StyleProfilesContent({
                   </div>
                 </div>
                 <StyleSourceTrace profile={s} />
-                <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+                <div className="resource-actions">
                   {!s.isActive && (
                     <button
                       className="btn btn-primary btn-sm"
@@ -295,9 +253,8 @@ export function StyleProfilesContent({
                   </button>
                   {s.sourceType !== 'system_default' && (
                     <button
-                      className="btn btn-secondary btn-sm"
+                      className="btn btn-secondary btn-sm resource-text-error"
                       onClick={() => deleteStyle(s.id, s.name)}
-                      style={{ color: 'var(--color-error)' }}
                       aria-label={`删除风格 ${s.name}`}
                       title="删除风格"
                     >
@@ -312,42 +269,31 @@ export function StyleProfilesContent({
 
         {/* 输出控制列表 */}
         {tab === 'outputs' && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: 12,
-            }}
-          >
+          <div className="resource-grid">
             {outputs.map((o) => (
               <div
                 key={o.id}
-                style={{
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 10,
-                  padding: 16,
-                  background: o.isDefault ? 'var(--color-primary-light)' : 'var(--color-bg-card)',
-                }}
+                className={`resource-card resource-card--flow${o.isDefault ? ' is-active' : ''}`}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>{o.name}</span>
+                <div className="resource-card-header">
+                  <span className="resource-card-title">{o.name}</span>
                   {o.isDefault && (
-                    <span style={{ fontSize: 12, color: 'var(--color-primary)', fontWeight: 600 }}>
+                    <span className="resource-pill resource-pill--primary resource-shrink">
                       默认
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="resource-card-description">
+                  <div className="resource-row">
                     <BarChart3 aria-hidden="true" size={14} strokeWidth={1.8} />
                     {formatNumber(o.targetWordCount ?? o.chapterWordRange.default)} 字
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div className="resource-row">
                     <Gauge aria-hidden="true" size={14} strokeWidth={1.8} />
                     {o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+                <div className="resource-actions">
                   {!o.isDefault && (
                     <button
                       className="btn btn-primary btn-sm"
@@ -377,9 +323,8 @@ export function StyleProfilesContent({
                   </button>
                   {!o.isDefault && (
                     <button
-                      className="btn btn-secondary btn-sm"
+                      className="btn btn-secondary btn-sm resource-text-error"
                       onClick={() => deleteOutput(o.id, o.name)}
-                      style={{ color: 'var(--color-error)' }}
                       aria-label={`删除输出方案 ${o.name}`}
                       title="删除输出方案"
                     >
@@ -394,30 +339,15 @@ export function StyleProfilesContent({
 
         {/* 导入记录 */}
         {tab === 'imports' && (
-          <div>
+          <div className="resource-list">
             {assets.length === 0 ? (
-              <div className="text-muted" style={{ textAlign: 'center', padding: 40 }}>
-                暂无导入记录
-              </div>
+              <div className="resource-empty">暂无导入记录</div>
             ) : (
               assets.map((a) => (
-                <div
-                  key={a.id}
-                  style={{
-                    border: '1px solid var(--color-border-light)',
-                    borderRadius: 8,
-                    padding: 12,
-                    marginBottom: 8,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div>
-                    <span style={{ fontWeight: 500 }}>{a.fileName}</span>
-                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 8 }}>
-                      {a.fileType.toUpperCase()}
-                    </span>
+                <div key={a.id} className="resource-list-item">
+                  <div className="resource-list-item-main">
+                    <span>{a.fileName}</span>
+                    <span className="resource-meta">{a.fileType.toUpperCase()}</span>
                   </div>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -437,7 +367,7 @@ export function StyleProfilesContent({
           </div>
         )}
       </PageTabs>
-      <button className="btn btn-secondary" onClick={onBack} style={{ marginTop: 20 }}>
+      <button className="btn btn-secondary resource-gap-top-lg" onClick={onBack}>
         <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
         返回首页
       </button>

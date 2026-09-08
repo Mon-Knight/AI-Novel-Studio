@@ -7,6 +7,8 @@ import { execFile, spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { redactLogText, sanitizeArtifactDirectory } from './artifact-sanitizer.ts';
+import { assertUnelevatedWindowsHost } from './host-integrity.ts';
+import { legacyPanelSpecs, selectDesktopSpecs } from './spec-selection.ts';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -37,10 +39,12 @@ const productAppPath = path.join(
 );
 const allSpecs = [
   'app-start.spec.ts',
+  'workbench-writing-smoke.spec.ts',
   'cold-start.spec.ts',
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',
   'project-backup-boundary.spec.ts',
+  'txt-import-atomic.spec.ts',
   'workbench-task-directory.spec.ts',
   'chapter-save.spec.ts',
   'large-text-save.spec.ts',
@@ -57,7 +61,8 @@ const allSpecs = [
   'agent-production-closed-loop.spec.ts',
   'domain-facade-sqlite.spec.ts',
 ];
-const specs = selectSpecs(process.argv.slice(2));
+const specs = selectDesktopSpecs(process.argv.slice(2), allSpecs);
+assertUnelevatedWindowsHost();
 
 const artifactRoot = path.resolve(
   process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'),
@@ -119,6 +124,7 @@ for (const [index, spec] of specs.entries()) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     AI_NOVEL_STUDIO_E2E: '1',
+    AI_NOVEL_STUDIO_E2E_LEGACY_PANELS: legacyPanelSpecs.has(spec) ? '1' : '0',
     AI_NOVEL_STUDIO_E2E_RUN_ID: runId,
     AI_NOVEL_STUDIO_E2E_DATA_DIR: specRoot,
     AI_NOVEL_STUDIO_E2E_ARTIFACTS: specArtifacts,
@@ -330,28 +336,6 @@ function canBindPort(
       server.close((error) => resolve(!error));
     });
   });
-}
-
-function selectSpecs(args: string[]): string[] {
-  const smoke = args.includes('--smoke');
-  const specIndex = args.indexOf('--spec');
-  if (smoke && specIndex >= 0) {
-    throw new Error('--smoke and --spec cannot be used together.');
-  }
-  if (specIndex < 0) return smoke ? allSpecs.slice(0, 1) : allSpecs;
-
-  const requested = args[specIndex + 1];
-  if (!requested || requested.startsWith('--')) {
-    throw new Error('--spec requires one E2E spec name.');
-  }
-  if (args.indexOf('--spec', specIndex + 1) >= 0) {
-    throw new Error('--spec can be supplied only once.');
-  }
-  const normalized = requested.endsWith('.spec.ts') ? requested : `${requested}.spec.ts`;
-  if (!allSpecs.includes(normalized)) {
-    throw new Error(`Unknown E2E spec: ${requested}. Expected one of: ${allSpecs.join(', ')}`);
-  }
-  return [normalized];
 }
 
 async function runWdio(

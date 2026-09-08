@@ -6,19 +6,15 @@ import {
   buildCoreAssetEditPath,
   type ChapterCoreAsset,
 } from '../../services/conversation/chapterAssetReadiness';
-import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
-import {
-  resolveWorkbenchModelDirectoryTarget,
-  WorkbenchModelUnavailableError,
-} from '../../services/conversation/workbenchModelAvailability';
+import { resolveWorkbenchModelDirectoryTarget } from '../../services/conversation/workbenchModelAvailability';
 import {
   settleStructuredArtifactDecision,
   type StructuredArtifactDecisionInput,
 } from '../../features/workbench/structuredArtifactDecisionSettlement';
-import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchComposer } from './WorkbenchComposer';
 import { WorkbenchMessageStream } from './WorkbenchMessageStream';
 import { WorkbenchNavigation } from './WorkbenchNavigation';
+import { WorkbenchSidePanel } from './WorkbenchSidePanel';
 import {
   WorkbenchEmptyProjects,
   WorkbenchEmptyTasks,
@@ -28,6 +24,7 @@ import {
 } from './WorkbenchPageStates';
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
+import { submitWorkbenchTask } from './workbenchTaskSubmission';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
 import { useWorkbenchVisibility } from './hooks/useWorkbenchVisibility';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
@@ -35,7 +32,9 @@ import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
 import { useWorkbenchCompression } from './hooks/useWorkbenchCompression';
 import { useWorkbenchConversations } from './hooks/useWorkbenchConversations';
+import { useWorkbenchIntent } from './hooks/useWorkbenchIntent';
 import { useWorkbenchPlugins } from './hooks/useWorkbenchPlugins';
+import { useWorkbenchSidePanel } from './hooks/useWorkbenchSidePanel';
 import { useWorkbenchStartupReadiness } from './hooks/useWorkbenchStartupReadiness';
 import { useWorkbenchTaskRunner } from './hooks/useWorkbenchTaskRunner';
 
@@ -48,6 +47,7 @@ export function WorkbenchPage() {
   const [taskCreatorError, setTaskCreatorError] = useState('');
   const { plugins, pluginsLoading, pluginsError, showPlugins, setShowPlugins, refreshPlugins } =
     useWorkbenchPlugins(taskCreatorOpen);
+  const sidePanel = useWorkbenchSidePanel(showPlugins, setShowPlugins);
   const { contextPending, contextFailed } = useWorkbenchStartupReadiness();
   const [startupDraft, setStartupDraft] = useState('');
   const newTaskSubmissionRef = useRef(false);
@@ -220,6 +220,7 @@ export function WorkbenchPage() {
     },
     [chapterId, startupDraft],
   );
+  const { searchFocusToken } = useWorkbenchIntent(openTaskCreator);
   const effectiveStatus = resolveWorkbenchConversationStatus({
     runtimeActive: selectedConversationRunning,
     bundleConversation:
@@ -261,79 +262,42 @@ export function WorkbenchPage() {
       onCancel={cancelTask}
       onRefreshAssetScope={() => void assetScope.refresh()}
       onOpenAssetScopePath={(path) => navigate(path)}
+      onShowPlugins={sidePanel.openPlugins}
     />
   );
-  const editMissingAsset = useCallback(
-    (asset: ChapterCoreAsset) => {
-      if (!assetRecovery) return;
-      navigate(buildCoreAssetEditPath(assetRecovery, asset));
-    },
-    [assetRecovery, navigate],
-  );
+  const editMissingAsset = (asset: ChapterCoreAsset) =>
+    assetRecovery && navigate(buildCoreAssetEditPath(assetRecovery, asset));
   const closeTaskCreator = useCallback(() => {
     if (!creatingTask && !newTaskSubmissionRef.current) setTaskCreatorOpen(false);
   }, [creatingTask]);
-  const submitNewTask = async () => {
-    const goal = newTaskGoal.trim();
-    if (!goal || creatingTask || !selectedNovelId || newTaskSubmissionRef.current) return;
-    const conversationalGoal = isConversationalGoal(goal);
-    if (contextPending && !conversationalGoal) {
-      setTaskCreatorError('正在整理已有章节上下文；创作目标已保留，完成后即可创建任务。');
-      return;
-    }
-    if (contextFailed && !conversationalGoal) {
-      setTaskCreatorError('旧版上下文未能安全整理；创作目标已保留，请重新启动应用后重试。');
-      return;
-    }
-    const requestedChapterId = newTaskChapterId.trim();
-    const scopedChapter = requestedChapterId
-      ? chapters.find(
-          (chapter) => chapter.id === requestedChapterId && chapter.novelId === selectedNovelId,
-        )
-      : undefined;
-    if (requestedChapterId && !scopedChapter) {
-      setTaskCreatorError('所选章节不属于当前小说项目，请重新选择。');
-      return;
-    }
-    const scopedChapterId = scopedChapter?.id;
-    newTaskSubmissionRef.current = true;
-    setTaskCreatorError('');
-    let taskModel = newTaskModel;
-    try {
-      if (!conversationalGoal) {
-        try {
-          taskModel = await validateModelForSend(taskModel, { allowLocalFallback: true });
-        } catch (error) {
-          setTaskCreatorError(
-            error instanceof WorkbenchModelUnavailableError
-              ? error.message
-              : 'Runtime 模型目录刷新失败，创作目标已保留，请稍后重试。',
-          );
-          return;
-        }
-      }
-      await selectChapter(scopedChapterId ?? '');
-      const initialized = await createTask(goal, taskModel);
-      if (!initialized) return;
-      setStartupDraft('');
-      setTaskCreatorOpen(false);
-      await startInitializedTask({
-        conversationId: initialized.conversation.conversationId,
-        novelId: initialized.conversation.novelId,
-        chapterId: scopedChapterId,
-        turnId: initialized.turn.turnId,
-        goal,
-        modelSnapshot: taskModel,
-      });
-    } catch (error) {
-      setTaskCreatorError(error instanceof Error ? error.message : '新建创作任务失败，请重试。');
-    } finally {
-      newTaskSubmissionRef.current = false;
-    }
-  };
+  const submitNewTask = () =>
+    submitWorkbenchTask({
+      goal: newTaskGoal,
+      requestedChapterId: newTaskChapterId,
+      taskModel: newTaskModel,
+      selectedNovelId,
+      chapters,
+      creatingTask,
+      contextPending,
+      contextFailed,
+      submissionRef: newTaskSubmissionRef,
+      validateModelForSend,
+      selectChapter,
+      createTask,
+      startInitializedTask,
+      onError: setTaskCreatorError,
+      onCreated: () => {
+        setStartupDraft('');
+        setTaskCreatorOpen(false);
+      },
+    });
 
   return (
-    <div className="workbench-page" data-testid="creative-workbench">
+    <div
+      className="workbench-page"
+      data-testid="creative-workbench"
+      data-side-panel={sidePanel.view ?? 'closed'}
+    >
       <WorkbenchNavigation
         directory={directory}
         novels={novels}
@@ -346,6 +310,7 @@ export function WorkbenchPage() {
         projectsError={projectsError}
         conversationsError={conversationsError}
         creatingTask={creatingTask}
+        searchFocusToken={searchFocusToken}
         onCreateTask={openTaskCreator}
         onSelectProject={selectProject}
         onSelectTask={selectTask}
@@ -407,7 +372,9 @@ export function WorkbenchPage() {
               onSelectChapter={(value) => void selectChapter(value)}
               onCreateChapter={() => navigate(`/novels/${selectedNovelId}`)}
               onCompress={() => void proposeContextCompression()}
-              onShowPlugins={() => setShowPlugins(true)}
+              onShowPlugins={sidePanel.openPlugins}
+              sidePanelOpen={sidePanel.view !== null}
+              onToggleSidePanel={sidePanel.toggle}
             />
 
             <PanelErrorBoundary panelTitle="创作对话">
@@ -452,15 +419,24 @@ export function WorkbenchPage() {
           </>
         )}
       </main>
-      {showPlugins && (
-        <PanelErrorBoundary panelTitle="当前插件">
-          <PluginPanel
-            plugins={plugins}
-            loading={pluginsLoading}
-            error={pluginsError}
-            onClose={() => setShowPlugins(false)}
-          />
-        </PanelErrorBoundary>
+      {sidePanel.view && (
+        <WorkbenchSidePanel
+          view={sidePanel.view}
+          novelId={selectedNovelId}
+          chapterId={selectedChapter?.id}
+          bundle={bundleReady ? bundle : null}
+          plugins={plugins}
+          pluginsLoading={pluginsLoading}
+          pluginsError={pluginsError}
+          assetScope={assetScope.summary}
+          assetScopeLoading={assetScope.loading}
+          assetScopeError={assetScope.error}
+          onRefreshAssetScope={() => void assetScope.refresh()}
+          onOpenAssetScopePath={(path) => navigate(path)}
+          onOpen={sidePanel.open}
+          onBack={sidePanel.back}
+          onClose={sidePanel.close}
+        />
       )}
       {taskCreatorOpen && selectedNovel && (
         <WorkbenchTaskCreator

@@ -1,4 +1,4 @@
-import { Minimize2, Puzzle } from 'lucide-react';
+import { Minimize2, PanelRight, Puzzle } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { TaskConversation } from '../../types/conversation';
 import { statusLabel } from './workbenchHelpers';
@@ -19,6 +19,8 @@ interface WorkbenchTaskHeaderProps {
   onCreateChapter: () => void;
   onCompress: () => void;
   onShowPlugins: () => void;
+  sidePanelOpen?: boolean;
+  onToggleSidePanel?: () => void;
 }
 
 export function WorkbenchTaskHeader({
@@ -36,6 +38,8 @@ export function WorkbenchTaskHeader({
   onCreateChapter,
   onCompress,
   onShowPlugins,
+  sidePanelOpen = false,
+  onToggleSidePanel,
 }: WorkbenchTaskHeaderProps) {
   return (
     <header
@@ -112,6 +116,19 @@ export function WorkbenchTaskHeader({
           >
             <Puzzle aria-hidden="true" size={16} strokeWidth={1.8} />
           </button>
+          {onToggleSidePanel && (
+            <button
+              type="button"
+              className={`workbench-header-icon-button ${sidePanelOpen ? 'is-active' : ''}`.trim()}
+              data-testid="workbench-toggle-side-panel"
+              aria-label={sidePanelOpen ? '关闭侧边面板' : '打开侧边面板'}
+              aria-pressed={sidePanelOpen}
+              title={sidePanelOpen ? '关闭侧边面板' : '打开侧边面板'}
+              onClick={onToggleSidePanel}
+            >
+              <PanelRight aria-hidden="true" size={16} strokeWidth={1.8} />
+            </button>
+          )}
         </div>
       </div>
     </header>

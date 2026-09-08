@@ -1292,6 +1292,14 @@ test('WorkbenchPage clicking a task template fills the input draft', async () =>
     assert.ok(screen.getByText('生成下一章'));
   });
 
+  // Templates live behind the composer "+" menu; open it so the confirm strip is accessible.
+  fireEvent.click(screen.getByTestId('workbench-composer-attach'));
+  assert.equal(
+    screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
+    'true',
+  );
+  assert.equal(screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'), false);
+
   const templateButton = screen.getByText('生成下一章');
   fireEvent.click(templateButton);
 

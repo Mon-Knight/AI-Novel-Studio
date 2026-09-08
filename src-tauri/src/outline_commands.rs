@@ -145,52 +145,165 @@ pub struct OutlineGenerationContext {
     pub output_config_summary: Option<String>,
 }
 
+// ==================== Ownership / Scope Guards ====================
+//
+// 纲要表没有外键约束（历史 schema），因此每个写命令在同一事务内显式复验作用域：
+// 作品必须存在且未删除；卷、章节、上级纲要必须属于同一作品。任何不匹配都失败关闭，
+// 不产生部分写入，避免跨书污染（审计 GAP-11）。
+
+pub const OUTLINE_SCOPE_MISMATCH: &str = "OUTLINE_SCOPE_MISMATCH";
+
+fn scope_error(detail: &str) -> String {
+    format!("{OUTLINE_SCOPE_MISMATCH}: {detail}")
+}
+
+fn exists(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<bool, String> {
+    conn.query_row(sql, params, |row| row.get::<_, i64>(0))
+        .map(|count| count > 0)
+        .map_err(|e| e.to_string())
+}
+
+fn ensure_project_exists(conn: &rusqlite::Connection, project_id: &str) -> Result<(), String> {
+    if project_id.trim().is_empty() {
+        return Err(scope_error("作品标识不能为空"));
+    }
+    if !exists(
+        conn,
+        "SELECT COUNT(*) FROM novels WHERE id = ?1 AND deleted_at IS NULL",
+        &[&project_id],
+    )? {
+        return Err(scope_error("作品不存在或已删除"));
+    }
+    Ok(())
+}
+
+fn ensure_volume_in_project(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    volume_id: &Option<String>,
+) -> Result<(), String> {
+    let Some(volume_id) = volume_id.as_deref() else {
+        return Ok(());
+    };
+    if !exists(
+        conn,
+        "SELECT COUNT(*) FROM volumes WHERE id = ?1 AND novel_id = ?2",
+        &[&volume_id, &project_id],
+    )? {
+        return Err(scope_error("卷不存在或不属于当前作品"));
+    }
+    Ok(())
+}
+
+fn ensure_chapter_in_project(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    chapter_id: &Option<String>,
+) -> Result<(), String> {
+    let Some(chapter_id) = chapter_id.as_deref() else {
+        return Ok(());
+    };
+    if !exists(
+        conn,
+        "SELECT COUNT(*) FROM chapters WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL",
+        &[&chapter_id, &project_id],
+    )? {
+        return Err(scope_error("章节不存在或不属于当前作品"));
+    }
+    Ok(())
+}
+
+fn ensure_master_outline_in_project(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    master_outline_id: &Option<String>,
+) -> Result<(), String> {
+    let Some(master_outline_id) = master_outline_id.as_deref() else {
+        return Ok(());
+    };
+    if !exists(
+        conn,
+        "SELECT COUNT(*) FROM master_outlines WHERE id = ?1 AND project_id = ?2",
+        &[&master_outline_id, &project_id],
+    )? {
+        return Err(scope_error("主纲要不存在或不属于当前作品"));
+    }
+    Ok(())
+}
+
+fn ensure_volume_outline_in_project(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    volume_outline_id: &Option<String>,
+) -> Result<(), String> {
+    let Some(volume_outline_id) = volume_outline_id.as_deref() else {
+        return Ok(());
+    };
+    if !exists(
+        conn,
+        "SELECT COUNT(*) FROM volume_outlines WHERE id = ?1 AND project_id = ?2",
+        &[&volume_outline_id, &project_id],
+    )? {
+        return Err(scope_error("分卷纲要不存在或不属于当前作品"));
+    }
+    Ok(())
+}
+
+fn next_version(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<i64, String> {
+    conn.query_row(sql, params, |row| row.get::<_, i64>(0))
+        .map(|max_version| max_version + 1)
+        .map_err(|e| e.to_string())
+}
+
 // ==================== Tauri Commands ====================
 
 // --- Master Outline ---
 
 #[tauri::command]
 pub fn save_master_outline(input: SaveMasterOutlineInput) -> Result<MasterOutlineDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    ensure_project_exists(&transaction, &input.project_id)?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
     let save_as_new = input.save_as_new_version.unwrap_or(false);
 
-    if save_as_new {
-        // Get current max version
-        let max_version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM master_outlines WHERE project_id = ?1",
-                params![&input.project_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-
-        let id = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO master_outlines (id, project_id, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,'draft',?5,0,?6,?7,?8,?8)",
-            params![&id, &input.project_id, &input.title, &input.content, max_version + 1, &source_type, &input.context_snapshot, &now],
-        ).map_err(|e| e.to_string())?;
-        get_master_outline_by_id_internal(&conn, &id)
+    let existing = if save_as_new {
+        None
     } else {
-        // Update current active or latest version
-        let existing = get_active_master_outline_internal(&conn, &input.project_id);
-        if let Ok(current) = existing {
-            conn.execute(
-                "UPDATE master_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6",
-                params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id],
-            ).map_err(|e| e.to_string())?;
-            get_master_outline_by_id_internal(&conn, &current.id)
-        } else {
-            // Create new
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO master_outlines (id, project_id, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,'draft',1,0,?5,?6,?7,?7)",
-                params![&id, &input.project_id, &input.title, &input.content, &source_type, &input.context_snapshot, &now],
-            ).map_err(|e| e.to_string())?;
-            get_master_outline_by_id_internal(&conn, &id)
-        }
-    }
+        get_active_master_outline_internal(&transaction, &input.project_id).ok()
+    };
+    let saved = if let Some(current) = existing {
+        transaction.execute(
+            "UPDATE master_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6 AND project_id = ?7",
+            params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id, &input.project_id],
+        ).map_err(|e| e.to_string())?;
+        get_master_outline_by_id_internal(&transaction, &current.id)?
+    } else {
+        let version = next_version(
+            &transaction,
+            "SELECT COALESCE(MAX(version), 0) FROM master_outlines WHERE project_id = ?1",
+            &[&input.project_id],
+        )?;
+        let id = uuid::Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO master_outlines (id, project_id, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,'draft',?5,0,?6,?7,?8,?8)",
+            params![&id, &input.project_id, &input.title, &input.content, version, &source_type, &input.context_snapshot, &now],
+        ).map_err(|e| e.to_string())?;
+        get_master_outline_by_id_internal(&transaction, &id)?
+    };
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -249,48 +362,49 @@ pub fn set_active_master_outline(input: SetActiveMasterOutlineInput) -> Result<(
 
 #[tauri::command]
 pub fn save_volume_outline(input: SaveVolumeOutlineInput) -> Result<VolumeOutlineDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    ensure_project_exists(&transaction, &input.project_id)?;
+    ensure_volume_in_project(&transaction, &input.project_id, &input.volume_id)?;
+    ensure_master_outline_in_project(&transaction, &input.project_id, &input.master_outline_id)?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
     let save_as_new = input.save_as_new_version.unwrap_or(false);
     let volume_index = input.volume_index.unwrap_or(1);
 
-    if save_as_new {
-        let max_version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM volume_outlines WHERE project_id = ?1 AND volume_id IS ?2",
-                params![&input.project_id, &input.volume_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-
-        let id = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO volume_outlines (id, project_id, master_outline_id, volume_id, volume_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,0,?9,?10,?11,?11)",
-            params![&id, &input.project_id, &input.master_outline_id, &input.volume_id, volume_index, &input.title, &input.content, max_version + 1, &source_type, &input.context_snapshot, &now],
-        ).map_err(|e| e.to_string())?;
-        get_volume_outline_by_id_internal(&conn, &id)
+    let existing = if save_as_new {
+        None
     } else {
-        let existing = get_active_volume_outline_by_volume_internal(
-            &conn,
+        get_active_volume_outline_by_volume_internal(
+            &transaction,
             &input.project_id,
             &input.volume_id,
-        );
-        if let Ok(current) = existing {
-            conn.execute(
-                "UPDATE volume_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6",
-                params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id],
-            ).map_err(|e| e.to_string())?;
-            get_volume_outline_by_id_internal(&conn, &current.id)
-        } else {
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO volume_outlines (id, project_id, master_outline_id, volume_id, volume_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',1,0,?8,?9,?10,?10)",
-                params![&id, &input.project_id, &input.master_outline_id, &input.volume_id, volume_index, &input.title, &input.content, &source_type, &input.context_snapshot, &now],
-            ).map_err(|e| e.to_string())?;
-            get_volume_outline_by_id_internal(&conn, &id)
-        }
-    }
+        )
+        .ok()
+    };
+    let saved = if let Some(current) = existing {
+        transaction.execute(
+            "UPDATE volume_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6 AND project_id = ?7",
+            params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id, &input.project_id],
+        ).map_err(|e| e.to_string())?;
+        get_volume_outline_by_id_internal(&transaction, &current.id)?
+    } else {
+        let version = next_version(
+            &transaction,
+            "SELECT COALESCE(MAX(version), 0) FROM volume_outlines WHERE project_id = ?1 AND volume_id IS ?2",
+            &[&input.project_id, &input.volume_id],
+        )?;
+        let id = uuid::Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO volume_outlines (id, project_id, master_outline_id, volume_id, volume_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,0,?9,?10,?11,?11)",
+            params![&id, &input.project_id, &input.master_outline_id, &input.volume_id, volume_index, &input.title, &input.content, version, &source_type, &input.context_snapshot, &now],
+        ).map_err(|e| e.to_string())?;
+        get_volume_outline_by_id_internal(&transaction, &id)?
+    };
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -354,48 +468,49 @@ pub fn set_active_volume_outline(input: SetActiveVolumeOutlineInput) -> Result<(
 
 #[tauri::command]
 pub fn save_chapter_outline(input: SaveChapterOutlineInput) -> Result<ChapterOutlineDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    ensure_project_exists(&transaction, &input.project_id)?;
+    ensure_chapter_in_project(&transaction, &input.project_id, &input.chapter_id)?;
+    ensure_volume_outline_in_project(&transaction, &input.project_id, &input.volume_outline_id)?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
     let save_as_new = input.save_as_new_version.unwrap_or(false);
     let chapter_index = input.chapter_index.unwrap_or(1);
 
-    if save_as_new {
-        let max_version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM chapter_outlines WHERE project_id = ?1 AND chapter_id IS ?2",
-                params![&input.project_id, &input.chapter_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-
-        let id = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO chapter_outlines (id, project_id, volume_outline_id, chapter_id, chapter_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,0,?9,?10,?11,?11)",
-            params![&id, &input.project_id, &input.volume_outline_id, &input.chapter_id, chapter_index, &input.title, &input.content, max_version + 1, &source_type, &input.context_snapshot, &now],
-        ).map_err(|e| e.to_string())?;
-        get_chapter_outline_by_id_internal(&conn, &id)
+    let existing = if save_as_new {
+        None
     } else {
-        let existing = get_active_chapter_outline_by_chapter_internal(
-            &conn,
+        get_active_chapter_outline_by_chapter_internal(
+            &transaction,
             &input.project_id,
             &input.chapter_id,
-        );
-        if let Ok(current) = existing {
-            conn.execute(
-                "UPDATE chapter_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6",
-                params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id],
-            ).map_err(|e| e.to_string())?;
-            get_chapter_outline_by_id_internal(&conn, &current.id)
-        } else {
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO chapter_outlines (id, project_id, volume_outline_id, chapter_id, chapter_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',1,0,?8,?9,?10,?10)",
-                params![&id, &input.project_id, &input.volume_outline_id, &input.chapter_id, chapter_index, &input.title, &input.content, &source_type, &input.context_snapshot, &now],
-            ).map_err(|e| e.to_string())?;
-            get_chapter_outline_by_id_internal(&conn, &id)
-        }
-    }
+        )
+        .ok()
+    };
+    let saved = if let Some(current) = existing {
+        transaction.execute(
+            "UPDATE chapter_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6 AND project_id = ?7",
+            params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id, &input.project_id],
+        ).map_err(|e| e.to_string())?;
+        get_chapter_outline_by_id_internal(&transaction, &current.id)?
+    } else {
+        let version = next_version(
+            &transaction,
+            "SELECT COALESCE(MAX(version), 0) FROM chapter_outlines WHERE project_id = ?1 AND chapter_id IS ?2",
+            &[&input.project_id, &input.chapter_id],
+        )?;
+        let id = uuid::Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO chapter_outlines (id, project_id, volume_outline_id, chapter_id, chapter_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,0,?9,?10,?11,?11)",
+            params![&id, &input.project_id, &input.volume_outline_id, &input.chapter_id, chapter_index, &input.title, &input.content, version, &source_type, &input.context_snapshot, &now],
+        ).map_err(|e| e.to_string())?;
+        get_chapter_outline_by_id_internal(&transaction, &id)?
+    };
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -771,6 +886,219 @@ mod tests {
             .unwrap();
         assert_eq!(active_a, 1);
         assert_eq!(active_b, 1);
+    }
+
+    struct ScopeFixture {
+        project_a: String,
+        project_b: String,
+        chapter_b: String,
+        volume_b: String,
+        deleted_project: String,
+    }
+
+    fn seed_scope_fixture() -> ScopeFixture {
+        init_test_database();
+        let fixture = ScopeFixture {
+            project_a: uuid::Uuid::new_v4().to_string(),
+            project_b: uuid::Uuid::new_v4().to_string(),
+            chapter_b: uuid::Uuid::new_v4().to_string(),
+            volume_b: uuid::Uuid::new_v4().to_string(),
+            deleted_project: uuid::Uuid::new_v4().to_string(),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = get_connection().lock().unwrap();
+        for project_id in [&fixture.project_a, &fixture.project_b] {
+            conn.execute(
+                "INSERT INTO novels (id, title, outline, created_at, updated_at) VALUES (?1, 'Scope test', '', ?2, ?2)",
+                rusqlite::params![project_id, &now],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO novels (id, title, outline, created_at, updated_at, deleted_at) VALUES (?1, 'Deleted', '', ?2, ?2, ?2)",
+            rusqlite::params![&fixture.deleted_project, &now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO volumes (id, novel_id, title, order_index, created_at, updated_at) VALUES (?1, ?2, 'Volume B', 0, ?3, ?3)",
+            rusqlite::params![&fixture.volume_b, &fixture.project_b, &now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chapters (id, novel_id, volume_id, title, order_index, status, created_at, updated_at) VALUES (?1, ?2, ?3, 'Chapter B', 1, 'draft', ?4, ?4)",
+            rusqlite::params![&fixture.chapter_b, &fixture.project_b, &fixture.volume_b, &now],
+        )
+        .unwrap();
+        fixture
+    }
+
+    fn chapter_outline_input(
+        project_id: &str,
+        chapter_id: Option<String>,
+    ) -> SaveChapterOutlineInput {
+        SaveChapterOutlineInput {
+            project_id: project_id.to_string(),
+            volume_outline_id: None,
+            chapter_id,
+            chapter_index: Some(1),
+            title: "Scoped".to_string(),
+            content: "Scoped content".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        }
+    }
+
+    fn count_rows(sql: &str, project_id: &str) -> i64 {
+        let conn = get_connection().lock().unwrap();
+        conn.query_row(sql, rusqlite::params![project_id], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn chapter_outline_rejects_chapter_owned_by_another_novel() {
+        let fixture = seed_scope_fixture();
+        let error = save_chapter_outline(chapter_outline_input(
+            &fixture.project_a,
+            Some(fixture.chapter_b.clone()),
+        ))
+        .expect_err("cross-novel chapter must be rejected");
+        assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+        assert_eq!(
+            count_rows(
+                "SELECT COUNT(*) FROM chapter_outlines WHERE project_id = ?1",
+                &fixture.project_a
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn chapter_outline_rejects_missing_or_deleted_project() {
+        let fixture = seed_scope_fixture();
+        for project_id in [
+            uuid::Uuid::new_v4().to_string(),
+            fixture.deleted_project.clone(),
+        ] {
+            let error = save_chapter_outline(chapter_outline_input(&project_id, None))
+                .expect_err("missing or deleted project must be rejected");
+            assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+            assert_eq!(
+                count_rows(
+                    "SELECT COUNT(*) FROM chapter_outlines WHERE project_id = ?1",
+                    &project_id
+                ),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn chapter_outline_rejects_volume_outline_from_another_project() {
+        let fixture = seed_scope_fixture();
+        let foreign_volume_outline = save_volume_outline(SaveVolumeOutlineInput {
+            project_id: fixture.project_b.clone(),
+            master_outline_id: None,
+            volume_id: Some(fixture.volume_b.clone()),
+            volume_index: Some(1),
+            title: "Volume outline B".to_string(),
+            content: "B".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .unwrap();
+        let mut input = chapter_outline_input(&fixture.project_a, None);
+        input.volume_outline_id = Some(foreign_volume_outline.id);
+        let error =
+            save_chapter_outline(input).expect_err("foreign volume outline must be rejected");
+        assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+    }
+
+    #[test]
+    fn volume_outline_rejects_volume_or_master_outline_from_another_novel() {
+        let fixture = seed_scope_fixture();
+        let error = save_volume_outline(SaveVolumeOutlineInput {
+            project_id: fixture.project_a.clone(),
+            master_outline_id: None,
+            volume_id: Some(fixture.volume_b.clone()),
+            volume_index: Some(1),
+            title: "Volume".to_string(),
+            content: "Volume content".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .expect_err("cross-novel volume must be rejected");
+        assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+
+        let foreign_master = save_master_outline(SaveMasterOutlineInput {
+            project_id: fixture.project_b.clone(),
+            title: "Master B".to_string(),
+            content: "Master B".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .unwrap();
+        let error = save_volume_outline(SaveVolumeOutlineInput {
+            project_id: fixture.project_a.clone(),
+            master_outline_id: Some(foreign_master.id),
+            volume_id: None,
+            volume_index: Some(1),
+            title: "Volume".to_string(),
+            content: "Volume content".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .expect_err("foreign master outline must be rejected");
+        assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+        assert_eq!(
+            count_rows(
+                "SELECT COUNT(*) FROM volume_outlines WHERE project_id = ?1",
+                &fixture.project_a
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn master_outline_rejects_deleted_project_and_versions_stay_monotonic() {
+        let fixture = seed_scope_fixture();
+        let error = save_master_outline(SaveMasterOutlineInput {
+            project_id: fixture.deleted_project.clone(),
+            title: "Master".to_string(),
+            content: "Master".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(false),
+        })
+        .expect_err("deleted project must be rejected");
+        assert!(error.starts_with(OUTLINE_SCOPE_MISMATCH), "{error}");
+
+        let first = save_master_outline(SaveMasterOutlineInput {
+            project_id: fixture.project_a.clone(),
+            title: "Master v1".to_string(),
+            content: "v1".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .unwrap();
+        // 没有激活版本时，非新版本保存也不能复用已存在的版本号。
+        let second = save_master_outline(SaveMasterOutlineInput {
+            project_id: fixture.project_a.clone(),
+            title: "Master v2".to_string(),
+            content: "v2".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(false),
+        })
+        .unwrap();
+        assert_eq!(first.version, 1);
+        assert_eq!(second.version, 2);
+        assert_ne!(first.id, second.id);
     }
 }
 

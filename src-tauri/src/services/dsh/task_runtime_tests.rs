@@ -12,6 +12,7 @@ fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput 
         expected_artifact_type: None,
         required_read_tools: Vec::new(),
         book_word_goal: None,
+        chapter_word_range: None,
         model_snapshot: json!({
             "providerId": provider,
             "modelId": model,
@@ -445,6 +446,7 @@ fn greeting_turn_prompt_forbids_empty_generate_chapter() {
         expected_artifact_type: None,
         required_read_tools: Vec::new(),
         book_word_goal: None,
+        chapter_word_range: None,
         model_snapshot: json!({}),
         request_policy: TaskRequestPolicyInput {
             max_requests_per_minute: 1,
@@ -468,6 +470,121 @@ fn greeting_turn_prompt_forbids_empty_generate_chapter() {
     for tool in CANDIDATE_TOOLS.split(',') {
         assert!(!WORKBENCH_SYSTEM_PROMPT.contains(tool));
     }
+}
+
+fn chapter_write_input() -> StartTaskTurnInput {
+    let mut input = api_input(
+        OPENAI_COMPATIBLE_PROVIDER,
+        "gpt-5.6-luna",
+        "http://127.0.0.1:12074/v1/",
+    );
+    input.goal = "写第一章".to_string();
+    input.task_kind = "chapter_write".to_string();
+    input.expected_tool = Some("generate_chapter".to_string());
+    input.expected_artifact_type = Some("chapter_text".to_string());
+    input.required_read_tools = vec![
+        "novel.read_context".to_string(),
+        "chapter.read_outline".to_string(),
+        "get_character_states".to_string(),
+        "search_memory".to_string(),
+    ];
+    input.chapter_word_range = Some(ChapterWordRangeInput {
+        target: 3000,
+        minimum: 2400,
+        maximum: 3450,
+    });
+    input
+}
+
+#[test]
+fn chapter_write_turn_binds_one_candidate_tool_and_narrows_the_allowlist() {
+    let input = chapter_write_input();
+    validate_turn_contract(&input).expect("valid chapter_write contract");
+    assert_eq!(turn_allowed_tools(&input), CHAPTER_WRITE_ALLOWED_TOOLS);
+    for tool in CANDIDATE_TOOLS
+        .split(',')
+        .filter(|tool| *tool != "generate_chapter")
+    {
+        assert!(
+            !CHAPTER_WRITE_ALLOWED_TOOLS
+                .split(',')
+                .any(|allowed| allowed == tool),
+            "{tool} must not leak into the writing allowlist"
+        );
+    }
+    assert!(!is_canonical_only_turn(&input));
+    let prompt = workbench_turn_prompt(&input);
+    assert!(prompt.contains("唯一候选工具：generate_chapter"));
+    assert!(prompt.contains("预期产物：chapter_text"));
+    assert!(prompt.contains("完整写出本章正文"));
+    assert!(prompt.contains("目标 3000 字"));
+    assert!(prompt.contains("2400～3450 字"));
+
+    let mut polish = chapter_write_input();
+    polish.task_kind = "chapter_polish".to_string();
+    polish.expected_tool = Some("polish_chapter".to_string());
+    validate_turn_contract(&polish).expect("valid chapter_polish contract");
+    assert_eq!(turn_allowed_tools(&polish), CHAPTER_POLISH_ALLOWED_TOOLS);
+    assert!(workbench_turn_prompt(&polish).contains("整体润色"));
+}
+
+#[test]
+fn chapter_write_contract_rejects_missing_chapter_wrong_tool_and_bad_range() {
+    let mut no_chapter = chapter_write_input();
+    no_chapter.chapter_id = None;
+    assert!(validate_turn_contract(&no_chapter)
+        .unwrap_err()
+        .contains("必须绑定章节"));
+
+    let mut wrong_tool = chapter_write_input();
+    wrong_tool.expected_tool = Some("generate_outline".to_string());
+    assert!(validate_turn_contract(&wrong_tool)
+        .unwrap_err()
+        .contains("chapter_write 必须绑定 generate_chapter -> chapter_text"));
+
+    let mut inverted = chapter_write_input();
+    inverted.chapter_word_range = Some(ChapterWordRangeInput {
+        target: 3000,
+        minimum: 3500,
+        maximum: 3450,
+    });
+    assert!(validate_turn_contract(&inverted)
+        .unwrap_err()
+        .contains("章节字数区间非法"));
+
+    let mut range_on_read = api_input(
+        OPENAI_COMPATIBLE_PROVIDER,
+        "gpt-5.6-luna",
+        "http://127.0.0.1:12074/v1/",
+    );
+    range_on_read.chapter_word_range = Some(ChapterWordRangeInput {
+        target: 10,
+        minimum: 5,
+        maximum: 20,
+    });
+    assert!(validate_turn_contract(&range_on_read)
+        .unwrap_err()
+        .contains("只有章节写作任务可以携带字数区间"));
+}
+
+#[test]
+fn chapter_candidate_length_is_enforced_only_for_writing_turns_with_a_range() {
+    let input = chapter_write_input();
+    let short = "短".repeat(2399);
+    let error = validate_chapter_candidate_length(&input, &short).unwrap_err();
+    assert_eq!(error.code, "DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED");
+    let within = "字".repeat(2400);
+    validate_chapter_candidate_length(&input, &within).expect("lower bound is inclusive");
+    let long = "字".repeat(3451);
+    assert!(validate_chapter_candidate_length(&input, &long).is_err());
+
+    let mut unbounded = chapter_write_input();
+    unbounded.chapter_word_range = None;
+    validate_chapter_candidate_length(&unbounded, &short).expect("no range, no rejection");
+
+    let mut summary = chapter_write_input();
+    summary.task_kind = "chapter_summary".to_string();
+    validate_chapter_candidate_length(&summary, &short).expect("other kinds ignore the range");
 }
 
 #[test]
@@ -859,7 +976,7 @@ fn chapter_summary_recovery_is_exact_allowlisted_and_summary_only() {
 #[test]
 fn chapter_summary_recovery_prompt_repeats_reads_in_a_later_step() {
     let input = chapter_summary_input();
-    let ordinary = workbench_turn_prompt_for_attempt(&input, 0);
+    let ordinary = workbench_turn_prompt_for_attempt(&input, 0, 0);
     assert!(!ordinary.contains("协议自动恢复"));
     assert!(ordinary.contains(
             "必需读取：novel.read_context -> chapter.read_outline -> get_character_states -> search_memory"
@@ -867,13 +984,60 @@ fn chapter_summary_recovery_prompt_repeats_reads_in_a_later_step() {
     assert!(ordinary.contains("第一阶段在同一模型响应中并行调用全部必需读取"));
     assert!(ordinary.contains("第二阶段必须调用唯一候选工具"));
 
-    let recovery = workbench_turn_prompt_for_attempt(&input, 1);
+    let recovery = workbench_turn_prompt_for_attempt(&input, 1, 1);
     assert!(recovery.contains("第 1/2 次有限重试"));
     assert!(recovery.contains("上一 Run 已保留为失败事实"));
     assert!(recovery.contains("没有创建候选 Artifact"));
     assert!(recovery.contains("重新调用本轮全部必需读取工具"));
     assert!(recovery.contains("等待全部 Tool Result 返回后"));
     assert!(recovery.contains("第二阶段只调用且必须调用唯一候选工具"));
+    // Automatic protocol recovery already demands fresh reads; the user-retry notice stays out.
+    assert!(!recovery.contains("用户重试"));
+}
+
+#[test]
+fn user_retry_prompt_demands_fresh_required_reads_in_this_run() {
+    let input = chapter_write_input();
+    let first = workbench_turn_prompt_for_attempt(&input, 0, 0);
+    assert!(!first.contains("用户重试"));
+
+    let retry = workbench_turn_prompt_for_attempt(&input, 0, 2);
+    assert!(retry.contains("用户重试：同一目标此前已有 2 次失败或中断的运行"));
+    assert!(retry.contains("宿主只承认本回合内完成的读取"));
+    assert!(retry.contains("重新并行调用本轮全部必需读取工具"));
+    assert!(retry.contains("禁止沿用此前读取结果直接调用候选工具"));
+    assert!(!retry.contains("协议自动恢复"));
+}
+
+#[test]
+fn previous_terminal_run_count_only_counts_failed_or_cancelled_runs_of_the_same_turn() {
+    let input = chapter_summary_input();
+    let connection = chapter_summary_recovery_connection();
+    for (run_id, turn_id, status) in [
+        ("run-a", input.turn_id.as_str(), "failed"),
+        ("run-b", input.turn_id.as_str(), "cancelled"),
+        ("run-c", input.turn_id.as_str(), "completed"),
+        ("run-d", "another-turn", "failed"),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO task_runs
+                     (run_id,conversation_id,turn_id,status,error,model_snapshot_json,created_at)
+                     VALUES (?1,?2,?3,?4,NULL,'{}','2026-09-08T00:00:01Z')",
+                rusqlite::params![run_id, input.conversation_id, turn_id, status],
+            )
+            .expect("seed run");
+    }
+    assert_eq!(
+        previous_terminal_run_count(&connection, &input.conversation_id, &input.turn_id)
+            .expect("count"),
+        2
+    );
+    assert_eq!(
+        previous_terminal_run_count(&connection, "other-conversation", &input.turn_id)
+            .expect("count"),
+        0
+    );
 }
 
 #[test]

@@ -40,17 +40,10 @@ function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
 
   return (
     <div className="detail-card">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="detail-card-header">
+        <div className="detail-card-title">
           <Globe2 aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>世界背景</span>
+          <span>世界背景</span>
         </div>
         {!editing && (
           <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
@@ -60,45 +53,36 @@ function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
         )}
       </div>
 
-      <div className="text-sm text-muted" style={{ marginBottom: 8 }}>
+      <div className="text-sm text-muted detail-gap-bottom">
         这里只需要输入大致世界背景，不要求一次性填写完整世界观。后续 AI
         会根据这些内容辅助整理结构化设定。
       </div>
 
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="detail-form detail-form--tight">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="form-input"
+            className="form-input detail-fill"
             placeholder="设定标题"
-            style={{ width: '100%' }}
           />
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            className="form-textarea"
+            className="form-textarea detail-textarea detail-textarea--xl"
             placeholder="描述这个世界的背景、时代、地理、社会结构等..."
-            style={{
-              width: '100%',
-              height: 200,
-              resize: 'vertical',
-              fontSize: 14,
-              lineHeight: 1.8,
-            }}
           />
           {message && (
             <div
-              style={{
-                fontSize: 13,
-                color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)',
-              }}
+              className={`detail-save-status detail-save-status--inline${
+                message === '保存成功' ? ' is-ok' : ''
+              }`}
             >
               {message}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="detail-form-actions">
             <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>
               取消
             </button>
@@ -117,24 +101,15 @@ function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
       ) : (
         <div>
           {content ? (
-            <div
-              style={{
-                fontSize: 14,
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.8,
-                whiteSpace: 'pre-wrap',
-              }}
-            >
+            <div className="detail-fact-text detail-fact-text--pre">
               {content.slice(0, 300)}
               {content.length > 300 ? '...' : ''}
             </div>
           ) : (
-            <div style={{ color: 'var(--color-text-muted)', fontSize: 14, fontStyle: 'italic' }}>
-              尚未填写世界背景，点击编辑开始填写
-            </div>
+            <div className="detail-empty-hint">尚未填写世界背景，点击编辑开始填写</div>
           )}
           {activeSetting && (
-            <div className="text-sm text-muted" style={{ marginTop: 8 }}>
+            <div className="text-sm text-muted detail-gap-top">
               最后更新：{formatDate(activeSetting.updatedAt)}
             </div>
           )}

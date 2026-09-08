@@ -42,7 +42,11 @@ pub struct TaskRunRecord {
     pub updated_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_id: Option<String>,
 }
+
+const TASK_RUN_COLUMNS: &str = "run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at, chapter_id";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,6 +204,10 @@ pub struct CreateRunInput {
     pub turn_id: String,
     pub model_snapshot: Value,
     pub worker_id: String,
+    /// Frozen chapter target of this run. Persisted so a failed run can be retried
+    /// against the same chapter even when it never reached a tool call or artifact.
+    #[serde(default)]
+    pub chapter_id: Option<String>,
     pub created_at: String,
 }
 
@@ -584,6 +592,7 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRunRecord> {
         updated_at: row.get(8)?,
         started_at: row.get(9)?,
         finished_at: row.get(10)?,
+        chapter_id: row.get(11)?,
     })
 }
 
@@ -690,7 +699,14 @@ pub fn list_conversations(
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
-    list_conversations_page(connection, novel_id, if include_archived { "all" } else { "active" }, "", limit, None)
+    list_conversations_page(
+        connection,
+        novel_id,
+        if include_archived { "all" } else { "active" },
+        "",
+        limit,
+        None,
+    )
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -710,12 +726,18 @@ pub fn list_conversations_page(
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
     if !["active", "archived", "all"].contains(&archive)
         || query.trim().chars().count() > 200
-        || cursor.is_some_and(|value| value.updated_at.is_empty() || value.conversation_id.is_empty())
+        || cursor
+            .is_some_and(|value| value.updated_at.is_empty() || value.conversation_id.is_empty())
     {
-        return Err(AppError::new("CONVERSATION_INPUT_INVALID", "任务搜索或分页参数无效", false));
+        return Err(AppError::new(
+            "CONVERSATION_INPUT_INVALID",
+            "任务搜索或分页参数无效",
+            false,
+        ));
     }
-    let mut statement = connection.prepare(
-        "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
+    let mut statement = connection
+        .prepare(
+            "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
                 c.created_at, c.updated_at, c.archived_at
          FROM task_conversations c JOIN novels n ON n.id=c.novel_id
          WHERE (?1 IS NULL OR c.novel_id=?1)
@@ -723,11 +745,21 @@ pub fn list_conversations_page(
                 OR (?2='archived' AND (c.archived_at IS NOT NULL OR c.status='archived')))
            AND (?3='' OR instr(lower(c.title || ' ' || n.title), lower(?3))>0)
            AND (?4 IS NULL OR c.updated_at<?4 OR (c.updated_at=?4 AND c.conversation_id<?5))
-         ORDER BY c.updated_at DESC, c.conversation_id DESC LIMIT ?6"
-    ).map_err(AppError::database)?;
-    let rows = statement.query_map(params![novel_id, archive, query.trim(),
-        cursor.map(|value| value.updated_at.as_str()),
-        cursor.map(|value| value.conversation_id.as_str()), limit.clamp(1, 501)], conversation_from_row)
+         ORDER BY c.updated_at DESC, c.conversation_id DESC LIMIT ?6",
+        )
+        .map_err(AppError::database)?;
+    let rows = statement
+        .query_map(
+            params![
+                novel_id,
+                archive,
+                query.trim(),
+                cursor.map(|value| value.updated_at.as_str()),
+                cursor.map(|value| value.conversation_id.as_str()),
+                limit.clamp(1, 501)
+            ],
+            conversation_from_row,
+        )
         .map_err(AppError::database)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(AppError::database)
@@ -1120,8 +1152,39 @@ pub fn create_run(
             false,
         ));
     }
+    let chapter_id = input
+        .chapter_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(chapter_id) = chapter_id.as_deref() {
+        // The frozen chapter must be a live chapter of the conversation's novel; a run
+        // bound to another book (or a deleted chapter) must not exist at all.
+        let scoped_chapter: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM chapters AS chapter
+                    JOIN task_conversations AS conversation
+                      ON conversation.novel_id = chapter.novel_id
+                    WHERE chapter.id=?1
+                      AND conversation.conversation_id=?2
+                      AND chapter.deleted_at IS NULL
+                )",
+                params![chapter_id, input.conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !scoped_chapter {
+            return Err(AppError::new(
+                "TASK_RUN_CHAPTER_SCOPE_MISMATCH",
+                "任务运行绑定的章节不属于当前作品或已删除",
+                false,
+            ));
+        }
+    }
     transaction
-        .execute("INSERT INTO task_runs (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?6)", params![input.run_id, input.conversation_id, input.turn_id, snapshot, input.worker_id, input.created_at])
+        .execute("INSERT INTO task_runs (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at, chapter_id) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?6, ?7)", params![input.run_id, input.conversation_id, input.turn_id, snapshot, input.worker_id, input.created_at, chapter_id])
         .map_err(AppError::database)?;
     transaction
         .execute("UPDATE task_conversations SET status='running', updated_at=?2 WHERE conversation_id=?1", params![input.conversation_id, input.created_at])
@@ -1133,7 +1196,14 @@ pub fn create_run(
 }
 
 pub fn get_run(connection: &Connection, id: &str) -> Result<Option<TaskRunRecord>, AppError> {
-    connection.query_row("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE run_id=?1", params![id], run_from_row).optional().map_err(AppError::database)
+    connection
+        .query_row(
+            &format!("SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE run_id=?1"),
+            params![id],
+            run_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)
 }
 
 pub fn get_turn_run_projection(
@@ -1155,13 +1225,12 @@ pub fn get_turn_run_projection(
         return Ok(None);
     };
     let runs = connection
-        .prepare(
-            "SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id,
-                    error, created_at, updated_at, started_at, finished_at
+        .prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS}
              FROM task_runs
              WHERE conversation_id=?1 AND turn_id=?2
-             ORDER BY created_at, rowid",
-        )
+             ORDER BY created_at, rowid"
+        ))
         .map_err(AppError::database)?
         .query_map(params![conversation_id, turn_id], run_from_row)
         .map_err(AppError::database)?
@@ -2342,7 +2411,7 @@ pub fn get_bundle(
         None => return Ok(None),
     };
     let mut turns = connection.prepare("SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at FROM conversation_turns WHERE conversation_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![id], turn_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-    let runs = connection.prepare("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE conversation_id=?1 ORDER BY created_at, rowid").map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+    let runs = connection.prepare(&format!("SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE conversation_id=?1 ORDER BY created_at, rowid")).map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     let mut tool_events = Vec::new();
     for run in &runs {
         let events = connection.prepare("SELECT event_id, run_id, sequence, tool_name, arguments_summary_json, status, duration_ms, error, result_json, created_at, finished_at, call_id FROM tool_call_events WHERE run_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![run.run_id], event_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
@@ -2461,6 +2530,7 @@ mod tests {
                 turn_id: first_turn.turn_id,
                 model_snapshot: hydrated,
                 worker_id: "legacy-worker-1".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
@@ -2498,6 +2568,7 @@ mod tests {
                 turn_id: second_turn.turn_id,
                 model_snapshot: different_endpoint,
                 worker_id: "legacy-worker-2".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:05Z".to_string(),
             },
         )
@@ -2577,6 +2648,136 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("conversation status")
+    }
+
+    #[test]
+    fn create_run_persists_the_frozen_chapter_and_rejects_foreign_or_deleted_chapters() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "INSERT INTO novels (id, title, outline, created_at, updated_at)
+                 VALUES ('novel-other', '其他小说', '', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                [],
+            )
+            .expect("other novel");
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at, deleted_at)
+                 VALUES ('chapter-owned', 'novel-conversation-test', '本书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL),
+                        ('chapter-deleted', 'novel-conversation-test', '已删章节', 2, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', '2026-08-21T00:00:00Z'),
+                        ('chapter-other', 'novel-other', '他书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL)",
+                [],
+            )
+            .expect("chapters");
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-chapter-binding".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "章节绑定".to_string(),
+                default_model: None,
+                created_at: "2026-08-20T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        let run_input = |run_id: &str, turn_id: &str, chapter_id: Option<&str>| CreateRunInput {
+            run_id: run_id.to_string(),
+            conversation_id: "conversation-chapter-binding".to_string(),
+            turn_id: turn_id.to_string(),
+            model_snapshot: json!({"providerId":"mock","modelId":"Mock","runtimeMode":"mock"}),
+            worker_id: "worker-binding".to_string(),
+            chapter_id: chapter_id.map(str::to_string),
+            created_at: "2026-08-20T00:00:01Z".to_string(),
+        };
+        let append_user_turn = |connection: &mut Connection, turn_id: &str| {
+            append_turn(
+                connection,
+                AppendTurnInput {
+                    turn_id: turn_id.to_string(),
+                    conversation_id: "conversation-chapter-binding".to_string(),
+                    role: "user".to_string(),
+                    content: "生成本章正文".to_string(),
+                    created_at: "2026-08-20T00:00:00Z".to_string(),
+                },
+            )
+            .expect("user turn")
+        };
+
+        append_user_turn(&mut connection, "turn-binding-1");
+        let foreign = create_run(
+            &mut connection,
+            run_input("run-foreign", "turn-binding-1", Some("chapter-other")),
+        )
+        .expect_err("another book's chapter must be rejected");
+        assert_eq!(foreign.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let deleted = create_run(
+            &mut connection,
+            run_input("run-deleted", "turn-binding-1", Some("chapter-deleted")),
+        )
+        .expect_err("a deleted chapter must be rejected");
+        assert_eq!(deleted.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let missing = create_run(
+            &mut connection,
+            run_input("run-missing", "turn-binding-1", Some("chapter-missing")),
+        )
+        .expect_err("an unknown chapter must be rejected");
+        assert_eq!(missing.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let run_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM task_runs WHERE conversation_id='conversation-chapter-binding'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(run_count, 0, "rejected runs must not exist");
+
+        let bound = create_run(
+            &mut connection,
+            run_input("run-bound", "turn-binding-1", Some("  chapter-owned ")),
+        )
+        .expect("owned chapter");
+        assert_eq!(bound.chapter_id.as_deref(), Some("chapter-owned"));
+        let bundle = get_bundle(&connection, "conversation-chapter-binding")
+            .expect("bundle")
+            .expect("conversation exists");
+        assert_eq!(bundle.runs.len(), 1);
+        assert_eq!(bundle.runs[0].chapter_id.as_deref(), Some("chapter-owned"));
+        let serialized = serde_json::to_value(&bundle.runs[0]).expect("serialize run");
+        assert_eq!(
+            serialized.get("chapterId").and_then(Value::as_str),
+            Some("chapter-owned")
+        );
+        assert!(
+            connection
+                .execute(
+                    "UPDATE task_runs SET chapter_id='chapter-other' WHERE run_id='run-bound'",
+                    [],
+                )
+                .is_err(),
+            "the frozen chapter is part of the immutable run identity"
+        );
+        update_run(
+            &mut connection,
+            UpdateRunInput {
+                run_id: "run-bound".to_string(),
+                status: "failed".to_string(),
+                error: Some("上游失败".to_string()),
+                updated_at: "2026-08-20T00:00:02Z".to_string(),
+                started_at: None,
+                finished_at: Some("2026-08-20T00:00:02Z".to_string()),
+            },
+        )
+        .expect("fail run");
+
+        append_user_turn(&mut connection, "turn-binding-2");
+        let unbound = create_run(
+            &mut connection,
+            run_input("run-unbound", "turn-binding-2", Some("   ")),
+        )
+        .expect("blank chapter id means no binding");
+        assert_eq!(unbound.chapter_id, None);
+        let serialized = serde_json::to_value(&unbound).expect("serialize run");
+        assert!(serialized.get("chapterId").is_none());
     }
 
     #[test]
@@ -2750,6 +2951,7 @@ mod tests {
                 turn_id: turn.turn_id.clone(),
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-model-mismatch".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
@@ -2763,6 +2965,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: conversation.default_model.clone().expect("locked model"),
                 worker_id: "worker-1".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
@@ -2880,6 +3083,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-status".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-28T00:00:02Z".to_string(),
             },
         )
@@ -2957,6 +3161,7 @@ mod tests {
                     turn_id,
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: "worker-status".to_string(),
+                    chapter_id: None,
                     created_at: format!("2026-08-28T00:02:0{}Z", suffix.len() % 10),
                 },
             )
@@ -2998,6 +3203,7 @@ mod tests {
                 turn_id: recovery_turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-status".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-28T00:04:01Z".to_string(),
             },
         )
@@ -3241,6 +3447,7 @@ mod tests {
                     turn_id: turn.turn_id.clone(),
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: "worker-run-order".to_string(),
+                    chapter_id: None,
                     created_at: "2026-08-28T02:00:02.000Z".to_string(),
                 },
             )
@@ -3334,6 +3541,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-recovery".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:01:02Z".to_string(),
             },
         )
@@ -3442,6 +3650,7 @@ mod tests {
                     turn_id: turn_id.to_string(),
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: format!("worker-{run_id}"),
+                    chapter_id: None,
                     created_at: "2026-08-20T01:00:02Z".to_string(),
                 },
             )
@@ -3542,6 +3751,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-decision".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-21T00:00:02Z".to_string(),
             },
         )
@@ -4271,18 +4481,31 @@ mod tests {
     fn conversation_directory_filters_before_limit_and_pages_tied_timestamps() {
         let mut connection = connection();
         for index in 0..251 {
-            create_conversation(&mut connection, CreateConversationInput {
-                conversation_id: format!("page-{index:04}"),
-                novel_id: "novel-conversation-test".to_string(),
-                title: if index == 0 { "旧的待处理任务 100%".to_string() } else { format!("归档任务 {index}") },
-                default_model: None,
-                created_at: "2026-09-05T00:00:00Z".to_string(),
-            }).expect("create directory fixture");
+            create_conversation(
+                &mut connection,
+                CreateConversationInput {
+                    conversation_id: format!("page-{index:04}"),
+                    novel_id: "novel-conversation-test".to_string(),
+                    title: if index == 0 {
+                        "旧的待处理任务 100%".to_string()
+                    } else {
+                        format!("归档任务 {index}")
+                    },
+                    default_model: None,
+                    created_at: "2026-09-05T00:00:00Z".to_string(),
+                },
+            )
+            .expect("create directory fixture");
             if index > 0 {
-                set_conversation_archived(&mut connection, SetConversationArchivedInput {
-                    conversation_id: format!("page-{index:04}"), archived: true,
-                    updated_at: "2026-09-05T00:00:00Z".to_string(),
-                }).expect("archive fixture");
+                set_conversation_archived(
+                    &mut connection,
+                    SetConversationArchivedInput {
+                        conversation_id: format!("page-{index:04}"),
+                        archived: true,
+                        updated_at: "2026-09-05T00:00:00Z".to_string(),
+                    },
+                )
+                .expect("archive fixture");
             }
         }
         let active = list_conversations_page(&connection, None, "active", "", 100, None).unwrap();
@@ -4294,15 +4517,30 @@ mod tests {
         let mut cursor = None;
         let mut ids = std::collections::HashSet::new();
         loop {
-            let page = list_conversations_page(&connection, None, "all", "", 100, cursor.as_ref()).unwrap();
-            for row in &page { assert!(ids.insert(row.conversation_id.clone())); }
-            let Some(last) = page.last() else { break; };
-            cursor = Some(ConversationListCursor { updated_at: last.updated_at.clone(), conversation_id: last.conversation_id.clone() });
+            let page = list_conversations_page(&connection, None, "all", "", 100, cursor.as_ref())
+                .unwrap();
+            for row in &page {
+                assert!(ids.insert(row.conversation_id.clone()));
+            }
+            let Some(last) = page.last() else {
+                break;
+            };
+            cursor = Some(ConversationListCursor {
+                updated_at: last.updated_at.clone(),
+                conversation_id: last.conversation_id.clone(),
+            });
         }
         assert_eq!(ids.len(), 251);
-        assert!(list_conversations_page(&connection, Some("other-novel"), "all", "", 100, None).unwrap().is_empty());
+        assert!(
+            list_conversations_page(&connection, Some("other-novel"), "all", "", 100, None)
+                .unwrap()
+                .is_empty()
+        );
         assert!(list_conversations_page(&connection, None, "unknown", "", 100, None).is_err());
-        assert!(list_conversations_page(&connection, None, "all", &"字".repeat(201), 100, None).is_err());
+        assert!(
+            list_conversations_page(&connection, None, "all", &"字".repeat(201), 100, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -4384,6 +4622,7 @@ mod tests {
                 turn_id: "turn-management".to_string(),
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-management".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-24T00:00:05Z".to_string(),
             },
         )

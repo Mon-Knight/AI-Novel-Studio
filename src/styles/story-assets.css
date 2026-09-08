@@ -62,8 +62,8 @@
 
 .story-assets-page-tabs button.active,
 .story-assets-tabs button.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-text-primary);
 }
 
 .story-assets-card,
@@ -71,8 +71,8 @@
   margin-bottom: 14px;
   padding: 16px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg-sidebar);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
 }
 
 .story-assets-card > h3 {

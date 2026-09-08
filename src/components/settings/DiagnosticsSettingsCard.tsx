@@ -108,21 +108,21 @@ function DiagnosticsSettingsCard() {
   }, []);
 
   return (
-    <section className="detail-card" style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+    <section className="detail-card settings-card-block">
+      <div className="settings-card-header">
         <Stethoscope aria-hidden="true" size={18} strokeWidth={1.8} />
-        <strong>诊断与崩溃报告</strong>
+        <strong className="settings-card-title">诊断与崩溃报告</strong>
       </div>
-      <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+      <p className="settings-card-paragraph">
         前端未处理错误与原生进程崩溃会在本机保存脱敏记录，不包含正文、Prompt、API Key、 Provider
         原始响应、panic 内容或堆栈。当前前端 {reportCount} 条，原生 {nativeReportCount} 条。
       </p>
-      <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+      <p className="settings-card-paragraph">
         AI 延迟样本 {performanceSummary.sampleCount} 条；P50 {performanceSummary.p50DurationMs} ms，
         P95 {performanceSummary.p95DurationMs} ms，失败 {performanceSummary.failedCount} 次， 取消{' '}
         {performanceSummary.cancelledCount} 次。
       </p>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="resource-row resource-row--wrap">
         <button className="btn btn-secondary btn-sm" type="button" onClick={handleExport}>
           导出诊断报告
         </button>
@@ -135,7 +135,7 @@ function DiagnosticsSettingsCard() {
           清空本地报告
         </button>
       </div>
-      {message && <div style={{ marginTop: 8, fontSize: 12 }}>{message}</div>}
+      {message && <div className="settings-card-note">{message}</div>}
     </section>
   );
 }

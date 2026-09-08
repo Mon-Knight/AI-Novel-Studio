@@ -595,6 +595,13 @@ textarea.input,
   border-radius: var(--radius-sm);
 }
 
+.btn-xs {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
 .btn-lg {
   height: 40px;
   padding: 0 var(--spacing-xl);
