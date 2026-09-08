@@ -13,12 +13,15 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { npmCommand } from './verification-process.mjs';
 
-export function ensureDist(root = process.cwd(), run = spawnSync) {
+export function ensureDist(root = process.cwd(), run = spawnSync, command = npmCommand) {
   const marker = path.join(root, 'dist', 'index.html');
   if (existsSync(marker)) return { built: false, marker };
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = run(npm, ['run', 'build'], { cwd: root, stdio: 'inherit', shell: false });
+  // Node 22+ on Windows refuses to spawn `npm.cmd` without a shell (EINVAL); run the npm
+  // CLI through the current node binary exactly like the selector does.
+  const { executable, args } = command('build');
+  const result = run(executable, args, { cwd: root, stdio: 'inherit', shell: false });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`frontend build failed while preparing dist/ (exit ${String(result.status)})`);
