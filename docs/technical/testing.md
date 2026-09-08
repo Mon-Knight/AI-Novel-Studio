@@ -94,7 +94,7 @@ npm run test:bundle-size
 ```
 
 - `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与显式服务测试，以及性能基准；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
-- `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。覆盖率在 `test:all` 首次执行时采集：`test:vitest` 使用 `vitest.aggregate.config.ts`，在同一轮 Vitest 通道中同时把关键组件覆盖率写入 `coverage/critical-components`；随后 `test:coverage:core` 只生成核心集合报告，`scripts/check-critical-component-coverage.mjs` 只读取该报告检查每组 ≥ 60% 的阈值，不再次执行相同组件测试。独立的 `test:coverage:components` 仍可单独运行。
+- `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。全量与核心集合覆盖率在 `test:all` 首次执行时由 C8 采集，`test:coverage:core` 只读取同一份 `coverage/tmp` 生成核心集合报告；关键组件门禁 `test:coverage:components` 随后用 `vitest.critical-components.config.ts` 单独执行 22 个关键组件文件并由 `scripts/check-critical-component-coverage.mjs` 检查每组 ≥ 60%。`test:vitest` 本身不启用 Vitest 覆盖率提供者——它会接管子进程的 `NODE_V8_COVERAGE`，导致 C8 丢失 Vitest 用例对全量与核心集合的贡献（Linux CI 上核心集合曾因此从 87% 跌到 78%）。
 - `test:component-size` 扫描全部生产 `.tsx`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。
 - `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。
 - `test:bundle-size` 读取 Vite manifest，校验唯一入口、全部 emitted JS、稳定 vendor chunk 与安全路径，再按真实文件字节和 gzip-9 执行双预算。当前入口门槛为 400 KiB / 135 KiB gzip-9，任一 chunk 为 450 KiB / 160 KiB gzip-9；缺失或歧义产物同样返回非零。
