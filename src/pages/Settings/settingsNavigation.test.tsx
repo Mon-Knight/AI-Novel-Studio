@@ -136,6 +136,10 @@ test('SettingsPage keeps session API keys fixed to their exact model identity', 
   await act(async () => {
     fireEvent.click(mockMode);
   });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '自定义设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开模型参数' }));
+  });
 
   const baseUrl = screen.getByPlaceholderText(/api\.deepseek\.com\/v1/) as HTMLInputElement;
   const apiKey = screen.getByPlaceholderText('sk-...') as HTMLInputElement;
@@ -520,4 +524,111 @@ test('SettingsPage discards a cancelled first model draft before a general save'
     assert.equal(Object.prototype.hasOwnProperty.call(stored, 'apiKey'), false);
     assert.match(screen.getByTestId('ai-saved-model-list').textContent ?? '', /还没有保存/);
   });
+});
+
+test('SettingsPage groups API models that share a source endpoint onto one card', async () => {
+  localStorage.setItem(
+    AI_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      runtimeMode: 'api',
+      mockMode: false,
+      provider: 'openai_compatible',
+      baseUrl: 'https://shared.invalid/v1',
+      modelName: 'model-a',
+      savedApiModels: [
+        {
+          id: 'shared-a',
+          label: 'model-a',
+          provider: 'openai_compatible',
+          baseUrl: 'https://shared.invalid/v1',
+          modelName: 'model-a',
+          maxTokens: 8000,
+          timeoutSeconds: 120,
+        },
+        {
+          id: 'shared-b',
+          label: 'model-b',
+          provider: 'openai_compatible',
+          baseUrl: 'https://shared.invalid/v1',
+          modelName: 'model-b',
+          maxTokens: 8000,
+          timeoutSeconds: 120,
+        },
+        {
+          id: 'other-c',
+          label: 'Other',
+          provider: 'openai_compatible',
+          baseUrl: 'https://other.invalid/v1',
+          modelName: 'model-c',
+          maxTokens: 8000,
+          timeoutSeconds: 120,
+        },
+      ],
+      activeSavedApiModelId: 'shared-a',
+    }),
+  );
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+  });
+  await waitFor(() => {
+    const cards = screen.getAllByTestId('ai-saved-model-card');
+    assert.equal(cards.length, 2);
+    assert.ok(cards.some((card) => card.getAttribute('data-model-id') === 'shared-a'));
+    assert.ok(cards.some((card) => card.getAttribute('data-model-id') === 'other-c'));
+    assert.equal(
+      cards
+        .find((card) => card.getAttribute('data-model-id') === 'shared-a')
+        ?.getAttribute('data-active'),
+      'true',
+    );
+  });
+
+  assert.equal(screen.queryByTestId('ai-api-model-editor'), null);
+  const sharedCard = screen
+    .getAllByTestId('ai-saved-model-card')
+    .find((card) => card.getAttribute('data-model-id') === 'shared-a');
+  const otherCard = screen
+    .getAllByTestId('ai-saved-model-card')
+    .find((card) => card.getAttribute('data-model-id') === 'other-c');
+  assert.ok(sharedCard && otherCard);
+  await act(async () => {
+    fireEvent.click(sharedCard);
+  });
+  assert.equal(screen.queryByTestId('ai-api-model-editor'), null);
+  await act(async () => {
+    fireEvent.click(within(otherCard).getByRole('button', { name: '选中 Other' }));
+  });
+  await waitFor(() => {
+    assert.equal(otherCard.getAttribute('data-active'), 'true');
+    assert.equal(sharedCard.getAttribute('data-active'), 'false');
+  });
+  assert.equal(screen.queryByTestId('ai-api-model-editor'), null);
+
+  await act(async () => {
+    fireEvent.click(within(sharedCard).getByRole('button', { name: '编辑' }));
+  });
+  await waitFor(() => assert.ok(within(sharedCard).getByTestId('ai-api-model-editor')));
+  assert.equal(
+    within(sharedCard).getByRole('button', { name: '编辑' }).getAttribute('aria-expanded'),
+    'true',
+  );
+  assert.equal(
+    within(sharedCard).getByRole('button', { name: '自定义设置' }).getAttribute('aria-expanded'),
+    'false',
+  );
+  const modelToggles = within(sharedCard).getAllByRole('button', { name: '展开模型参数' });
+  assert.equal(modelToggles.length, 2);
+  assert.ok(modelToggles.every((button) => button.getAttribute('aria-expanded') === 'false'));
+
+  await act(async () => {
+    fireEvent.click(within(sharedCard).getByRole('button', { name: '编辑' }));
+  });
+  await waitFor(() => assert.equal(screen.queryByTestId('ai-api-model-editor'), null));
 });

@@ -2,8 +2,6 @@
  * AI Novel Studio - AI 类型定义（v1.0.6 增强版）
  */
 
-// ==================== AI 设置 ====================
-
 export type AiRuntimeMode = 'mock' | 'api';
 export type AiProvider = 'mock' | 'deepseek' | 'openai_compatible';
 export type CloudApiProvider = Exclude<AiProvider, 'mock'>;
@@ -14,8 +12,11 @@ export interface SavedApiModelProfile {
   provider: CloudApiProvider;
   baseUrl: string;
   modelName: string;
+  sourceId?: string;
+  sourceLabel?: string;
   temperature?: number;
   maxTokens?: number;
+  contextTokens?: number;
   timeoutSeconds?: number;
   inputPricePerMillionTokens?: number;
   outputPricePerMillionTokens?: number;

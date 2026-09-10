@@ -387,6 +387,7 @@ fn main() {
             ai::ai_chat_completion_stream,
             ai::check_local_chapter_model,
             ai::check_local_chapter_model_availability,
+            ai::list_cloud_models,
             ai::cancel_ai_request,
             runtime::get_e2e_diagnostics,
             runtime::get_e2e_novel_commit_state,
