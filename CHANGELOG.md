@@ -1,6 +1,40 @@
 # AI Novel Studio - CHANGELOG
 
-> 当前版本：v3.6.2。v3.6.0 保持为智能体创作平台与长篇小说记忆层的功能基线；v3.6.1 收口 SQLite 安全、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径。
+> 当前版本：v3.7.0。v3.6.0 保持为智能体创作平台与长篇小说记忆层的功能基线；v3.6.1 收口 SQLite 安全、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径；v3.7.0 开放 Writing SubAgent 与 ZCode 工作台。
+
+## Unreleased
+
+### 新增
+
+- **设置中 API 模型按来源分组**：全局 Cloud Provider 不再一张卡片对应一个模型，而是按来源（`sourceId`，缺省时为 Provider + 规范化 Base URL）折叠。点击「编辑」展开或收起：密钥（已配置可替换）、自定义设置（显示名称 / API 地址 / 协议）、模型目录（恢复默认、获取上游 `/models`、模型 ID + 显示名称，展开后可填上下文窗口与最大输出 Token）。点击卡片只选中该来源。桌面端经 Rust `list_cloud_models` 拉取，避免 WebView CORS；密钥仍只进会话/DPAPI，不写设置 JSON。同地址不同密钥用「添加来源」生成新的 `sourceId`。
+- **`beatTextValidator` 单元测试（测试盲点收口）**：`src/services/ai/orchestrator/beatTextValidator.ts`（1013 行、约 50 个导出符号）此前被 `chapterProseOrchestrator` / `proseGenerationPipeline` / `beatRepairService` 三个生产模块引用，却没有任何测试文件直接引用它，Beat 覆盖判定只有上层管线的间接覆盖。新增 `beatTextValidator.test.ts`（35 个用例）直接锁定纯逻辑边界：`meaningfulTerms` 的中文滑窗与去重、`semanticBeatClauses` 的四字下限、`actionStatusAt` 的 actual/prospective/negated 判定与句界不跨越、`statusSatisfies` 状态矩阵、`actionOccurrences` 的单字「进」入场与 `进行` 排除及情境化伪装识别、`requiredCompletedActions` 只要求末位计划动作并排除观察类族、`lexicalTerms` 的功能性二元组过滤、`trimNormalizedBoundaryOverlap` 的 12 字重叠阈值、`validateSceneRepetition` / `validateBeatNovelty` 的重复预算、`validateSceneText` 的九条拒收路径（含 Beat 规划句「≥12 字才判定原样输出」的边界）、`missingBeatClauses` / `beatCovered` / `externalRepairBeatCovered` 的覆盖与「计划动作须真正完成」差异，以及 `mergeSceneContinuation` / `pendingSceneBeats` / `validateSceneContinuity`。测试只读取现有导出，不改生产行为。
+- **组件行数门禁扩展到生产 `.ts`**：`check-component-size.mjs` 此前只扫描生产 `.tsx`，服务层不受约束（34 个生产 `.ts` 超过 500 行，最大 1834 行）。现在同时扫描 `.ts`：`.tsx` 保持 500 行硬上限；`.ts` 由 `LEGACY_TS_BASELINE` 冻结各自当前行数作为非回退预算，存量模块只能缩小不能增长，降到 500 行及以下时其豁免条目必须删除（预算只能单向收紧），新增 `.ts` 一律按 500 行硬上限失败关闭。脚本改为导出 `evaluate / countLines / isProductionSource` 纯函数，新增 `check-component-size.test.mjs`（9 个用例，含基线增长、缩小、失效与「已提交基线条目必须高于上限」自检）并登记到 `npm test`。当前门禁通过：618 个生产源文件、197 个 TSX、34 个冻结 TS 模块。
+- **固定 Rust 工具链**：新增 `rust-toolchain.toml` 钉定 `channel = "1.95.0"`（`profile = minimal`，`components = ["rustfmt"]`）。此前四个工作流一致使用 `rustup default stable`，本地与 CI 可能落到不同的 stable 快照上。1.95.0 正是本次固定时 `stable` 已解析到的版本（rustc hash `59807616e`），因此是可重现性修复而非工具链变更。它与 `src-tauri/Cargo.toml` 的 `rust-version = "1.89"` 是两回事：后者仍是声明的 MSRV 下限，已用 `cargo +1.89.0 check --locked` 复验通过。不新增 clippy 组件与显式 target，CI 既有的 `rustup target add` 保持不变。
+- **正式 GitHub Release 附带 NSIS `*-setup.exe`**：`tauri:build:release` 从 `--bundles msi,updater` 改为 `msi,nsis,updater`。签名自动更新通道仍只用 `.msi.zip`（已安装用户的更新 URL 不变）；release workflow 现在失败关闭要求当前版本的 `AI Novel Studio_<ver>_x64-setup.exe`、`.msi` 与 `.msi.zip.sig` 都存在，再按既有 `bundle/**` 通配上传。既有 `v3.6.2` tag 不会回填，下一份签名发布才会带上 setup.exe。
+
+### 修复
+
+- **API 来源卡片点击与默认折叠**：只有「编辑」打开或收起该来源设置表单；点击卡片只选中并高亮，不弹出表单。「自定义设置」与模型参数行默认收起，只在用户点击后再展开。
+- **浏览器规格 viewport 断言竞态**：`tests/browser/shared-dialog-layout.browser.spec.ts` 在补偿式 resize 之后立即同步断言 `innerWidth/innerHeight`，而 headless Chromium 异步应用该 resize（CI runner 上请求 820px 实测得到 677px）。改为 `browser.waitUntil` 轮询至 viewport 收敛（5s 超时并给出目标尺寸的失败信息），不改变任何布局断言或被测尺寸。
+
+### 文档
+
+- **本地 release EXE 刷新规则**：根 `AGENTS.md` 第 7.6 节要求任务可交付前更新 `src-tauri/target/release/AI Novel Studio.exe`（清除 `CARGO_TARGET_DIR` 后 `npm run dsh:assets` + `npx tauri build --bundles none`）。这不是发布授权、不提交 EXE；`docs/agent-workflow.md` 与 `.cursor/rules/update-release-exe.mdc` 同步。不另建 `agent.md`。
+- **migration 范围口径**：README 第 2 节的技术栈行仍写 `Migrations（001-036）`，实际已到 `038_task_runs_chapter_binding`，改为 `001-038`。同一份 README 其余段落与备份 schema 11（`BACKUP_SCHEMA_VERSION: u32 = 11`）经核对无误。`docs/audit/` 下带审计基准时间的历史快照保留原有 36 项表述，不回填当前版本。
+- **门禁口径同步**：`docs/technical/testing.md` 与 `.github/checklists/release.checklist.md` 中「`test:component-size` 只扫描生产 `.tsx`」的描述同步为 `.tsx` 硬上限 + `.ts` 冻结基线，并注明门禁自身由 `check-component-size.test.mjs` 覆盖。
+- **v3.7.0 文档口径与缺口分析**：新增 [`docs/feature-gap-analysis-v3.7.0.md`](docs/feature-gap-analysis-v3.7.0.md) 对照当前代码列出已关闭与仍开放项；纠正 README / 路线图 / 工作台 / Runtime / 用户指南中仍把 Writing SubAgent 写成后置、或把已修复入口写成 BROKEN 的当前句。历史审计只加校正头，不改写证据表。Canonical 事实块改为同时标明 `writing-subagent` 与 `deterministic-writer` 双路径；R4 live 仍 NOT VERIFIED。不升级应用版本、不宣称新功能。
+
+### 验证
+
+- `npx tsx --test src/services/ai/orchestrator/beatTextValidator.test.ts`（35 passed）
+- `node --experimental-strip-types --test scripts/quality/check-component-size.test.mjs`（9 passed）
+- `npm run test:component-size`、`npm run test:ownership`（202 existing / 66 discovered）、`npm run test:docs-sync`
+- `npm run verify:change`（`tests/browser/shared-dialog-layout.browser.spec.ts` → browser harness：`git diff --check`、Prettier、`test:e2e:browser` 8 个规格 64 用例全部通过）
+- `cargo +1.89.0 check --locked --manifest-path src-tauri/Cargo.toml`（MSRV 复验通过）、`cargo check --locked`（固定工具链复验）
+- `npx eslint`、`npx prettier --check`（本次全部改动文件）
+- 未执行：完整 `cargo test`、完整 `npm run test:all`、桌面 E2E、`tauri:build` / `tauri:build:release`（后者需要仓库 updater 私钥；本轮只改发布清单与验收，不在本地重打签名安装包）
+- 来源卡片：`npx tsx --test src/services/ai/savedApiSources.test.ts src/services/ai/cloudModelCatalog.test.ts src/services/ai/aiSettingsStore.test.ts src/services/ai/credentialStorageCopy.test.ts`（27 passed）；`src/pages/Settings/settingsNavigation.test.tsx`（6 passed，含同源两模型一张卡、点击卡片只选中、仅「编辑」打开/收起、自定义设置/模型参数默认收起）；`cargo test --locked` 过滤 `build_models_url_mirrors` / `parse_cloud_model_ids`（2 passed）；`npx eslint --max-warnings 0` 与 Prettier（本次来源卡片相关文件）；`npm run test:component-size`。未对设置页做真实桌面窗口点选；完整 `verify:change` 会混入工作区里未提交的 NSIS/release 改动，故未整包执行。
+- 本地 EXE：`npm run dsh:assets` + `npx tauri build --bundles none`（清除 `CARGO_TARGET_DIR`）已写出 `src-tauri/target/release/AI Novel Studio.exe`（2026-09-09 15:35，25159168 bytes）。未打 MSI/NSIS/updater。
 
 ## v3.7.0 (2026-09-08) - Writing SubAgent 开放与 ZCode 工作台
 

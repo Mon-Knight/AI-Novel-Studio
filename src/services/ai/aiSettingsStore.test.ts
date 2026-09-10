@@ -414,6 +414,9 @@ test('saving existing model cards preserves their custom display labels', () => 
         provider: 'openai_compatible',
         baseUrl: 'https://provider.invalid/v1',
         modelName: 'model-x',
+        sourceId: 'src-custom',
+        sourceLabel: 'cpa',
+        contextTokens: 256000,
       },
     ],
     activeSavedApiModelId: 'custom-api',
@@ -442,12 +445,18 @@ test('saving existing model cards preserves their custom display labels', () => 
 
   const loaded = getAiSettings();
   assert.equal(loaded.savedApiModels?.[0]?.label, '我的写作模型');
+  assert.equal(loaded.savedApiModels?.[0]?.sourceId, 'src-custom');
+  assert.equal(loaded.savedApiModels?.[0]?.sourceLabel, 'cpa');
+  assert.equal(loaded.savedApiModels?.[0]?.contextTokens, 256000);
   assert.equal(loaded.savedLocalModels?.[0]?.label, '我的本地模型');
   assert.equal(loaded.savedGatewayModels?.[0]?.label, '我的网关模型');
 
   saveAiSettings(loaded);
   const persisted = JSON.parse(storage.getItem('ai_novel_studio_ai_settings') ?? '{}');
   assert.equal(persisted.savedApiModels[0].label, '我的写作模型');
+  assert.equal(persisted.savedApiModels[0].sourceId, 'src-custom');
+  assert.equal(persisted.savedApiModels[0].sourceLabel, 'cpa');
+  assert.equal(persisted.savedApiModels[0].contextTokens, 256000);
   assert.equal(persisted.savedLocalModels[0].label, '我的本地模型');
   assert.equal(persisted.savedGatewayModels[0].label, '我的网关模型');
 });
