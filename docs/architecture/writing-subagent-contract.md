@@ -97,6 +97,6 @@ E-0～E-3 已在仓内落地并通过单测（E-0～E-4 期间开关默认关闭
 
 ## 5. 与其他文档的关系
 
-- 产品/架构基线：`conversational-creative-workbench.md` §11、§14.5（“Writing SubAgent 与 `chapter_write` 走 DSH 继续后置”仍成立，本文是其设计前置）。
+- 产品/架构基线：`conversational-creative-workbench.md` §11、§14.5。v3.7.0 已开放桌面端 + 真实 API 的 Writing SubAgent，本文是现行契约，不是后置设计稿。
 - 审计：`docs/audit-v2/agent_gap_report.md` §7 处理记录。
 - 运行时：`agent-runtime.md`、`dual-model-creative-runtime.md`。

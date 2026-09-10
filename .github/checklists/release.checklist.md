@@ -42,7 +42,7 @@
 ## 构建验证
 
 - [ ] `powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1` 通过（完整矩阵只运行一次，不提前手动重复其子测试）
-- [ ] 矩阵中的 `npm run build`、`npm run test:bundle-size`（入口和任一 chunk 预算未回退）、`npm run test:component-size`（生产 TSX 不超过 500 行）均为 PASS
+- [ ] 矩阵中的 `npm run build`、`npm run test:bundle-size`（入口和任一 chunk 预算未回退）、`npm run test:component-size`（生产 TSX 不超过 500 行，生产 TS 不超过冻结基线）均为 PASS
 - [ ] 矩阵中的 `cargo check --locked`、Gateway 重建与完整串行 `cargo test` 均为 PASS
 - [ ] 矩阵中的完整桌面 E2E 与 `npm run tauri:build` 均为 PASS
 - [ ] 安装包或 release 产物路径已记录
