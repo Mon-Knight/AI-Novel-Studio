@@ -1,6 +1,6 @@
 # R4：真实 Main Agent Runtime 验证方案（Canonical exposure 后置设计稿）
 
-> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 DSH 验证。** 四个 Canonical 只读 Tool 已是 `stable` + `working`，共享 Manifest 的 `modelVisibleToolIdentities` 长度为 4。不得再把 `catalog_only` 或空可见集合写成当前状态。Gateway 已能在 Canonical allowlist 下列出 `novel.read` 等；宿主启动仍注入 legacy `ALLOWED_TOOLS`。R4 仍未 VERIFIED：必须在真实 DSH 只读回合把 Canonical 名注入 Worker `tools/list` 并由模型自主调用。宿主 `mainAgentRuntimeService` 脚手架不能代替该证据。Writing SubAgent 与 `chapter_write` 不在本方案范围内。
+> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 live 云端验收。** 四个 Canonical 只读 Tool 已是 `stable` + `working`。仓内 loopback 已证明 Canonical-only 读取；live 云端仍 NOT VERIFIED，`mainAgentRuntimeService` 脚手架不能代替该证据。本文是 R4 验证方案快照：Writing SubAgent 不在本方案范围内，但其产品路径已于 v3.7.0 开放，见 [`../architecture/writing-subagent-contract.md`](../architecture/writing-subagent-contract.md)。下文“chapter_write → TypeScript adapter”是方案起草时的路径描述。
 
 > 本文只定义 exposure 通过后的 R4 验证证据，不代表 R4 已通过。验证必须使用显式真实 Provider profile；默认 Mock E2E 不变。
 

@@ -1,6 +1,6 @@
 # AI Novel Studio 第二次全量能力审计：Capability Health
 
-> 历史与当前口径：本文主体保留 2026-08-24 第二次全量审计快照；其中的能力数量、入口和阶段判断不得直接改写为 2026-08-27 的当前事实。v3.6.0 发布候选校正如下，候选状态不代表已经发布。
+> 历史与当前口径：本文主体保留 2026-08-24 第二次全量审计快照；其中的能力数量、入口和阶段判断不得直接改写为后续版本事实。v3.6.0 / v3.7.0 校正见第 0 节与第 0.1 节。当前缺口对照见 [`../feature-gap-analysis-v3.7.0.md`](../feature-gap-analysis-v3.7.0.md)。
 
 ## 0. v3.6.0 发布候选校正
 
@@ -8,6 +8,12 @@
 - 章节候选已经具备 `ReviewAuthorization + adopt_review_authorized_draft` 的单一 Rust/SQLite 原子采用链路；通用结构化 `request_apply` 对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 与精确 `generic_json`+`context_compression` 同事务写入，其余类型失败关闭且不产生领域写入（GAP-10/11 的前端策略收敛与大纲 ownership 校验见 `agent_gap_report.md` 处理记录）。
 - Canonical 1A-A/B/C/D 已完成，但四个只读 identity 仍为 `catalog_only + partial`，模型可见数为 `0`。必须先关闭四项 Facade blocker，再完成独立 exposure；之后才进入 R4 真实 Main Agent Runtime 验证。
 - 本校正不重算 2026-08-24 的 21/37/3/11/3 健康数量，也不授权 exposure、R4、SubAgent、新版本或发布。
+
+## 0.1 v3.7.0 当前校正（不改写下方审计表）
+
+- 第 4 节三个 BROKEN 入口描述的是 2026-08-24 当日代码。v3.7.0 用户级联删除走 `delete_novel_cascade` → `purge_project_in_tx`；桌面「扫描并修复」调用 `repair_database`；资产中心「导入资产」计数来自 `useAssetStatistics`。不得再把这三项写成当前 BROKEN。
+- 第 0 节“四个只读 identity 仍为 `catalog_only`、可见数为 0”是 v3.6.0 发布候选历史。当前四项已是 `stable + working`，`modelVisibleToolIdentities` 长度为 4。
+- Writing SubAgent 已对桌面端 + 真实 API 的 `chapter_write` 默认开放；第 5.3 节“章节写作只走 TypeScript writer”不再是当前生产默认。R4 live 仍 NOT VERIFIED。本校正不重算健康数量，不授权新版本。
 
 ## 1. 结论先行
 

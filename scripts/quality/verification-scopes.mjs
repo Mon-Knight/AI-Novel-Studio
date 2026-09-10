@@ -142,7 +142,10 @@ export const verificationScopes = [
   },
   {
     name: 'native packaging',
-    match: /^src-tauri\/(?:Cargo\.|tauri\.conf|build\.rs|resources\/|icons\/|capabilities\/)/u,
+    // rust-toolchain.toml selects the compiler for every native build, so it
+    // carries the same blast radius as Cargo.toml and the packaging config.
+    match:
+      /^(?:rust-toolchain\.toml$|src-tauri\/(?:Cargo\.|tauri\.conf|build\.rs|resources\/|icons\/|capabilities\/))/u,
     rustFull: true,
     desktopFull: true,
     production: true,

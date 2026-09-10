@@ -1,0 +1,14 @@
+# Pins the compiler that actually builds this repo, so local runs, PR CI and the
+# signed release pipeline cannot drift onto different `stable` snapshots.
+#
+# 1.95.0 is the version `stable` already resolved to when this pin was added, so
+# it is a reproducibility fix and not a toolchain change. It is separate from
+# `rust-version = "1.89"` in src-tauri/Cargo.toml, which stays the declared MSRV
+# floor (verified with `cargo +1.89.0 check --locked`), not the build toolchain.
+#
+# Bumping this pin is a deliberate change: rebuild the Gateway and re-run the
+# full Rust suite plus the Windows desktop E2E matrix before landing it.
+[toolchain]
+channel = "1.95.0"
+profile = "minimal"
+components = ["rustfmt"]

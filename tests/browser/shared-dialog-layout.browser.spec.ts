@@ -59,10 +59,12 @@ async function setViewport(width: number, height: number): Promise<void> {
       outer.height + height - inner.height,
     );
   }
-  expect(await browser.execute(() => ({ width: innerWidth, height: innerHeight }))).toEqual({
-    width,
-    height,
-  });
+  // Headless Chromium applies the compensated resize asynchronously; asserting the very
+  // next frame is racy (observed 677px for a requested 820px on the CI runner).
+  await browser.waitUntil(
+    async () => browser.execute((w, h) => innerWidth === w && innerHeight === h, width, height),
+    { timeout: 5000, timeoutMsg: `viewport did not settle at ${width}x${height}` },
+  );
 }
 
 async function coldOpen(

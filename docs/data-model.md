@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -3130,7 +3130,7 @@ DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection
 
 Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个只读 identity 已为 `stable + working`，模型可见集合见本文开头的当前事实块。v3.6.0 发布候选曾未开放这些工具，这是历史基线，不是当前准入状态。
 
-宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章继续由确定性 Writer 编排。
+宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章按本文开头事实块分流：桌面 + 真实 API 默认 `writing-subagent`，mock / 本地 / 浏览器为 `deterministic-writer`。
 
 ---
 

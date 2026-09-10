@@ -4,7 +4,7 @@
 状态：**COMPLETED / HISTORICAL TASKBOOK**
 前置阶段：`Phase 0.5 — Model / Provider Infrastructure Verified`
 
-> 当前校正：本任务书保存 Phase 1A-A 的原始执行范围与汇报模板，不再是当前执行阶段。v3.6.0 候选已经完成 1A-A Capability Catalog、1A-B Domain Facade、1A-C Canonical Projection 和 1A-D portable Manifest/宿主门禁；四个 Canonical Tool 仍为 `catalog_only + partial`，模型可见数为 `0`。下一门禁是关闭四项 Facade blocker，再做独立 exposure；通过后才进入 R4 真实 Main Agent Runtime 验证。本文不授权任何后继阶段。
+> 当前校正：本任务书保存 Phase 1A-A 的原始执行范围与汇报模板，不再是当前执行阶段。1A-A～1A-D 与四项 Canonical exposure 均已完成（现为 `stable + working`，可见数为 4）。R4 仓内只读闭环已证明，live 云端仍 NOT VERIFIED。Writing SubAgent 已于 v3.7.0 开放。下文“四个 Canonical Tool 仍为 `catalog_only`”是任务书起草时的历史句子。本文不授权任何后继阶段。
 
 ## 1. 阶段定位
 

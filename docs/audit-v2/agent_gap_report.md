@@ -1,5 +1,7 @@
 # AI Novel Studio 第二次全量能力审计：Agent Gap Report
 
+> **v3.7.0 当前校正（2026-09-09）。** 下方 GAP 总表与第 3～6 节保留 2026-08-24 证据，不改写。已关闭：GAP-09（Writing SubAgent 桌面 + 真实 API 默认开放）、GAP-10/11/15/16/18/19（见第 7 节处理记录）。仍开放：GAP-02/04/06/07/08/12/13/14/17，以及 R4 live、SubAgent 自动修正、Context/Quality SubAgent。当前对照见 [`../feature-gap-analysis-v3.7.0.md`](../feature-gap-analysis-v3.7.0.md) 与第 7 节。本文不授权下一阶段。
+
 ## 阶段重分类（2026-08-24）
 
 本轮真实 DSH smoke 只把模型接入层提升为：

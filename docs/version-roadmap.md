@@ -592,10 +592,10 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 - **Canonical catalog/manifest exposure（已完成）**：4 项只读能力（`novel.read@1`, `structure.read@1`, `context.read@1`, `memory.search@1`）健康度 `working`，exposure `stable`，共享 Manifest 的 `modelVisibleToolIdentities` 长度为 4。v3.6.0 基线当时仍是 `catalog_only` + 可见数为 0，那是历史状态。
 - **R4 仓内只读闭环（已证明）**：`read` intent 请求 Canonical-only allowlist；宿主 `dsh_start_task_turn` 在 start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS` 与工具授权三处一致注入 Canonical 名，Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；Rust loopback E2E 经真实 Worker 启动链证明模型自主调用四个 Canonical 只读工具、零产物、零采用、章节字数不变、零凭据泄漏。候选与审计回合保持 legacy `ALLOWED_TOOLS` 不变；`mainAgentRuntimeService` 启发式脚手架不是 R4 证据。
 - **R4 live 云端验收（进行中，NOT VERIFIED）**：真实云端 Provider 只读回合尚未验收；判定标准（前置凭据、opt-in cloud profile 执行、通过条件与脱敏证据要求）见 `docs/architecture/conversational-creative-workbench.md` §14.5。标准满足前不得宣称 R4 VERIFIED。
-- **后续规划**：Writing SubAgent、`chapter_write` 走 DSH 与其余状态变更 SubAgent 继续后置；结构化写入继续维持 Safe Apply 失败关闭与显式审核不变式。
-- **结构化写入边界加固（Unreleased，审计 GAP-10/11）**：前端“可应用类型 / 章节作用域 / 目标解析”收敛为单一策略源 `src/services/conversation/structuredApplyPolicy.ts`，与 Rust `validate_static_scope` 的白名单和 `expected_target` 一一对应；大纲写命令 `save_master/volume/chapter_outline` 改为事务内校验作品存在且未删除、卷/章节/上级纲要属于同一作品，不匹配返回 `OUTLINE_SCOPE_MISMATCH` 且零写入。
+- **后续规划**：Writing SubAgent 与桌面 + 真实 API 的 `chapter_write` 已于 v3.7.0 开放；Context / Quality 等其余状态变更 SubAgent 继续后置。结构化写入继续维持 Safe Apply 失败关闭与显式审核不变式。
+- **结构化写入边界加固（已随 v3.7.0 落地，审计 GAP-10/11）**：前端“可应用类型 / 章节作用域 / 目标解析”收敛为单一策略源 `src/services/conversation/structuredApplyPolicy.ts`，与 Rust `validate_static_scope` 的白名单和 `expected_target` 一一对应；大纲写命令 `save_master/volume/chapter_outline` 改为事务内校验作品存在且未删除、卷/章节/上级纲要属于同一作品，不匹配返回 `OUTLINE_SCOPE_MISMATCH` 且零写入。
 
-详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 功能基线、v3.6.1 安全补丁、Canonical catalog exposure、R4 仓内只读闭环证据，以及 live 云端验收仍未完成的真实边界。
+详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.7.0 Writing SubAgent 与 ZCode 工作台、v3.6.0 功能基线、Canonical catalog exposure、R4 仓内只读闭环证据，以及 live 云端验收仍未完成的真实边界。当前缺口对照见 [`feature-gap-analysis-v3.7.0.md`](feature-gap-analysis-v3.7.0.md)。
 
 ---
 

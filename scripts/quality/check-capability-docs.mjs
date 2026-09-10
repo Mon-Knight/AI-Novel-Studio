@@ -75,8 +75,8 @@ export function checkCapabilityDeclarations({ manifest, hostSource, documents })
       .sort();
     if (
       JSON.stringify(identities) !== JSON.stringify(expected) ||
-      !['`canonical-only`', '`deterministic-writer`', '`NOT_VERIFIED`'].every((fact) =>
-        block.includes(fact),
+      !['`canonical-only`', '`writing-subagent`', '`deterministic-writer`', '`NOT_VERIFIED`'].every(
+        (fact) => block.includes(fact),
       )
     ) {
       throw new Error(

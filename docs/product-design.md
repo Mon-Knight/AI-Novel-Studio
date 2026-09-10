@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -13,7 +13,7 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是 SQLite 等安全修复，v3.6.2 是当前 Canonical 只读链路与桌面体验收口补丁；版本号以 `package.json` 和同步检查为准。
+> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是 SQLite 等安全修复，v3.6.2 放行 Canonical 只读链路；v3.7.0 开放 Writing SubAgent 与 ZCode 工作台。版本号以 `package.json` 和同步检查为准。
 
 ---
 
@@ -1346,7 +1346,7 @@ v0.1.0 完成后，应满足：
 
 Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成。四个 Canonical 只读 identity（`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`）现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4。这只是 Catalog/Manifest exposure。
 
-R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置，详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
+R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 已于 v3.7.0 对桌面端 + 真实 API 的 `chapter_write` 默认开放；mock / 本地 / 浏览器走确定性 Writer。详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
 
