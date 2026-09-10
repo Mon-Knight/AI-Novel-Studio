@@ -57,13 +57,16 @@ Bug 描述：{{BUG_DESCRIPTION}}
 - 最小改动原则：只修改必要的代码
 - 不顺手重构无关代码
 - 不新增功能
-- 修复后必须运行完整验证
+- 为修复的行为补回归；用户交互变化对应真实桌面场景
+- 修复后运行变更选择器选出的检查，只复测受影响项；不因“修 Bug”运行完整发布矩阵或生产安装包构建
 
 ## 验证命令
 
 ```powershell
-cargo check
-npm run build
-npm run tauri build
-git status
+npm run verify:change -- --dry-run   # 查看选择理由与命令
+npm run verify:change
+git diff --check
+git status --short
 ```
+
+Rust/SQLite 修复由选择器加入 `cargo check --locked` 与相关 Rust 测试；migration、共享持久化或 DSH 变化扩大到对应完整领域门禁。任何检查失败都要如实报告，不用“其他测试通过”抵消。

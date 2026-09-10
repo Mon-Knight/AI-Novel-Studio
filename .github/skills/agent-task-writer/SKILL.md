@@ -1,3 +1,8 @@
+---
+name: agent-task-writer
+description: 仅在用户要求生成任务书、写任务书或交接给其他 Agent 时，把已确认的版本规划转成自包含任务书；同会话的明确任务不触发。
+---
+
 # Skill: agent-task-writer
 
 > **Skill 名称**：Agent 任务书生成

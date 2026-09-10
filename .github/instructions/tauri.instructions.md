@@ -50,13 +50,13 @@ Tauri 层是 AI Novel Studio 的桌面壳，核心职责：
 
 ```powershell
 # 开发模式
-cargo tauri dev
+npm run tauri:dev
 
-# 生产构建
-cargo tauri build
+# 生产构建（先准备固定 DSH 载体；仅打包配置、依赖图或发布任务）
+npm run tauri:build
 
-# Rust 编译检查（快速验证）
-cargo check
+# Rust 编译检查（日常 Rust 修改由 npm run verify:change 自动加入）
+cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
 ### 3.2 构建失败处理

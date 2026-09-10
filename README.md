@@ -25,11 +25,11 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v3.6.2**
+**当前版本：v3.7.0**
 
-**阶段：Canonical 只读链路与桌面体验收口补丁**
+**阶段：Writing SubAgent 开放与 ZCode 工作台**
 
-v3.6.0 是当前功能基线；v3.6.1 收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径，不扩展后续版本能力。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
+v3.6.0 是功能基线；v3.6.1 收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径；v3.7.0 把桌面 Agent 工作台重构为 ZCode 形态并正式开放 Writing SubAgent——桌面端使用真实 API 模型写章时，模型在只读工具 + 唯一候选工具的收窄 allowlist 内自主读取上下文并提交 candidate-only 正文，候选仍只进入人工审阅与原子采用；mock / 本地模型与浏览器模式继续走确定性 Writer。同版收口 LocalStorage/SQLite 双真相（migration 037）、TXT 导入单事务、大纲作用域校验，并为任务运行持久化章节目标（migration 038）。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 
@@ -181,19 +181,22 @@ npm run tauri:build
 
 ## 5. Windows 桌面规格
 
-| 项目     | 规格                                             |
-| -------- | ------------------------------------------------ |
-| 默认窗口 | 1280 × 820                                       |
-| 最小窗口 | 1024 × 700                                       |
-| 最大化   | 支持，UI 自适应                                  |
-| 2K 适配  | 内容宽度受控，阅读 / 表单 / 卡片布局不会无限拉伸 |
-| 数据存储 | 桌面模式 SQLite；浏览器开发模式 LocalStorage     |
+| 项目     | 规格                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------------------- |
+| 默认窗口 | 1280 × 820                                                                                               |
+| 最小窗口 | 1024 × 700                                                                                               |
+| 窗口边框 | 无系统装饰，顶部标签栏即标题栏：空白处拖动、双击最大化，右侧自绘最小化 / 最大化 / 关闭；关闭仍经离开保护 |
+| 最大化   | 支持（按工作区最大化，不遮任务栏），UI 自适应                                                            |
+| 2K 适配  | 内容宽度受控，阅读 / 表单 / 卡片布局不会无限拉伸                                                         |
+| 数据存储 | 桌面模式 SQLite；浏览器开发模式 LocalStorage                                                             |
 
 API Key 按 Provider、Base URL 与模型精确绑定。Windows 桌面端由 `SessionCredentialVault` 使用 DPAPI 加密写入应用数据目录的本地保护文件，并在启动时尝试恢复；浏览器开发模式仅保留会话内存，不把密钥写入 LocalStorage。密钥不进入小说项目、SQLite、项目备份、日志、Git 或应用自有同步服务；真实模型鉴权仅发送到用户配置且与当前模型匹配的 Provider Endpoint，不能跨身份借用凭据。
 
 ---
 
 ## 6. 页面与功能入口
+
+应用壳层按桌面 Agent 工作台组织：顶部标签栏常驻（会话 / 项目 / 当前页面、版本与资源中心入口），左侧栏提供快捷操作（新建任务 `Ctrl+N`、搜索 `Ctrl+K`、自主创作、项目库）与分组导航。功能集中在两个入口——**会话**（`/` 创作工作台）与**项目**（`/novels` 及作品下的概览 / 章节审阅 / 大纲 / 设定推演 / 参考资料 / 故事资产 / 自主创作，共用一条项目标签条）；风格方案、模板中心、创作资产、导入导出、AI 任务记录与设置合并为**资源中心**（分组左导航，`/settings?tab=` 直达设置分类）。所有历史路由继续可用：
 
 | 路径                                | 页面                   | 说明                                      |
 | ----------------------------------- | ---------------------- | ----------------------------------------- |
@@ -250,33 +253,34 @@ API Key 按 Provider、Base URL 与模型精确绑定。Windows 桌面端由 `Se
 
 ## 9. 当前版本路线
 
-| 版本                      | 内容                                                                                                                                                                         |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| v1.7.10                   | 已完成：候选设定采纳与测试补齐                                                                                                                                               |
-| v1.7.11                   | 已完成：发布收尾、构建产物清理                                                                                                                                               |
-| v1.7.12、v1.7.13、v1.7.20 | 已完成：任务删除、上下文与质量检查链路增强                                                                                                                                   |
-| v1.8.x                    | 旧规划节点，未形成独立 CHANGELOG 发布记录                                                                                                                                    |
-| v1.9.5～v1.9.7            | 已完成：章节工程、上下文编译与生成任务                                                                                                                                       |
-| v2.0.0～v2.0.3            | 已完成：正文初稿、结构化质检、局部修复与版本管理                                                                                                                             |
-| v2.1.0                    | 已完成：单章质量闭环稳定版                                                                                                                                                   |
-| v2.1.1                    | 已完成：正文变更安全门                                                                                                                                                       |
-| v2.1.2                    | 已完成：完整备份与恢复闭环                                                                                                                                                   |
-| v2.1.3                    | 已完成：Windows 真实桌面 E2E 与稳定性                                                                                                                                        |
-| v2.1.4                    | 已完成：大文本正文安全闭环                                                                                                                                                   |
-| v2.1.5                    | 已完成：章节工程任务跨重启恢复闭环                                                                                                                                           |
-| v2.1.6                    | 已完成：章节工程真实 AI 请求取消闭环                                                                                                                                         |
-| v2.1.7                    | 已完成：章节质量历史不可变快照与原子重放                                                                                                                                     |
-| v2.1.8                    | 已完成：章节上下文持久化一致性闭环                                                                                                                                           |
-| v2.2.0                    | 已完成：工作区可靠性与基础设施收口                                                                                                                                           |
-| v2.2.1～v2.4.0            | 已完成：可靠性热修、执行事实、Provider、Safe Apply、Compiler 与 Tool Registry                                                                                                |
-| v2.5.0                    | 已完成：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复                                                                                                 |
-| v2.6.1                    | 文档规范化版本；未形成独立 Memory 实现                                                                                                                                       |
-| v3.0.0                    | 已完成：全书自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory，以及多目标事务、跨章节批处理和势力 / 地点正式资产 |
-| v3.3.0～v3.5.0            | 已实现并在 v3.5.0 版本条目收敛：对话式创作工作台主界面、任务对话与内联产物、确认/审阅授权，以及写作工作台向人工审阅、编辑、保存和采用收敛                                    |
-| v3.6.0                    | 功能基线：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                                  |
-| v3.6.1                    | 已完成：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复                                                                                                |
-| v3.6.2                    | **当前版本**：Canonical 只读链路放行（4 项 stable Tool、DSH read 回合 Canonical-only allowlist）、DPAPI 会话凭据持久化与桌面体验收口；R4 live 云端验收仍未完成               |
-| v3.x 后续                 | 更多 Canonical 能力准入、R4 live Provider / Writing SubAgent 验收、未覆盖结构化类型的原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付        |
+| 版本                      | 内容                                                                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| v1.7.10                   | 已完成：候选设定采纳与测试补齐                                                                                                                                                                                                 |
+| v1.7.11                   | 已完成：发布收尾、构建产物清理                                                                                                                                                                                                 |
+| v1.7.12、v1.7.13、v1.7.20 | 已完成：任务删除、上下文与质量检查链路增强                                                                                                                                                                                     |
+| v1.8.x                    | 旧规划节点，未形成独立 CHANGELOG 发布记录                                                                                                                                                                                      |
+| v1.9.5～v1.9.7            | 已完成：章节工程、上下文编译与生成任务                                                                                                                                                                                         |
+| v2.0.0～v2.0.3            | 已完成：正文初稿、结构化质检、局部修复与版本管理                                                                                                                                                                               |
+| v2.1.0                    | 已完成：单章质量闭环稳定版                                                                                                                                                                                                     |
+| v2.1.1                    | 已完成：正文变更安全门                                                                                                                                                                                                         |
+| v2.1.2                    | 已完成：完整备份与恢复闭环                                                                                                                                                                                                     |
+| v2.1.3                    | 已完成：Windows 真实桌面 E2E 与稳定性                                                                                                                                                                                          |
+| v2.1.4                    | 已完成：大文本正文安全闭环                                                                                                                                                                                                     |
+| v2.1.5                    | 已完成：章节工程任务跨重启恢复闭环                                                                                                                                                                                             |
+| v2.1.6                    | 已完成：章节工程真实 AI 请求取消闭环                                                                                                                                                                                           |
+| v2.1.7                    | 已完成：章节质量历史不可变快照与原子重放                                                                                                                                                                                       |
+| v2.1.8                    | 已完成：章节上下文持久化一致性闭环                                                                                                                                                                                             |
+| v2.2.0                    | 已完成：工作区可靠性与基础设施收口                                                                                                                                                                                             |
+| v2.2.1～v2.4.0            | 已完成：可靠性热修、执行事实、Provider、Safe Apply、Compiler 与 Tool Registry                                                                                                                                                  |
+| v2.5.0                    | 已完成：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复                                                                                                                                                   |
+| v2.6.1                    | 文档规范化版本；未形成独立 Memory 实现                                                                                                                                                                                         |
+| v3.0.0                    | 已完成：全书自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory，以及多目标事务、跨章节批处理和势力 / 地点正式资产                                                   |
+| v3.3.0～v3.5.0            | 已实现并在 v3.5.0 版本条目收敛：对话式创作工作台主界面、任务对话与内联产物、确认/审阅授权，以及写作工作台向人工审阅、编辑、保存和采用收敛                                                                                      |
+| v3.6.0                    | 功能基线：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                                                                                    |
+| v3.6.1                    | 已完成：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复                                                                                                                                                  |
+| v3.6.2                    | 已完成：Canonical 只读链路放行（4 项 stable Tool、DSH read 回合 Canonical-only allowlist）、DPAPI 会话凭据持久化与桌面体验收口                                                                                                 |
+| v3.7.0                    | **当前版本**：ZCode 形态桌面工作台、Writing SubAgent 正式开放（桌面 + 真实 API 模型默认经 DSH 提交 candidate-only 正文）、LocalStorage/SQLite 双真相收敛、TXT 导入单事务、任务运行持久化章节目标；R4 live 云端只读验收仍未完成 |
+| v3.x 后续                 | 更多 Canonical 能力准入、R4 live Provider 验收、SubAgent 预算内自动修正回合、未覆盖结构化类型的原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付                                                |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
 
@@ -309,13 +313,17 @@ ai-novel-studio/
 
 ## 11. 测试与构建
 
-以下为可选套件与命令索引，不是每次任务全部执行的清单。编码 Agent 先按 [AGENTS.md](AGENTS.md) 的验证矩阵选择适用层级；纯文档任务不要求完整 Tauri 发布构建。
+以下为可选套件与命令索引，不是每次任务全部执行的清单。日常修改的统一入口是 `npm run verify:change`，它按变更路径的模块归属选择行为测试、Rust 筛选与真实桌面场景，并与 PR CI 共用同一规则；完整发布矩阵只用于发布或明确的完整验收。编码 Agent 先按 [AGENTS.md](AGENTS.md) 的验证矩阵选择适用层级；纯文档任务不要求完整 Tauri 发布构建。
 
 ```powershell
+# 日常修改：查看选择理由，再运行选出的检查
+npm run verify:change -- --dry-run
+npm run verify:change
+
 # 版本号与用户可见文档同步门禁
 npm run test:version-sync
 
-# Windows 真实 Tauri 启动冒烟测试
+# Windows 真实 Tauri 冒烟：启动诊断 + 生产界面日常写作场景（含真实进程重启）
 npm run test:e2e:smoke
 
 # Windows 真实 Tauri 全部核心 E2E 流程
@@ -324,8 +332,9 @@ npm run test:e2e
 # 真实浏览器开发模式路由、持久化边界与手动明暗主题
 npm run test:e2e:browser
 
-# 定向复测一个独立桌面场景
+# 定向复测一个或多个独立桌面场景（一次构建）
 npm run test:e2e -- --spec candidate-review-apply
+npm run test:e2e -- --spec chapter-save --spec leave-guard
 
 # 定向复测章节上下文保存、重启、过期与生成排除
 npm run test:e2e -- --spec chapter-context-persistence
@@ -336,18 +345,16 @@ npm run test
 # 正文变更安全门动态测试
 npm run test:workspace-safety
 
-# v2.2.x 定向 Vitest；后三项同时执行全量 Rust 回归
+# v2.2.x 定向 Vitest；后三项按列出的完整测试名精确执行对应 Rust 用例
 npm run test:components
 npm run test:workspace-reliability
 npm run test:workspace-recovery
 npm run test:large-text-integrity
 npm run test:migrations
 
-# Rust / SQLite 命令安全测试
-cd src-tauri
-cargo test
-cargo test commands::tests -- --nocapture
-cd ..
+# Rust / SQLite 命令安全测试（相关领域：零匹配失败关闭；完整：串行）
+node scripts/quality/run-cargo-tests.mjs --filter commands::tests::
+cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 
 # TypeScript 类型检查 + 前端构建
 npm run build
@@ -369,14 +376,12 @@ npm run test:project-backup
 npm run lint:ci
 
 # Rust 编译检查
-cd src-tauri
-cargo check
-cd ..
+cargo check --locked --manifest-path src-tauri/Cargo.toml
 
-# Windows MSI 与桌面 EXE 完整构建
+# Windows MSI 与桌面 EXE 完整构建（打包配置或发布任务）
 npm run tauri:build
 
-# 项目验证脚本
+# 完整发布矩阵（仅发布或明确完整验收，一次运行）
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 

@@ -10,6 +10,11 @@ import {
 } from 'lucide-react';
 import type { ConversationArtifactCard, ToolCallEvent } from '../../types/conversation';
 import { isContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
+import {
+  isReadOnlyReportType,
+  parseJsonPayload,
+  supportsStructuredApply as supportsStructuredApplyPolicy,
+} from '../../services/conversation/structuredApplyPolicy';
 import { GenerationContextReceipt, GenerationContextSummary } from './WorkbenchContextReceipt';
 import {
   hideContextReceiptInternals,
@@ -198,35 +203,9 @@ const ARTIFACT_VALIDATION_LABELS = {
   invalid: '结构与来源校验未通过',
 } as const;
 
-const STRUCTURED_APPLY_TYPES = new Set([
-  'outline',
-  'character_candidates',
-  'event_candidates',
-  'setting_candidates',
-  'chapter_summary',
-]);
-
-const READ_ONLY_REPORT_TYPES = new Set(['quality_report', 'style_analysis']);
-
-function isApplicableContextCompression(artifact: ConversationArtifactCard): boolean {
-  if (artifact.artifactType !== 'generic_json') return false;
-  if (artifact.artifactEvidence?.derivationType === 'context_compression') return true;
-  if (!artifact.content) return false;
-  try {
-    const candidate = JSON.parse(artifact.content) as unknown;
-    return isContextCompressionCandidate(candidate) && candidate.valid;
-  } catch {
-    return false;
-  }
-}
-
 function isDeterministicContextCompression(artifact: ConversationArtifactCard): boolean {
   if (artifact.artifactType !== 'generic_json' || !artifact.content) return false;
-  try {
-    return isContextCompressionCandidate(JSON.parse(artifact.content) as unknown);
-  } catch {
-    return false;
-  }
+  return isContextCompressionCandidate(parseJsonPayload(artifact.content));
 }
 
 function compactHash(value: string): string {
@@ -267,10 +246,14 @@ export const ArtifactCard = memo(function ArtifactCard({
   ).length;
   const isInvalid = evidence?.processingStatus === 'invalid';
   const isChapter = artifact.artifactType === 'chapter_text';
-  const isReadOnlyReport = READ_ONLY_REPORT_TYPES.has(artifact.artifactType);
+  const isReadOnlyReport = isReadOnlyReportType(artifact.artifactType);
   const isDeterministicCompression = isDeterministicContextCompression(artifact);
-  const supportsStructuredApply =
-    STRUCTURED_APPLY_TYPES.has(artifact.artifactType) || isApplicableContextCompression(artifact);
+  const supportsStructuredApply = supportsStructuredApplyPolicy({
+    artifactType: artifact.artifactType,
+    derivationType: artifact.artifactEvidence?.derivationType,
+    payload:
+      artifact.artifactType === 'generic_json' ? parseJsonPayload(artifact.content) : undefined,
+  });
   const structuredApplyAvailable = !artifact.artifactId?.startsWith('browser-');
   const projectedStatus = isInvalid
     ? '结构与来源未通过'

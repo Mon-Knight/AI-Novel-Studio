@@ -257,7 +257,7 @@ export default function MemoryInspectorPanel({
                     >
                       <span
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           padding: '1px 4px',
                           background: 'var(--color-bg-subtle, #f1f5f9)',
                           borderRadius: 3,
@@ -268,8 +268,8 @@ export default function MemoryInspectorPanel({
                       </span>
                       <span
                         style={{
-                          fontSize: 11,
-                          color: '#a16207',
+                          fontSize: 12,
+                          color: 'var(--color-warning-text)',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
@@ -379,7 +379,7 @@ export default function MemoryInspectorPanel({
                     margin: 0,
                     paddingLeft: 18,
                     fontSize: 12,
-                    color: 'var(--color-danger, #ef4444)',
+                    color: 'var(--color-error-text)',
                   }}
                 >
                   {context.constraints.map((c, i) => (

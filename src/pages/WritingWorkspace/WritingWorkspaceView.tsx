@@ -15,7 +15,10 @@ import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import { hashTextContent } from '../../utils/contentHash';
 import { showInfo } from '../../utils/nativeDialog';
 import type { WritingWorkspaceViewProps } from './WritingWorkspaceView.types';
-import { isWorkspaceAiPanelRetired } from '../../types/rightSidebar';
+import {
+  isE2eLegacyWorkspacePanelsEnabled,
+  isWorkspaceAiPanelRetired,
+} from '../../types/rightSidebar';
 import { WorkspaceDocumentSkeleton } from './WorkspaceDocumentSkeleton';
 import { WorkspaceFocusToggle } from './WorkspaceFocusToggle';
 
@@ -58,7 +61,7 @@ export default function WritingWorkspaceView({
     aiModal,
   } = session;
   const activePanel = sidebarState.activeTool;
-  const e2ePanelsEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+  const e2ePanelsEnabled = isE2eLegacyWorkspacePanelsEnabled();
   const visibleActivePanel = isWorkspaceAiPanelRetired(activePanel, e2ePanelsEnabled)
     ? null
     : activePanel;

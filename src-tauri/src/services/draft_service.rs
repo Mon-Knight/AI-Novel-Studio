@@ -114,7 +114,7 @@ pub struct ReadChapterDraftContentOutput {
     pub content_state: DraftContentState,
 }
 
-fn word_count(content: &str) -> i64 {
+pub(crate) fn word_count(content: &str) -> i64 {
     let mut count = 0_i64;
     let mut in_ascii_word = false;
     for character in content.chars() {

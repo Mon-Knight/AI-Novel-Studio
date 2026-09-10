@@ -55,7 +55,7 @@ export function CharactersProtagonistSection({
                   <span
                     style={{
                       color: 'var(--color-primary)',
-                      fontSize: 11,
+                      fontSize: 12,
                       marginLeft: 4,
                       fontWeight: 'bold',
                     }}
@@ -72,7 +72,7 @@ export function CharactersProtagonistSection({
                       : ' · 本章不出场'}
                 </div>
                 {protagonist.goal && (
-                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>
                     目标：{protagonist.goal}
                   </div>
                 )}

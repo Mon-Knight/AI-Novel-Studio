@@ -123,7 +123,7 @@ export function OutlineEditorView({
         )}
 
         {versions.length > 0 && (
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
             v{currentVersion} · {versions.length} 个版本
           </span>
         )}
@@ -133,7 +133,7 @@ export function OutlineEditorView({
         <div
           style={{
             padding: 12,
-            fontSize: 11,
+            fontSize: 12,
             background: 'var(--color-bg-hover)',
             borderRadius: 8,
             border: '1px solid var(--color-border-light)',
@@ -219,7 +219,7 @@ export function OutlineEditorView({
 
       {versions.length > 1 && (
         <div style={{ padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
             历史版本：
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -229,7 +229,7 @@ export function OutlineEditorView({
                 style={{
                   padding: '2px 8px',
                   borderRadius: 4,
-                  fontSize: 11,
+                  fontSize: 12,
                   background: version.isActive
                     ? 'var(--color-primary-light)'
                     : 'var(--color-bg-hover)',
@@ -250,7 +250,7 @@ export function OutlineEditorView({
         </div>
       )}
 
-      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', display: 'flex', gap: 16 }}>
+      <div style={{ fontSize: 12, color: 'var(--color-text-muted)', display: 'flex', gap: 16 }}>
         <span>字数：{content.length}</span>
         <span>版本：v{currentVersion}</span>
         {isDirty && (

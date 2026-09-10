@@ -66,7 +66,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
             <button
               className="btn btn-secondary btn-sm"
               onClick={onStartEdit}
-              style={{ fontSize: 11 }}
+              style={{ fontSize: 12 }}
             >
               <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
               编辑
@@ -76,7 +76,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={onSaveOutline}
-                style={{ fontSize: 11 }}
+                style={{ fontSize: 12 }}
               >
                 <Save aria-hidden="true" size={13} strokeWidth={1.8} />
                 保存
@@ -84,7 +84,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={onCancelEdit}
-                style={{ fontSize: 11 }}
+                style={{ fontSize: 12 }}
               >
                 取消
               </button>
@@ -125,7 +125,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
             <button
               className="btn btn-secondary btn-sm"
               onClick={onStartEdit}
-              style={{ fontSize: 11, marginLeft: 8 }}
+              style={{ fontSize: 12, marginLeft: 8 }}
             >
               <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
               手动编写
@@ -144,7 +144,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
             className="btn btn-primary btn-sm"
             onClick={onSaveGoal}
             disabled={!goalDirty}
-            style={{ fontSize: 11 }}
+            style={{ fontSize: 12 }}
           >
             <Save aria-hidden="true" size={13} strokeWidth={1.8} />
             保存本章目标
@@ -167,7 +167,7 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
         />
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: goalDirty ? 'var(--color-warning)' : 'var(--color-text-muted)',
             marginTop: 4,
           }}
@@ -187,7 +187,7 @@ function SaveMessage({ value }: { value: string }) {
   return (
     <div
       style={{
-        fontSize: 11,
+        fontSize: 12,
         marginTop: 4,
         color: value.includes('失败')
           ? 'var(--color-error)'

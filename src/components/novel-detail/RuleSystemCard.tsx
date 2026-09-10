@@ -98,17 +98,10 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
 
   return (
     <div className="detail-card">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="detail-card-header">
+        <div className="detail-card-title">
           <Scale aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>规则体系</span>
+          <span>规则体系</span>
         </div>
         {!editingId && !isNew && (
           <button className="btn btn-secondary btn-sm" onClick={startNew}>
@@ -118,7 +111,7 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
         )}
       </div>
 
-      <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+      <div className="text-sm text-muted detail-card-intro">
         这里用于描述魔法、科技、修炼、战斗或社会规则。正文生成时，AI 必须遵守这些规则。
       </div>
 
@@ -141,34 +134,17 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
             onCancel={cancelEdit}
           />
         ) : (
-          <div
-            key={rs.id}
-            style={{
-              border: '1px solid var(--color-border-light)',
-              borderRadius: 8,
-              padding: 12,
-              marginBottom: 8,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={rs.id} className="detail-list-item">
+            <div className="detail-list-item-header">
               <div>
-                <span style={{ fontWeight: 500 }}>{rs.title}</span>
+                <span className="detail-list-item-title">{rs.title}</span>
                 {rs.category && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      marginLeft: 8,
-                      padding: '1px 6px',
-                      background: 'var(--color-bg-hover)',
-                      borderRadius: 4,
-                      color: 'var(--color-text-muted)',
-                    }}
-                  >
+                  <span className="detail-tag">
                     {ruleCategoryOptions.find((o) => o.value === rs.category)?.label || rs.category}
                   </span>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div className="detail-inline-actions">
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => startEdit(rs)}
@@ -177,24 +153,15 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
                   <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
                 </button>
                 <button
-                  className="btn btn-secondary btn-sm"
+                  className="btn btn-secondary btn-sm detail-text-error"
                   onClick={() => handleDelete(rs.id)}
                   aria-label={`删除规则 ${rs.title}`}
-                  style={{ color: 'var(--color-error)' }}
                 >
                   <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
                 </button>
               </div>
             </div>
-            <div
-              style={{
-                fontSize: 13,
-                color: 'var(--color-text-secondary)',
-                marginTop: 6,
-                lineHeight: 1.6,
-                whiteSpace: 'pre-wrap',
-              }}
-            >
+            <div className="detail-fact-text detail-fact-text--sm">
               {rs.content.slice(0, 150)}
               {rs.content.length > 150 ? '...' : ''}
             </div>
@@ -203,9 +170,7 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
       )}
 
       {ruleSystems.length === 0 && !isNew && (
-        <div style={{ color: 'var(--color-text-muted)', fontSize: 14, fontStyle: 'italic' }}>
-          尚未添加规则体系，点击上方“新增规则”开始创建
-        </div>
+        <div className="detail-empty-hint">尚未添加规则体系，点击上方“新增规则”开始创建</div>
       )}
 
       {/* 新建表单 */}
@@ -257,26 +222,17 @@ function RuleEditForm({
   onCancel: () => void;
 }) {
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-primary)',
-        borderRadius: 8,
-        padding: 12,
-        marginBottom: 8,
-        background: 'var(--color-primary-light)',
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+    <div className="detail-list-item is-editing">
+      <div className="detail-form detail-form--tight">
+        <div className="detail-form-grid detail-form-grid--tight">
           <div>
             <label className="panel-field-label">规则名称 *</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="form-input"
+              className="form-input detail-fill"
               placeholder="如：魔法体系规则"
-              style={{ width: '100%' }}
             />
           </div>
           <div>
@@ -299,15 +255,8 @@ function RuleEditForm({
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            className="form-textarea"
+            className="form-textarea detail-textarea detail-textarea--lg"
             placeholder="详细描述规则体系..."
-            style={{
-              width: '100%',
-              height: 160,
-              resize: 'vertical',
-              fontSize: 14,
-              lineHeight: 1.8,
-            }}
           />
         </div>
         <div>
@@ -315,22 +264,20 @@ function RuleEditForm({
           <textarea
             value={forbiddenRules}
             onChange={(e) => setForbiddenRules(e.target.value)}
-            className="form-textarea"
+            className="form-textarea detail-textarea detail-textarea--sm"
             placeholder="列出 AI 绝对不能违反的规则..."
-            style={{ width: '100%', height: 80, resize: 'vertical', fontSize: 14 }}
           />
         </div>
         {message && (
           <div
-            style={{
-              fontSize: 13,
-              color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)',
-            }}
+            className={`detail-save-status detail-save-status--inline${
+              message === '保存成功' ? ' is-ok' : ''
+            }`}
           >
             {message}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="detail-form-actions">
           <button className="btn btn-secondary btn-sm" onClick={onCancel}>
             取消
           </button>

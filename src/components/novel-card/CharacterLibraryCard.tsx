@@ -6,10 +6,33 @@ import { CheckCircle2, Plus, UsersRound } from 'lucide-react';
 import type { Character, CreateCharacterInput, CharacterRoleType } from '../../types/character';
 import { CharacterRoleLabels } from '../../types/character';
 import { characterService } from '../../services/characters/characterService';
+import '../../styles/novel-detail.css';
 
 interface CharacterLibraryCardProps {
   novelId: string;
 }
+
+type TextField =
+  | 'identity'
+  | 'faction'
+  | 'relationToProtagonist'
+  | 'personality'
+  | 'goal'
+  | 'behaviorLimits'
+  | 'forbiddenBehaviors';
+
+const TEXT_FIELDS: Array<{ key: TextField; label: string; placeholder: string }> = [
+  { key: 'faction', label: '阵营', placeholder: '如：卡塞尔学院' },
+  { key: 'relationToProtagonist', label: '与主角关系', placeholder: '如：导师、战友' },
+  { key: 'personality', label: '性格特征', placeholder: '简洁描述角色性格' },
+  { key: 'goal', label: '目标', placeholder: '角色在故事中的目标' },
+  { key: 'behaviorLimits', label: '行为限制（允许但不限制范围）', placeholder: '角色行为上限' },
+  {
+    key: 'forbiddenBehaviors',
+    label: '禁止行为（绝对不能做的）',
+    placeholder: '角色禁止做出的行为',
+  },
+];
 
 function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -41,10 +64,10 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
 
   return (
     <div className="detail-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="detail-card-header">
+        <div className="detail-card-title">
           <UsersRound aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>角色库（{characters.length}）</span>
+          <span>角色库（{characters.length}）</span>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => setEditing(!editing)}>
           {editing ? (
@@ -59,35 +82,22 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
       </div>
 
       {editing && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            background: 'var(--color-bg-primary)',
-            borderRadius: 6,
-            border: '1px solid var(--color-border-light)',
-          }}
-        >
-          <div style={{ display: 'grid', gap: 8 }}>
+        <div className="detail-list-item detail-list-item--inset">
+          <div className="detail-form detail-form--compact">
             <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                角色名称 *
-              </label>
+              <label className="detail-field-label">角色名称 *</label>
               <input
-                className="input"
+                className="input detail-fill"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="输入角色名"
-                style={{ width: '100%' }}
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="detail-form-grid detail-form-grid--tight">
               <div>
-                <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                  角色类型
-                </label>
+                <label className="detail-field-label">角色类型</label>
                 <select
-                  className="input"
+                  className="input detail-fill"
                   value={form.roleType || ''}
                   onChange={(e) =>
                     setForm({
@@ -95,7 +105,6 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
                       roleType: (e.target.value || undefined) as CharacterRoleType | undefined,
                     })
                   }
-                  style={{ width: '100%' }}
                 >
                   <option value="">未分类</option>
                   <option value="protagonist">主角</option>
@@ -105,82 +114,26 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>身份</label>
+                <label className="detail-field-label">身份</label>
                 <input
-                  className="input"
+                  className="input detail-fill"
                   value={form.identity || ''}
                   onChange={(e) => setForm({ ...form, identity: e.target.value })}
                   placeholder="如：航天工程师"
-                  style={{ width: '100%' }}
                 />
               </div>
             </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>阵营</label>
-              <input
-                className="input"
-                value={form.faction || ''}
-                onChange={(e) => setForm({ ...form, faction: e.target.value })}
-                placeholder="如：卡塞尔学院"
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                与主角关系
-              </label>
-              <input
-                className="input"
-                value={form.relationToProtagonist || ''}
-                onChange={(e) => setForm({ ...form, relationToProtagonist: e.target.value })}
-                placeholder="如：导师、战友"
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>性格特征</label>
-              <input
-                className="input"
-                value={form.personality || ''}
-                onChange={(e) => setForm({ ...form, personality: e.target.value })}
-                placeholder="简洁描述角色性格"
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>目标</label>
-              <input
-                className="input"
-                value={form.goal || ''}
-                onChange={(e) => setForm({ ...form, goal: e.target.value })}
-                placeholder="角色在故事中的目标"
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                行为限制（允许但不限制范围）
-              </label>
-              <input
-                className="input"
-                value={form.behaviorLimits || ''}
-                onChange={(e) => setForm({ ...form, behaviorLimits: e.target.value })}
-                placeholder="角色行为上限"
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                禁止行为（绝对不能做的）
-              </label>
-              <input
-                className="input"
-                value={form.forbiddenBehaviors || ''}
-                onChange={(e) => setForm({ ...form, forbiddenBehaviors: e.target.value })}
-                placeholder="角色禁止做出的行为"
-                style={{ width: '100%' }}
-              />
-            </div>
+            {TEXT_FIELDS.map((field) => (
+              <div key={field.key}>
+                <label className="detail-field-label">{field.label}</label>
+                <input
+                  className="input detail-fill"
+                  value={form[field.key] || ''}
+                  onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                  placeholder={field.placeholder}
+                />
+              </div>
+            ))}
             <button
               className="btn btn-primary btn-sm"
               onClick={handleCreate}
@@ -194,45 +147,23 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
       )}
 
       {characters.length === 0 ? (
-        <div className="detail-card-desc" style={{ marginTop: 8 }}>
+        <div className="detail-card-desc detail-gap-top">
           暂无角色，点击上方按钮手动创建或在写作工作台通过 AI 生成
         </div>
       ) : (
-        <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+        <div className="detail-list">
           {characters.map((char) => (
             <div
               key={char.id}
-              style={{
-                padding: 10,
-                border: '1px solid var(--color-border-light)',
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
+              className="detail-list-item detail-list-item--sm detail-character-row"
               onClick={() => setExpandedId(expandedId === char.id ? null : char.id)}
             >
-              <div
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 16,
-                      background: 'var(--color-primary)',
-                      color: 'var(--color-on-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 600,
-                      fontSize: 13,
-                    }}
-                  >
-                    {char.name[0]}
-                  </div>
+              <div className="detail-list-item-header">
+                <div className="detail-list-item-main">
+                  <div className="detail-avatar">{char.name[0]}</div>
                   <div>
-                    <div style={{ fontWeight: 500, fontSize: 14 }}>{char.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    <div className="detail-character-name">{char.name}</div>
+                    <div className="detail-character-meta">
                       {char.roleType ? CharacterRoleLabels[char.roleType] : '未分类'}
                       {char.identity ? ` · ${char.identity}` : ''}
                       {char.faction ? ` · ${char.faction}` : ''}
@@ -240,25 +171,17 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
                   </div>
                 </div>
                 <button
-                  className="btn btn-text btn-sm"
+                  className="btn btn-text btn-sm detail-text-error"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleRemove(char.id);
                   }}
-                  style={{ color: 'var(--color-error)' }}
                 >
                   删除
                 </button>
               </div>
               {expandedId === char.id && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 12,
-                    color: 'var(--color-text-secondary)',
-                    paddingLeft: 40,
-                  }}
-                >
+                <div className="detail-character-details">
                   {char.personality && <div>性格：{char.personality}</div>}
                   {char.goal && <div>目标：{char.goal}</div>}
                   {char.relationToProtagonist && (
@@ -266,12 +189,10 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
                   )}
                   {char.behaviorLimits && <div>行为限制：{char.behaviorLimits}</div>}
                   {char.forbiddenBehaviors && (
-                    <div style={{ color: 'var(--color-error)' }}>
-                      禁止行为：{char.forbiddenBehaviors}
-                    </div>
+                    <div className="detail-text-error">禁止行为：{char.forbiddenBehaviors}</div>
                   )}
                   {char.currentState && <div>当前状态：{char.currentState}</div>}
-                  <div style={{ marginTop: 4, color: 'var(--color-text-muted)' }}>
+                  <div className="detail-character-source">
                     来源：{char.source === 'manual' ? '手动创建' : 'AI 生成'}
                   </div>
                 </div>

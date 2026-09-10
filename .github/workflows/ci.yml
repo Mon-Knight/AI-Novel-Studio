@@ -18,17 +18,40 @@ jobs:
     name: Browser-mode lint, tests, and build
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Verify the PR change with the shared selector
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          node scripts/quality/verify-change.mjs --base $env:VERIFY_BASE --lane frontend --report test-results/verification/frontend.json
+          exit $LASTEXITCODE
       - run: npm run lint:ci
+        if: github.event_name != 'pull_request'
       - run: npm run test:component-size
-      - run: npm run test:all
+        if: github.event_name != 'pull_request'
+      - run: npm run test:coverage
+        if: github.event_name != 'pull_request'
       - name: Run real Chromium browser-mode E2E
+        if: github.event_name != 'pull_request'
         run: npm run test:e2e:browser
       - run: npm run build
+        if: github.event_name != 'pull_request'
       - run: npm run test:bundle-size
+        if: github.event_name != 'pull_request'
+      - name: Upload change verification evidence
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-change-verification
+          path: test-results/verification/frontend.json
+          if-no-files-found: warn

@@ -329,11 +329,16 @@ $windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob
     '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build:release -- --config"
 )
-Add-CheckResult "release DSH and gateway precede Rust tests" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and signed installer creation"
+Add-CheckResult "release DSH and gateway precede signed packaging" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, signed installer creation; dynamic tests are inherited from desktop-gate"
 
+$releaseReusesExactEvidence =
+    ([string]$windowsReleaseJob).Contains("VERIFIED_SHA:" ) -and
+    ([string]$windowsReleaseJob).Contains('needs.desktop-gate.outputs.verified_sha') -and
+    ([string]$windowsReleaseJob).Contains('$actualSha -ne $env:VERIFIED_SHA') -and
+    ([string]$desktopWorkflow).Contains('verified_sha:')
+Add-CheckResult "release checks inherited evidence commit" $releaseReusesExactEvidence "reused full-gate evidence must match the checked-out release commit"
 $verificationScript = Get-OptionalText "scripts/agent-workflow/verify_project.ps1"
 $verificationHasGatewayOrder = Test-MarkersInOrder ([string]$verificationScript) @(
     'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")',

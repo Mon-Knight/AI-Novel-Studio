@@ -67,7 +67,7 @@ export function CheckPanelIssueCard({
       >
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 3,
             background: QualityIssueSeverityColors[item.severity] + '20',
@@ -79,7 +79,7 @@ export function CheckPanelIssueCard({
         </span>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 3,
             background: 'var(--color-bg-primary)',
@@ -90,7 +90,7 @@ export function CheckPanelIssueCard({
         </span>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 3,
             ...statusStyle(item.status),
@@ -104,7 +104,7 @@ export function CheckPanelIssueCard({
       {(item.quote || item.evidence) && (
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             fontStyle: 'italic',
             color: 'var(--color-text-muted)',
             marginTop: 4,
@@ -122,7 +122,7 @@ export function CheckPanelIssueCard({
       {item.suggestion && (
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-primary)',
             marginTop: 3,
             display: 'flex',

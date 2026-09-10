@@ -197,7 +197,7 @@ export function CharactersPanelView({
                 <div className="character-name">
                   {character?.name || chapterCharacter.characterName || '未知'}
                   {isProtagonist && (
-                    <span style={{ color: 'var(--color-primary)', fontSize: 11, marginLeft: 4 }}>
+                    <span style={{ color: 'var(--color-primary)', fontSize: 12, marginLeft: 4 }}>
                       主角
                     </span>
                   )}
@@ -279,7 +279,7 @@ export function CharactersPanelView({
                     <span
                       style={{
                         color: 'var(--color-primary)',
-                        fontSize: 11,
+                        fontSize: 12,
                         marginLeft: 4,
                         fontWeight: 'bold',
                       }}
@@ -293,12 +293,12 @@ export function CharactersPanelView({
                   {character.identity ? ` · ${character.identity}` : ''}
                 </div>
                 {isProtagonist && character.goal && (
-                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>
                     目标：{character.goal}
                   </div>
                 )}
                 {isProtagonist && character.personality && (
-                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                     性格：
                     {character.personality.length > 40
                       ? character.personality.slice(0, 40) + '...'
@@ -306,7 +306,7 @@ export function CharactersPanelView({
                   </div>
                 )}
                 {isProtagonist && character.behaviorLimits && (
-                  <div style={{ fontSize: 11, color: 'var(--color-warning)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>
                     限制：
                     {character.behaviorLimits.length > 30
                       ? character.behaviorLimits.slice(0, 30) + '...'
@@ -413,19 +413,19 @@ export function CharactersPanelView({
                 {candidate.identity ? ` · ${candidate.identity}` : ''}
               </div>
               {candidate.goal && (
-                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   目标：{candidate.goal}
                 </div>
               )}
               {candidate.chapterFunction && (
-                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   本章作用：{candidate.chapterFunction}
                 </div>
               )}
               {candidate.rawText && (
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--color-text-secondary)',
                     whiteSpace: 'pre-wrap',
                     marginTop: 4,
@@ -454,7 +454,7 @@ export function CharactersPanelView({
         )}
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-muted)',
             marginTop: 8,
             display: 'flex',

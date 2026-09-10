@@ -45,40 +45,20 @@ export default function DataStorageSettingsCard() {
   };
 
   return (
-    <div
-      className="detail-card"
-      data-testid="settings-data-storage-card"
-      style={{ marginBottom: 16 }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+    <div className="detail-card settings-card-block" data-testid="settings-data-storage-card">
+      <div className="settings-card-header">
         <Database aria-hidden="true" size={18} strokeWidth={1.8} />
-        <span style={{ fontSize: 16, fontWeight: 600 }}>数据与存储架构</span>
+        <span className="settings-card-title">数据与存储架构</span>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
+      <div className="settings-card-text">
         <div>
           <strong>存储引擎：</strong> SQLite（Tauri 桌面模式）/ LocalStorage（开发调试模式）
         </div>
         <div>
           <strong>数据根目录：</strong> <code>%LOCALAPPDATA%\AI Novel Studio\</code>
         </div>
-        <div
-          style={{
-            marginTop: 10,
-            padding: 10,
-            background: 'var(--color-bg-hover, #f8fafc)',
-            borderRadius: 6,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              marginBottom: 4,
-              color: 'var(--color-text-primary)',
-            }}
-          >
+        <div className="settings-subcard">
+          <div className="settings-subcard-title">
             <PackageCheck aria-hidden="true" size={16} strokeWidth={1.8} />
             备份与安全恢复机制
           </div>
@@ -87,17 +67,8 @@ export default function DataStorageSettingsCard() {
           <div>· 支持章节不可变版本（Revision）与创作溯源数据持久化归档</div>
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              marginBottom: 4,
-              color: 'var(--color-text-primary)',
-            }}
-          >
+        <div className="settings-subcard">
+          <div className="settings-subcard-title">
             <Wrench aria-hidden="true" size={16} strokeWidth={1.8} />
             数据库异常诊断与修复
           </div>
@@ -107,7 +78,6 @@ export default function DataStorageSettingsCard() {
             onClick={handleRepairData}
             disabled={repairing}
             data-testid="settings-repair-data-btn"
-            style={{ marginTop: 4 }}
           >
             {!repairing && <Wrench aria-hidden="true" size={15} strokeWidth={1.8} />}
             {repairing ? '正在扫描修复...' : '扫描并修复异常作品数据'}
@@ -115,19 +85,14 @@ export default function DataStorageSettingsCard() {
           {repairMsg && (
             <div
               data-testid="settings-repair-message"
-              style={{
-                marginTop: 6,
-                fontSize: 12,
-                color:
-                  repairMsg.includes('失败') || repairMsg.includes('发现问题')
-                    ? 'var(--color-error, #dc2626)'
-                    : 'var(--color-success, #16a34a)',
-              }}
+              className={`settings-status-line${
+                repairMsg.includes('失败') || repairMsg.includes('发现问题') ? ' is-error' : ''
+              }`}
             >
               {repairMsg}
             </div>
           )}
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          <div className="settings-card-note">
             桌面端规范化 SQLite 作品基础字段并执行完整性检查；浏览器开发模式会先生成 LocalStorage
             安全镜像。
           </div>

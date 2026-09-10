@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -3130,4 +3130,56 @@ DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection
 
 Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个只读 identity 已为 `stable + working`，模型可见集合见本文开头的当前事实块。v3.6.0 发布候选曾未开放这些工具，这是历史基线，不是当前准入状态。
 
-宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章继续由确定性 Writer 编排。
+宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章按本文开头事实块分流：桌面 + 真实 API 默认 `writing-subagent`，mock / 本地 / 浏览器为 `deterministic-writer`。
+
+---
+
+# 41. migration 037：用户模板与设定建议正式事实源（审计 GAP-15 收口）
+
+`037_user_templates_and_setting_suggestions` checksum 固定为：
+
+```text
+014aa444b946d1a6e9f89334441238ffa0ea39992938550592e81b6d9ca0fdea
+```
+
+审计 GAP-15 指出用户模板、导入资产、润色记录与设定建议在桌面端仍以 LocalStorage 为事实源，与 SQLite 形成双真相。收口分两步：
+
+1. `imported_assets`、`polish_records` 两张表早已存在但没有写入命令，补齐 `commands/local_assets.rs` 的 list / save / delete（作品、章节、来源/结果草稿、AI 任务归属与枚举复验，按 id 幂等 upsert），不新增 migration。
+2. 本迁移为此前只存在于 LocalStorage 的两类实体建表：
+
+```text
+user_templates        id, name, type, description, content, tags_json, variables_json, source,
+                      file_name, created_at, updated_at
+                      CHECK：tags_json / variables_json 为 JSON 数组；source ∈ system|user_imported|user_created
+setting_suggestions   id, novel_id(FK novels), suggestion_type, world_type, reference_style, prompt,
+                      result_json, item_json, status, adopted_target_id, adopted_target_type,
+                      user_instruction, raw_output, created_at, updated_at
+                      CHECK：suggestion_type ∈ character|faction|location|rule；
+                             status ∈ pending|adopted|edited_adopted|discarded；item_json 为 JSON 对象
+```
+
+- 设定建议状态只允许 `pending → adopted / edited_adopted / discarded` 一次性推进：`decide_setting_suggestion` 用 `WHERE status='pending'` 的 CAS 更新，触发器 `trg_setting_suggestions_status_edges` 兜底拒绝直接 SQL 改回或二次改写；`id / novel_id / suggestion_type / created_at` 由触发器冻结。一次生成的多条候选由 `save_setting_suggestions` 在同一 `IMMEDIATE` 事务内落库，任一条非法整批回滚。
+- `save_user_template` 按 id 幂等 upsert：更新时保留原 `created_at`；迁移历史记录时可携带原 `created_at / updated_at`。标签与变量去重、去空、限长 50 项。
+- 前端 `templateService`（API 改为异步）、`settingSuggestionService`、`importedAssetService`、`polishService` 在桌面端只走命令；浏览器开发模式继续使用各自的 LocalStorage 键。首次在桌面端读取时，把历史 LocalStorage 记录幂等迁入 SQLite（引用已删除作品/章节/草稿的孤儿记录跳过），然后写入迁移标记 `ai_novel_studio_<entity>_sqlite_v1`；标记只在全部 upsert 尝试完成后写入。
+- 用户模板是应用级事实，不随单个作品备份；设定建议是可再生成的 AI 候选，本轮不纳入项目备份 schema（备份仍为 schema 11），`imported_assets / polish_records` 沿用既有备份规则并因此首次在桌面端携带真实数据。
+
+# 42. migration 038：任务运行持久化章节目标（审计 GAP-18 收口）
+
+`038_task_runs_chapter_binding` checksum 固定为：
+
+```text
+fc9b8fc49ac1ea8dd5c6ece3f179ab0921a523ee54de99577e0a798658cc749a
+```
+
+Writing SubAgent E-4b 故障注入验收发现（GAP-18）：`task_runs` 没有章节列，Rust `CreateRunInput` 丢弃前端传入的 `chapterId`，DSH 工具投影只保留 `chapterIdHash`。DSH 运行若在任何工具调用或候选产生前失败（上游持续失败、进程被杀），`resolveRetryRunChapterTarget` 只能靠回合目标文本定位章节，目标写成“生成本章正文…”时重试被 `WORKBENCH_RETRY_TARGET_MISSING` fail-closed 拒绝。本迁移把冻结的章节目标落到运行本身：
+
+```text
+task_runs             + chapter_id TEXT NULL
+                      索引 idx_task_runs_chapter(chapter_id, created_at) WHERE chapter_id IS NOT NULL
+                      触发器 trg_task_runs_immutable_identity 重建，新增 OLD.chapter_id IS NOT NEW.chapter_id
+```
+
+- `create_run` 接受可选 `chapterId`（空白视为未绑定）；若给出，则必须是对话所属作品下未删除的章节，否则返回 `TASK_RUN_CHAPTER_SCOPE_MISMATCH` 且不创建运行——跨书或已删章节的运行根本不会存在。归属校验放在服务层而不是外键，因为章节采用软删除。
+- DSH 运行（`dsh_start_task_turn`）创建 run 时把 `StartTaskTurnInput.chapter_id` 写入；确定性 Writer 路径经 `create_task_run` 命令传入同一字段。`TaskRunRecord.chapter_id` 随会话包序列化为 `chapterId`（无绑定时省略），前端 `normalizeRun` 与 `workbenchRetryTarget` 的 `run.chapterId` 证据源无需改动即可生效。
+- 项目备份：`chapter_id` 属于通用引用列，恢复时随 ID 重映射；行校验新增 `optional_non_empty_text("chapter_id")`。旧备份不含该列，恢复后为 NULL；备份 schema 版本不变。
+- 配套（GAP-19，不涉及 schema）：宿主在创建 run 前统计同一回合已有的失败/取消运行数，重试时在回合提示中追加“用户重试”说明——此前回合的读取已失效，本回合必须重新完成全部必需读取再进入候选阶段。宿主对必需读取的按 run 校验不变。

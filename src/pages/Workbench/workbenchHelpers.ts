@@ -1,4 +1,20 @@
 import type { ConversationArtifactCard, TaskConversationBundle } from '../../types/conversation';
+import { resolveArtifactDecisionTarget as resolveStructuredDecisionTarget } from '../../services/conversation/structuredApplyPolicy';
+
+/** Relative activity label for task rows ("刚刚", "3分钟前", "2天前", then a short date). */
+export function formatRecentActivity(value: string, now = Date.now()): string {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '';
+  const elapsed = Math.max(0, now - timestamp);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (elapsed < minute) return '刚刚';
+  if (elapsed < hour) return `${Math.floor(elapsed / minute)}分钟前`;
+  if (elapsed < day) return `${Math.floor(elapsed / hour)}小时前`;
+  if (elapsed < 7 * day) return `${Math.floor(elapsed / day)}天前`;
+  return new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+}
 
 function nonEmptyChapterId(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -35,6 +51,7 @@ export function resolveConversationTargetChapter(
   return authorizations.map((item) => nonEmptyChapterId(item.chapterId)).find(Boolean);
 }
 
+/** Target resolution is owned by the structured-apply policy; kept here as the workbench entry point. */
 export function resolveArtifactDecisionTarget(input: {
   artifactType: ConversationArtifactCard['artifactType'];
   sourceChapterId?: string;
@@ -45,20 +62,8 @@ export function resolveArtifactDecisionTarget(input: {
   targetId: string;
   chapterId?: string;
 } {
-  const chapterId =
-    input.artifactType === 'chapter_text'
-      ? input.sourceChapterId || input.currentChapterId
-      : input.sourceChapterId;
-  const usesChapterTarget =
-    input.artifactType === 'chapter_text' ||
-    input.artifactType === 'event_candidates' ||
-    input.artifactType === 'chapter_summary' ||
-    (input.artifactType === 'outline' && Boolean(chapterId));
-  return {
-    targetType: input.artifactType === 'chapter_text' ? 'chapter' : 'asset',
-    targetId: usesChapterTarget && chapterId ? chapterId : input.novelId,
-    chapterId,
-  };
+  const { targetType, targetId, chapterId } = resolveStructuredDecisionTarget(input);
+  return { targetType, targetId, chapterId };
 }
 
 export function statusLabel(status: string): string {

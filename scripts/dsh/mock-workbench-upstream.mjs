@@ -9,10 +9,26 @@
  * Environment:
  *   MOCK_WORKBENCH_PORT        Loopback port; 0/default asks the OS to choose.
  *   MOCK_WORKBENCH_MODE        normal | text-only | delayed-text | tool-error | delay | cancel | attestation-fail | attestation-delay
+ *                              | forbidden-tool | cross-novel | upstream-error-once | hold-generate
  *   MOCK_WORKBENCH_NOVEL_ID    novelId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CHAPTER_ID  chapterId placed in scripted tool arguments.
+ *   MOCK_WORKBENCH_FOREIGN_NOVEL_ID / MOCK_WORKBENCH_FOREIGN_CHAPTER_ID
+ *                              Out-of-scope ids used by the cross-novel fault mode.
  *   MOCK_WORKBENCH_CANDIDATE_TEXT  generate_chapter candidate (never exposed in summaries).
  *   MOCK_WORKBENCH_DELAY_MS    Delay between SSE phases for delay/cancel modes.
+ *
+ * Fault modes (Writing SubAgent gate E-4b):
+ *   forbidden-tool       after the context reads the model calls `expand_settings`, a tool the
+ *                        chapter_write allowlist never exposes; the host must reject it.
+ *   cross-novel          generate_chapter carries the foreign novel/chapter ids.
+ *   upstream-error-once  the first non-attestation completion fails with HTTP 500, later ones
+ *                        behave like normal (transport-level retry drill).
+ *   upstream-error       every non-attestation completion fails with HTTP 500 until the mode
+ *                        is switched again (fail-closed + explicit retry drill).
+ *   hold-generate        the generate_chapter completion never finishes until the client
+ *                        disconnects (process restart / cancellation drills).
+ * The in-process handle exposes `configure()` so one server can switch modes and ids between
+ * scenarios without rebinding its port.
  *
  * Security: request bodies and headers are never retained. In particular,
  * Authorization, cookies, credentials, prompts, tool arguments, and tool
@@ -45,7 +61,14 @@ const MODES = new Set([
   'cancel',
   'attestation-fail',
   'attestation-delay',
+  'forbidden-tool',
+  'cross-novel',
+  'upstream-error-once',
+  'upstream-error',
+  'hold-generate',
 ]);
+const FORBIDDEN_TOOL_WIRE_NAME = 'mcp__novel__expand_settings';
+const FORBIDDEN_TOOL_MARKER = 'expand_settings';
 const CONTEXT_TOOLS = [
   'novel.read_context',
   'chapter.read_outline',
@@ -145,6 +168,16 @@ function resolveOptions(options = {}) {
       options.chapterId ?? process.env.MOCK_WORKBENCH_CHAPTER_ID,
       'MOCK_WORKBENCH_CHAPTER_ID',
       'mock-workbench-chapter',
+    ),
+    foreignNovelId: nonEmptyOption(
+      options.foreignNovelId ?? process.env.MOCK_WORKBENCH_FOREIGN_NOVEL_ID,
+      'MOCK_WORKBENCH_FOREIGN_NOVEL_ID',
+      'mock-workbench-foreign-novel',
+    ),
+    foreignChapterId: nonEmptyOption(
+      options.foreignChapterId ?? process.env.MOCK_WORKBENCH_FOREIGN_CHAPTER_ID,
+      'MOCK_WORKBENCH_FOREIGN_CHAPTER_ID',
+      'mock-workbench-foreign-chapter',
     ),
     candidateText: nonEmptyOption(
       options.candidateText ?? process.env.MOCK_WORKBENCH_CANDIDATE_TEXT,
@@ -255,9 +288,25 @@ function wireTools(body) {
   return { actualNames, byCanonical };
 }
 
+/**
+ * The host requires every read to happen inside the current run, and its turn prompt says so.
+ * A resumed DSH session replays earlier turns (including their tool calls) ahead of the new
+ * user message; a compliant model therefore only counts what it did after that message.
+ */
+function messagesOfCurrentTurn(messages) {
+  let start = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      start = index + 1;
+      break;
+    }
+  }
+  return messages.slice(start);
+}
+
 function calledTools(messages) {
   const called = new Set();
-  for (const message of messages) {
+  for (const message of messagesOfCurrentTurn(messages)) {
     if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
     for (const call of message.tool_calls) {
       const canonical = canonicalToolName(call?.function?.name);
@@ -276,21 +325,34 @@ function contentLength(value) {
   }, 0);
 }
 
+const HOST_USER_RETRY_NOTICE = '用户重试';
+
+function contentText(value) {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((block) => (typeof block === 'string' ? block : (block?.text ?? ''))).join('');
+}
+
 function summarizeMessages(messages) {
   const roles = { system: 0, user: 0, assistant: 0, tool: 0, other: 0 };
   let promptChars = 0;
   let lastUserChars = 0;
   let toolResultCount = 0;
+  let userRetryNotice = false;
   for (const message of messages) {
     const role = typeof message?.role === 'string' ? message.role : 'other';
     if (Object.hasOwn(roles, role)) roles[role] += 1;
     else roles.other += 1;
     const length = contentLength(message?.content);
     promptChars += length;
-    if (role === 'user') lastUserChars = length;
+    if (role === 'user') {
+      lastUserChars = length;
+      // Only whether the host's retry notice is present; the prompt itself is never kept.
+      userRetryNotice = contentText(message?.content).includes(HOST_USER_RETRY_NOTICE);
+    }
     if (role === 'tool') toolResultCount += 1;
   }
-  return { roles, promptChars, lastUserChars, toolResultCount };
+  return { roles, promptChars, lastUserChars, toolResultCount, userRetryNotice };
 }
 
 function chapterScopedArguments(options) {
@@ -326,6 +388,14 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
         topK: 5,
       };
     case GENERATE_TOOL:
+      if (options.mode === 'cross-novel') {
+        // The reads stayed in scope; only the candidate submission points at another book.
+        return {
+          novelId: options.foreignNovelId,
+          chapterId: options.foreignChapterId,
+          candidateText: options.candidateText,
+        };
+      }
       return {
         novelId: options.novelId,
         chapterId: options.chapterId,
@@ -334,6 +404,31 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
     default:
       throw new ContractError(`unsupported canonical tool: ${canonical}`);
   }
+}
+
+function forbiddenToolAlreadyCalled(messages) {
+  for (const message of messagesOfCurrentTurn(messages)) {
+    if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
+    for (const call of message.tool_calls) {
+      const name = call?.function?.name;
+      if (typeof name === 'string' && normalizedToolName(name).includes(FORBIDDEN_TOOL_MARKER)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function createForbiddenToolCall(options, sequence) {
+  return {
+    canonical: FORBIDDEN_TOOL_MARKER,
+    id: `call_mock_${sequence}_0_${FORBIDDEN_TOOL_MARKER}`,
+    name: FORBIDDEN_TOOL_WIRE_NAME,
+    arguments: JSON.stringify({
+      novelId: options.novelId,
+      settings: [{ name: '越权设定', description: '模型试图在章节写作回合写入正式设定。' }],
+    }),
+  };
 }
 
 function requireWireTools(byCanonical, canonicalNames) {
@@ -447,6 +542,22 @@ function createPlan(body, options, sequence) {
       advertisedToolNames: actualNames,
     };
   }
+  if (options.mode === 'forbidden-tool') {
+    if (!forbiddenToolAlreadyCalled(messages)) {
+      return {
+        kind: 'tools',
+        phase: 'forbidden-tool',
+        calls: [createForbiddenToolCall(options, sequence)],
+        advertisedToolNames: actualNames,
+      };
+    }
+    return {
+      kind: 'text',
+      phase: 'forbidden-tool-final',
+      text: '越权工具调用已被拒绝；本回合没有生成章节候选，也未修改正式小说事实。',
+      advertisedToolNames: actualNames,
+    };
+  }
   if (!alreadyCalled.has(GENERATE_TOOL)) {
     return {
       kind: 'tools',
@@ -524,6 +635,17 @@ async function waitForScriptDelay(options, signal) {
   }
 }
 
+/** Parks the response until the client disconnects (or the server shuts down). */
+function holdUntilClientCloses(signal) {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(new ClientClosedError());
+      return;
+    }
+    signal.addEventListener('abort', () => reject(new ClientClosedError()), { once: true });
+  });
+}
+
 async function streamPlan(response, body, plan, options, summary, signal) {
   const model = safeName(body.model);
   const requestId = summary.requestId;
@@ -554,6 +676,10 @@ async function streamPlan(response, body, plan, options, summary, signal) {
     (plan.phase === 'model-tool-attestation' && options.mode === 'attestation-delay')
   ) {
     await waitForScriptDelay(options, signal);
+  }
+  if (options.mode === 'hold-generate' && plan.phase === 'generate-chapter') {
+    summary.phase = 'hold-generate';
+    await holdUntilClientCloses(signal);
   }
 
   let completionChars = 0;
@@ -621,7 +747,15 @@ function finishSummary(state, summary, outcome) {
   state.activeRequests = Math.max(0, state.activeRequests - 1);
 }
 
-async function handleChat(request, response, state, options, pathname) {
+function hasAttestationTool(body) {
+  return (Array.isArray(body.tools) ? body.tools : []).some(
+    (tool) => tool?.type === 'function' && tool?.function?.name === MODEL_TOOL_ATTESTATION_NAME,
+  );
+}
+
+async function handleChat(request, response, state, pathname) {
+  // Scenario switches through configure() must apply to the next request immediately.
+  const options = state.options;
   state.activeRequests += 1;
   state.peakActiveRequests = Math.max(state.peakActiveRequests, state.activeRequests);
   const sequence = ++state.sequence;
@@ -663,6 +797,25 @@ async function handleChat(request, response, state, options, pathname) {
       startedAtMs: Date.now(),
     };
     state.requests.push(summary);
+
+    const injectFailure =
+      !hasAttestationTool(body) &&
+      (options.mode === 'upstream-error' ||
+        (options.mode === 'upstream-error-once' && state.injectedUpstreamFailures === 0));
+    if (injectFailure) {
+      state.injectedUpstreamFailures += 1;
+      summary.phase = 'injected-upstream-failure';
+      summary.advertisedToolNames = wireTools(body).actualNames;
+      jsonResponse(response, 500, {
+        error: {
+          message: `injected upstream failure (mock fault mode ${options.mode})`,
+          code: 'MOCK_INJECTED_UPSTREAM_FAILURE',
+        },
+      });
+      completed = true;
+      finishSummary(state, summary, 'injected_failure');
+      return;
+    }
 
     let plan;
     try {
@@ -731,6 +884,7 @@ function createState(options) {
     sequence: 0,
     activeRequests: 0,
     peakActiveRequests: 0,
+    injectedUpstreamFailures: 0,
     requests: [],
     controllers: new Set(),
   };
@@ -742,12 +896,29 @@ function requestSnapshot(state) {
     requestCount: state.requests.length,
     activeRequests: state.activeRequests,
     peakActiveRequests: state.peakActiveRequests,
+    injectedUpstreamFailures: state.injectedUpstreamFailures,
     requests: state.requests.map((summary) => {
       const safe = { ...summary };
       delete safe.startedAtMs;
       return safe;
     }),
   };
+}
+
+/** Re-resolve the scripted options; ids and mode change, the bound port does not. */
+function reconfigure(state, overrides) {
+  const { port: _port, delayMs, ...current } = state.options;
+  // A mode switch without an explicit delay falls back to that mode's default delay.
+  const carriedDelay =
+    overrides.mode !== undefined && overrides.delayMs === undefined ? {} : { delayMs };
+  state.options = resolveOptions({
+    ...current,
+    ...carriedDelay,
+    ...overrides,
+    port: state.options.port,
+  });
+  if (state.options.mode.startsWith('upstream-error')) state.injectedUpstreamFailures = 0;
+  return state.options;
 }
 
 /** Start the loopback-only mock and return its discovery/teardown handle. */
@@ -761,7 +932,7 @@ export async function startMockWorkbenchUpstream(options = {}) {
         ok: true,
         ready: true,
         host: HOST,
-        mode: resolved.mode,
+        mode: state.options.mode,
         requestCount: state.requests.length,
         activeRequests: state.activeRequests,
         peakActiveRequests: state.peakActiveRequests,
@@ -779,7 +950,7 @@ export async function startMockWorkbenchUpstream(options = {}) {
       request.method === 'POST' &&
       (pathname === '/chat/completions' || pathname === '/v1/chat/completions')
     ) {
-      void handleChat(request, response, state, resolved, pathname);
+      void handleChat(request, response, state, pathname);
       return;
     }
     if (pathname.endsWith('/chat/completions')) {
@@ -805,12 +976,16 @@ export async function startMockWorkbenchUpstream(options = {}) {
   return Object.freeze({
     host: HOST,
     port: address.port,
-    mode: resolved.mode,
+    get mode() {
+      return state.options.mode;
+    },
     baseUrl,
     upstreamBaseUrl: `${baseUrl}/v1`,
     chatCompletionsUrl: `${baseUrl}/v1/chat/completions`,
     healthUrl: `${baseUrl}/health`,
     requestsUrl: `${baseUrl}/requests`,
+    configure: (overrides = {}) => reconfigure(state, overrides),
+    snapshot: () => requestSnapshot(state),
     close,
   });
 }

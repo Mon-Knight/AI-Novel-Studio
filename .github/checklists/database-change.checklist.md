@@ -52,7 +52,8 @@
 
 ## 验证
 
-- [ ] `cargo check` 通过
-- [ ] 旧数据库文件可正常打开
+- [ ] `cargo check --locked --manifest-path src-tauri/Cargo.toml` 通过
+- [ ] `npm run verify:change` 对 migration / 共享持久化选出的完整 Rust 领域门禁（Gateway 重建 + 完整串行 `cargo test`）与对应真实桌面场景通过
+- [ ] 迁移幂等、checksum 冲突与旧库升级由临时 SQLite 动态测试证明；旧数据库文件可正常打开
 - [ ] 新功能正常工作
 - [ ] 未提交 `.db` / `.sqlite` 文件到 Git

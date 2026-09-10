@@ -67,7 +67,7 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
               · {scene.title} —— {scene.purpose}
             </div>
             {scene.conflicts && scene.conflicts.length > 0 ? (
-              <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
                 冲突：{scene.conflicts.join('、')}
               </div>
             ) : null}
@@ -218,7 +218,7 @@ export function DshPreparationCard({
       {revisionsReady && (
         <div
           className="agent-plan-card__notice"
-          style={{ fontSize: 11 }}
+          style={{ fontSize: 12 }}
           data-testid="dsh-revisions-ready"
         >
           基线修订号已加载：{revisions?.map((item) => item.source + '=' + item.revision).join('，')}
@@ -227,7 +227,7 @@ export function DshPreparationCard({
       {summary.runs > 0 && (
         <div
           className="agent-plan-card__notice"
-          style={{ fontSize: 11 }}
+          style={{ fontSize: 12 }}
           data-testid="dsh-usage-summary"
         >
           本章 DSH 用量：{summary.runs} 次 · 输入 {summary.promptTokens} tokens · 输出{' '}

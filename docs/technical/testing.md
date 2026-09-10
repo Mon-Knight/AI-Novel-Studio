@@ -6,14 +6,14 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
-> 当前版本：v3.6.2（对话式创作工作台与审阅收敛）
+> 当前版本：v3.7.0（Writing SubAgent 开放与 ZCode 工作台）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、可靠取消与请求治理、真实流式预览、参考资料与分层风格、混合语义 Memory、跨进程三档调度、多目标事务与正式故事资产、正文变更动态回归、性能基准、真实浏览器模式 E2E、Windows 真实 Tauri E2E、签名更新发布、前端构建与 Rust/Tauri 编译。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v3.0.0，测试体系在执行事实、Safe Apply、Compiler/Registry 与持久 Planner 基础上，增加 Multi-Agent 并发与共识、12～500 章自主规划、可靠取消 / 流式 / 成本治理、参考资料与风格画像、混合语义 Memory、跨进程 scheduler、多目标事务、正式资产、性能基准、SQLite 事实、工作台交互与备份 schema 9 验证：
+截至 v3.6.2，测试体系在执行事实、Safe Apply、Compiler/Registry 与持久 Planner 基础上，增加 Multi-Agent 并发与共识、12～500 章自主规划、可靠取消 / 流式 / 成本治理、参考资料与风格画像、混合语义 Memory、跨进程 scheduler、多目标事务、正式资产、性能基准、SQLite 事实、工作台交互与项目备份 schema 验证，并新增测试归属门禁（`test:ownership`）与 Canonical 文档事实校验（`test:capability-docs`）：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -32,9 +32,32 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 - 单次正常路径演示、编译通过或静态文本命中，不能替代竞争与故障注入测试。
 - 任一子测试失败，聚合命令和 CI 必须返回非零退出码；不得记录为“通过但有失败”。
 
+### 1.1 三类验证层级与变更选择器
+
+| 层级                | 触发                                                          | 入口                                                                                   |
+| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 日常修改            | 任何代码、脚本、文档或开发指令变更                            | `npm run verify:change`（先 `-- --dry-run` 查看选择理由）                              |
+| 专项验收            | 用户明确要求的领域检查：工作区可靠性、迁移、DSH、指定桌面场景 | 第 2 节专项脚本，或 `npm run test:e2e -- --spec <a> --spec <b>` 一次构建后运行多个场景 |
+| 发布 / 明确完整验收 | 发布任务、定时完整验收                                        | `scripts/agent-workflow/verify_project.ps1` 一次运行完整矩阵                           |
+
+`scripts/quality/verify-change.mjs` 读取已暂存、未暂存与未跟踪的变更路径（`--base <ref>` 纳入基线以来的提交，PR CI 使用），按 `scripts/quality/verification-scopes.mjs` 的模块归属表把变更路径映射到行为测试、Rust 筛选条件和桌面场景，合并去重后执行，并输出选择原因、命令、用例数、耗时和结果（`--report <file>` 写出 JSON）。默认检查如下：
+
+| 变更                                 | 默认检查                                                   |
+| ------------------------------------ | ---------------------------------------------------------- |
+| 文档、开发指令                       | 文档同步、改动文件格式、差异检查；涉及版本时加版本同步     |
+| 局部前端逻辑                         | 相邻或所属模块行为测试、改动文件 ESLint、一次类型检查      |
+| 用户交互、写作流程                   | 上述检查，加对应真实桌面场景                               |
+| Rust、SQLite 逻辑                    | `--locked` 编译检查及有非零匹配证明的相关 Rust/SQLite 测试 |
+| Migration、共享持久化、DSH、打包配置 | 扩大到对应完整领域门禁；打包变化验证生产构建               |
+| 发布、定时完整验收                   | 完整矩阵（`--full`），各测试集合执行一次                   |
+
+选择器的失败关闭边界：未映射路径抛出 `Unmapped change`，需在归属表补充行为归属；有归属但没有行为测试抛出 `No behavior tests`；零执行用例的成功进程记为 FAIL；任一检查失败传播非零退出码，失败的前端构建或 Gateway 重建会阻断依赖它们的后续步骤并把它们记为 `NOT_RUN`。完整门禁（覆盖率、完整 Rust、完整桌面）吸收对应的定向选择，避免同一测试执行两次。`--lane frontend|native|desktop` 用于 CI 分工，三条车道的命令集合互不重叠且合并后等于完整选择。覆盖率步骤按平台切换：Windows 运行带阈值的 `test:coverage`，其他平台运行同一批测试的 `test:all` 并在输出中注明阈值未在该平台执行（Linux 上 C8 对 `tsx --test` 子进程的归因偏低，核心集合会比 Windows 低约 10 个百分点，阈值只在校准过的 Windows 工具链上有意义）。行为测试见 `scripts/quality/verify-change.test.mjs`、`run-cargo-tests.test.mjs`、`test-ownership.test.mjs` 与 `scripts/e2e/spec-selection.test.ts`。
+
+同一批代码/配置未变化且已通过的检查不重复运行；失败修复或出现具体新风险时只复测受影响项。功能开发脚本 `run_feature_workflow.ps1` 默认只做开工检查，`-Phase Verify` 才调用选择器；完整发布脚本保持独立。
+
 ---
 
-## 2. 动态测试入口（v2.2.x～当前 v3.0.0）
+## 2. 动态测试入口（v2.2.x～v3.7.0）
 
 ### 2.1 工作区可靠性专项
 
@@ -56,7 +79,7 @@ npm run test:migrations
 - `large-text-integrity`：前端 fail-closed / operation 重试 / 采用竞态 disposition 与 Rust DB04～DB11；Rust 集成回归分别执行采用先提交和保存先提交两个顺序，并核对最终草稿、章节指针与 operation 状态。
 - `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
 
-`components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再检查所需 Rust 测试的完整名称是否各自唯一存在，最后运行全量 Rust 测试；因此它们不是 Rust 过滤命令。Cargo 测试发现为 0、名称歧义或任一全量 Rust 回归失败均不得被当作通过。
+`components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再把列出的完整 Rust 测试名交给 `scripts/quality/run-cargo-tests.mjs --exact` 精确执行：先 `--list` 校验每个名称唯一存在，再逐个以 `--locked`、`--exact`、`--test-threads=1` 运行，不再运行全部 Rust 测试。Cargo 测试发现为 0、名称歧义、仅 ignored 或任一用例失败均不得被当作通过。
 
 #### 统一前端入口与覆盖率门禁
 
@@ -71,7 +94,7 @@ npm run test:bundle-size
 ```
 
 - `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与显式服务测试，以及性能基准；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
-- `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。
+- `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。全量与核心集合覆盖率在 `test:all` 首次执行时由 C8 采集，`test:coverage:core` 只读取同一份 `coverage/tmp` 生成核心集合报告；关键组件门禁 `test:coverage:components` 随后用 `vitest.critical-components.config.ts` 单独执行 22 个关键组件文件并由 `scripts/check-critical-component-coverage.mjs` 检查每组 ≥ 60%。`test:vitest` 本身不启用 Vitest 覆盖率提供者——它会接管子进程的 `NODE_V8_COVERAGE`，导致 C8 丢失 Vitest 用例对全量与核心集合的贡献（Linux CI 上核心集合曾因此从 87% 跌到 78%）。
 - `test:component-size` 扫描全部生产 `.tsx`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。
 - `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。
 - `test:bundle-size` 读取 Vite manifest，校验唯一入口、全部 emitted JS、稳定 vendor chunk 与安全路径，再按真实文件字节和 gzip-9 执行双预算。当前入口门槛为 400 KiB / 135 KiB gzip-9，任一 chunk 为 450 KiB / 160 KiB gzip-9；缺失或歧义产物同样返回非零。
@@ -80,7 +103,7 @@ npm run test:bundle-size
 - `lint:ci` 将显式 `any` 作为 error，并以 `--max-warnings 0` 运行；生产源码 warning 回归会直接返回非零退出码。
 - `workspaceSessionStore.test.ts` 验证切换 novel 时清空 active chapter、当前草稿与 dirty，并覆盖可追踪的函数式集合更新；同一 reset 契约还统一持有质量和 AI 弹窗状态，该 Zustand store 已进入核心覆盖率集合。
 - `renderIdentityBudget.test.tsx` 验证编辑器活动状态一次原子提交，并证明 AI 任务轮询只替换变化事实、memo 卡片与卷树在无关更新中保持对象/渲染身份。
-- Pull Request、`main` 推送和发布构建都执行上述门禁；覆盖率或 warning 数发生回退时命令返回非零退出码。
+- `main` 推送、定时任务和发布构建完整执行上述门禁；Pull Request 由 `verify:change --base <PR base>` 按变更归属选择检查，只有依赖图、构建配置、验证基础设施或 CI 工作流变化才升级为完整覆盖率与构建门禁。覆盖率或 warning 数发生回退时命令返回非零退出码。
 
 ### 2.2 v2.1.8 及此前 Node / tsx 回归集合
 
@@ -88,7 +111,7 @@ npm run test:bundle-size
 npm run test
 ```
 
-该命令要求 Node.js >= 22.6，先使用原生 `node:test` 与 `--experimental-strip-types`，再使用 `tsx --test` 执行 v2.1.8 及此前的生产安全回归。它不包含 `src/test/**` 下的 v2.2.0 Vitest 用例；v2.2.0 必须同时运行 2.1 节列出的五个专项入口。类型剔除不代替 `tsc` 类型检查。
+该命令要求 Node.js >= 22.6，先使用原生 `node:test` 与 `--experimental-strip-types`，再使用 `tsx --test` 执行 v2.1.8 及此前的生产安全回归。它不包含 `src/test/**` 下的 v2.2.0 Vitest 用例；v2.2.0 必须同时运行 2.1 节列出的五个专项入口。类型剔除不代替 `tsc` 类型检查。工作台会话、采纳稿记忆、工具注册表与 Main Agent 运行时等 v3.x 服务测试由 `test:workbench` 统一执行；`test:ownership` 对默认链路中的重复归属失败关闭，`npm test` 不再内联这些文件，避免同一测试在每次全量链路中运行两次。
 
 ### 2.3 正文变更安全门定向测试
 
@@ -310,14 +333,15 @@ Node 测试负责区分 Tauri 与浏览器运行模式并验证“桌面失败�
 ### 2.11 Windows 真实桌面 E2E
 
 ```powershell
-# 启动、窗口、迁移和前端异常冒烟测试
+# 启动诊断 + 生产界面日常写作场景（含真实进程重启）
 npm run test:e2e:smoke
 
 # 全部独立桌面核心流程
 npm run test:e2e
 
-# 定向运行一个独立场景（扩展名可省略）
+# 定向运行一个或多个独立场景（扩展名可省略，共用一次构建）
 npm run test:e2e -- --spec candidate-review-apply
+npm run test:e2e -- --spec chapter-save --spec leave-guard
 ```
 
 该入口使用 WebdriverIO、`tauri-driver`、匹配 WebView2 的 EdgeDriver 和真实 Tauri release EXE。每个 suite 在独立 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的应用，每个 spec 独立启动该 suite 的 staged EXE，并使用独立临时 SQLite、WebView2 profile、单实例状态目录和自动选择的空闲 driver 端口；正常业务写入仍通过 React UI、Tauri IPC 与 Rust command 完成。测试桥只提供受限验收查询，以及仅限隔离 E2E 库的大文本故障注入。
@@ -330,26 +354,58 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 
 当前自动化流程：
 
-| Spec                                  | 流程                                                                                                                                     |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `app-start.spec.ts`                   | 应用启动、`app-shell`、迁移、SQLite 健康与前端异常                                                                                       |
-| `project-create-open.spec.ts`         | 创建作品、返回列表并打开                                                                                                                 |
-| `project-edit-save.spec.ts`           | 修改作品信息，验证保存不挂起、提交且不重复写入                                                                                           |
-| `chapter-save.spec.ts`                | 显式创建卷和章节、保存正文、切换页面并重新打开                                                                                           |
-| `large-text-save.spec.ts`             | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭                                                    |
-| `provider-pipeline-setting.spec.ts`   | Mock 设定候选经过 Task/Snapshot/Attempt/Artifact 全链路，且未确认前不写入正式设定                                                        |
-| `candidate-review-apply.spec.ts`      | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等                                                                             |
-| `leave-guard.spec.ts`                 | 未保存离开保护的取消、保存并离开及放弃修改分支                                                                                           |
-| `generation-job-cancel.spec.ts`       | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
-| `restart-task-recovery.spec.ts`       | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等                                                                   |
-| `quality-history-replay.spec.ts`      | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数                           |
-| `chapter-context-persistence.spec.ts` | 保存章节总结与上下文后重启，校验稳定 ID 和同一内容；持久化过期后再次重启，证明后续生成不再读取该记录                                     |
+| Spec                                   | 流程                                                                                                                                     |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-start.spec.ts`                    | 应用启动、`app-shell`、迁移、SQLite 健康与前端异常                                                                                       |
+| `workbench-writing-smoke.spec.ts`      | 生产界面日常写作：创建作品/章节 → 工作台任务 → 生成候选 → 请求修订 → 显式审阅 → 编辑保存 → 确认采用 → 真实进程重启 → 核对正文/采用/授权  |
+| `cold-start.spec.ts`                   | 隔离库首次启动：稳定应用外壳先于工作台就绪，并输出冷启动计时标记                                                                         |
+| `project-create-open.spec.ts`          | 创建作品、返回列表并打开                                                                                                                 |
+| `project-edit-save.spec.ts`            | 修改作品信息，验证保存不挂起、提交且不重复写入                                                                                           |
+| `project-backup-boundary.spec.ts`      | 项目备份附件边界：未知或越界附件在任何 SQLite/LocalStorage 写入前整体拒绝                                                                |
+| `txt-import-atomic.spec.ts`            | TXT 导入单事务：经生产对话框投递两章 TXT，Rust `import_txt_novel` 在一个 SQLite 事务内创建作品、卷、章节与未采用导入草稿                 |
+| `workbench-task-directory.spec.ts`     | 持久化工作台任务目录：本地会话建立真实会话事实，覆盖分页、归档搜索与选中恢复                                                             |
+| `chapter-save.spec.ts`                 | 显式创建卷和章节、保存正文、切换页面并重新打开                                                                                           |
+| `large-text-save.spec.ts`              | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭                                                    |
+| `provider-pipeline-setting.spec.ts`    | Mock 设定候选经过 Task/Snapshot/Attempt/Artifact 全链路，且未确认前不写入正式设定                                                        |
+| `candidate-review-apply.spec.ts`       | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等                                                                             |
+| `leave-guard.spec.ts`                  | 未保存离开保护的取消、保存并离开及放弃修改分支                                                                                           |
+| `generation-job-cancel.spec.ts`        | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
+| `restart-task-recovery.spec.ts`        | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等                                                                   |
+| `quality-history-replay.spec.ts`       | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数                           |
+| `chapter-context-persistence.spec.ts`  | 保存章节总结与上下文后重启，校验稳定 ID 和同一内容；持久化过期后再次重启，证明后续生成不再读取该记录                                     |
+| `chapter-readiness-planner.spec.ts`    | 六个本地只读 Tool 各运行一次并持久化完成 Plan、零网络访问；重启后 claimed step 以 waiting_retry 恢复，仅在显式 UI 确认后重放（见 2.16）  |
+| `story-assets-transaction.spec.ts`     | 从真实 UI 创建势力并只应用两章之一的多目标事务，另一章经只读 SQLite 连接复验不变（见 2.22）                                              |
+| `conversational-workbench.spec.ts`     | 对话式创作工作台主流程：Runtime 模型不可用时保留 legacy 路由并阻断空任务发送                                                             |
+| `agent-production-closed-loop.spec.ts` | Agent 生产闭环：5 轮多小说生成、修订、审阅授权与采用，并经真实应用重启后存活                                                             |
+| `domain-facade-sqlite.spec.ts`         | TS/Rust Canonical attestation 一致，四个宿主校验只读 Tool 进入真实 SQLite Facade 链（见 2.24）                                           |
+
+表中行序与 `scripts/e2e/run-e2e.ts` 的 `allSpecs` 数组一致，该数组是桌面 E2E 的权威 spec 清单；`creative-agent-workflow.spec.ts` 为 legacy / NOT_RUN，不在清单内（见第 3 节）。smoke 模式运行 `app-start.spec.ts` 与 `workbench-writing-smoke.spec.ts`，完整模式运行全部 22 个场景；`--spec` 可重复指定多个场景，运行器统一构建一次并保留逐场景数据库隔离与进程清理（`scripts/e2e/spec-selection.ts`）。
+
+默认 E2E 使用生产界面：已从生产移除的旧右侧 AI 面板与草稿回滚入口不再仅凭 E2E 构建标记恢复，只有 `spec-selection.ts` 的 `legacyPanelSpecs` 列出的兼容性用例（候选审阅采用、上下文持久化、生成取消、大文本、Provider 管线、质量历史重放、重启恢复）由运行器注入 `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS=1`，再由 `wdio.conf.ts` 在会话启动后写入显式 localStorage 开关；`src/types/rightSidebar.ts` 的 `isE2eLegacyWorkspacePanelsEnabled()` 同时要求 E2E 构建与该开关。`workbench-writing-smoke` 的夹具只准备世界/规则/主角/章纲前置资产，生成、修订、审阅、保存、采用与重启全部经生产 UI、真实 Tauri IPC 与隔离 SQLite 完成；其中 Mock 模式的章节总结在创建 Run 前显式失败，是失败边界证据而非总结成功。五轮跨作品闭环（`agent-production-closed-loop.spec.ts`）继续用于完整验收。
 
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；每周定时、手动完整模式及签名发布的可复用 `workflow_call` 运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。`release.yml` 显式依赖该 full 门禁，不再与标签桌面 E2E 并行竞速。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+#### 真实配置验收（opt-in，不在 CI 内）
+
+```powershell
+# 先关闭桌面应用；必须在非提权 shell 中运行
+$env:AI_NOVEL_STUDIO_REAL_PROFILE = '1'
+npm run test:real-profile:writing-subagent
+```
+
+`tests/real-acceptance/wdio.real-profile.conf.ts` 与隔离 E2E 相反：它用 tauri-driver 启动生产 EXE（默认 `src-tauri/target/release/AI Novel Studio.exe`，可用 `AI_NOVEL_STUDIO_REAL_PROFILE_APP` 覆盖）并复用操作者的真实配置——已保存的模型卡片、DPAPI 凭据保管库与生产 SQLite，因此能验收只存在于客户端保管库中的模型凭据，且密钥从不离开应用。它不设置 `AI_NOVEL_STUDIO_E2E`（隔离标记会阻断网络并改写数据目录），WebView2 用户数据目录必须传 `%LOCALAPPDATA%\com.ainovelstudio.app`（wry 的父目录；传子目录 `EBWebView` 会让被驱动实例落入一份嵌套的空配置）。当前唯一规格 `writing-subagent-real-profile.spec.ts` 覆盖 Writing SubAgent Gate E-4a：经生产 IPC 建立或复用固定作品「Writing SubAgent E-4 真实验收」，在 WebView 内写入 `ai_novel_studio_writing_subagent_dsh=1`，经生产工作台创建并启动一条 `chapter_write` 任务，判据为模型工具调用全部落在 allowlist（`dsh.*` 为运行时会话事件投影，不计）、`generate_chapter` 成功、`chapter_text` 候选 `valid` 且绑定目标章节、章节字数 / 草稿数 / 作品总字数零变化、开关运行后移除。证据写入 `test-results/real-profile/<runId>/writing-subagent-real-profile.json`，只含工具名、状态、计数、长度与哈希；失败时另存本地截图。该运行会产生真实计费调用并向生产库写入一部固定作品与任务会话，只在用户明确授权时执行。可选环境变量：`AI_NOVEL_STUDIO_REAL_PROFILE_MODEL_HINT`（默认 `gemini`）、`..._TARGET_WORDS`（默认 1000）、`..._TURN_TIMEOUT_MS`（默认 15 分钟）、`..._DRIVER_PORT`（默认 4470）。
+
+```powershell
+# 故障注入（Writing SubAgent E-4b）：生产 EXE + 隔离配置 + 回环脚本上游，零网络零凭据
+$env:AI_NOVEL_STUDIO_FAULT_INJECTION = '1'
+npm run test:fault-injection:writing-subagent
+```
+
+`tests/real-acceptance/wdio.fault-injection.conf.ts` 与真实配置载体共用 `production-carrier.ts`，同样启动生产 EXE 并经真实 DSH 运行时、Gateway、Rust 宿主与工作台 UI 执行，但把 `LOCALAPPDATA / APPDATA / WebView2` 用户数据目录重定向到 `test-results/fault-injection/<runId>/profile/`，不打开操作者的设置、保管库与数据库（DSH 运行时载荷经 `DSH_RUNTIME_ROOT` 只读复用，也可用 `AI_NOVEL_STUDIO_FAULT_INJECTION_DSH_RUNTIME_ROOT` 覆盖），因此桌面应用可以保持打开。规格 `writing-subagent-fault-injection.spec.ts` 自己启动 `scripts/dsh/mock-workbench-upstream.mjs` 作为模型（`MOCK_WORKBENCH_MODE` 新增 `forbidden-tool / cross-novel / upstream-error-once / upstream-error / hold-generate`，进程内 `configure()` 在同一端口切换模式与 id），在 WebView 中写入指向回环上游的 API 设置与 Writing SubAgent 开关，依次跑越权工具、跨书候选、上游瞬时失败、上游持续失败与显式重试、字数越界候选、候选补全挂起时强杀应用进程并重启恢复六个场景；每个场景都核对 run/工具事件/候选卡状态、正式章节字数 / 草稿 / 作品总字数零变化，重启场景另核对启动恢复对话框、中断 run 状态、重试后重新完成全部读取及无残留 worker 进程。两个重试场景刻意使用不点名章节的目标文本，并断言同一会话的每个 run 都持久化了固定章节的 `chapterId`（GAP-18 回归），以及重试运行的每个模型请求都携带宿主的“用户重试”说明而原运行的请求均不携带（GAP-19 回归；mock 只记录布尔值）。证据写入 `test-results/fault-injection/<runId>/writing-subagent-fault-injection.json`（工具名、状态、计数、哈希与 mock 请求阶段），不含提示词与正文。该载体不在 CI 内，也不进入 `test:all`。
+
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 上先用 `verify:change --dry-run --github-output` 判定是否涉及桌面行为：未涉及时桌面作业输出 `NOT_APPLICABLE` 且不声称任何测试；涉及时以 `--lane desktop` 只运行归属的场景（按需扩大为完整套件）。`main` 推送、每周定时、手动完整模式及签名发布的可复用 `workflow_call` 运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。`release.yml` 显式依赖该 full 门禁并复验 `verified_sha`，不再与标签桌面 E2E 并行竞速。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ### 2.12 v2.3.0 执行事实层专项
 
@@ -715,7 +771,7 @@ npm run test:e2e -- --spec domain-facade-sqlite.spec.ts
 
 ### 测试归属与本批边界回归
 
-`test:all` 先校验测试归属，保留原有 Node/tsx、Vitest、独立面板和性能运行参数，再通过 `test:discovered` 按正确 runner 实际执行遗漏的单测。新增测试没有归属、runner 冲突或引用已删除文件必须失败；桌面/真实云端保留专属入口和明确证据边界。旧 `creative-agent-workflow.spec.ts` 指向已退出生产的实验 UI，明确标为 legacy / NOT_RUN，不通过恢复旧主流程来冒充当前桌面覆盖。
+`test:all` 先校验测试归属，保留原有 Node/tsx、Vitest、独立面板和性能运行参数，再通过 `test:discovered` 按正确 runner 实际执行遗漏的单测。新增测试没有归属、runner 冲突、引用已删除文件或同一默认链路内重复归属必须失败；桌面/真实云端保留专属入口和明确证据边界。旧 `creative-agent-workflow.spec.ts` 指向已退出生产的实验 UI，明确标为 legacy / NOT_RUN，不通过恢复旧主流程来冒充当前桌面覆盖。
 
 当前边界回归包括：备份恶意附件在任何 SQLite/LocalStorage 写入前拒绝与 schema 2～11 兼容；任务目录超过 100 条后的分页、归档搜索、迟到请求隔离及选中任务恢复；否定与总结对象路由、完整指令/有界检索分离、约束预算回执；语义警告不多发请求而硬错误仍阻断；凭据双环境说明；更新通道防倒退、不可变产物和部分上传故障补偿。
 
@@ -775,9 +831,9 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-`verify_project.ps1` 会顺序运行版本同步、文档同步、覆盖率、组件体积、Node 测试、ESLint、前端构建、包体预算、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
+`verify_project.ps1` 只用于发布或明确完整验收，会顺序运行版本同步、文档同步、覆盖率（含关键组件阈值）、组件体积、ESLint、前端构建、包体预算、`cargo check --locked`、Gateway 清理与重建、所需 Rust 回归用例存在性校验（`run-cargo-tests.mjs --list-only`，AI Task 删除与项目备份用例由随后的完整 `cargo test` 实际执行，不再提前重复运行）、完整串行 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
 
-GitHub Actions 分为四层：`ci.yml` 提供 Linux lint / test / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Windows 运行版本、文档、覆盖率、Rust、无 bundle 生产构建、包体预算和真实 Tauri E2E；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，再构建 MSI、签名 updater 与回滚 manifest。浏览器快速 CI 通过不等于桌面发布通过。
+GitHub Actions 分为四层，PR 与 `main`/发布使用不同强度：`ci.yml` 在 Pull Request 上用 `verify:change --base <PR base> --lane frontend` 只运行前端归属检查，在 `main` 推送时运行完整 lint / coverage / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Pull Request 上以 `--lane native` 与 `--lane desktop` 运行 Rust、文档与桌面归属检查（不适用时输出 `NOT_APPLICABLE`），在 `main` 推送、定时和 `workflow_call` 时运行版本、文档、Rust、无 bundle 生产构建和完整真实 Tauri E2E（Linux 前端作业执行完整 `test:all` 矩阵；C8 覆盖率阈值只在校准过的 Windows 工具链执行，选择器按平台切换 `test:coverage` / `test:all`）；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，复验 `verified_sha` 与发布提交一致后再构建 MSI、签名 updater 与回滚 manifest，签名、产物与通道检查仍独立执行。required check 名称保持稳定；缺工具、零匹配和实际失败不能伪装为通过。浏览器快速 CI 通过不等于桌面发布通过。
 
 辅助脚本不替代第 2 节的定向动态测试。发布汇报必须逐项记录真实命令、退出码与失败信息，不能只写“综合验证通过”。
 

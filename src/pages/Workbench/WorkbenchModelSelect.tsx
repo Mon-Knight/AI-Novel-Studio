@@ -35,14 +35,22 @@ export function WorkbenchModelSelect({
     selectionLocked: locked,
   });
   const selectedMissing = !availability.selectedOption;
+  const statusTitle =
+    availability.status === 'available'
+      ? '模型可用'
+      : availability.status === 'refreshing'
+        ? '正在刷新模型目录'
+        : availability.message || '模型不可用';
 
   return (
     <label
-      className={`workbench-model-control${locked ? ' is-locked' : ''}`}
+      className={`workbench-model-control${locked ? ' is-locked' : ''} is-${availability.status}`}
       htmlFor={id}
-      title={locked ? '模型已在任务创建时固定' : undefined}
+      title={locked ? `模型已在任务创建时固定 · ${statusTitle}` : statusTitle}
+      data-model-status={availability.status}
     >
       <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
+      <span className="workbench-model-status-dot" aria-hidden="true" />
       <span className="workbench-model-label">模型</span>
       <select
         id={id}

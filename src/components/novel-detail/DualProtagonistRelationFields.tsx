@@ -13,39 +13,20 @@ export default function DualProtagonistRelationFields({
 }: DualProtagonistRelationFieldsProps) {
   const update = (patch: Partial<DualProtagonistRelation>) => onChange({ ...relation, ...patch });
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-border-light)',
-        borderRadius: 8,
-        padding: 12,
-        marginBottom: 8,
-        background: 'var(--color-bg-primary)',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          fontSize: 14,
-          fontWeight: 600,
-          marginBottom: 10,
-          color: 'var(--color-primary)',
-        }}
-      >
+    <div className="detail-list-item detail-list-item--inset">
+      <div className="detail-subsection-title detail-subsection-title--md">
         <Link2 aria-hidden="true" size={14} strokeWidth={1.8} />
         双主角关系
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="detail-form-grid detail-form-grid--tight">
         <div>
           <label className="panel-field-label">关系类型</label>
           <select
-            className="panel-select"
+            className="panel-select detail-fill detail-text-sm"
             value={relation.type}
             onChange={(event) =>
               update({ type: event.target.value as DualProtagonistRelation['type'] })
             }
-            style={{ width: '100%', fontSize: 13 }}
           >
             {Object.entries(RELATION_TYPE_LABELS).map(([key, value]) => (
               <option key={key} value={key}>
@@ -57,14 +38,13 @@ export default function DualProtagonistRelationFields({
         <div>
           <label className="panel-field-label">叙事权重</label>
           <select
-            className="panel-select"
+            className="panel-select detail-fill detail-text-sm"
             value={relation.narrativeWeight || 'balanced'}
             onChange={(event) =>
               update({
                 narrativeWeight: event.target.value as DualProtagonistRelation['narrativeWeight'],
               })
             }
-            style={{ width: '100%', fontSize: 13 }}
           >
             {Object.entries(NARRATIVE_WEIGHT_LABELS).map(([key, value]) => (
               <option key={key} value={key}>
@@ -74,27 +54,25 @@ export default function DualProtagonistRelationFields({
           </select>
         </div>
       </div>
-      <div style={{ marginTop: 8 }}>
+      <div className="detail-gap-top">
         <label className="panel-field-label">关系说明</label>
         <textarea
           value={relation.description}
           onChange={(event) => update({ description: event.target.value })}
-          className="form-textarea"
+          className="form-textarea detail-textarea"
           placeholder="描述两位主角之间的关系..."
           rows={2}
-          style={{ width: '100%', resize: 'vertical' }}
         />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+      <div className="detail-form-grid detail-form-grid--tight detail-form-grid--gap-top">
         <div>
           <label className="panel-field-label">核心冲突</label>
           <input
             type="text"
             value={relation.conflict || ''}
             onChange={(event) => update({ conflict: event.target.value })}
-            className="form-input"
+            className="form-input detail-fill detail-text-sm"
             placeholder="两人之间的主要冲突"
-            style={{ width: '100%', fontSize: 13 }}
           />
         </div>
         <div>
@@ -103,21 +81,19 @@ export default function DualProtagonistRelationFields({
             type="text"
             value={relation.cooperation || ''}
             onChange={(event) => update({ cooperation: event.target.value })}
-            className="form-input"
+            className="form-input detail-fill detail-text-sm"
             placeholder="合作模式"
-            style={{ width: '100%', fontSize: 13 }}
           />
         </div>
       </div>
-      <div style={{ marginTop: 8 }}>
+      <div className="detail-gap-top">
         <label className="panel-field-label">关系推进</label>
         <input
           type="text"
           value={relation.emotionalProgression || ''}
           onChange={(event) => update({ emotionalProgression: event.target.value })}
-          className="form-input"
+          className="form-input detail-fill detail-text-sm"
           placeholder="关系发展路线"
-          style={{ width: '100%', fontSize: 13 }}
         />
       </div>
     </div>

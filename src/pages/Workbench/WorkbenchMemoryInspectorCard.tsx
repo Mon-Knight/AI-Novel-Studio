@@ -62,7 +62,7 @@ export const MemoryInspectorCard = memo(function MemoryInspectorCard({
         style={{
           display: 'flex',
           gap: 8,
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--color-text-muted, #64748b)',
         }}
       >

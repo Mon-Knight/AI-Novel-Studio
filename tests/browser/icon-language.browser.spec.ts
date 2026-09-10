@@ -24,7 +24,7 @@ describe('application icon language', () => {
   for (const route of routes) {
     it(`keeps ${route.name} on the sidebar Lucide line-icon baseline`, async () => {
       await browser.url(route.hash);
-      await (await $('.app-sidebar')).waitForDisplayed();
+      await (await $('.app-frame-bar')).waitForDisplayed();
       await (await $('#startup-splash')).waitForExist({ reverse: true });
       await browser.waitUntil(
         async () =>
