@@ -1,7 +1,13 @@
 /**
  * AI Novel Studio - AI Client 工厂
  */
-import type { AiClient, AiSettings } from '../../types/ai';
+import type {
+  AiClient,
+  AiGenerateOptions,
+  AiGenerateRequest,
+  AiGenerateResponse,
+  AiSettings,
+} from '../../types/ai';
 import { MockAiClient } from './mockAiClient';
 import { RealAiClient } from './realAiClient';
 import { aiSettingsService } from './aiSettingsService';
@@ -52,6 +58,19 @@ export function createAiClient(settings?: AiSettings): AiClient {
       return attachAiUsageCost(await client.generate(request, options), resolvedSettings);
     },
   };
+}
+
+/**
+ * Runs a single AI request with a client built from the supplied settings (or
+ * the current settings when omitted). Client construction stays in the service
+ * layer so UI components never wire providers themselves.
+ */
+export async function runAiGenerate(
+  request: AiGenerateRequest,
+  options: AiGenerateOptions = {},
+  settings?: AiSettings,
+): Promise<AiGenerateResponse> {
+  return createAiClient(settings).generate(request, options);
 }
 
 export { aiSettingsService } from './aiSettingsService';

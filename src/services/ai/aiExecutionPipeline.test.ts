@@ -1247,3 +1247,97 @@ test('local chapter adapter rejects a non-loopback endpoint before provider disp
     /只允许 localhost、127\.0\.0\.0\/8 或 \[::1\]/,
   );
 });
+
+test('chapter revisions use the dedicated persistence port and retain their verified parent identity', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  const content = '原候选A的完整正文';
+  const hash = await computeContentSha256(content);
+  const source = {
+    conversationId: 'conversation-a',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    cardId: 'card-a',
+    artifactId: 'artifact-a',
+    artifactHash: hash,
+    artifactType: 'chapter_text',
+    title: '候选A',
+  };
+  const input: ExecuteAiTaskInput = {
+    ...executionInput(),
+    taskType: 'chapter_generate',
+    scopeType: 'chapter',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    compilation: {
+      sources: [],
+      taskInput: {
+        revisionSource: source,
+        parentArtifactId: 'artifact-a',
+        sourceArtifactId: 'artifact-a',
+        sourceContentHash: hash,
+        derivationType: 'revision',
+      },
+    },
+  };
+  let revisionCalls = 0;
+  const runtime = createRuntime(observations, {
+    getArtifact: async () => ({
+      ...artifactBundle({
+        taskId: 'parent-task',
+        attemptId: 'parent-attempt',
+        artifactType: 'chapter_text',
+        schemaVersion: 1,
+        rawContent: content,
+      }),
+      artifact: {
+        ...artifactBundle({
+          taskId: 'parent-task',
+          attemptId: 'parent-attempt',
+          artifactType: 'chapter_text',
+          schemaVersion: 1,
+          rawContent: content,
+        }).artifact,
+        artifactId: 'artifact-a',
+        sourceNovelId: 'novel-1',
+        sourceChapterId: 'chapter-1',
+        contentHash: hash,
+      },
+    }),
+    createArtifact: async () => {
+      throw new Error('generic artifact persistence must not receive a revision');
+    },
+    createChapterRevisionArtifact: async (payload) => {
+      revisionCalls++;
+      observations.artifact = payload;
+      return artifactBundle(payload);
+    },
+  });
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    execute: async () => ({
+      text: '修订候选',
+      providerId: 'deepseek',
+      modelId: 'test-model',
+      tokenInput: 1,
+      tokenOutput: 1,
+      tokenTotal: 2,
+      finishReason: 'stop',
+      durationMs: 1,
+    }),
+  };
+  const deps = dependencies(runtime, adapter);
+  deps.compileContract = async () => {
+    const contract = await compiledContract();
+    contract.taskType = 'chapter_generate';
+    contract.expectedArtifactType = 'chapter_text';
+    contract.request.taskType = 'chapter_generate';
+    contract.inputPayloadJson.taskInput = input.compilation.taskInput!;
+    contract.contextSnapshot.sourceManifestJson.revisionSource = source;
+    return contract;
+  };
+  await executeAiTask(input, deps);
+  assert.equal(revisionCalls, 1);
+  assert.equal(observations.artifact?.parentArtifactId, 'artifact-a');
+  assert.equal(observations.artifact?.derivationType, 'revision');
+});

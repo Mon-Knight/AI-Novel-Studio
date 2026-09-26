@@ -1,5 +1,20 @@
 import { dbCall, generateId, isTauri, lsGet, lsSet, nowISO } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
+import {
+  decodeArtifactRevisionTurn,
+  encodeArtifactRevisionTurn,
+} from './artifactRevisionSourceCodec';
+import {
+  decisionFallbackStatus,
+  reconcileLocalConversationStatus,
+} from './conversationDecisionState';
+import {
+  assertClientWritableModelSnapshot,
+  isLocalConversationalSnapshot,
+  modelSnapshotFrom,
+  sameModelSnapshot,
+} from './conversationModelSnapshotValidation';
 import { isContextCompressionCandidate } from '../context/novelContextCompressionProvider';
 import {
   normalizeConversationDirectoryQuery,
@@ -70,86 +85,6 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function isModelSnapshotSecretField(key: string): boolean {
-  const normalized = key
-    .split('')
-    .filter((character) => /[a-z0-9]/i.test(character))
-    .join('')
-    .toLowerCase();
-  return (
-    normalized.endsWith('apikey') ||
-    normalized.endsWith('authorization') ||
-    normalized.endsWith('accesstoken') ||
-    normalized.endsWith('refreshtoken') ||
-    normalized.endsWith('authtoken') ||
-    normalized.endsWith('apitoken') ||
-    normalized.endsWith('bearertoken') ||
-    normalized.endsWith('sessiontoken') ||
-    normalized.endsWith('password') ||
-    normalized.endsWith('passphrase') ||
-    normalized.endsWith('secret') ||
-    normalized.endsWith('credential') ||
-    normalized.endsWith('credentials') ||
-    normalized.endsWith('cookie') ||
-    normalized.endsWith('cookies') ||
-    normalized.endsWith('privatekey')
-  );
-}
-
-function containsModelSnapshotSecret(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsModelSnapshotSecret);
-  if (typeof value === 'string') {
-    const lower = value.toLowerCase();
-    return (
-      lower.includes('bearer ') ||
-      lower.includes('authorization:') ||
-      lower.includes('x-api-key') ||
-      lower.includes('x_api_key') ||
-      lower.includes('xapikey') ||
-      lower.includes('openaiapikey') ||
-      lower.includes('api_key=') ||
-      lower.includes('apikey=') ||
-      lower.includes('api-key=') ||
-      lower.includes('credentials=') ||
-      lower.includes('"credentials"') ||
-      lower.includes('-----begin private key-----') ||
-      value
-        .split(/[\s"'=:,;()[\]{}]+/)
-        .some(
-          (token) =>
-            (token.startsWith('sk-') && token.length >= 19) || /^AKIA[A-Z0-9]{16}$/.test(token),
-        )
-    );
-  }
-  if (!value || typeof value !== 'object') return false;
-  return Object.entries(value).some(
-    ([key, child]) => isModelSnapshotSecretField(key) || containsModelSnapshotSecret(child),
-  );
-}
-
-function assertSafeModelSnapshot(
-  value: unknown,
-  label: string,
-): asserts value is TaskModelSnapshot {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label}必须是对象`);
-  }
-  if (containsModelSnapshotSecret(value)) {
-    throw new Error(`${label}不得包含 API Key 或其他凭据`);
-  }
-}
-
-function assertClientWritableModelSnapshot(value: TaskModelSnapshot, label: string): void {
-  const runtime = value.runtime as Record<string, unknown> | undefined;
-  if (runtime && Object.prototype.hasOwnProperty.call(runtime, 'toolCallingAttestation')) {
-    const error = new Error(
-      `${label}不得声明模型工具认证；该证明只能由 DSH 运行时写入`,
-    ) as Error & { code: string };
-    error.code = 'MODEL_ATTESTATION_UNTRUSTED';
-    throw error;
-  }
-}
-
 function localBundle(id: string): TaskConversationBundle | undefined {
   return localState().bundles.find((bundle) => bundle.conversation.conversationId === id);
 }
@@ -163,39 +98,6 @@ function upsertLocal(bundle: TaskConversationBundle): TaskConversationBundle {
   else state.bundles.unshift(bundle);
   saveLocal(state);
   return clone(bundle);
-}
-
-function modelSnapshotFrom(value: TaskModelSnapshot | undefined): TaskModelSnapshot | undefined {
-  if (!value) return undefined;
-  assertSafeModelSnapshot(value, '模型快照');
-  return clone(value);
-}
-
-function stableJson(value: unknown): string {
-  if (value === undefined) return 'undefined';
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-    .join(',')}}`;
-}
-
-function sameModelSnapshot(left: TaskModelSnapshot, right: TaskModelSnapshot): boolean {
-  const lockProjection = (snapshot: TaskModelSnapshot) => {
-    const projected = clone(snapshot);
-    if (projected.runtime) delete projected.runtime.toolCallingAttestation;
-    return projected;
-  };
-  return stableJson(lockProjection(left)) === stableJson(lockProjection(right));
-}
-
-function isLocalConversationalSnapshot(snapshot: TaskModelSnapshot): boolean {
-  return (
-    snapshot.providerId === 'ans-local' &&
-    snapshot.runtime?.adapterProtocol === 'ans_local_conversation_v1'
-  );
 }
 
 function normalizeConversation(raw: unknown): TaskConversation {
@@ -228,7 +130,12 @@ function normalizeBundle(raw: unknown): TaskConversationBundle | null {
   if (!item.conversation) return null;
   return {
     conversation: normalizeConversation(item.conversation),
-    turns: Array.isArray(item.turns) ? (item.turns as ConversationTurn[]) : [],
+    turns: Array.isArray(item.turns)
+      ? (item.turns as ConversationTurn[]).map((turn) => ({
+          ...turn,
+          ...decodeArtifactRevisionTurn(turn.content ?? ''),
+        }))
+      : [],
     runs: Array.isArray(item.runs) ? (item.runs as TaskRun[]).map(normalizeRun) : [],
     toolEvents: Array.isArray(item.toolEvents) ? (item.toolEvents as ToolCallEvent[]) : [],
     artifacts: Array.isArray(item.artifacts)
@@ -279,10 +186,12 @@ async function readArtifactProjection(artifactId: string): Promise<HydratedArtif
         content: artifact.displayContent ?? artifact.rawContent,
         artifactEvidence: {
           sourceNovelId: artifact.artifact.sourceNovelId,
-          sourceChapterId: artifact.artifact.sourceChapterId,
-          sourceDraftId: artifact.artifact.sourceDraftId,
-          sourceDraftVersion: artifact.artifact.sourceDraftVersion,
-          baseContentHash: artifact.artifact.sourceBaseContentHash,
+          // Real IPC returns JSON null for absent optional columns; the optional contract is
+          // `undefined`, and a null would otherwise fail the strict revision-source codec.
+          sourceChapterId: artifact.artifact.sourceChapterId ?? undefined,
+          sourceDraftId: artifact.artifact.sourceDraftId ?? undefined,
+          sourceDraftVersion: artifact.artifact.sourceDraftVersion ?? undefined,
+          baseContentHash: artifact.artifact.sourceBaseContentHash ?? undefined,
           derivationType:
             artifact.artifact.derivationType ??
             (isContextCompression ? 'context_compression' : undefined),
@@ -364,66 +273,6 @@ function isTerminalRun(status: TaskRun['status']): boolean {
 
 function isTerminalToolEvent(status: ToolCallEvent['status']): boolean {
   return ['succeeded', 'failed', 'cancelled', 'skipped'].includes(status);
-}
-
-function latestDecisionForCard(
-  bundle: TaskConversationBundle,
-  cardId: string,
-): ArtifactDecision | undefined {
-  const related = (bundle.decisions ?? []).filter(
-    (decision) =>
-      decision.cardId === cardId && decision.conversationId === bundle.conversation.conversationId,
-  );
-  return related[related.length - 1];
-}
-
-function hasUnresolvedArtifactCandidate(bundle: TaskConversationBundle): boolean {
-  const authorizations = bundle.authorizations ?? [];
-  return bundle.artifacts.some((card) => {
-    if (!['candidate', 'confirmed'].includes(card.status)) return false;
-    const decision = latestDecisionForCard(bundle, card.cardId);
-    if (!decision) return true;
-    if (decision.decision === 'confirm') {
-      return !authorizations.some(
-        (authorization) =>
-          authorization.decisionId === decision.decisionId &&
-          authorization.status === 'consumed' &&
-          Boolean(authorization.consumedByDraftId),
-      );
-    }
-    return (
-      decision.decision === 'request_apply' &&
-      !decision.applyTransactionId &&
-      !decision.conflictCode
-    );
-  });
-}
-
-function decisionFallbackStatus(decision: ArtifactDecision): TaskConversation['status'] {
-  if (decision.conflictCode) return 'failed';
-  if (decision.decision === 'reject' || decision.decision === 'request_revision') return 'idle';
-  if (decision.decision === 'request_apply' && decision.applyTransactionId) return 'completed';
-  if (decision.decision === 'confirm' || decision.decision === 'request_apply') {
-    return 'waiting_user';
-  }
-  return 'idle';
-}
-
-function reconcileLocalConversationStatus(
-  bundle: TaskConversationBundle,
-  fallbackStatus: TaskConversation['status'],
-  updatedAt: string,
-): void {
-  if (bundle.conversation.archivedAt) return;
-  const hasActiveRun = bundle.runs.some((run) =>
-    ['queued', 'running', 'cancel_requested'].includes(run.status),
-  );
-  bundle.conversation.status = hasUnresolvedArtifactCandidate(bundle)
-    ? 'waiting_user'
-    : hasActiveRun
-      ? 'running'
-      : fallbackStatus;
-  bundle.conversation.updatedAt = updatedAt;
 }
 
 export const taskConversationService = {
@@ -676,12 +525,16 @@ export const taskConversationService = {
     conversationId: string,
     role: ConversationTurn['role'],
     content: string,
+    revisionSource?: ArtifactRevisionSource,
   ): Promise<ConversationTurn> {
+    if (revisionSource && (role !== 'user' || revisionSource.conversationId !== conversationId)) {
+      throw new Error('修订来源只能绑定同一任务的用户回合。');
+    }
     const input = {
       turnId: generateId(),
       conversationId,
       role,
-      content,
+      content: encodeArtifactRevisionTurn(content, revisionSource),
       createdAt: nowISO(),
     };
     const raw = await dbCall<unknown>('append_conversation_turn', { input }, () => {
@@ -703,7 +556,7 @@ export const taskConversationService = {
       upsertLocal(bundle);
       return turn;
     });
-    return raw as ConversationTurn;
+    return { ...(raw as ConversationTurn), content, ...(revisionSource ? { revisionSource } : {}) };
   },
 
   async createRun(
@@ -921,7 +774,11 @@ export const taskConversationService = {
     }
     const recorded = existing ?? clone(decision);
     if (!existing) decisions.push(recorded);
-    reconcileLocalConversationStatus(bundle, decisionFallbackStatus(recorded), recorded.createdAt);
+    reconcileLocalConversationStatus(
+      bundle,
+      decisionFallbackStatus(bundle, recorded),
+      recorded.createdAt,
+    );
     upsertLocal(bundle);
     return clone(recorded);
   },
@@ -979,6 +836,39 @@ export const taskConversationService = {
     return null;
   },
 
+  async getBrowserReviewArtifact(
+    authorizationId: string,
+  ): Promise<ConversationArtifactCard | null> {
+    if (isTauri()) throw new Error('桌面候选必须从SQLite读取。');
+    for (const bundle of localState().bundles) {
+      const auth = bundle.authorizations?.find((item) => item.authorizationId === authorizationId);
+      if (!auth) continue;
+      const decision = bundle.decisions?.find((item) => item.decisionId === auth.decisionId);
+      const card = bundle.artifacts.find(
+        (item) => item.cardId === decision?.cardId && item.artifactId === auth.artifactId,
+      );
+      return card ? clone(card) : null;
+    }
+    return null;
+  },
+
+  expireBrowserReviewAuthorizations(novelId: string, authorizationIds?: string[]): void {
+    if (isTauri()) throw new Error('桌面授权过期必须由SQLite事务完成。');
+    const state = localState();
+    for (const bundle of state.bundles) {
+      if (bundle.conversation.novelId !== novelId) continue;
+      for (const auth of bundle.authorizations ?? []) {
+        if (
+          auth.status === 'issued' &&
+          (!authorizationIds || authorizationIds.includes(auth.authorizationId))
+        ) {
+          auth.status = 'expired';
+        }
+      }
+    }
+    saveLocal(state);
+  },
+
   async completeBrowserReviewAdoption(
     authorizationId: string,
     draftId: string,
@@ -1015,6 +905,8 @@ export const taskConversationService = {
 
   async publishStructuredCandidate(input: {
     conversationId: string;
+    runId?: string;
+    turnId?: string;
     novelId: string;
     chapterId?: string;
     artifactType: ConversationArtifactCard['artifactType'];
@@ -1042,9 +934,20 @@ export const taskConversationService = {
       () => {
         const bundle = localBundle(input.conversationId);
         if (!bundle) throw new Error('任务对话不存在');
+        const sourceRun = input.runId
+          ? bundle.runs.find((run) => run.runId === input.runId)
+          : undefined;
+        if (
+          input.runId &&
+          (!sourceRun ||
+            sourceRun.conversationId !== input.conversationId ||
+            (input.turnId && sourceRun.turnId !== input.turnId))
+        )
+          throw new Error('候选运行来源不匹配。');
         const card: ConversationArtifactCard = {
           cardId: generateId(),
           conversationId: input.conversationId,
+          ...(sourceRun ? { runId: sourceRun.runId, turnId: sourceRun.turnId } : {}),
           artifactId: `browser-${generateId()}`,
           artifactType: input.artifactType,
           title: input.title,

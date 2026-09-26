@@ -545,12 +545,13 @@ const server = http.createServer(async (req, res) => {
     const upstreamBase = new URL(UPSTREAM);
     const upstreamPath = pathname.replace(/^\/v1(?=\/)/, '');
     const basePath = upstreamBase.pathname.replace(/\/+$/, '');
-    // Callers may provide either an origin or an OpenAI-compatible /v1 base.
-    // Avoid producing /v1/v1 when the downstream already includes the prefix.
-    const targetPath =
-      basePath.endsWith('/v1') && upstreamPath.startsWith('/v1/')
-        ? upstreamPath.slice(3)
-        : basePath + upstreamPath;
+    // Settings also accept a full chat completion endpoint. Recover its API
+    // prefix before appending the validated route so Responses bodies are never
+    // sent to the Chat endpoint. Preserve tenant prefixes and the origin route.
+    const apiBasePath = basePath.endsWith('/chat/completions')
+      ? basePath.slice(0, -'/chat/completions'.length)
+      : basePath;
+    const targetPath = apiBasePath + upstreamPath;
     upstreamBase.pathname = targetPath || '/';
     upstreamBase.search = requestUrl.search;
     const upstream = await fetch(upstreamBase, {

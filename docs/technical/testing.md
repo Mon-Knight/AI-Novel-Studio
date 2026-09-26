@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 > 当前版本：v3.7.0（Writing SubAgent 开放与 ZCode 工作台）
@@ -87,6 +87,7 @@ npm run test:migrations
 npm run test:all
 npm run test:coverage
 npm run test:component-size
+npm run test:rust-file-size
 npm run test:rust-logging
 npm run lint:ci
 npm run build
@@ -95,7 +96,8 @@ npm run test:bundle-size
 
 - `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与显式服务测试，以及性能基准；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
 - `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。全量与核心集合覆盖率在 `test:all` 首次执行时由 C8 采集，`test:coverage:core` 只读取同一份 `coverage/tmp` 生成核心集合报告；关键组件门禁 `test:coverage:components` 随后用 `vitest.critical-components.config.ts` 单独执行 22 个关键组件文件并由 `scripts/check-critical-component-coverage.mjs` 检查每组 ≥ 60%。`test:vitest` 本身不启用 Vitest 覆盖率提供者——它会接管子进程的 `NODE_V8_COVERAGE`，导致 C8 丢失 Vitest 用例对全量与核心集合的贡献（Linux CI 上核心集合曾因此从 87% 跌到 78%）。
-- `test:component-size` 扫描全部生产 `.tsx`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。
+- `test:component-size` 扫描全部生产 `.tsx` 与 `.ts`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。`.tsx` 是硬上限；`.ts` 因存量模块早于本门禁，由 `LEGACY_TS_BASELINE` 冻结各自当前行数作为非回退预算——存量模块只能缩小不能增长，降到 500 行及以下时必须删除其豁免条目，新增 `.ts` 一律按 500 行硬上限。门禁自身行为由 `scripts/quality/check-component-size.test.mjs` 覆盖。
+- `test:rust-file-size` 扫描全部生产 Rust 源（`src-tauri/src/**/*.rs`，排除 `tests.rs` / `*_tests.rs` 测试模块与 test/fixture/target 路径），要求每个文件不超过 500 行：新增 `.rs` 一律按硬上限失败关闭；存量超限模块由 `LEGACY_RUST_BASELINE` 冻结各自当前行数作为非回退预算，只能缩小不能增长，降到 500 行及以下时必须删除其豁免条目，已提交条目 ≤ 上限本身即判失败。门禁自身行为由 `scripts/quality/check-rust-file-size.test.mjs` 覆盖。
 - `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。
 - `test:bundle-size` 读取 Vite manifest，校验唯一入口、全部 emitted JS、稳定 vendor chunk 与安全路径，再按真实文件字节和 gzip-9 执行双预算。当前入口门槛为 400 KiB / 135 KiB gzip-9，任一 chunk 为 450 KiB / 160 KiB gzip-9；缺失或歧义产物同样返回非零。
 - Phase 5.1 模型路由门禁由 `scripts/models/local-model-benchmark*.test.mjs`、`src/services/ai/runtime/modelLifecycleSidecar.test.ts`、`routeDecision.test.ts`、`executionContractCompiler.test.ts` 与 `aiExecutionPipeline.test.ts` 覆盖：无 sidecar 的本地模型保持 `TESTING`，回环模型通过 Benchmark 才写 `AVAILABLE`，TRAINING/TESTING 走云端 Beat Fallback；关闭或未配置本地模型时云端是正文主路由；编译器与 Adapter 均按冻结 RouteDecision 选择参数和 endpoint，sidecar 拒绝凭据字段。
@@ -354,32 +356,34 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 
 当前自动化流程：
 
-| Spec                                   | 流程                                                                                                                                     |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `app-start.spec.ts`                    | 应用启动、`app-shell`、迁移、SQLite 健康与前端异常                                                                                       |
-| `workbench-writing-smoke.spec.ts`      | 生产界面日常写作：创建作品/章节 → 工作台任务 → 生成候选 → 请求修订 → 显式审阅 → 编辑保存 → 确认采用 → 真实进程重启 → 核对正文/采用/授权  |
-| `cold-start.spec.ts`                   | 隔离库首次启动：稳定应用外壳先于工作台就绪，并输出冷启动计时标记                                                                         |
-| `project-create-open.spec.ts`          | 创建作品、返回列表并打开                                                                                                                 |
-| `project-edit-save.spec.ts`            | 修改作品信息，验证保存不挂起、提交且不重复写入                                                                                           |
-| `project-backup-boundary.spec.ts`      | 项目备份附件边界：未知或越界附件在任何 SQLite/LocalStorage 写入前整体拒绝                                                                |
-| `txt-import-atomic.spec.ts`            | TXT 导入单事务：经生产对话框投递两章 TXT，Rust `import_txt_novel` 在一个 SQLite 事务内创建作品、卷、章节与未采用导入草稿                 |
-| `workbench-task-directory.spec.ts`     | 持久化工作台任务目录：本地会话建立真实会话事实，覆盖分页、归档搜索与选中恢复                                                             |
-| `chapter-save.spec.ts`                 | 显式创建卷和章节、保存正文、切换页面并重新打开                                                                                           |
-| `large-text-save.spec.ts`              | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭                                                    |
-| `provider-pipeline-setting.spec.ts`    | Mock 设定候选经过 Task/Snapshot/Attempt/Artifact 全链路，且未确认前不写入正式设定                                                        |
-| `candidate-review-apply.spec.ts`       | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等                                                                             |
-| `leave-guard.spec.ts`                  | 未保存离开保护的取消、保存并离开及放弃修改分支                                                                                           |
-| `generation-job-cancel.spec.ts`        | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
-| `restart-task-recovery.spec.ts`        | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等                                                                   |
-| `quality-history-replay.spec.ts`       | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数                           |
-| `chapter-context-persistence.spec.ts`  | 保存章节总结与上下文后重启，校验稳定 ID 和同一内容；持久化过期后再次重启，证明后续生成不再读取该记录                                     |
-| `chapter-readiness-planner.spec.ts`    | 六个本地只读 Tool 各运行一次并持久化完成 Plan、零网络访问；重启后 claimed step 以 waiting_retry 恢复，仅在显式 UI 确认后重放（见 2.16）  |
-| `story-assets-transaction.spec.ts`     | 从真实 UI 创建势力并只应用两章之一的多目标事务，另一章经只读 SQLite 连接复验不变（见 2.22）                                              |
-| `conversational-workbench.spec.ts`     | 对话式创作工作台主流程：Runtime 模型不可用时保留 legacy 路由并阻断空任务发送                                                             |
-| `agent-production-closed-loop.spec.ts` | Agent 生产闭环：5 轮多小说生成、修订、审阅授权与采用，并经真实应用重启后存活                                                             |
-| `domain-facade-sqlite.spec.ts`         | TS/Rust Canonical attestation 一致，四个宿主校验只读 Tool 进入真实 SQLite Facade 链（见 2.24）                                           |
+| Spec                                     | 流程                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-start.spec.ts`                      | 应用启动、`app-shell`、迁移、SQLite 健康与前端异常                                                                                       |
+| `workbench-writing-smoke.spec.ts`        | 生产界面日常写作：创建作品/章节 → 工作台任务 → 生成候选 → 请求修订 → 显式审阅 → 编辑保存 → 确认采用 → 真实进程重启 → 核对正文/采用/授权  |
+| `interaction-world-rules-repair.spec.ts` | 工作台临时面板、修订来源、公开事件顺序与世界规则作者确认的隔离桌面回归                                                                   |
+| `ux-round2.spec.ts`                      | 临时/固定参考面板、专注恢复、读取分组、候选识别与世界规则原生保存；受限视口按实测记录未覆盖项                                            |
+| `cold-start.spec.ts`                     | 隔离库首次启动：稳定应用外壳先于工作台就绪，并输出冷启动计时标记                                                                         |
+| `project-create-open.spec.ts`            | 创建作品、返回列表并打开                                                                                                                 |
+| `project-edit-save.spec.ts`              | 修改作品信息，验证保存不挂起、提交且不重复写入                                                                                           |
+| `project-backup-boundary.spec.ts`        | 项目备份附件边界：未知或越界附件在任何 SQLite/LocalStorage 写入前整体拒绝                                                                |
+| `txt-import-atomic.spec.ts`              | TXT 导入单事务：经生产对话框投递两章 TXT，Rust `import_txt_novel` 在一个 SQLite 事务内创建作品、卷、章节与未采用导入草稿                 |
+| `workbench-task-directory.spec.ts`       | 持久化工作台任务目录：本地会话建立真实会话事实，覆盖分页、归档搜索与选中恢复                                                             |
+| `chapter-save.spec.ts`                   | 显式创建卷和章节、保存正文、切换页面并重新打开                                                                                           |
+| `large-text-save.spec.ts`                | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭                                                    |
+| `provider-pipeline-setting.spec.ts`      | Mock 设定候选经过 Task/Snapshot/Attempt/Artifact 全链路，且未确认前不写入正式设定                                                        |
+| `candidate-review-apply.spec.ts`         | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等                                                                             |
+| `leave-guard.spec.ts`                    | 未保存离开保护的取消、保存并离开及放弃修改分支                                                                                           |
+| `generation-job-cancel.spec.ts`          | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
+| `restart-task-recovery.spec.ts`          | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等                                                                   |
+| `quality-history-replay.spec.ts`         | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数                           |
+| `chapter-context-persistence.spec.ts`    | 保存章节总结与上下文后重启，校验稳定 ID 和同一内容；持久化过期后再次重启，证明后续生成不再读取该记录                                     |
+| `chapter-readiness-planner.spec.ts`      | 六个本地只读 Tool 各运行一次并持久化完成 Plan、零网络访问；重启后 claimed step 以 waiting_retry 恢复，仅在显式 UI 确认后重放（见 2.16）  |
+| `story-assets-transaction.spec.ts`       | 从真实 UI 创建势力并只应用两章之一的多目标事务，另一章经只读 SQLite 连接复验不变（见 2.22）                                              |
+| `conversational-workbench.spec.ts`       | 对话式创作工作台主流程：Runtime 模型不可用时保留 legacy 路由并阻断空任务发送                                                             |
+| `agent-production-closed-loop.spec.ts`   | Agent 生产闭环：5 轮多小说生成、修订、审阅授权与采用，并经真实应用重启后存活                                                             |
+| `domain-facade-sqlite.spec.ts`           | TS/Rust Canonical attestation 一致，四个宿主校验只读 Tool 进入真实 SQLite Facade 链（见 2.24）                                           |
 
-表中行序与 `scripts/e2e/run-e2e.ts` 的 `allSpecs` 数组一致，该数组是桌面 E2E 的权威 spec 清单；`creative-agent-workflow.spec.ts` 为 legacy / NOT_RUN，不在清单内（见第 3 节）。smoke 模式运行 `app-start.spec.ts` 与 `workbench-writing-smoke.spec.ts`，完整模式运行全部 22 个场景；`--spec` 可重复指定多个场景，运行器统一构建一次并保留逐场景数据库隔离与进程清理（`scripts/e2e/spec-selection.ts`）。
+表中行序与 `scripts/e2e/run-e2e.ts` 的 `allSpecs` 数组一致，该数组是桌面 E2E 的权威 spec 清单；`creative-agent-workflow.spec.ts` 为 legacy / NOT_RUN，不在清单内（见第 3 节）。smoke 模式运行 `app-start.spec.ts` 与 `workbench-writing-smoke.spec.ts`，完整模式运行全部 24 个场景；`--spec` 可重复指定多个场景，运行器统一构建一次并保留逐场景数据库隔离与进程清理（`scripts/e2e/spec-selection.ts`）。
 
 默认 E2E 使用生产界面：已从生产移除的旧右侧 AI 面板与草稿回滚入口不再仅凭 E2E 构建标记恢复，只有 `spec-selection.ts` 的 `legacyPanelSpecs` 列出的兼容性用例（候选审阅采用、上下文持久化、生成取消、大文本、Provider 管线、质量历史重放、重启恢复）由运行器注入 `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS=1`，再由 `wdio.conf.ts` 在会话启动后写入显式 localStorage 开关；`src/types/rightSidebar.ts` 的 `isE2eLegacyWorkspacePanelsEnabled()` 同时要求 E2E 构建与该开关。`workbench-writing-smoke` 的夹具只准备世界/规则/主角/章纲前置资产，生成、修订、审阅、保存、采用与重启全部经生产 UI、真实 Tauri IPC 与隔离 SQLite 完成；其中 Mock 模式的章节总结在创建 Run 前显式失败，是失败边界证据而非总结成功。五轮跨作品闭环（`agent-production-closed-loop.spec.ts`）继续用于完整验收。
 
@@ -403,7 +407,7 @@ $env:AI_NOVEL_STUDIO_FAULT_INJECTION = '1'
 npm run test:fault-injection:writing-subagent
 ```
 
-`tests/real-acceptance/wdio.fault-injection.conf.ts` 与真实配置载体共用 `production-carrier.ts`，同样启动生产 EXE 并经真实 DSH 运行时、Gateway、Rust 宿主与工作台 UI 执行，但把 `LOCALAPPDATA / APPDATA / WebView2` 用户数据目录重定向到 `test-results/fault-injection/<runId>/profile/`，不打开操作者的设置、保管库与数据库（DSH 运行时载荷经 `DSH_RUNTIME_ROOT` 只读复用，也可用 `AI_NOVEL_STUDIO_FAULT_INJECTION_DSH_RUNTIME_ROOT` 覆盖），因此桌面应用可以保持打开。规格 `writing-subagent-fault-injection.spec.ts` 自己启动 `scripts/dsh/mock-workbench-upstream.mjs` 作为模型（`MOCK_WORKBENCH_MODE` 新增 `forbidden-tool / cross-novel / upstream-error-once / upstream-error / hold-generate`，进程内 `configure()` 在同一端口切换模式与 id），在 WebView 中写入指向回环上游的 API 设置与 Writing SubAgent 开关，依次跑越权工具、跨书候选、上游瞬时失败、上游持续失败与显式重试、字数越界候选、候选补全挂起时强杀应用进程并重启恢复六个场景；每个场景都核对 run/工具事件/候选卡状态、正式章节字数 / 草稿 / 作品总字数零变化，重启场景另核对启动恢复对话框、中断 run 状态、重试后重新完成全部读取及无残留 worker 进程。两个重试场景刻意使用不点名章节的目标文本，并断言同一会话的每个 run 都持久化了固定章节的 `chapterId`（GAP-18 回归），以及重试运行的每个模型请求都携带宿主的“用户重试”说明而原运行的请求均不携带（GAP-19 回归；mock 只记录布尔值）。证据写入 `test-results/fault-injection/<runId>/writing-subagent-fault-injection.json`（工具名、状态、计数、哈希与 mock 请求阶段），不含提示词与正文。该载体不在 CI 内，也不进入 `test:all`。
+`tests/real-acceptance/wdio.fault-injection.conf.ts` 与真实配置载体共用 `production-carrier.ts`，同样启动生产 EXE 并经真实 DSH 运行时、Gateway、Rust 宿主与工作台 UI 执行，但把 `LOCALAPPDATA / APPDATA / WebView2` 用户数据目录重定向到 `test-results/fault-injection/<runId>/profile/`，不打开操作者的设置、保管库与数据库（DSH 运行时载荷经 `DSH_RUNTIME_ROOT` 只读复用，也可用 `AI_NOVEL_STUDIO_FAULT_INJECTION_DSH_RUNTIME_ROOT` 覆盖），因此桌面应用可以保持打开。规格 `writing-subagent-fault-injection.spec.ts` 自己启动 `scripts/dsh/mock-workbench-upstream.mjs` 作为模型（`MOCK_WORKBENCH_MODE` 新增 `forbidden-tool / cross-novel / upstream-error-once / upstream-error / hold-generate`，进程内 `configure()` 在同一端口切换模式与 id），在 WebView 中写入指向回环上游的 API 设置与 Writing SubAgent 开关，依次跑越权工具、跨书候选、上游瞬时失败、上游持续失败与显式重试、字数越界候选、任务对话独立设置字数并重新加载后写章、3586 字超长候选修正为 3009 字的正向恢复、候选补全挂起时强杀应用进程并重启恢复八个场景；持续失败场景先在故障仍在时重试并确认仍失败，再恢复上游后重试成功；持续过短场景必须恰有三次候选与三条长度拒收失败 Run，正向恢复场景必须保留首次失败、重新完成四项读取并只接收第二份有效候选。字数设置场景确认本地回执、持久化任务目标 3200 字生效且原章节目标 1000 字未改；设置期分别记录目录探针和正文 / 工具补全请求数，不把排除目录探针后的零补全称为零上游请求。隔离 API 配置使用完整 `/v1/chat/completions/` 地址，覆盖工作台模型预检与真实 DSH 代理的端点归一化。每个场景都核对 run/工具事件/候选卡状态、正式章节字数 / 草稿 / 作品总字数零变化，重启场景另核对启动恢复对话框、中断 run 状态、重试后重新完成全部读取及无残留 worker 进程。两个重试场景刻意使用不点名章节的目标文本，并断言同一会话的每个 run 都持久化了固定章节的 `chapterId`（GAP-18 回归），以及重试运行的每个模型请求都携带宿主的“用户重试”说明而原运行的请求均不携带（GAP-19 回归；mock 只记录布尔值）。证据写入 `test-results/fault-injection/<runId>/writing-subagent-fault-injection.json`（工具名、状态、计数、哈希与 mock 请求阶段），不含提示词与正文。该载体不在 CI 内，也不进入 `test:all`。
 
 GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 上先用 `verify:change --dry-run --github-output` 判定是否涉及桌面行为：未涉及时桌面作业输出 `NOT_APPLICABLE` 且不声称任何测试；涉及时以 `--lane desktop` 只运行归属的场景（按需扩大为完整套件）。`main` 推送、每周定时、手动完整模式及签名发布的可复用 `workflow_call` 运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。`release.yml` 显式依赖该 full 门禁并复验 `verified_sha`，不再与标签桌面 E2E 并行竞速。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
@@ -749,7 +753,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::t
 - updater 单元测试证明 Stable/Beta 版本隔离、发布说明限长/控制字符清理、普通本地包的公钥槽位不被视为已配置。
 - release manifest 测试使用临时 MSI updater/signature fixture，验证静态 Tauri v1 `latest.json`、artifact SHA-256、上一版 HTTPS installer 和 rollback backup 要求；稳定版本不得进入 Beta 索引。
 - release manifest 测试还必须使用含空格的 Tauri bundle 文件名，证明 GitHub Release 规范化后的点号资产名同时写入 `latest.json` URL 与 `release.json` 的 updater、signature、installer 字段，避免发布成功但更新 URL 返回 404。
-- `.github/workflows/release.yml` 只有在 `TAURI_PUBLIC_KEY / TAURI_PRIVATE_KEY` secrets 存在时构建 `msi,updater`，并在发布前检查 `.msi.zip.sig`。普通本地构建不会读取或生成私钥。
+- `.github/workflows/release.yml` 只有在 `TAURI_PUBLIC_KEY / TAURI_PRIVATE_KEY` secrets 存在时构建 `msi,nsis,updater`，发布前检查当前版本的 `*-setup.exe`、`.msi` 与 `.msi.zip.sig`。自动更新通道继续使用 MSI updater，避免已安装用户的更新 URL 漂移。普通本地构建不会读取或生成私钥。
 
 ---
 
@@ -763,7 +767,7 @@ npm run test:e2e -- --spec domain-facade-sqlite.spec.ts
 
 `test:canonical-manifest` 由三套独立实现验证同一个 `contracts/agent/canonical-tool-manifest.v1.json`：Node/DSH 复算 portable hash 并检查 legacy 隔离；TypeScript 校验 Catalog、固定 adapter、动态 projection、版本/hash/exposure/allowlist/permission/schema 门禁；Rust 通过 `include_str!` 嵌入并独立复算 hash。Windows E2E 进一步比较 TS/Rust attestation，并验证四个 host-validation read Tool 进入真实 SQLite Facade 链。
 
-当前必须保持本文开头事实块与共享 Manifest 的四项模型可见只读 identity 一致，并验证宿主只读回合的 Canonical allowlist。候选与审计回合继续使用 legacy 工具；loopback 证明不替代 live 云端验收，生产写章也不因此迁入 DSH。新增工具必须经过独立准入，不能通过修改 hash 或 exposure 绕过门禁。
+当前必须保持本文开头事实块与共享 Manifest 的四项模型可见只读 identity 一致，并验证宿主只读回合的 Canonical allowlist。候选与审计回合继续使用 legacy 工具；loopback 证明不替代 live 云端验收。生产写章在桌面 + 真实 API 默认走 Writing SubAgent，mock / 本地 / 浏览器仍走确定性 Writer；不得把写章路径或 Mock 说成 R4 VERIFIED。新增工具必须经过独立准入，不能通过修改 hash 或 exposure 绕过门禁。
 
 ---
 
@@ -822,7 +826,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 npm run tauri:build
 ```
 
-本地入口显式生成 MSI 与 NSIS，不进入需要私钥的 updater 签名阶段；正式发布使用 `tauri:build:release`，并由 release workflow 注入公私钥后生成 MSI updater。
+本地入口显式生成 MSI 与 NSIS，不进入需要私钥的 updater 签名阶段；正式发布使用 `tauri:build:release`，并由 release workflow 注入公私钥后同时生成 NSIS `*-setup.exe`、MSI 与签名 MSI updater。
 
 项目辅助脚本：
 

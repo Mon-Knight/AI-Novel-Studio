@@ -65,6 +65,9 @@ const originalGetNovelById = novelService.getNovelById;
 const originalGetWorldSettings = settingRepository.getWorldSettings;
 const originalGetRuleSystems = settingRepository.getRuleSystems;
 const originalGetProtagonist = protagonistRepository.getByNovelId;
+const originalPreview = settingRepository.previewWorldRuleChange;
+const originalSaveWorld = settingRepository.saveWorldSetting;
+const originalDeleteRule = settingRepository.deleteRuleSystem;
 
 const novel: Novel = {
   id: 'novel-focus',
@@ -124,7 +127,12 @@ beforeEach(() => {
   protagonistRepository.getByNovelId = async () => null;
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  settingRepository.previewWorldRuleChange = originalPreview;
+  settingRepository.saveWorldSetting = originalSaveWorld;
+  settingRepository.deleteRuleSystem = originalDeleteRule;
+});
 
 after(async () => {
   novelService.getNovelById = originalGetNovelById;
@@ -193,4 +201,103 @@ test('default detail view shows back to novels list and empty state placeholders
   assert.ok(back);
   fireEvent.click(back);
   assert.ok(await screen.findByTestId('novels-route'));
+});
+
+function ruleImpact(): Awaited<ReturnType<typeof settingRepository.previewWorldRuleChange>> {
+  return {
+    novelId: novel.id,
+    ruleSetFingerprint: 'rule-set-1',
+    previewHash: 'preview-1',
+    sources: [],
+    affectedChapters: [],
+    dependentRules: [],
+    uncertainty: ['未证明语义一致'],
+    blockingConflicts: [],
+    requiresConfirmation: true,
+  };
+}
+
+test('world metadata requires fresh impact confirmation and survives closing before save', async () => {
+  const inputs: import('../../types/setting').SaveWorldSettingInput[] = [];
+  settingRepository.previewWorldRuleChange = async () => ruleImpact();
+  settingRepository.saveWorldSetting = async (_id, input) => {
+    inputs.push(input);
+    return {
+      ...input,
+      id: 'saved-world',
+      isActive: true,
+      createdAt: novel.createdAt,
+      updatedAt: novel.updatedAt,
+    };
+  };
+  renderFocusedPage('world_setting');
+  fireEvent.click(await screen.findByTestId('world-setting-edit'));
+  const editor = screen.getByTestId('setting-editor-world-new');
+  const field = (id: string) => {
+    const node = editor.querySelector<HTMLInputElement>('[data-testid="' + id + '"]');
+    assert.ok(node);
+    return node;
+  };
+  fireEvent.change(field('setting-title'), { target: { value: '河港背景' } });
+  fireEvent.change(field('setting-content'), { target: { value: '河港在暴雨后实行供水配额。' } });
+  fireEvent.change(field('world-parameter-economy_resources'), {
+    target: { value: '每户每日三桶' },
+  });
+  fireEvent.compositionStart(field('setting-content'));
+  fireEvent.keyDown(field('setting-content'), { key: 'Escape', isComposing: true, keyCode: 229 });
+  assert.equal(editor.hidden, false);
+  fireEvent.compositionEnd(field('setting-content'));
+  fireEvent.click(field('setting-close'));
+  fireEvent.click(screen.getByTestId('world-setting-edit'));
+  assert.equal(field('world-parameter-economy_resources').value, '每户每日三桶');
+  fireEvent.click(field('setting-impact-preview'));
+  await waitFor(() => assert.ok(editor.querySelector('[data-testid="setting-author-confirm"]')));
+  fireEvent.click(field('setting-author-confirm'));
+  fireEvent.change(field('setting-content'), { target: { value: '河港实行配额，医院优先。' } });
+  assert.equal(field('setting-save').disabled, true);
+  assert.equal(inputs.length, 0);
+  fireEvent.click(field('setting-impact-preview'));
+  await waitFor(() => assert.ok(editor.querySelector('[data-testid="setting-author-confirm"]')));
+  fireEvent.click(field('setting-author-confirm'));
+  fireEvent.click(field('setting-save'));
+  await waitFor(() => assert.equal(inputs.length, 1));
+  assert.equal(inputs[0].expectedRuleSetFingerprint, 'rule-set-1');
+  assert.equal(inputs[0].changeAuthorization?.previewHash, 'preview-1');
+  const metadata = JSON.parse(inputs[0].structuredJson!);
+  assert.equal(metadata.worldParameters.economy_resources, '每户每日三桶');
+  assert.equal(metadata.authority, 'confirmed');
+});
+
+test('permanent rule deletion retains its action but requires explicit preview-bound author consent', async () => {
+  const rule = {
+    id: 'rule-delete',
+    novelId: novel.id,
+    title: '旧配额规则',
+    content: '每户三桶。',
+    isActive: true,
+    createdAt: novel.createdAt,
+    updatedAt: novel.updatedAt,
+  };
+  settingRepository.getRuleSystems = async () => [rule];
+  const deleted: Array<import('../../types/setting').DeleteRuleSystemInput | undefined> = [];
+  settingRepository.previewWorldRuleChange = async (_novel, changes) => {
+    assert.equal(changes[0].operation, 'delete');
+    return ruleImpact();
+  };
+  settingRepository.deleteRuleSystem = async (_id, input) => {
+    deleted.push(input);
+  };
+  renderFocusedPage('rule_system');
+  fireEvent.click(await screen.findByLabelText('删除规则 旧配额规则'));
+  await screen.findByTestId('world-rule-change-confirmation');
+  assert.equal(deleted.length, 0);
+  assert.equal(
+    (screen.getByTestId('world-rule-change-confirm') as HTMLButtonElement).disabled,
+    true,
+  );
+  fireEvent.click(screen.getByTestId('setting-author-confirm'));
+  fireEvent.click(screen.getByTestId('world-rule-change-confirm'));
+  await waitFor(() => assert.equal(deleted.length, 1));
+  assert.equal(deleted[0]?.expectedUpdatedAt, rule.updatedAt);
+  assert.equal(deleted[0]?.changeAuthorization?.previewHash, 'preview-1');
 });

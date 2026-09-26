@@ -1,4 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
+import {
+  WorkbenchTemplateUndoNotice,
+  type WorkbenchTemplateUndo,
+} from './WorkbenchTemplateUndoNotice';
 import {
   isWorkbenchTaskTemplateEnabled,
   type WorkbenchTaskTemplate,
@@ -10,6 +15,7 @@ interface Props {
   disabled: boolean;
   value: string;
   onChange: (value: string) => void;
+  onApplied?: (undo: WorkbenchTemplateUndo) => void;
 }
 
 export function WorkbenchTemplateControls({
@@ -18,9 +24,21 @@ export function WorkbenchTemplateControls({
   disabled,
   value,
   onChange,
+  onApplied,
 }: Props) {
   const [pending, setPending] = useState<WorkbenchTaskTemplate | null>(null);
-  const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
+  const [undo, setUndo] = useState<WorkbenchTemplateUndo | null>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const templateTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (pending) {
+      confirmRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
+  }, [pending]);
+  const cancelPending = () => {
+    setPending(null);
+    templateTriggerRef.current?.focus({ preventScroll: true });
+  };
   const [moreOpen, setMoreOpen] = useState(false);
   const common = templates
     .filter((template) => isWorkbenchTaskTemplateEnabled(template, hasChapter))
@@ -38,6 +56,7 @@ export function WorkbenchTemplateControls({
     setUndo({ before: value, after });
     setPending(null);
     onChange(after);
+    onApplied?.({ before: value, after });
   };
   const templateButton = (template: WorkbenchTaskTemplate) => (
     <button
@@ -53,7 +72,11 @@ export function WorkbenchTemplateControls({
             : '请先选择目标章节'
           : undefined
       }
-      onClick={() => (value.trim().length ? setPending(template) : apply(template, 'replace'))}
+      onClick={(event) => {
+        templateTriggerRef.current = event.currentTarget;
+        if (value.trim().length) setPending(template);
+        else apply(template, 'replace');
+      }}
     >
       {template.label}
     </button>
@@ -81,14 +104,15 @@ export function WorkbenchTemplateControls({
       </div>
       {validPending && (
         <div
+          ref={confirmRef}
           className="workbench-template-confirm"
           role="group"
           aria-label="模板插入方式"
           onKeyDown={(event) => {
-            if (event.key === 'Escape') {
+            if (event.key === 'Escape' && !isComposingKeyboardEvent(event)) {
               event.preventDefault();
               event.stopPropagation();
-              setPending(null);
+              cancelPending();
             }
           }}
         >
@@ -109,34 +133,22 @@ export function WorkbenchTemplateControls({
           >
             替换目标
           </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setPending(null)}
-          >
+          <button type="button" className="btn btn-secondary btn-sm" onClick={cancelPending}>
             取消
           </button>
         </div>
       )}
-      {undo && (
-        <div className="workbench-template-undo" role="status">
-          <span>
-            {value === undo.after
-              ? '模板已填入，尚未发送。'
-              : '目标已继续编辑；为保护新输入，本次模板撤销已停用。'}
-          </span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={disabled || value !== undo.after}
-            onClick={() => {
-              onChange(undo.before);
-              setUndo(null);
-            }}
-          >
-            撤销模板
-          </button>
-        </div>
+      {!onApplied && (
+        <WorkbenchTemplateUndoNotice
+          undo={undo}
+          value={value}
+          disabled={disabled}
+          onUndo={() => {
+            if (!undo || disabled || value !== undo.after) return;
+            onChange(undo.before);
+            setUndo(null);
+          }}
+        />
       )}
     </div>
   );

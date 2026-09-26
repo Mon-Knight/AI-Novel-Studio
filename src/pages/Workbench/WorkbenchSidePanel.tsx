@@ -6,16 +6,23 @@ import {
   FileText,
   ListChecks,
   PenLine,
+  Pin,
+  PinOff,
   Puzzle,
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useWorkbenchSidePanelAccessibility } from './hooks/useWorkbenchSidePanelAccessibility';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 import type { WorkbenchAssetScopeSummary } from '../../services/conversation/workbenchAssetScopeService';
 import type { TaskConversationBundle } from '../../types/conversation';
-import type { WorkbenchSidePanelView } from './hooks/useWorkbenchSidePanel';
+import type {
+  WorkbenchSidePanelPresentation,
+  WorkbenchSidePanelView,
+} from './hooks/useWorkbenchSidePanel';
 import { WorkbenchAssetScopePanel } from './WorkbenchAssetScopePanel';
 import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchArtifactIndex, WorkbenchRunLog } from './WorkbenchSidePanelViews';
@@ -24,6 +31,9 @@ export type { WorkbenchSidePanelView } from './hooks/useWorkbenchSidePanel';
 
 interface WorkbenchSidePanelProps {
   view: WorkbenchSidePanelView;
+  scopeKey?: string;
+  presentation?: WorkbenchSidePanelPresentation;
+  temporarilyHidden?: boolean;
   novelId: string;
   chapterId?: string;
   bundle: TaskConversationBundle | null;
@@ -38,6 +48,8 @@ interface WorkbenchSidePanelProps {
   onOpen: (view: WorkbenchSidePanelView) => void;
   onBack: () => void;
   onClose: () => void;
+  onTogglePresentation?: () => void;
+  onLocateArtifact?: (cardId: string) => void;
 }
 
 interface LauncherCard {
@@ -54,9 +66,37 @@ const VIEW_TITLES: Record<Exclude<WorkbenchSidePanelView, 'launcher' | 'plugins'
   events: '运行日志',
 };
 
+function PanelPinButton({
+  presentation,
+  onToggle,
+}: {
+  presentation: WorkbenchSidePanelPresentation;
+  onToggle?: () => void;
+}) {
+  if (!onToggle) return null;
+  const pinned = presentation === 'pinned';
+  const Icon = pinned ? PinOff : Pin;
+  return (
+    <button
+      type="button"
+      className={pinned ? 'workbench-icon-button is-active' : 'workbench-icon-button'}
+      data-testid="workbench-side-pin"
+      aria-label={pinned ? '取消固定参考面板' : '固定参考面板'}
+      aria-pressed={pinned}
+      title={pinned ? '取消固定参考面板' : '固定参考面板'}
+      onClick={onToggle}
+    >
+      <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+    </button>
+  );
+}
+
 /** ZCode-style side panel: a launcher of tabs; each tab opens in place with back/close. */
 export function WorkbenchSidePanel({
   view,
+  scopeKey,
+  presentation = 'transient',
+  temporarilyHidden = false,
   novelId,
   chapterId,
   bundle,
@@ -71,8 +111,19 @@ export function WorkbenchSidePanel({
   onOpen,
   onBack,
   onClose,
+  onTogglePresentation,
+  onLocateArtifact,
 }: WorkbenchSidePanelProps) {
   const navigate = useNavigate();
+  const panelRef = useRef<HTMLElement>(null);
+  useWorkbenchSidePanelAccessibility({
+    panelRef,
+    view,
+    scopeKey: scopeKey ?? novelId,
+    presentation,
+    temporarilyHidden,
+    onClose,
+  });
   const projectPath = novelId ? `/novels/${encodeURIComponent(novelId)}` : '/novels';
   const artifactCount = bundle?.artifacts.length ?? 0;
   const runCount = bundle?.runs.length ?? 0;
@@ -139,37 +190,53 @@ export function WorkbenchSidePanel({
 
   return (
     <aside
+      ref={panelRef}
+      tabIndex={-1}
       className="workbench-side-panel"
+      id="workbench-side-panel"
       data-testid="workbench-side-panel"
       data-view={view}
+      data-panel-intent={presentation}
+      data-temporarily-hidden={temporarilyHidden ? 'true' : 'false'}
+      hidden={temporarilyHidden}
+      aria-hidden={temporarilyHidden || undefined}
       aria-label="侧边面板"
     >
       {view === 'plugins' ? (
-        <PanelErrorBoundary panelTitle="当前插件">
-          <PluginPanel
-            plugins={plugins}
-            loading={pluginsLoading}
-            error={pluginsError}
-            onClose={onClose}
-          />
-        </PanelErrorBoundary>
+        <div className="workbench-side-plugin-frame">
+          <div className="workbench-side-plugin-actions">
+            <PanelPinButton presentation={presentation} onToggle={onTogglePresentation} />
+          </div>
+          <PanelErrorBoundary panelTitle="当前插件">
+            <PluginPanel
+              plugins={plugins}
+              loading={pluginsLoading}
+              error={pluginsError}
+              onClose={onClose}
+              onBack={onBack}
+            />
+          </PanelErrorBoundary>
+        </div>
       ) : view === 'launcher' ? (
         <div className="workbench-side-launcher">
           <div className="workbench-side-launcher-header">
             <div>
-              <h2>打开标签页</h2>
-              <p>选择要在侧边面板中打开的标签。</p>
+              <h2>辅助参考</h2>
+              <p>查看任务参考或前往相关页面。</p>
             </div>
-            <button
-              type="button"
-              className="workbench-icon-button"
-              data-testid="workbench-side-close"
-              aria-label="关闭侧边面板"
-              title="关闭侧边面板"
-              onClick={onClose}
-            >
-              <X aria-hidden="true" size={15} strokeWidth={1.8} />
-            </button>
+            <div className="workbench-side-launcher-actions">
+              <PanelPinButton presentation={presentation} onToggle={onTogglePresentation} />
+              <button
+                type="button"
+                className="workbench-icon-button"
+                data-testid="workbench-side-close"
+                aria-label="关闭侧边面板"
+                title="关闭侧边面板"
+                onClick={onClose}
+              >
+                <X aria-hidden="true" size={15} strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
           <div className="workbench-side-launcher-list">
             {cards.map((card) => {
@@ -208,6 +275,7 @@ export function WorkbenchSidePanel({
               <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
             </button>
             <h2>{VIEW_TITLES[view]}</h2>
+            <PanelPinButton presentation={presentation} onToggle={onTogglePresentation} />
             <button
               type="button"
               className="workbench-icon-button"
@@ -233,7 +301,17 @@ export function WorkbenchSidePanel({
               ) : !bundle ? (
                 <p className="workbench-side-empty">任务恢复完成后即可查看。</p>
               ) : view === 'artifacts' ? (
-                <WorkbenchArtifactIndex bundle={bundle} />
+                <WorkbenchArtifactIndex
+                  bundle={bundle}
+                  onReveal={
+                    onLocateArtifact
+                      ? (cardId) => {
+                          onLocateArtifact(cardId);
+                          return true; // Accepted for deferred history hydration by the message stream.
+                        }
+                      : undefined
+                  }
+                />
               ) : (
                 <WorkbenchRunLog bundle={bundle} />
               )}

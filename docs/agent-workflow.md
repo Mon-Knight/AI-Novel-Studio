@@ -88,7 +88,9 @@ Skill 中的示例版本、提交、真实模型调用和发布步骤都不是�
 
 ## 5. 完成与可选 Git 操作
 
-完成汇报遵循 [AGENTS 交付要求](../AGENTS.md#7-文档同步git-与交付)：列出完成内容、主要文件、实际命令与结果、未验证项、剩余风险和 Git 状态。不能把执行计划或历史测试记录当成本次运行结果。
+完成汇报遵循 [AGENTS 交付要求](../AGENTS.md#7-文档同步git-与交付)：列出完成内容、主要文件、实际命令与结果、未验证项、剩余风险、Git 状态，以及本地 `src-tauri/target/release/AI Novel Studio.exe` 是否已按 AGENTS 第 7.6 节更新。不能把执行计划或历史测试记录当成本次运行结果。
+
+可运行桌面产物对应的任务在汇报前必须重建该 EXE：清除 `CARGO_TARGET_DIR` 后执行 `npm run dsh:assets` 与 `npx tauri build --bundles none`，保证写到仓库内 `src-tauri/target/release/AI Novel Studio.exe`（不要只留下 `ai-novel-studio.exe`）。这不是发布授权，也不提交构建产物。EXE 被占用则停止覆盖并请用户退出。纯文档且不改变可执行行为时，汇报中说明未重建。
 
 仅在相应动作已经获得用户或已确认任务授权时 commit / push / PR / tag / 发布。获准提交时只暂存相关文件并核对暂存差异；发布遵循 [Git 治理](project/git-workflow.md) 的 PR、门禁、审查、合入 `main`、同步后打不可移动 tag 的顺序。没有授权则交付未提交差异。
 

@@ -74,6 +74,26 @@ function restoreStorage(): void {
   }
 }
 
+async function saveGuardedWorldSetting(
+  novelId: string,
+  title: string,
+  content: string,
+): Promise<void> {
+  const change = { targetType: 'world_setting' as const, title, content, isActive: true };
+  const preview = await settingRepository.previewWorldRuleChange(novelId, [change]);
+  await settingRepository.saveWorldSetting(null, {
+    novelId,
+    title,
+    content,
+    isActive: true,
+    expectedRuleSetFingerprint: preview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: preview.previewHash,
+      intent: 'confirm_change',
+    },
+  });
+}
+
 async function setupFixture() {
   const novelA = await novelRepository.create({
     title: '星际迷途：深空回响',
@@ -99,11 +119,11 @@ async function setupFixture() {
     targetWordCount: 3000,
   });
 
-  await settingRepository.saveWorldSetting(null, {
-    novelId: novelA.id,
-    title: '跃迁引擎法则',
-    content: '跃迁过程不可中断，空间扭曲点存在时间膨胀效应。',
-  });
+  await saveGuardedWorldSetting(
+    novelA.id,
+    '跃迁引擎法则',
+    '跃迁过程不可中断，空间扭曲点存在时间膨胀效应。',
+  );
 
   await protagonistRepository.save(null, {
     novelId: novelA.id,

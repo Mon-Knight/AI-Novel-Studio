@@ -40,6 +40,8 @@ const productAppPath = path.join(
 const allSpecs = [
   'app-start.spec.ts',
   'workbench-writing-smoke.spec.ts',
+  'interaction-world-rules-repair.spec.ts',
+  'ux-round2.spec.ts',
   'cold-start.spec.ts',
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',

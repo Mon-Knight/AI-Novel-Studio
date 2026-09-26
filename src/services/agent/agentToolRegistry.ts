@@ -53,7 +53,10 @@ export class AgentToolRegistry {
       execute: async (args, context) => {
         const novelId = String(args.novelId || context.novelId || '');
         if (!novelId) throw new Error('novelId is required');
-        const retrieved = await novelMemoryManager.retrieveContext({ novelId, sceneId: 'world-query' });
+        const retrieved = await novelMemoryManager.retrieveContext({
+          novelId,
+          sceneId: 'world-query',
+        });
         const snapshot = novelMemoryManager.getWorldState(novelId);
         return {
           worldRules: retrieved.longTermMemories.filter((m) => m.type === 'world_rule'),
@@ -186,11 +189,7 @@ export class AgentToolRegistry {
               sceneNo: 1,
               title: `${chapterTitle} - 破局`,
               goal,
-              beats: [
-                '主角潜行入夜探查线索',
-                '遭遇强敌埋伏陷入苦战',
-                '机智动用秘法破局脱险',
-              ],
+              beats: ['主角潜行入夜探查线索', '遭遇强敌埋伏陷入苦战', '机智动用秘法破局脱险'],
             },
           ],
         };

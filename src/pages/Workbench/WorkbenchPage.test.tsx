@@ -79,9 +79,18 @@ const artifactDecisionModule = (await vite.ssrLoadModule(
 const chapterAssetRecoveryHookModule = (await vite.ssrLoadModule(
   '/src/pages/Workbench/hooks/useWorkbenchChapterAssetRecovery.ts',
 )) as typeof import('./hooks/useWorkbenchChapterAssetRecovery');
+const draftStateModule = (await vite.ssrLoadModule(
+  '/src/store/workbenchDraftStore.ts',
+)) as typeof import('../../store/workbenchDraftStore');
+const readingStateModule = (await vite.ssrLoadModule(
+  '/src/features/workbench/workbenchPresentationReading.ts',
+)) as typeof import('../../features/workbench/workbenchPresentationReading');
 const pageModule = (await vite.ssrLoadModule(
   '/src/pages/Workbench/WorkbenchPage.tsx',
 )) as typeof import('./WorkbenchPage');
+const structuredRuleGovernanceModule = (await vite.ssrLoadModule(
+  '/src/services/conversation/structuredRuleGovernanceService.ts',
+)) as typeof import('../../services/conversation/structuredRuleGovernanceService');
 
 const { novelRepository } = novelRepoModule;
 const { chapterRepository } = chapterRepoModule;
@@ -95,6 +104,7 @@ const { buildCoreAssetGenerationGoal, chapterAssetReadinessService, chapterAsset
   chapterAssetReadinessModule;
 const { decodeWorkbenchTurnContent, encodeWorkbenchTurnContent } = workbenchTurnOriginModule;
 const { artifactDecisionService } = artifactDecisionModule;
+const { structuredRuleGovernanceService } = structuredRuleGovernanceModule;
 const { useWorkbenchChapterAssetRecovery } = chapterAssetRecoveryHookModule;
 const WorkbenchPage = pageModule.default;
 
@@ -128,6 +138,7 @@ const originalInspectChapterAssets = chapterAssetReadinessService.inspect;
 const originalApplyStructuredArtifact = artifactDecisionService.applyStructured;
 const originalRecordArtifactDecision = artifactDecisionService.record;
 const originalEnsureChapterSummaryFollowUp = artifactDecisionService.ensureChapterSummaryFollowUp;
+const originalPreviewStructuredRuleChange = structuredRuleGovernanceService.preview;
 
 const mockNovel: Novel = {
   id: 'novel-001',
@@ -230,6 +241,26 @@ const mockBundle: TaskConversationBundle = {
   artifacts: [],
 };
 
+/**
+ * jsdom has no Tauri bridge, and the read-only rule preview fails closed without it
+ * ('浏览器候选不能冒充桌面规则应用预览。'). Page tests stub that native boundary with an impact
+ * that needs no extra confirmation, so `setting_candidates` applies can walk the real
+ * applyStructured → onStructuredArtifactDecision → settleAssetCandidateDecision chain.
+ */
+function usePermissiveRuleChangePreview(): void {
+  structuredRuleGovernanceService.preview = async (input) => ({
+    novelId: input.novelId,
+    ruleSetFingerprint: 'rule-set-page-test',
+    sources: [],
+    affectedChapters: [],
+    dependentRules: [],
+    blockingConflicts: [],
+    uncertainty: [],
+    requiresConfirmation: false,
+    previewHash: 'preview-page-test',
+  });
+}
+
 function useBrowserMockModel(): void {
   localStorage.setItem(
     'ai_novel_studio_ai_settings',
@@ -244,6 +275,8 @@ function useBrowserMockModel(): void {
 }
 
 beforeEach(() => {
+  draftStateModule.useWorkbenchDraftStore.setState({ drafts: {} });
+  readingStateModule.clearWorkbenchPresentationReading();
   localStorage.clear();
   window.sessionStorage.clear();
   novelRepository.getAll = async () => [mockNovel];
@@ -304,6 +337,7 @@ beforeEach(() => {
   taskSessionAdapter.subscribeToRuntimeProjections = async () => () => undefined;
   chapterSummaryService.getByNovelId = async () => [];
   chapterAssetReadinessService.inspect = async () => ({ ready: true, missingAssets: [] });
+  usePermissiveRuleChangePreview();
 });
 
 afterEach(() => {
@@ -335,6 +369,7 @@ afterEach(() => {
   artifactDecisionService.applyStructured = originalApplyStructuredArtifact;
   artifactDecisionService.record = originalRecordArtifactDecision;
   artifactDecisionService.ensureChapterSummaryFollowUp = originalEnsureChapterSummaryFollowUp;
+  structuredRuleGovernanceService.preview = originalPreviewStructuredRuleChange;
 });
 
 test('Workbench directory reaches an old task through paged storage, search, and restart selection', async () => {
@@ -1292,47 +1327,50 @@ test('WorkbenchPage clicking a task template fills the input draft', async () =>
     assert.ok(screen.getByText('生成下一章'));
   });
 
-  // Templates live behind the composer "+" menu; open it so the confirm strip is accessible.
-  fireEvent.click(screen.getByTestId('workbench-composer-attach'));
-  assert.equal(
-    screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
-    'true',
-  );
-  assert.equal(screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'), false);
+  // Templates live behind the composer "+" menu. Applying one closes that menu and hands the
+  // caret back to the input, so picking the next template means opening the menu again.
+  const openAttachMenu = () => {
+    fireEvent.click(screen.getByTestId('workbench-composer-attach'));
+    assert.equal(
+      screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
+      'true',
+    );
+    assert.equal(
+      screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'),
+      false,
+    );
+  };
+  const draftOf = () =>
+    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value;
 
+  openAttachMenu();
   const templateButton = screen.getByText('生成下一章');
   fireEvent.click(templateButton);
 
-  await waitFor(() => {
-    const textarea = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
-    assert.equal(textarea.value, '生成下一章');
-  });
+  await waitFor(() => assert.equal(draftOf(), '生成下一章'));
+  assert.equal(
+    screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
+    'false',
+  );
+  assert.equal(screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'), true);
+  assert.equal(document.activeElement, screen.getByTestId('workbench-composer-input'));
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('完善大纲'));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '生成下一章',
-  );
+  assert.equal(draftOf(), '生成下一章');
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '完善当前章节大纲',
-  );
+  assert.equal(draftOf(), '完善当前章节大纲');
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('更多模板'));
   fireEvent.click(screen.getByText('人物一致性审计'));
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '审计本章已采用正文的人物一致性',
-  );
+  assert.equal(draftOf(), '审计本章已采用正文的人物一致性');
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('推演事件'));
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '生成本章剧情事件候选',
-  );
+  assert.equal(draftOf(), '生成本章剧情事件候选');
 });
 
 test('WorkbenchPage identifies automatic asset preparation turns without presenting them as the user', async () => {
@@ -1833,10 +1871,15 @@ test('Workbench automatically sequences missing assets while keeping every apply
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'awaiting_apply', readiness.textContent);
   });
-  assert.equal(
-    (screen.getByTestId('workbench-generate-asset-world_setting') as HTMLButtonElement).disabled,
-    true,
-  );
+  // While the world candidate waits for the user's own apply decision the current asset is not
+  // regenerable; its action becomes locating that exact candidate instead of producing a new one.
+  assert.equal(screen.queryByTestId('workbench-generate-asset-world_setting'), null);
+  const currentAssetAction = screen.getByTestId(
+    'workbench-view-preparation-candidate',
+  ) as HTMLButtonElement;
+  assert.match(currentAssetAction.textContent ?? '', /查看本次候选/);
+  assert.equal(currentAssetAction.disabled, false);
+  assert.equal(currentAssetAction.dataset.candidateCardId, 'card-world_setting');
   assert.equal(startedGoals.length, 1);
   let applyButtons = screen.getAllByTestId('workbench-artifact-apply');
   fireEvent.click(applyButtons[applyButtons.length - 1]!);
@@ -3769,9 +3812,11 @@ test('Workbench keeps tool execution details inline in the conversation', async 
   fireEvent.click(screen.getByTestId('workbench-task'));
 
   await waitFor(() => {
-    assert.ok(screen.getByTestId('workbench-message-list'));
-    assert.ok(screen.getByTestId('workbench-tool-event'));
-    assert.ok(screen.getByText('mock · Mock'));
+    const messageList = screen.getByTestId('workbench-message-list');
+    assert.ok(messageList.contains(screen.getByTestId('workbench-tool-event')));
+    const modelSource = screen.getByText('来源模型');
+    assert.equal(modelSource.getAttribute('title'), 'mock · Mock');
+    assert.ok(messageList.contains(modelSource));
   });
   const toolEvent = screen.getByTestId('workbench-tool-event') as HTMLDetailsElement;
   toolEvent.open = true;
@@ -4040,27 +4085,40 @@ test('retrying an older failed run creates a new run on the original user turn',
   await waitFor(() => assert.equal(chapterSelect.value, mockChapter.id));
 
   await waitFor(() => {
-    const oldTurn = document.querySelector('[data-turn-id="turn-old"]');
+    const oldTurn = document.querySelector(
+      '[data-testid="workbench-turn"][data-turn-id="turn-old"]',
+    );
     assert.ok(oldTurn);
-    assert.equal(oldTurn.querySelectorAll('[data-testid="workbench-run"]').length, 2);
-    assert.match(oldTurn.textContent ?? '', /第 1 次运行/);
-    assert.match(oldTurn.textContent ?? '', /第 2 次运行/);
-    assert.match(oldTurn.textContent ?? '', /Mock/);
-    assert.match(oldTurn.textContent ?? '', /旧回合失败/);
-    const oldRun = oldTurn.querySelector('[data-testid="workbench-run"][data-run-id="run-old"]');
-    const retryRun = oldTurn.querySelector(
+    const sourceNodes = screen
+      .getAllByTestId('workbench-public-event')
+      .filter((node) => node.getAttribute('data-turn-id') === 'turn-old');
+    const sourceText = sourceNodes.map((node) => node.textContent ?? '').join('\n');
+    assert.match(sourceText, /第 1 次运行/);
+    assert.match(sourceText, /第 2 次运行/);
+    assert.match(sourceText, /Mock/);
+    assert.match(sourceText, /旧回合失败/);
+    const oldRun = document.querySelector('[data-testid="workbench-run"][data-run-id="run-old"]');
+    const retryRun = document.querySelector(
       '[data-testid="workbench-run"][data-run-id="run-retry"]',
     );
     assert.ok(oldRun);
     assert.ok(retryRun);
-    assert.ok(oldRun.querySelector('[data-event-id="evt-old"]'));
-    assert.ok(oldRun.querySelector('[data-card-id="card-old"]'));
-    assert.equal(oldRun.querySelector('[data-event-id="evt-retry"]'), null);
-    assert.equal(oldRun.querySelector('[data-card-id="card-retry"]'), null);
-    assert.ok(retryRun.querySelector('[data-event-id="evt-retry"]'));
-    assert.ok(retryRun.querySelector('[data-card-id="card-retry"]'));
-    assert.equal(retryRun.querySelector('[data-event-id="evt-old"]'), null);
-    assert.equal(retryRun.querySelector('[data-card-id="card-old"]'), null);
+    assert.equal(oldRun.getAttribute('data-turn-id'), 'turn-old');
+    assert.equal(retryRun.getAttribute('data-turn-id'), 'turn-old');
+    for (const [selector, runId] of [
+      ['[data-event-id="evt-old"]', 'run-old'],
+      ['[data-card-id="card-old"]', 'run-old'],
+      ['[data-event-id="evt-retry"]', 'run-retry'],
+      ['[data-card-id="card-retry"]', 'run-retry'],
+    ]) {
+      const node = document
+        .querySelector(selector)
+        ?.closest('[data-testid="workbench-public-event"]');
+      assert.ok(node, selector);
+      assert.equal(node.getAttribute('data-run-id'), runId);
+      assert.equal(node.getAttribute('data-turn-id'), 'turn-old');
+    }
+    assert.ok(oldRun.compareDocumentPosition(retryRun) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });
 
@@ -4188,7 +4246,7 @@ test('WorkbenchPage does not inherit another task model when a legacy task has n
 
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'mock:Task A Model',
     );
   });
@@ -4204,7 +4262,7 @@ test('WorkbenchPage does not inherit another task model when a legacy task has n
       'conv-legacy-model',
     );
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'deepseek-official:deepseek-chat',
     );
   });
@@ -5229,13 +5287,11 @@ test('WorkbenchPage revalidates the model directory before persisting a turn', a
   fireEvent.click(screen.getByTestId('workbench-task'));
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'mock:Mock',
     );
-    assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).disabled,
-      true,
-    );
+    assert.equal(screen.getByTestId('workbench-model-select').getAttribute('role'), 'group');
+    assert.equal(screen.getByTestId('workbench-model-select').querySelector('select'), null);
     assert.equal(
       screen.getByTestId('workbench-model-select').getAttribute('data-model-locked'),
       'true',
@@ -5324,7 +5380,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
 
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'openai_compatible:legacy-model',
     );
   });

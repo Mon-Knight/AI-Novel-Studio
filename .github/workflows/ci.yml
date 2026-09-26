@@ -39,6 +39,8 @@ jobs:
         if: github.event_name != 'pull_request'
       - run: npm run test:component-size
         if: github.event_name != 'pull_request'
+      - run: npm run test:rust-file-size
+        if: github.event_name != 'pull_request'
       - run: npm run test:coverage
         if: github.event_name != 'pull_request'
       - name: Run real Chromium browser-mode E2E

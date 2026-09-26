@@ -218,8 +218,7 @@ export class FeedbackDatasetService {
       sumRatio += s.editRatio;
     }
 
-    const avgEditRatio =
-      totalSamples > 0 ? Number((sumRatio / totalSamples).toFixed(3)) : 0;
+    const avgEditRatio = totalSamples > 0 ? Number((sumRatio / totalSamples).toFixed(3)) : 0;
 
     return {
       totalSamples,

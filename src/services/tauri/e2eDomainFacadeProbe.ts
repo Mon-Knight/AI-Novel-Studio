@@ -161,10 +161,32 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
     goal: 'Facade E2E goal',
     targetWordCount: 800,
   });
+  // The desktop write revalidates its own transaction, so the isolated fixture runs the same
+  // preview -> author-authorized write sequence a user performs. A successful world insert
+  // changes the rule-set fingerprint, so the preview is taken immediately before this write.
+  const worldTitle = `Facade Setting ${suffix}`;
+  const worldContent = 'Facade E2E setting';
+  const worldPreview = await settingRepository.previewWorldRuleChange(novel.id, [
+    {
+      targetType: 'world_setting',
+      title: worldTitle,
+      content: worldContent,
+      isActive: true,
+    },
+  ]);
+  if (worldPreview.blockingConflicts.length)
+    throw new Error('Domain Facade smoke world preview has blocking dependencies.');
   await settingRepository.saveWorldSetting(null, {
     novelId: novel.id,
-    title: `Facade Setting ${suffix}`,
-    content: 'Facade E2E setting',
+    title: worldTitle,
+    content: worldContent,
+    isActive: true,
+    expectedRuleSetFingerprint: worldPreview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: worldPreview.previewHash,
+      intent: 'confirm_change',
+      notes: '已授权的隔离 E2E 前置资产；不代替被测生产 UI 决定。',
+    },
   });
   await protagonistRepository.save(null, {
     novelId: novel.id,

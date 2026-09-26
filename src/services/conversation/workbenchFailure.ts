@@ -14,6 +14,8 @@ const CORE_ASSETS_MISSING = 'GENERATION_CORE_ASSETS_MISSING';
 const PREVIOUS_CHAPTER_NOT_ADOPTED = 'WORKBENCH_PREVIOUS_CHAPTER_NOT_ADOPTED';
 const PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE = 'WORKBENCH_PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE';
 const MODEL_CREDENTIAL_UNAVAILABLE = 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE';
+const REVISION_SOURCE_INVALID = 'WORKBENCH_REVISION_SOURCE_INVALID';
+const NATIVE_REVISION_SOURCE_INVALID = 'CHAPTER_REVISION_SOURCE_INVALID';
 const RETRY_TARGET_FAILURES = new Set([
   'WORKBENCH_RETRY_TARGET_MISSING',
   'WORKBENCH_RETRY_TARGET_CONFLICT',
@@ -38,7 +40,10 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
   const message = error instanceof Error ? error.message : String(error ?? '任务失败');
   const text = code + ' ' + message;
 
-  if (code === 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED') {
+  if (
+    code === 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED' ||
+    code === 'WORKBENCH_WORD_TARGET_INVALID'
+  ) {
     return {
       layer: 'parameter',
       code,
@@ -47,6 +52,26 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
     };
   }
 
+  if (/DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/.test(text)) {
+    return {
+      layer: 'model',
+      code: 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED',
+      message,
+      hint: '候选未通过字数硬门禁，未生成可采用产物，正式正文不变。有限修正未成功时，可保留目标字数重试；若创作要求确实改变，发送“本任务目标字数设为3200字”，再发送写章指令。不要通过放宽验收区间掩盖超长。',
+    };
+  }
+  if (
+    code === REVISION_SOURCE_INVALID ||
+    code === NATIVE_REVISION_SOURCE_INVALID ||
+    /修订来源(?:身份不完整|已失效|缺失)/i.test(text)
+  ) {
+    return {
+      layer: 'data',
+      code: REVISION_SOURCE_INVALID,
+      message,
+      hint: '请重新选择要修改的候选后再次发送；修订来源不会降级为最新候选，也不会改写正式正文。',
+    };
+  }
   if (
     code === CHAPTER_REQUIRED ||
     /未绑定章节|请先选择或创建章节|必须绑定目标章节|chapterId is required/i.test(text)

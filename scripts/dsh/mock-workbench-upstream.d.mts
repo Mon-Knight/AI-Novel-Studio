@@ -25,6 +25,8 @@ export interface MockWorkbenchOptions {
   foreignNovelId?: string;
   foreignChapterId?: string;
   candidateText?: string;
+  /** Per-candidate sequence, repeats its last entry; [] restores candidateText. configure resets it. */
+  candidateTexts?: readonly string[];
   delayMs?: number;
 }
 
@@ -36,6 +38,7 @@ export interface MockWorkbenchResolvedOptions {
   foreignNovelId: string;
   foreignChapterId: string;
   candidateText: string;
+  candidateTexts: readonly string[];
   delayMs: number;
 }
 
@@ -51,6 +54,9 @@ export interface MockWorkbenchRequestSummary {
   requestedToolNames: string[];
   /** Whether the newest user message carried the host's "用户重试" notice (GAP-19). */
   userRetryNotice: boolean;
+  /** Counts from the latest configure, without storing candidate text. */
+  candidateCallNumber?: number;
+  candidateTextLength?: number;
   chunksSent: number;
   startedAt: string;
   completedAt?: string;
@@ -63,6 +69,7 @@ export interface MockWorkbenchSnapshot {
   activeRequests: number;
   peakActiveRequests: number;
   injectedUpstreamFailures: number;
+  candidateCalls: number;
   requests: MockWorkbenchRequestSummary[];
 }
 

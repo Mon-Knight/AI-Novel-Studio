@@ -96,6 +96,7 @@ interface TaskConversationBundle {
     conversationId: string;
     turnId: string;
     status: string;
+    error?: string;
   }>;
   toolEvents: Array<{ runId: string; toolName: string; status: string; error?: string }>;
   artifacts: Array<{
@@ -154,6 +155,46 @@ function assertChapterArtifact(
   expect(['valid', 'valid_with_warnings']).toContain(bundle.artifact.processingStatus);
   expect(bundle.rawContent.length).toBeGreaterThan(20);
   expect(sha256(bundle.rawContent)).toBe(bundle.artifact.contentHash);
+}
+
+async function readComposerErrorText(): Promise<string> {
+  const element = await browser.$('[data-testid="workbench-composer-error"]');
+  if (!(await element.isExisting())) return '';
+  return (await element.getText()).trim();
+}
+
+/**
+ * A revision only persists a second chapter candidate while the composer still carries the exact
+ * source captured by the `request_revision` decision. A bare timeout hides the runtime's own
+ * refusal, so surface the composer failure text as soon as it appears.
+ */
+async function waitForRevisedChapterCandidate(
+  conversationId: string,
+  baselineComposerError: string,
+): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const candidate = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+        conversationId,
+      });
+      if (
+        candidate?.conversation.status === 'waiting_user' &&
+        candidate.artifacts.filter((card) => card.artifactType === 'chapter_text').length === 2
+      )
+        return true;
+      const composerError = await readComposerErrorText();
+      if (composerError && composerError !== baselineComposerError)
+        throw new Error(`第二版章节候选未持久化；输入区错误：${composerError}`);
+      // A revision that starts a run but never publishes a candidate keeps its own failure text.
+      const failedRun = candidate?.runs.find((run) => run.status === 'failed');
+      if (failedRun)
+        throw new Error(
+          `第二版章节候选未持久化；修订运行 ${failedRun.runId} 失败：${failedRun.error ?? '（未记录错误）'}`,
+        );
+      return false;
+    },
+    { timeout: 60000, timeoutMsg: '未能持久化修改后的第二版章节候选卡片' },
+  );
 }
 
 describe('Agent production closed loop & restart verification', () => {
@@ -415,24 +456,17 @@ describe('Agent production closed loop & restart verification', () => {
       );
       await waitForTestIdAttribute('workbench-conversation-status', 'data-status', 'idle', 30000);
 
+      // 修订必须绑定被选中的精确候选：输入区显示 request_revision 决定捕获的修订来源。
+      const revisionSourceChip = await waitForTestId('workbench-revision-source');
+      expect(await revisionSourceChip.getText()).toContain('修订来源');
+
       await fillTestId('workbench-composer-input', task.revisionPrompt);
+      const baselineComposerError = await readComposerErrorText();
       const secondSendBtn = await waitForTestId('workbench-send-task');
       await secondSendBtn.waitForEnabled({ timeout: 30000 });
       await secondSendBtn.click();
 
-      await browser.waitUntil(
-        async () => {
-          const candidate = await bridgeCall<TaskConversationBundle | null>(
-            'get_task_conversation',
-            { conversationId },
-          );
-          return (
-            candidate?.conversation.status === 'waiting_user' &&
-            candidate.artifacts.filter((card) => card.artifactType === 'chapter_text').length === 2
-          );
-        },
-        { timeout: 60000, timeoutMsg: '未能持久化修改后的第二版章节候选卡片' },
-      );
+      await waitForRevisedChapterCandidate(conversationId, baselineComposerError);
       await waitForTestIdAttribute(
         'workbench-conversation-status',
         'data-status',

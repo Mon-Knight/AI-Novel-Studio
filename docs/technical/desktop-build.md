@@ -12,7 +12,7 @@ npm run build
 npm run tauri:build
 ```
 
-默认构建产物位于 `src-tauri/target/release/`；若设置了 `CARGO_TARGET_DIR`，以实际输出为准。构建不等于获准发布；分层验证见根 [AGENTS.md](../../AGENTS.md)，完整发布门禁与载体/Gateway 准备顺序见 [测试策略](testing.md)。
+默认构建产物位于 `src-tauri/target/release/`；若设置了 `CARGO_TARGET_DIR`，以实际输出为准。日常任务要刷新用户打开的 EXE 时，按根 [AGENTS.md](../../AGENTS.md) 第 7.6 节：清除 `CARGO_TARGET_DIR` 后执行 `npm run dsh:assets` 与 `npx tauri build --bundles none`，产物为 `src-tauri/target/release/AI Novel Studio.exe`。不要把该步骤当成 `npm run tauri:build` 发布打包。构建不等于获准发布；分层验证见根 AGENTS，完整发布门禁与载体/Gateway 准备顺序见 [测试策略](testing.md)。
 
 ## 环境配置
 

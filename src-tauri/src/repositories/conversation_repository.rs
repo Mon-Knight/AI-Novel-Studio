@@ -1,3 +1,11 @@
+#[path = "conversation_review_authorization.rs"]
+mod review_authorization;
+use review_authorization::validate_review_rule_baseline;
+pub use review_authorization::{issue_review_authorization, consume_review_authorization, get_review_authorization};
+#[cfg(test)]
+#[path = "conversation_lifecycle_tests.rs"]
+mod lifecycle_tests;
+
 use crate::errors::AppError;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -458,6 +466,12 @@ fn has_unresolved_artifact_candidate(
                     decision.decision_id IS NULL
                     OR (
                       decision.decision = 'confirm'
+                       AND NOT EXISTS(
+                         SELECT 1 FROM result_artifacts AS artifact
+                         WHERE artifact.artifact_id = card.artifact_id
+                           AND artifact.artifact_type = card.artifact_type
+                           AND artifact.artifact_type IN ('quality_report', 'style_analysis')
+                       )
                       AND NOT EXISTS(
                         SELECT 1
                         FROM review_authorizations AS authorization
@@ -540,17 +554,37 @@ pub(crate) fn reconcile_conversation_status(
     Ok(())
 }
 
-fn decision_fallback_status(decision: &ArtifactDecisionRecord) -> &'static str {
+fn decision_fallback_status(
+    connection: &Connection,
+    decision: &ArtifactDecisionRecord,
+) -> Result<&'static str, AppError> {
     if decision.conflict_code.is_some() {
-        "failed"
-    } else {
-        match decision.decision.as_str() {
-            "reject" | "request_revision" => "idle",
-            "request_apply" if decision.apply_transaction_id.is_some() => "completed",
-            "confirm" | "request_apply" => "waiting_user",
-            _ => "idle",
+        return Ok("failed");
+    }
+    if decision.decision == "confirm" {
+        let acknowledged_report: bool = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM conversation_artifact_cards AS card
+                    JOIN result_artifacts AS artifact ON artifact.artifact_id = card.artifact_id
+                    WHERE card.card_id=?1 AND card.conversation_id=?2
+                      AND card.artifact_id=?3 AND artifact.artifact_type = card.artifact_type
+                      AND artifact.artifact_type IN ('quality_report', 'style_analysis')
+                )",
+                params![decision.card_id, decision.conversation_id, decision.artifact_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if acknowledged_report {
+            return Ok("completed");
         }
     }
+    Ok(match decision.decision.as_str() {
+        "reject" | "request_revision" => "idle",
+        "request_apply" if decision.apply_transaction_id.is_some() => "completed",
+        "confirm" | "request_apply" => "waiting_user",
+        _ => "idle",
+    })
 }
 
 fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskConversationRecord> {
@@ -1727,7 +1761,7 @@ pub fn record_artifact_decision(
         reconcile_conversation_status(
             &transaction,
             &existing.conversation_id,
-            decision_fallback_status(&existing),
+            decision_fallback_status(&transaction, &existing)?,
             &existing.created_at,
         )?;
         transaction.commit().map_err(AppError::database)?;
@@ -1769,7 +1803,7 @@ pub fn record_artifact_decision(
     reconcile_conversation_status(
         &transaction,
         &decision.conversation_id,
-        decision_fallback_status(&decision),
+        decision_fallback_status(&transaction, &decision)?,
         &decision.created_at,
     )?;
     transaction.commit().map_err(AppError::database)?;
@@ -2093,136 +2127,6 @@ pub fn ensure_chapter_summary_follow_up_for_authorization(
     Ok(follow_up)
 }
 
-pub fn issue_review_authorization(
-    connection: &mut Connection,
-    authorization_id: &str,
-    decision_id: &str,
-    artifact_id: &str,
-    novel_id: &str,
-    chapter_id: &str,
-    issued_at: &str,
-) -> Result<ReviewAuthorizationRecord, AppError> {
-    let existing = connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE decision_id=?1",
-            params![decision_id],
-            authorization_from_row,
-        )
-        .optional()
-        .map_err(AppError::database)?;
-    if let Some(existing) = existing {
-        if existing.authorization_id != authorization_id
-            || existing.artifact_id != artifact_id
-            || existing.novel_id != novel_id
-            || existing.chapter_id != chapter_id
-        {
-            return Err(AppError::new(
-                "REVIEW_AUTHORIZATION_IDENTITY_CONFLICT",
-                "既有审阅授权与当前请求身份不一致",
-                false,
-            ));
-        }
-        validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
-        return Ok(existing);
-    }
-    validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
-    connection
-        .execute(
-            "INSERT INTO review_authorizations (
-                authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at
-             ) VALUES (?1,?2,?3,?4,?5,'issued',?6)",
-            params![
-                authorization_id,
-                artifact_id,
-                chapter_id,
-                novel_id,
-                decision_id,
-                issued_at
-            ],
-        )
-        .map_err(AppError::database)?;
-    connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)
-}
-
-pub fn consume_review_authorization(
-    connection: &mut Connection,
-    input: ConsumeReviewAuthorizationInput,
-) -> Result<ReviewAuthorizationRecord, AppError> {
-    let current = connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![input.authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)?;
-    if current.status == "consumed" {
-        if current.consumed_by_draft_id.as_deref() == Some(input.draft_id.as_str()) {
-            return Ok(current);
-        }
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_CONSUMED",
-            "审阅授权已被其他草稿消费",
-            false,
-        ));
-    }
-    if current.status != "issued" {
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_EXPIRED",
-            "审阅授权已失效",
-            false,
-        ));
-    }
-    let updated = connection
-        .execute(
-            "UPDATE review_authorizations
-             SET status='consumed', consumed_at=?2, consumed_by_draft_id=?3
-             WHERE authorization_id=?1 AND status='issued'",
-            params![input.authorization_id, input.consumed_at, input.draft_id],
-        )
-        .map_err(AppError::database)?;
-    if updated != 1 {
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_CONFLICT",
-            "审阅授权消费冲突",
-            false,
-        ));
-    }
-    connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![input.authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)
-}
-
-pub fn get_review_authorization(
-    connection: &Connection,
-    authorization_id: &str,
-) -> Result<Option<ReviewAuthorizationRecord>, AppError> {
-    let result = connection.query_row(
-        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-         FROM review_authorizations WHERE authorization_id=?1",
-        params![authorization_id],
-        authorization_from_row,
-    );
-    match result {
-        Ok(record) => Ok(Some(record)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(err) => Err(AppError::database(err)),
-    }
-}
-
 pub fn adopt_review_authorized_draft(
     connection: &mut Connection,
     input: AdoptReviewAuthorizedDraftInput,
@@ -2347,6 +2251,7 @@ pub fn adopt_review_authorized_draft(
         ));
     }
 
+    validate_review_rule_baseline(&transaction, &authorization.artifact_id, &authorization.novel_id)?;
     let adopted_draft = crate::services::chapter_service::adopt_chapter_draft_in_transaction(
         &transaction,
         &input.draft_id,
@@ -2438,7 +2343,7 @@ mod tests {
     use rusqlite::Connection;
     use serde_json::json;
 
-    fn connection() -> Connection {
+    pub(super) fn connection() -> Connection {
         let mut connection = Connection::open_in_memory().expect("connection");
         connection
             .execute_batch("PRAGMA foreign_keys=ON;")
@@ -2576,15 +2481,34 @@ mod tests {
         assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
     }
 
-    fn insert_valid_chapter_artifact(
+    pub(super) fn insert_valid_chapter_artifact(
+        connection: &Connection, artifact_id: &str, novel_id: &str, chapter_id: &str, content: &str,
+    ) -> String {
+        insert_valid_artifact_with_type(connection, artifact_id, novel_id, chapter_id, content, "chapter_text")
+    }
+
+    pub(super) fn insert_valid_artifact_with_type(
         connection: &Connection,
         artifact_id: &str,
         novel_id: &str,
         chapter_id: &str,
         content: &str,
+        artifact_type: &str,
     ) -> String {
         let content_hash = crate::repositories::large_text_repository::sha256(content);
         let task_id = format!("task-{artifact_id}");
+        // The task target trigger requires an owned, non-deleted chapter; make the fixture
+        // self-sufficient instead of depending on each caller having seeded one.
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+                 SELECT ?1, ?2, '夹具章节', 1, 'drafted', 0, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z'
+                 WHERE NOT EXISTS (SELECT 1 FROM chapters WHERE id = ?1)",
+                params![chapter_id, novel_id],
+            )
+            .expect("fixture chapter");
+        let frozen_rules = crate::services::world_rule_governance::rule_set_snapshot(connection, novel_id).expect("fixture frozen rules");
+        let target_hint = serde_json::json!({"nativeRuleSet": frozen_rules}).to_string();
         connection
             .execute_batch(
                 "PRAGMA foreign_keys=OFF;
@@ -2597,9 +2521,9 @@ mod tests {
                 task_id, task_type, novel_id, chapter_id, scope_type, status,
                 input_snapshot_id, context_snapshot_id, constraint_snapshot_id,
                 trace_id, operation_id, request_hash_version, request_hash,
-                expected_artifact_type, expected_artifact_schema_version, created_at, updated_at
+                expected_artifact_type, expected_artifact_schema_version, target_hint_json, created_at, updated_at
              ) VALUES (?1, 'chapter_generate', ?2, ?3, 'chapter', 'completed', ?4, ?5, ?6,
-                ?7, ?8, 1, ?9, 'chapter_text', 1, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
+                ?7, ?8, 1, ?9, ?10, 1, ?11, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
                 params![
                     &task_id,
                     novel_id,
@@ -2610,6 +2534,8 @@ mod tests {
                     format!("trace-{artifact_id}"),
                     format!("operation-{artifact_id}"),
                     "0".repeat(64),
+                    artifact_type,
+                    target_hint,
                 ],
             )
             .expect("insert artifact task fixture");
@@ -2619,7 +2545,7 @@ mod tests {
                 artifact_id, task_id, attempt_id, source_input_snapshot_id, artifact_type,
                 schema_version, raw_content_ref_id, source_novel_id, source_chapter_id,
                 content_hash, content_length, processing_status, created_at
-             ) VALUES (?1, ?2, ?3, ?4, 'chapter_text', 1, ?5, ?6, ?7, ?8, ?9, 'valid',
+             ) VALUES (?1, ?2, ?3, ?4, ?10, 1, ?5, ?6, ?7, ?8, ?9, 'valid',
                 '2026-08-21T00:00:00Z')",
                 params![
                     artifact_id,
@@ -2631,6 +2557,7 @@ mod tests {
                     chapter_id,
                     &content_hash,
                     content.chars().count() as i64,
+                    artifact_type,
                 ],
             )
             .expect("insert result artifact fixture");
@@ -2640,7 +2567,7 @@ mod tests {
         content_hash
     }
 
-    fn conversation_status(connection: &Connection, conversation_id: &str) -> String {
+    pub(super) fn conversation_status(connection: &Connection, conversation_id: &str) -> String {
         connection
             .query_row(
                 "SELECT status FROM task_conversations WHERE conversation_id=?1",

@@ -146,6 +146,15 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 3. `commit`、`push`、创建 PR、合并、`tag` 和发布仅在用户或已确认任务明确授权相应动作时执行。小步修改不等于自动提交；普通任务不要求工作树干净。
 4. 获准提交时只暂存本次相关文件并检查暂存差异，不使用无差别 `git add .` 混入用户修改。日常开发不直接提交到 `main`，不 force push，不移动既有 tag。
 5. 发布严格按 [Git 治理](docs/project/git-workflow.md)：分支/PR → 适用门禁和审查 → 合入并同步 `main` → 不可移动的发布 tag。不要把示例命令视为自动执行授权。
+6. **任务完成后更新本地 release EXE**（用户要求；不要另建 `agent.md`）。凡本仓库开发任务在可交付汇报前，必须把当前工作区打进 `src-tauri/target/release/AI Novel Studio.exe`，供用户直接打开验证。这不是获准发布、不是安装包、也不把该 EXE 提交进 Git。
+
+   ```powershell
+   Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+   npm run dsh:assets
+   npx tauri build --bundles none
+   ```
+
+   产物路径必须是仓库内 `src-tauri/target/release/AI Novel Studio.exe`（`productName`），不能只留下 `ai-novel-studio.exe`，也不能写到沙箱或其他 `CARGO_TARGET_DIR`。`tauri build --bundles none` 会跑前端 `beforeBuildCommand` 并跳过安装包；不要用 `tauri:build` / `tauri:build:release` 代替（那些会打 MSI/NSIS/updater，且可能要签名私钥）。EXE 被占用（用户正在运行）时停止覆盖，报告路径并请用户先退出。纯文档且确定不改变可执行行为时，在汇报中写明未重建及原因；其余任务不得跳过。
 
 完成汇报至少包含：
 
@@ -153,6 +162,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - **文件**：主要修改/新增文件及其用途；
 - **验证**：实际执行的命令、结果，未执行项及原因；
 - **风险**：剩余问题、限制和需用户决策的事项；
-- **Git 状态**：是否提交/推送/打 tag，以及是否保留用户已有修改。
+- **Git 状态**：是否提交/推送/打 tag，以及是否保留用户已有修改；
+- **本地 EXE**：`src-tauri/target/release/AI Novel Studio.exe` 是否已按第 7.6 节更新，或未更新的原因。
 
 复杂版本任务可使用自包含任务书，注明目标、版本或“非版本任务”、禁止事项、实现要求、测试和汇报格式；同一会话内的明确任务不强制重复生成任务书。详细过程见 [Agent 工作流](docs/agent-workflow.md)。

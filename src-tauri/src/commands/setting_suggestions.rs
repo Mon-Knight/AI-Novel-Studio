@@ -1,7 +1,7 @@
 //! 设定建议候选：桌面端以 SQLite `setting_suggestions` 为唯一事实源（migration 037，审计 GAP-15）。
 //!
-//! 候选只能从 `pending` 一次性推进到 `adopted / edited_adopted / discarded`；采纳目标写入由
-//! 前端既有 `adoptTarget` 链路完成，这里只负责候选事实本身与作品归属复验。
+//! 候选采用与正式目标由原生 IMMEDIATE 事务一起提交；旧决定入口保留用于废弃，
+//! 不再允许只伪造采用状态而没有正式目标、授权及事务回执。
 use crate::db::get_connection;
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,7 @@ pub struct SaveSettingSuggestionInput {
     pub reference_style: Option<String>,
     pub prompt: Option<String>,
     pub result_json: Option<String>,
+    pub expected_rule_set_fingerprint: Option<String>,
     pub item: Map<String, Value>,
     pub status: Option<String>,
     pub adopted_target_id: Option<String>,
@@ -115,7 +116,7 @@ fn bounded(value: &str, label: &str) -> Result<(), String> {
 }
 
 /// 候选载荷只允许字符串值，与前端 `normalizePayload` 一致。
-fn normalize_item(item: Map<String, Value>) -> Result<Map<String, Value>, String> {
+pub(crate) fn normalize_item(item: Map<String, Value>) -> Result<Map<String, Value>, String> {
     let mut normalized = Map::new();
     for (key, value) in item {
         let key = key.trim().to_string();
@@ -136,7 +137,7 @@ fn normalize_item(item: Map<String, Value>) -> Result<Map<String, Value>, String
     Ok(normalized)
 }
 
-fn ensure_novel(connection: &Connection, novel_id: &str) -> Result<(), String> {
+pub(crate) fn ensure_novel(connection: &Connection, novel_id: &str) -> Result<(), String> {
     let count = connection
         .query_row(
             "SELECT COUNT(*) FROM novels WHERE id = ?1 AND deleted_at IS NULL",
@@ -211,11 +212,47 @@ fn save_one(
         return Err(invalid("建议类型非法"));
     }
     ensure_novel(connection, &input.novel_id)?;
+    if let Some(id) = input.id.as_deref() {
+        if let Some(existing) = get_setting_suggestion_with(connection, id)? {
+            if existing.novel_id != input.novel_id
+                || existing.suggestion_type != input.suggestion_type
+                || (existing.status == "pending"
+                    && existing.item != normalize_item(input.item.clone())?)
+            {
+                return Err(invalid("候选ID已绑定其他作品、类型或内容"));
+            }
+            return Ok(existing); // Migration/retry cannot overwrite a decided fact.
+        }
+    }
     let status = input.status.unwrap_or_else(|| "pending".to_string());
     let target_type = optional_trimmed(input.adopted_target_type);
     let target_id = optional_trimmed(input.adopted_target_id);
     if status != "pending" {
         validate_decision(&status, target_type.as_deref(), target_id.as_deref())?;
+        if matches!(status.as_str(), "adopted" | "edited_adopted") {
+            let (expected_type, sql) = match input.suggestion_type.as_str() {
+                "character" => (
+                    "character",
+                    "SELECT EXISTS(SELECT 1 FROM characters WHERE id=?1 AND novel_id=?2)",
+                ),
+                "rule" => (
+                    "rule_system",
+                    "SELECT EXISTS(SELECT 1 FROM rule_systems WHERE id=?1 AND novel_id=?2)",
+                ),
+                _ => (
+                    "world_setting",
+                    "SELECT EXISTS(SELECT 1 FROM world_settings WHERE id=?1 AND novel_id=?2)",
+                ),
+            };
+            let exists: bool = connection
+                .query_row(sql, params![target_id, input.novel_id], |row| row.get(0))
+                .map_err(|e| e.to_string())?;
+            if target_type.as_deref() != Some(expected_type) || !exists {
+                return Err(invalid(
+                    "历史采用记录的目标不存在、类型不符或不属于当前作品",
+                ));
+            }
+        }
     } else if target_type.is_some() || target_id.is_some() {
         return Err(invalid("待处理候选不能携带采纳目标"));
     }
@@ -225,6 +262,26 @@ fn save_one(
     bounded(&prompt, "提示词快照")?;
     let result_json = input.result_json.unwrap_or_else(|| item_json.clone());
     bounded(&result_json, "结果 JSON")?;
+    let snapshot =
+        crate::services::world_rule_governance::rule_set_snapshot(connection, &input.novel_id)
+            .map_err(|e| e.to_string())?;
+    if input
+        .expected_rule_set_fingerprint
+        .as_deref()
+        .is_some_and(|expected| expected != snapshot.fingerprint)
+    {
+        return Err(
+            "RULE_SET_BASE_CONFLICT: 生成期间规则集变化，候选未保存，请重新生成".to_string(),
+        );
+    }
+    // The native envelope preserves historical output; clients cannot assert native sources.
+    let result_json = if status == "pending" {
+        serde_json::json!({"format":"setting-candidate-v1", "originalResultJson":result_json,
+            "baselineOrigin":if input.expected_rule_set_fingerprint.is_some() { "generation" } else { "legacy_import_review" },
+            "nativeRuleSet":snapshot}).to_string()
+    } else {
+        result_json
+    };
     let raw_output = input.raw_output;
     if let Some(raw_output) = raw_output.as_deref() {
         bounded(raw_output, "原始输出")?;
@@ -297,6 +354,15 @@ pub fn decide_setting_suggestion_with(
             "{SETTING_SUGGESTION_ALREADY_DECIDED}: 该候选已处理"
         ));
     }
+    if input.status != "discarded" {
+        return Err(invalid(
+            "采用必须调用 adopt_setting_suggestion 原子事务入口",
+        ));
+    }
+    if input.item.is_some() {
+        return Err(invalid("废弃不能修改候选内容"));
+    }
+    ensure_novel(connection, &existing.novel_id)?;
     let target_type = optional_trimmed(input.adopted_target_type);
     let target_id = optional_trimmed(input.adopted_target_id);
     validate_decision(&input.status, target_type.as_deref(), target_id.as_deref())?;
@@ -363,160 +429,45 @@ pub fn decide_setting_suggestion(
     decide_setting_suggestion_with(&connection, input)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    const NOVEL: &str = "20000000-0000-4000-8000-000000000001";
-
-    fn connection() -> Connection {
-        let mut connection = Connection::open_in_memory().expect("connection");
-        connection
-            .execute_batch("PRAGMA foreign_keys=ON;")
-            .expect("foreign keys");
-        crate::db::create_tables(&mut connection).expect("schema");
-        connection
-            .execute(
-                "INSERT INTO novels (id, title, outline, created_at, updated_at) VALUES (?1, 'n', '', ?2, ?2)",
-                params![NOVEL, "2026-09-08T00:00:00Z"],
-            )
-            .expect("novel");
-        connection
-    }
-
-    fn input(name: &str) -> SaveSettingSuggestionInput {
-        let mut item = Map::new();
-        item.insert("name".to_string(), json!(name));
-        item.insert("description".to_string(), json!({"nested": true}));
-        SaveSettingSuggestionInput {
-            id: None,
-            novel_id: NOVEL.to_string(),
-            suggestion_type: "character".to_string(),
-            world_type: Some("修仙".to_string()),
-            reference_style: Some("热血".to_string()),
-            prompt: Some("prompt".to_string()),
-            result_json: None,
-            item,
-            status: None,
-            adopted_target_id: None,
-            adopted_target_type: None,
-            user_instruction: None,
-            raw_output: Some("raw".to_string()),
-            created_at: None,
-            updated_at: None,
-        }
-    }
-
-    #[test]
-    fn saves_a_batch_atomically_and_decides_once() {
-        let mut connection = connection();
-        let saved =
-            save_setting_suggestions_with(&mut connection, vec![input("甲"), input("乙")]).unwrap();
-        assert_eq!(saved.len(), 2);
-        assert_eq!(saved[0].item["description"], json!("{\"nested\":true}"));
-        assert_eq!(saved[0].status, "pending");
-        assert_eq!(
-            list_setting_suggestions_with(&connection, NOVEL)
-                .unwrap()
-                .len(),
-            2
-        );
-
-        let adopted = decide_setting_suggestion_with(
-            &connection,
-            DecideSettingSuggestionInput {
-                id: saved[0].id.clone(),
-                status: "edited_adopted".to_string(),
-                item: Some(Map::from_iter([("name".to_string(), json!("甲·改"))])),
-                adopted_target_id: Some("character-1".to_string()),
-                adopted_target_type: Some("character".to_string()),
-            },
-        )
-        .unwrap();
-        assert_eq!(adopted.status, "edited_adopted");
-        assert_eq!(adopted.item["name"], json!("甲·改"));
-        assert_eq!(adopted.adopted_target_id.as_deref(), Some("character-1"));
-
-        let again = decide_setting_suggestion_with(
-            &connection,
-            DecideSettingSuggestionInput {
-                id: saved[0].id.clone(),
-                status: "discarded".to_string(),
-                item: None,
-                adopted_target_id: None,
-                adopted_target_type: None,
-            },
-        )
-        .unwrap_err();
-        assert!(
-            again.starts_with(SETTING_SUGGESTION_ALREADY_DECIDED),
-            "{again}"
-        );
-
-        let discarded = decide_setting_suggestion_with(
-            &connection,
-            DecideSettingSuggestionInput {
-                id: saved[1].id.clone(),
-                status: "discarded".to_string(),
-                item: None,
-                adopted_target_id: None,
-                adopted_target_type: None,
-            },
-        )
-        .unwrap();
-        assert_eq!(discarded.status, "discarded");
-
-        // The trigger is the last line of defence even for direct SQL.
-        let direct = connection.execute(
-            "UPDATE setting_suggestions SET status = 'pending' WHERE id = ?1",
-            params![saved[1].id],
-        );
-        assert!(direct.is_err(), "decided suggestions must not reopen");
-    }
-
-    #[test]
-    fn rejects_invalid_batches_without_partial_writes() {
-        let mut connection = connection();
-        let mut bad_type = input("丙");
-        bad_type.suggestion_type = "weapon".to_string();
-        let error = save_setting_suggestions_with(&mut connection, vec![input("甲"), bad_type])
-            .unwrap_err();
-        assert!(error.starts_with(SETTING_SUGGESTION_INVALID), "{error}");
-        assert!(list_setting_suggestions_with(&connection, NOVEL)
-            .unwrap()
-            .is_empty());
-
-        let mut foreign = input("丁");
-        foreign.novel_id = "missing-novel".to_string();
-        assert!(
-            save_setting_suggestions_with(&mut connection, vec![foreign])
-                .unwrap_err()
-                .starts_with(SETTING_SUGGESTION_INVALID)
-        );
-
-        let saved = save_setting_suggestions_with(&mut connection, vec![input("戊")]).unwrap();
-        let missing_target = decide_setting_suggestion_with(
-            &connection,
-            DecideSettingSuggestionInput {
-                id: saved[0].id.clone(),
-                status: "adopted".to_string(),
-                item: None,
-                adopted_target_id: None,
-                adopted_target_type: Some("character".to_string()),
-            },
-        )
-        .unwrap_err();
-        assert!(
-            missing_target.starts_with(SETTING_SUGGESTION_INVALID),
-            "{missing_target}"
-        );
-        assert_eq!(
-            get_setting_suggestion_with(&connection, &saved[0].id)
-                .unwrap()
-                .unwrap()
-                .status,
-            "pending"
-        );
-    }
+#[tauri::command]
+pub fn adopt_setting_suggestion(
+    input: crate::services::setting_suggestion_adoption_service::AdoptSettingSuggestionInput,
+) -> Result<crate::services::setting_suggestion_adoption_service::AdoptionResult, String> {
+    let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
+    crate::services::setting_suggestion_adoption_service::adopt_with(&mut connection, input)
 }
+
+#[tauri::command]
+pub fn preview_setting_suggestion_adoption(
+    input: crate::services::setting_suggestion_adoption_service::AdoptSettingSuggestionInput,
+) -> Result<Option<crate::services::world_rule_governance::RuleChangePreview>, String> {
+    let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(|error| error.to_string())?;
+    let preview = crate::services::setting_suggestion_adoption_service::preview_adoption(
+        &transaction,
+        &input,
+    )?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(preview)
+}
+
+#[tauri::command]
+pub fn get_world_rule_set_snapshot(
+    novel_id: String,
+) -> Result<crate::services::world_rule_governance::RuleSetSnapshot, String> {
+    let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(|error| error.to_string())?;
+    let snapshot =
+        crate::services::world_rule_governance::rule_set_snapshot(&transaction, &novel_id)
+            .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+#[cfg(test)]
+#[path = "setting_suggestions_tests.rs"]
+mod tests;

@@ -122,7 +122,16 @@ describe('production writing smoke', () => {
       'workbench-composer-input',
       '重新修改这一版正文，节奏放慢，着重渲染风雨交加与心理压迫感',
     );
-    await clickTestId('workbench-send-task');
+    // 修订来源绑定与发送前的权威复验是异步的：必须先等发送可用，避免点击落在禁用按钮上。
+    const send = await waitForTestId('workbench-send-task');
+    await send.waitForEnabled({ timeout: 30000 });
+    await send.click();
+    // A revision request that never reaches the runtime leaves the run count unchanged; waiting on
+    // the persisted run first keeps a dropped send attributable instead of a bare candidate timeout.
+    await browser.waitUntil(async () => (await readBundle()).runs.length === 2, {
+      timeout: 30000,
+      timeoutMsg: 'The revision request did not start a second run',
+    });
     const revised = await waitForCandidates(2);
     const revisedId = revised.artifacts.find(
       (item) => item.artifactType === 'chapter_text' && item.artifactId !== firstId,

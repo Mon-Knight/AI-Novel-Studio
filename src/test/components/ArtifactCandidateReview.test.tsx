@@ -473,8 +473,19 @@ describe('structured artifact candidate review semantics', () => {
     const view = render(stream(''));
     const cards = screen.getAllByTestId('workbench-artifact-card');
     expect(cards).toHaveLength(2);
-    expect(cards[0].closest('[data-testid="workbench-turn"]')).not.toBeNull();
-    expect(cards[1].closest('[data-testid="workbench-turn"]')).toBeNull();
+    // Cards are now flat public events: every candidate keeps its conversation attribution and
+    // a run-attached candidate additionally carries the turn/run identity of that run.
+    const attachedEntry = cards[0].closest('[data-testid="workbench-public-event"]');
+    const orphanEntry = cards[1].closest('[data-testid="workbench-public-event"]');
+    expect(attachedEntry).not.toBeNull();
+    expect(orphanEntry).not.toBeNull();
+    expect(attachedEntry?.getAttribute('data-conversation-id')).toBe(attached.conversationId);
+    // The event carries the authoritative run attribution, which is what the persisted run says
+    // (a card may store a different or missing turn identity).
+    expect(attachedEntry?.getAttribute('data-turn-id')).toBe(bundle.runs[0].turnId);
+    expect(attachedEntry?.getAttribute('data-run-id')).toBe(attached.runId);
+    expect(orphanEntry?.getAttribute('data-conversation-id')).toBe(orphan.conversationId);
+    expect(orphanEntry?.getAttribute('data-run-id')).toBeNull();
     for (const [index, card] of cards.entries()) {
       const row = within(card).getAllByTestId('workbench-artifact-candidate')[0];
       await user.click(within(row).getByRole('button', { name: '填写修订意见' }));

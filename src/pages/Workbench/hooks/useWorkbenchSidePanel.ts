@@ -1,13 +1,16 @@
 import { useCallback, useState } from 'react';
 
 export type WorkbenchSidePanelView = 'launcher' | 'plugins' | 'context' | 'artifacts' | 'events';
+export type WorkbenchSidePanelPresentation = 'transient' | 'pinned';
 
 export interface WorkbenchSidePanelState {
   view: WorkbenchSidePanelView | null;
+  presentation: WorkbenchSidePanelPresentation;
   open: (view: WorkbenchSidePanelView) => void;
   openPlugins: () => void;
   back: () => void;
   toggle: () => void;
+  togglePresentation: () => void;
   close: () => void;
 }
 
@@ -22,27 +25,31 @@ export function useWorkbenchSidePanel(
   const [localView, setLocalView] = useState<Exclude<WorkbenchSidePanelView, 'plugins'> | null>(
     null,
   );
+  const [presentation, setPresentation] = useState<WorkbenchSidePanelPresentation>('transient');
   const view: WorkbenchSidePanelView | null = showPlugins ? 'plugins' : localView;
-  const open = useCallback(
-    (next: WorkbenchSidePanelView) => {
-      if (next === 'plugins') {
-        setShowPlugins(true);
-        return;
-      }
-      setShowPlugins(false);
-      setLocalView(next);
-    },
-    [setShowPlugins],
-  );
   const close = useCallback(() => {
     setShowPlugins(false);
     setLocalView(null);
   }, [setShowPlugins]);
+  const open = useCallback(
+    (next: WorkbenchSidePanelView) => {
+      if (view === next) {
+        close();
+        return;
+      }
+      setShowPlugins(next === 'plugins');
+      setLocalView(next === 'plugins' ? null : next);
+    },
+    [close, setShowPlugins, view],
+  );
   const back = useCallback(() => open('launcher'), [open]);
   const toggle = useCallback(() => {
     if (view) close();
     else setLocalView('launcher');
   }, [close, view]);
+  const togglePresentation = useCallback(() => {
+    setPresentation((current) => (current === 'pinned' ? 'transient' : 'pinned'));
+  }, []);
   const openPlugins = useCallback(() => open('plugins'), [open]);
-  return { view, open, openPlugins, back, toggle, close };
+  return { view, presentation, open, openPlugins, back, toggle, togglePresentation, close };
 }

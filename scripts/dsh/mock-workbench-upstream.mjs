@@ -145,6 +145,14 @@ function resolveMode(value) {
   return selected;
 }
 
+function resolveCandidateTexts(value) {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value)) throw new TypeError('candidateTexts must be an array');
+  return Object.freeze(
+    value.map((text, index) => nonEmptyOption(text, `candidateTexts[${index}]`)),
+  );
+}
+
 function resolveOptions(options = {}) {
   const mode = resolveMode(options.mode ?? process.env.MOCK_WORKBENCH_MODE);
   const defaultDelay = mode === 'cancel' ? 30_000 : mode === 'delay' ? 150 : 0;
@@ -184,6 +192,8 @@ function resolveOptions(options = {}) {
       'MOCK_WORKBENCH_CANDIDATE_TEXT',
       '雨停在城门开启之前。沈砚收起湿透的地图，沿着石阶走进尚未苏醒的长街。\n\n远处钟声响起，他知道真正的考验才刚刚开始。',
     ),
+    // The sequence advances only when a candidate tool call is emitted; its last item repeats.
+    candidateTexts: resolveCandidateTexts(options.candidateTexts),
     delayMs: integerOption(
       options.delayMs ?? process.env.MOCK_WORKBENCH_DELAY_MS ?? defaultDelay,
       'MOCK_WORKBENCH_DELAY_MS',
@@ -819,7 +829,18 @@ async function handleChat(request, response, state, pathname) {
 
     let plan;
     try {
-      plan = createPlan(body, options, sequence);
+      const candidateText =
+        options.candidateTexts.length > 0
+          ? options.candidateTexts[
+              Math.min(state.candidateCalls, options.candidateTexts.length - 1)
+            ]
+          : options.candidateText;
+      plan = createPlan(body, { ...options, candidateText }, sequence);
+      if (plan.kind === 'tools' && plan.calls.some((call) => call.canonical === GENERATE_TOOL)) {
+        state.candidateCalls += 1;
+        summary.candidateCallNumber = state.candidateCalls;
+        summary.candidateTextLength = candidateText.length;
+      }
     } catch (error) {
       if (!(error instanceof ContractError)) throw error;
       summary.phase = 'contract-error';
@@ -885,6 +906,7 @@ function createState(options) {
     activeRequests: 0,
     peakActiveRequests: 0,
     injectedUpstreamFailures: 0,
+    candidateCalls: 0,
     requests: [],
     controllers: new Set(),
   };
@@ -897,6 +919,7 @@ function requestSnapshot(state) {
     activeRequests: state.activeRequests,
     peakActiveRequests: state.peakActiveRequests,
     injectedUpstreamFailures: state.injectedUpstreamFailures,
+    candidateCalls: state.candidateCalls,
     requests: state.requests.map((summary) => {
       const safe = { ...summary };
       delete safe.startedAtMs;
@@ -918,6 +941,7 @@ function reconfigure(state, overrides) {
     port: state.options.port,
   });
   if (state.options.mode.startsWith('upstream-error')) state.injectedUpstreamFailures = 0;
+  state.candidateCalls = 0;
   return state.options;
 }
 

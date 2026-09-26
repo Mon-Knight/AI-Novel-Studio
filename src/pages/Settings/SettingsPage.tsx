@@ -8,6 +8,7 @@ import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
 import AppearanceSettingsCard from '../../components/settings/AppearanceSettingsCard';
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
+import ChapterWordRangeSettingsCard from '../../components/settings/ChapterWordRangeSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
 import AiGatewaySettingsCard from '../../components/settings/AiGatewaySettingsCard';
@@ -276,7 +277,7 @@ function SettingsPage() {
             <div data-testid="settings-tab-pane-governance">
               <PageHeader
                 title="AI 网关与流控治理"
-                description="配置调用预算阈值、请求速率并发限制与安全审计规则。"
+                description="配置调用预算阈值、请求速率并发限制、章节候选字数验收区间与安全审计规则。"
                 icon={ShieldCheck}
               />
               <AiGovernanceSettingsCard
@@ -285,6 +286,7 @@ function SettingsPage() {
                 onSave={handleSave}
                 refreshVersion={policySnapshotVersion}
               />
+              <ChapterWordRangeSettingsCard />
               <SecuritySettingsCard />
             </div>
           )}

@@ -6,7 +6,10 @@ import type { WorkbenchIntentState } from '../../../components/layout/shellNavig
  * Consumes one-shot intents handed over by the shell quick actions (Ctrl+N / Ctrl+K or the
  * sidebar buttons on other routes) and clears them from history so a refresh cannot replay them.
  */
-export function useWorkbenchIntent(openTaskCreator: () => void): { searchFocusToken: number } {
+export function useWorkbenchIntent(
+  openTaskCreator: () => void,
+  onSearchRequested?: () => void,
+): { searchFocusToken: number } {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -15,9 +18,12 @@ export function useWorkbenchIntent(openTaskCreator: () => void): { searchFocusTo
   useEffect(() => {
     if (!intent) return;
     if (intent === 'new-task') openTaskCreator();
-    if (intent === 'search') setSearchFocusToken((token) => token + 1);
+    if (intent === 'search') {
+      onSearchRequested?.();
+      setSearchFocusToken((token) => token + 1);
+    }
     navigate(location.pathname, { replace: true, state: null });
-  }, [intent, location.pathname, navigate, openTaskCreator]);
+  }, [intent, location.pathname, navigate, onSearchRequested, openTaskCreator]);
 
   return { searchFocusToken };
 }

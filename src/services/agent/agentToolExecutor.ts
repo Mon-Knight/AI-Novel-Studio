@@ -10,10 +10,7 @@ import type {
 import { agentToolRegistry } from './agentToolRegistry';
 
 export class AgentToolExecutor {
-  async execute(
-    toolCall: AgentToolCall,
-    context: AgentContext,
-  ): Promise<AgentToolExecutionRecord> {
+  async execute(toolCall: AgentToolCall, context: AgentContext): Promise<AgentToolExecutionRecord> {
     const startTime = Date.now();
     const tool = agentToolRegistry.getTool(toolCall.name);
 

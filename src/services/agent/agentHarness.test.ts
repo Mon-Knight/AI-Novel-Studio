@@ -47,10 +47,9 @@ test('CreativeAgentHarness: 自然语言意图理解与工具自主选择', asyn
     relatedEntities: ['qingyun'],
   });
 
-  const result = await creativeAgentHarness.run(
-    '请查询当前小说的世界观规则与世界状态',
-    { novelId },
-  );
+  const result = await creativeAgentHarness.run('请查询当前小说的世界观规则与世界状态', {
+    novelId,
+  });
 
   assert.equal(result.status, 'completed');
   assert.ok(result.executionRecords.length >= 1);
@@ -72,10 +71,7 @@ test('CreativeAgentHarness: 角色动态心境查询与自主调度', async () =
     currentGoal: '破除封印',
   });
 
-  const result = await creativeAgentHarness.run(
-    '请查询主角当前的动态心境与伤势状态',
-    { novelId },
-  );
+  const result = await creativeAgentHarness.run('请查询主角当前的动态心境与伤势状态', { novelId });
 
   assert.equal(result.status, 'completed');
   const charRecord = result.executionRecords.find((r) => r.toolName === 'query_character_state');

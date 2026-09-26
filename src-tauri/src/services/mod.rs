@@ -32,4 +32,7 @@ pub mod structured_artifact_apply_service;
 pub mod style_profile_service;
 pub mod txt_import_service;
 pub mod volume_service;
+pub mod world_rule_governance;
+pub mod world_rule_schema;
 pub mod world_setting_service;
+pub mod setting_suggestion_adoption_service;
