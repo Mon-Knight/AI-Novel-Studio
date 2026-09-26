@@ -42,9 +42,11 @@ export function FrameBar({ sidebarCollapsed, onToggleSidebar, chrome }: FrameBar
       </div>
       <button
         type="button"
-        className="frame-icon-button"
+        className={`frame-icon-button ${sidebarCollapsed ? '' : 'is-active'}`.trim()}
         aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
         aria-pressed={!sidebarCollapsed}
+        aria-expanded={!sidebarCollapsed}
+        data-testid="shell-toggle-sidebar"
         title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
         onClick={onToggleSidebar}
       >

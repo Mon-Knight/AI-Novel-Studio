@@ -116,7 +116,8 @@
   height: 100%;
 }
 
-/* 顶部标签栏的“收起侧栏”在工作台路由作用于项目/任务树。 */
+/* 顶部标签栏的“收起侧栏”在工作台路由作用于项目/任务树。
+   四态：树展开/收起 × 参考列仅 pinned 且宽窗占用。focus 走同一套 collapsed 语义。 */
 .app-shell--workbench[data-sidebar='collapsed'] .workbench-page {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -124,6 +125,22 @@
 .app-shell--workbench[data-sidebar='collapsed'] .workbench-tree {
   display: none;
 }
+
+.app-shell--workbench[data-sidebar='collapsed'] .workbench-page[data-panel-intent='pinned'] {
+  grid-template-columns: minmax(0, 1fr) var(--side-panel-width);
+}
+
+.app-shell--hub[data-sidebar='collapsed'] .hub-sidebar {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .app-shell--workbench[data-sidebar='collapsed'] .workbench-page[data-panel-intent='pinned'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Overlay, pinned column, and plugin-frame chrome live in workbench-zcode.css. */
 
 /* ================================================================
    响应式布局 — 窗口大小控制与 2K 适配

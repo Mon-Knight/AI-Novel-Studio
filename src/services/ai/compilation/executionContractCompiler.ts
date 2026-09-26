@@ -307,6 +307,32 @@ export async function compileAiExecutionContract(
       allowedTools,
     },
   });
+  if (taskInput.revisionSource !== undefined) {
+    const source = taskInput.revisionSource;
+    if (
+      !isPlainRecord(source) ||
+      definition.expectedArtifactType !== 'chapter_text' ||
+      source.novelId !== scope.novelId ||
+      source.chapterId !== scope.chapterId ||
+      source.artifactType !== 'chapter_text' ||
+      taskInput.derivationType !== 'revision' ||
+      taskInput.parentArtifactId !== source.artifactId ||
+      taskInput.sourceArtifactId !== source.artifactId ||
+      ['conversationId', 'cardId', 'artifactId', 'title'].some(
+        (key) => typeof source[key] !== 'string' || !String(source[key]).trim(),
+      ) ||
+      typeof source.artifactHash !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(source.artifactHash) ||
+      typeof taskInput.sourceContentHash !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(taskInput.sourceContentHash)
+    ) {
+      throw new AiCompilationError(
+        'AI_COMPILATION_INPUT_INVALID',
+        '章节修订来源与编译任务作用域不一致。',
+      );
+    }
+    contextSnapshot.sourceManifestJson.revisionSource = JSON.parse(JSON.stringify(source));
+  }
   const compilationHash = await canonicalHash({
     contractVersion: 'compiled_ai_execution_v1',
     taskType: definition.taskType,

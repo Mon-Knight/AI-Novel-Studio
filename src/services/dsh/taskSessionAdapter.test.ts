@@ -11,6 +11,7 @@ import { WRITING_SUBAGENT_FLAG_KEY } from '../agents/writingSubAgentContract';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 import {
   captureLocalConversationalSnapshot,
   isActiveDshTaskRuntimeStatus,
@@ -89,6 +90,17 @@ test('local conversational replies record their real ANS source instead of the s
     assert.notEqual(capturedModel?.providerId, selectedModel.providerId);
     assert.equal(capturedWorker, 'worker-ans-local-conversation-local-help');
     assert.equal(assistantReply, WORKBENCH_CONVERSATIONAL_REPLY);
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-local-help',
+      novelId: 'novel-1',
+      turnId: 'turn-words',
+      goal: '本任务目标字数设为3200字',
+      modelSnapshot: selectedModel,
+    });
+    assert.match(assistantReply, /本任务每章目标字数设为 3200 字/u);
+    assert.match(assistantReply, /2560～3680 字/u);
+    assert.match(assistantReply, /未调用模型、未生成或采用正文/u);
+    assert.equal(capturedModel?.providerId, 'ans-local');
   } finally {
     taskSessionAdapter.clear('conversation-local-help');
     taskConversationService.createRun = originalCreateRun;
@@ -389,7 +401,16 @@ test('chapter_write keeps the deterministic writer for mock models and for an ex
   }
 });
 
-test('desktop chapter_write with an API model starts a candidate-only DSH turn by default with the narrowed writing allowlist', async () => {
+test('desktop chapter_write with an API model starts a candidate-only DSH turn by default with the narrowed writing allowlist', async (t) => {
+  t.mock.method(chapterRepository, 'getById', async () => ({
+    id: 'ch-1',
+    novelId: 'novel-1',
+    targetWordCount: 3000,
+  }));
+  t.mock.method(taskConversationService, 'get', async () => ({
+    conversation: { novelId: 'novel-1' },
+    turns: [],
+  }));
   const originalWindow = mockTauriWindow();
   // No flag set: v3.7.0 opens the SubAgent for real API models.
   const originalStorage = mockFlagStorage(null);
@@ -466,7 +487,16 @@ test('desktop chapter_write with an API model starts a candidate-only DSH turn b
   }
 });
 
-test('flagged chapter_write surfaces integrity errors on the persisted candidate without touching it', async () => {
+test('flagged chapter_write surfaces integrity errors on the persisted candidate without touching it', async (t) => {
+  t.mock.method(chapterRepository, 'getById', async () => ({
+    id: 'ch-1',
+    novelId: 'novel-1',
+    targetWordCount: 3000,
+  }));
+  t.mock.method(taskConversationService, 'get', async () => ({
+    conversation: { novelId: 'novel-1' },
+    turns: [],
+  }));
   const originalWindow = mockTauriWindow();
   const originalStorage = mockFlagStorage('1');
   const originalDshStart = dshTaskRuntimeService.start;
@@ -481,7 +511,15 @@ test('flagged chapter_write surfaces integrity errors on the persisted candidate
   });
   aiTaskRuntimeService.getArtifact = async (artifactId) =>
     ({
-      artifact: { artifactId, artifactType: 'chapter_text' },
+      artifact: {
+        artifactId,
+        artifactType: 'chapter_text',
+        sourceNovelId: 'novel-1',
+        sourceChapterId: 'ch-1',
+        contentHash: await computeContentSha256(
+          '沈砚推开档案馆的门，灰尘在光柱里翻滚。她转身离开。（未完待续）',
+        ),
+      },
       rawContent: '沈砚推开档案馆的门，灰尘在光柱里翻滚。她转身离开。（未完待续）',
       issues: [],
     }) as unknown as Awaited<ReturnType<typeof aiTaskRuntimeService.getArtifact>>;
@@ -518,6 +556,124 @@ test('flagged chapter_write surfaces integrity errors on the persisted candidate
     taskConversationService.appendTurn = originalAppendTurn;
     chapterRepository.getByNovelId = originalChapters;
     volumeRepository.getByNovelId = originalVolumes;
+    restoreFlagStorage(originalStorage);
+    restoreWindow(originalWindow);
+  }
+});
+
+test('DSH candidate warnings and failed integrity reads remain visible without rewriting the candidate', async (t) => {
+  const originalWindow = mockTauriWindow();
+  const originalStorage = mockFlagStorage('1');
+  const candidateText = '火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。';
+  const appended: string[] = [];
+  const chapter = { id: 'ch-1', novelId: 'novel-1', targetWordCount: 3000 };
+  t.mock.method(chapterRepository, 'getById', async () => chapter);
+  t.mock.method(chapterRepository, 'getByNovelId', async () => {
+    throw new Error('read failure');
+  });
+  t.mock.method(volumeRepository, 'getByNovelId', async () => []);
+  t.mock.method(taskConversationService, 'get', async () => ({
+    conversation: { novelId: 'novel-1' },
+    turns: [],
+  }));
+  let generationCalls = 0;
+  t.mock.method(dshTaskRuntimeService, 'start', async (input: DshTaskRuntimeInput) => {
+    generationCalls += 1;
+    return { ...fakeDshStartResult(input, input.conversationId), artifactId: 'artifact-warning' };
+  });
+  t.mock.method(aiTaskRuntimeService, 'getArtifact', async () => ({
+    artifact: {
+      artifactId: 'artifact-warning',
+      artifactType: 'chapter_text',
+      sourceNovelId: 'novel-1',
+      sourceChapterId: 'ch-1',
+      contentHash: await computeContentSha256(candidateText),
+    },
+    rawContent: candidateText,
+    issues: [],
+  }));
+  t.mock.method(
+    taskConversationService,
+    'appendTurn',
+    async (_conversationId: string, role: string, content: string) => {
+      assert.equal(role, 'assistant');
+      appended.push(content);
+      return { turnId: 'review', content };
+    },
+  );
+  const input = {
+    conversationId: 'warning-conversation',
+    novelId: 'novel-1',
+    chapterId: 'ch-1',
+    turnId: 'turn',
+    goal: '写本章正文',
+    modelSnapshot: readModelSnapshot,
+  };
+  try {
+    await taskSessionAdapter.startTurn(input);
+    assert.equal(generationCalls, 1);
+    assert.equal(appended.length, 1);
+    assert.match(appended[0], /warning.*chapter_temporal_semantics_conflict/u);
+    assert.match(appended[0], /前章边界未检查/u);
+    assert.match(appended[0], /全规则语义检查未执行/u);
+    assert.match(appended[0], /不触发自动重写/u);
+    t.mock.method(aiTaskRuntimeService, 'getArtifact', async () => {
+      throw new Error('cannot read candidate');
+    });
+    await taskSessionAdapter.startTurn(input);
+    assert.equal(appended.length, 2);
+    assert.match(appended[1], /完整性复核未检查/u);
+    assert.match(appended[1], /候选读取、作用域或哈希复核未完成/u);
+    assert.match(appended[1], /候选已保留供审阅/u);
+    assert.equal(generationCalls, 2);
+  } finally {
+    taskSessionAdapter.clear(input.conversationId);
+    restoreFlagStorage(originalStorage);
+    restoreWindow(originalWindow);
+  }
+});
+
+test('DSH writing uses durable task word targets and latest per-turn overrides without editing chapter data', async (t) => {
+  const originalWindow = mockTauriWindow();
+  const originalStorage = mockFlagStorage(null);
+  const chapter = { id: 'ch-1', novelId: 'novel-1', targetWordCount: 1000, wordCount: 0 };
+  t.mock.method(chapterRepository, 'getById', async () => chapter);
+  const turns = [
+    { turnId: 'words', sequence: 1, role: 'user', content: '本任务目标字数设为3200字' },
+    { turnId: 'generate', sequence: 2, role: 'user', content: '生成下一章' },
+  ];
+  t.mock.method(taskConversationService, 'get', async () => ({
+    conversation: { novelId: 'novel-1' },
+    turns,
+  }));
+  const inputs: DshTaskRuntimeInput[] = [];
+  t.mock.method(dshTaskRuntimeService, 'start', async (input: DshTaskRuntimeInput) => {
+    inputs.push(input);
+    return fakeDshStartResult(input, input.conversationId);
+  });
+  try {
+    const input = {
+      conversationId: 'conversation-target-words',
+      novelId: 'novel-1',
+      chapterId: 'ch-1',
+      turnId: 'generate',
+      goal: '生成下一章',
+      modelSnapshot: readModelSnapshot,
+    };
+    await taskSessionAdapter.startTurn(input);
+    assert.deepEqual(inputs[0].chapterWordRange, { target: 3200, minimum: 2560, maximum: 3680 });
+    await taskSessionAdapter.startTurn({ ...input, goal: '生成下一章，目标3000字' });
+    assert.deepEqual(inputs[1].chapterWordRange, { target: 3000, minimum: 2400, maximum: 3450 });
+    assert.equal(inputs[0].modelSnapshot, readModelSnapshot);
+    assert.equal(chapter.targetWordCount, 1000);
+    assert.equal(chapter.wordCount, 0);
+    t.mock.method(chapterRepository, 'getById', async () => {
+      throw new Error('chapter read failed');
+    });
+    await assert.rejects(taskSessionAdapter.startTurn(input), /chapter read failed/u);
+    assert.equal(inputs.length, 2);
+  } finally {
+    taskSessionAdapter.clear('conversation-target-words');
     restoreFlagStorage(originalStorage);
     restoreWindow(originalWindow);
   }

@@ -162,6 +162,17 @@ export default function EditorAreaView({
               >
                 进入编辑
               </button>
+              {document.canAdoptReadOnlyCandidate && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-testid="chapter-review-adopt-original"
+                  disabled={busy}
+                  onClick={() => void document.handleAdoptCurrent()}
+                >
+                  采用未修改候选
+                </button>
+              )}
             </div>
           )}
           <textarea

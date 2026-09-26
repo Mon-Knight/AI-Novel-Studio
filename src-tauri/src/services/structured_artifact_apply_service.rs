@@ -8,6 +8,9 @@ use crate::repositories::{
     character_asset_repository, context_record_repository, draft_repository, novel_repository,
     world_setting_repository,
 };
+use crate::services::world_rule_governance::{
+    self as rule_governance, RuleChangeAuthorization, RuleChangePreview,
+};
 use crate::services::{ai_task_service, artifact_service, chapter_context_bundle_service};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
@@ -47,11 +50,19 @@ pub struct ApplyStructuredArtifactInput {
     pub chapter_id: Option<String>,
     #[serde(default)]
     pub base_revision: Option<String>,
+    #[serde(default)]
+    pub expected_rule_set_fingerprint: Option<String>,
+    #[serde(default)]
+    pub change_authorization: Option<RuleChangeAuthorization>,
     pub created_at: String,
 }
 
+#[path = "structured_rule_apply_receipt.rs"]
+mod rule_receipt;
+
 enum DomainOutcome {
     Applied,
+    AppliedWithReceipt(String),
     Conflict(&'static str),
 }
 
@@ -99,6 +110,7 @@ struct SettingCandidate {
     target: SettingTarget,
     category: Option<String>,
     forbidden_rules: Option<String>,
+    structured_json: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1048,6 +1060,18 @@ fn validate_existing_identity(
             false,
         ));
     }
+    if existing
+        .apply_transaction_id
+        .as_deref()
+        .is_some_and(|id| !id.starts_with("apply-rule-"))
+        && (input.change_authorization.is_some() || input.expected_rule_set_fingerprint.is_some())
+    {
+        return Err(AppError::new(
+            "STRUCTURED_APPLY_IDEMPOTENCY_CONFLICT",
+            "旧应用没有本次规则确认回执",
+            false,
+        ));
+    }
     Ok(())
 }
 
@@ -1059,6 +1083,28 @@ fn validate_dynamic_base(
     let artifact = &bundle.artifact;
     if input.base_revision.as_deref() != artifact.source_base_content_hash.as_deref() {
         return Ok(Some("STRUCTURED_BASE_REVISION_CONFLICT"));
+    }
+    // This gate precedes the no-chapter fast path: whole-book setting candidates
+    // depend on the complete rule set just as chapter-scoped candidates do.
+    let task = ai_task_service::get_task_detail(connection, &artifact.task_id)?;
+    if let Some(frozen) = task
+        .task
+        .target_hint_json
+        .as_ref()
+        .and_then(|hint| hint.get("nativeRuleSet"))
+    {
+        if let Err(error) =
+            rule_governance::validate_frozen_rule_set(connection, &input.novel_id, frozen)
+        {
+            if error.code == "RULE_SET_BASE_CONFLICT" {
+                return Ok(Some("RULE_SET_BASE_CONFLICT"));
+            }
+            return Err(error);
+        }
+    } else if artifact.artifact_type == "setting_candidates" {
+        // Pre-upgrade candidates remain inspectable, but must be regenerated. A new
+        // click cannot retroactively prove which rules the model actually saw.
+        return Ok(Some("RULE_SET_SNAPSHOT_REQUIRED"));
     }
     let Some(chapter_id) = input.chapter_id.as_deref() else {
         return Ok(None);
@@ -2180,158 +2226,24 @@ fn apply_events(
     Ok(DomainOutcome::Applied)
 }
 
-fn parse_settings(value: &Value) -> Result<Vec<SettingCandidate>, &'static str> {
-    let rows = candidate_items(value, &["settings", "candidates"], "name");
-    if rows.is_empty() {
-        return Err("EMPTY_CANDIDATE");
-    }
-    if rows.len() > MAX_ITEMS {
-        return Err("TOO_MANY_CANDIDATES");
-    }
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    for row in rows {
-        let object = row.as_object().ok_or("STRUCTURED_PAYLOAD_INVALID")?;
-        let name = trimmed_text(object.get("name"), MAX_NAME_CHARS)
-            .or_else(|| trimmed_text(object.get("title"), MAX_NAME_CHARS))
-            .ok_or("STRUCTURED_PAYLOAD_INVALID")?;
-        let raw_category = trimmed_text(object.get("category"), MAX_NAME_CHARS)
-            .map(|value| value.to_ascii_lowercase());
-        let explicit_target = trimmed_text(
-            object.get("targetType").or_else(|| object.get("target")),
-            MAX_NAME_CHARS,
-        )
-        .map(|value| value.to_ascii_lowercase());
-        let target = if explicit_target.as_deref() == Some("rule_system")
-            || explicit_target.as_deref() == Some("rule")
-            || matches!(
-                raw_category.as_deref(),
-                Some(
-                    "world_rules"
-                        | "world_rule"
-                        | "rule"
-                        | "rules"
-                        | "magic"
-                        | "technology"
-                        | "cultivation"
-                        | "combat"
-                        | "social"
-                )
-            ) {
-            SettingTarget::Rule
-        } else {
-            SettingTarget::World
-        };
-        let target_key = match target {
-            SettingTarget::World => "world",
-            SettingTarget::Rule => "rule",
-        };
-        if !seen.insert((target_key, name.clone())) {
-            continue;
-        }
-        let category = match raw_category.as_deref() {
-            Some("magic") => Some("magic".to_string()),
-            Some("technology") => Some("technology".to_string()),
-            Some("cultivation") => Some("cultivation".to_string()),
-            Some("combat") => Some("combat".to_string()),
-            Some("social") => Some("social".to_string()),
-            Some(_) if target == SettingTarget::Rule => Some("other".to_string()),
-            _ => None,
-        };
-        let mut sections = Vec::new();
-        if let Some(description) = trimmed_text(
-            object.get("description").or_else(|| object.get("content")),
-            MAX_FIELD_CHARS,
-        ) {
-            sections.push(description);
-        }
-        if let Some(usage) = optional_field(object, "usageInChapter") {
-            sections.push(format!("本章用途：{usage}"));
-        }
-        if let Some(risk) = optional_field(object, "risk") {
-            sections.push(format!("风险提示：{risk}"));
-        }
-        candidates.push(SettingCandidate {
-            content: if sections.is_empty() {
-                name.clone()
-            } else {
-                sections.join("\n")
-            },
-            name,
-            target,
-            category,
-            forbidden_rules: stored_field(object, "forbiddenRules"),
-        });
-    }
-    if candidates.is_empty() {
-        Err("EMPTY_CANDIDATE")
-    } else {
-        Ok(candidates)
-    }
-}
+#[path = "structured_setting_apply.rs"]
+mod setting_apply;
+use setting_apply::apply_settings;
+pub(crate) use setting_apply::preview_structured_rule_change_with;
 
-fn apply_settings(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    bundle: &artifact_service::ResultArtifactBundle,
-) -> Result<DomainOutcome, AppError> {
-    let value = candidate_value(bundle).ok_or_else(|| domain_failure("setting_payload"))?;
-    let candidates = match parse_settings(&value) {
-        Ok(candidates) => candidates,
-        Err(code) => return Ok(DomainOutcome::Conflict(code)),
-    };
-    let existing_world =
-        world_setting_repository::find_world_settings_by_novel(connection, &input.novel_id)
-            .map_err(|_| domain_failure("setting_read"))?;
-    let existing_world_names = existing_world
-        .into_iter()
-        .map(|setting| setting.title)
-        .collect::<HashSet<_>>();
-    let existing_rule_names =
-        world_setting_repository::find_rule_systems_by_novel(connection, &input.novel_id)
-            .map_err(|_| domain_failure("rule_setting_read"))?
-            .into_iter()
-            .map(|setting| setting.title)
-            .collect::<HashSet<_>>();
-    let candidates = candidates
-        .into_iter()
-        .filter(|candidate| match candidate.target {
-            SettingTarget::World => !existing_world_names.contains(&candidate.name),
-            SettingTarget::Rule => !existing_rule_names.contains(&candidate.name),
-        })
-        .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return Ok(DomainOutcome::Conflict(
-            "SETTING_CANDIDATES_ALREADY_APPLIED",
-        ));
-    }
-    for candidate in candidates {
-        match candidate.target {
-            SettingTarget::World => world_setting_repository::insert_world_setting(
-                connection,
-                &uuid::Uuid::new_v4().to_string(),
-                &input.novel_id,
-                &candidate.name,
-                &candidate.content,
-                true,
-                &input.created_at,
-            )
-            .map_err(|_| domain_failure("setting_insert"))?,
-            SettingTarget::Rule => world_setting_repository::insert_rule_system(
-                connection,
-                &uuid::Uuid::new_v4().to_string(),
-                &input.novel_id,
-                &candidate.name,
-                candidate.category.as_deref(),
-                &candidate.content,
-                candidate.forbidden_rules.as_deref(),
-                true,
-                &input.created_at,
-            )
-            .map_err(|_| domain_failure("rule_setting_insert"))?,
-        }
-    }
-    Ok(DomainOutcome::Applied)
+#[tauri::command]
+pub fn preview_structured_artifact_rule_change(
+    input: ApplyStructuredArtifactInput,
+) -> Result<Option<RuleChangePreview>, AppError> {
+    let mut connection = crate::db::get_connection()
+        .lock()
+        .map_err(|_| domain_failure("connection_lock"))?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(AppError::database)?;
+    let preview = preview_structured_rule_change_with(&transaction, &input)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(preview)
 }
 
 fn existing_context_record_id(
@@ -2809,6 +2721,11 @@ pub fn apply_structured_artifact(
     let bundle = validate_static_scope(&transaction, &input)?;
     if let Some(existing) = existing_decision(&transaction, &input)? {
         validate_existing_identity(&existing, &input)?;
+        if bundle.artifact.artifact_type == "setting_candidates"
+            && existing.apply_transaction_id.is_some()
+        {
+            rule_receipt::validate(&transaction, &existing, &input)?;
+        }
         crate::repositories::conversation_repository::reconcile_conversation_status(
             &transaction,
             &existing.conversation_id,
@@ -2831,6 +2748,7 @@ pub fn apply_structured_artifact(
     };
     let (apply_transaction_id, conflict_code) = match outcome {
         DomainOutcome::Applied => (Some(format!("apply-{}", uuid::Uuid::new_v4())), None),
+        DomainOutcome::AppliedWithReceipt(receipt_id) => (Some(receipt_id), None),
         DomainOutcome::Conflict(code) => (None, Some(code)),
     };
     let decision = insert_decision(
@@ -2970,36 +2888,6 @@ mod tests {
             Some("旧港档案馆幸存者")
         );
         assert_eq!(protagonist[0].arc.as_deref(), Some("从独自追查到信任同伴"));
-    }
-
-    #[test]
-    fn setting_candidate_parser_keeps_same_name_world_and_rule_as_distinct_assets() {
-        let candidates = parse_settings(&json!({
-            "settings": [
-                {"name":"雾城法则","description":"城市每夜删除一段记录"},
-                {
-                    "name":"雾城法则",
-                    "targetType":"rule_system",
-                    "description":"已删除记录不得直接恢复"
-                }
-            ]
-        }))
-        .expect("world and rule namespaces must remain distinct");
-        assert_eq!(candidates.len(), 2);
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.target == SettingTarget::World));
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.target == SettingTarget::Rule));
-
-        assert_eq!(
-            parse_settings(&json!({
-                "settings": vec![json!({"name":"设定"}); MAX_ITEMS + 1]
-            }))
-            .err(),
-            Some("TOO_MANY_CANDIDATES")
-        );
     }
 
     fn story_plan_payload() -> Value {
@@ -3291,9 +3179,14 @@ mod tests {
             novel_id: NOVEL_ID.to_string(),
             chapter_id: artifact.source_chapter_id.clone(),
             base_revision: artifact.source_base_content_hash.clone(),
+            expected_rule_set_fingerprint: None,
+            change_authorization: None,
             created_at: NOW.to_string(),
         }
     }
+
+    include!("structured_artifact_rule_governance_tests.rs");
+    include!("structured_setting_apply_tests.rs");
 
     fn count(connection: &Connection, table: &str) -> i64 {
         connection
@@ -4319,9 +4212,11 @@ mod tests {
         ];
 
         let mut decisions = Vec::new();
-        for (card, bundle) in &fixtures {
-            let decision = apply_structured_artifact(&mut connection, apply_input(card, bundle))
-                .expect("apply");
+        // Apply already-generated non-rule candidates before changing their frozen rule set.
+        for index in [0, 1, 2, 4, 3] {
+            let (card, bundle) = &fixtures[index];
+            let input = governed_setting_input(&connection, card, bundle);
+            let decision = apply_structured_artifact(&mut connection, input).expect("apply");
             assert!(decision.apply_transaction_id.is_some());
             assert!(decision.conflict_code.is_none());
             decisions.push(decision);
@@ -4748,10 +4643,12 @@ mod tests {
                  BEGIN SELECT RAISE(ABORT, 'forced decision failure'); END;",
             )
             .expect("failure trigger");
-        apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
+        let authorized = governed_setting_input(&connection, &card, &bundle);
+        apply_structured_artifact(&mut connection, authorized)
             .expect_err("decision failure must roll back");
         assert_eq!(count(&connection, "world_settings"), 0);
         assert_eq!(count(&connection, "rule_systems"), 0);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM large_text_documents WHERE field_name='world_rule_apply_receipt'",[],|row| row.get::<_,i64>(0)).unwrap(),0);
         assert_eq!(count(&connection, "artifact_decisions"), 0);
         connection
             .execute_batch("DROP TRIGGER fail_structured_decision;")

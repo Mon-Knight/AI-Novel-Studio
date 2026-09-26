@@ -85,6 +85,7 @@ API Key 只存在于进程环境或命令参数，不写入 sidecar 和报告摘
 ## 5. 云端与外部模型网关（AI Model Gateway）部署
 
 ### 5.1 全局 Cloud Provider（默认与兜底）
+
 模型尚未训练完成时，用户只需配置设置中心的 **全局 Cloud Provider**（DeepSeek 或 OpenAI-Compatible API），并保持专用本地/外部网关模型关闭：
 
 ```text
@@ -96,6 +97,7 @@ Scene/Beat Writer ─┘
 如果已有确认的 Scene/Beat 计划，云端模型继续按同一 `scene-beat-prose-v1` 单 Beat 契约生成；没有 Scene 计划时使用原有整章候选流程。两条路径都只产生 Artifact / 草稿候选，继续经过 Quality Gate、人工审核和 Safe Apply。
 
 ### 5.2 外部模型网关接入（AI Model Gateway Client）
+
 支持将正文生成或专用微调模型通过统一的 OpenAI-Compatible API 接入层挂载至外部 GPU 服务器、私有云或 VPC 网络（详见 [AI Model Gateway 接入层规范](file:///f:/ai-novel-studio-hotfix-v321/docs/architecture/ai-model-gateway.md)）：
 
 - **网络策略**：
@@ -110,6 +112,7 @@ Scene/Beat Writer ─┘
   - 未配置本地 Writer 时，若启用了 `gateway`，则以 `remote_gateway_primary`（或 `remote_writer_primary`）为主路由。
 
 ### 5.3 端点边界对比
+
 - `local`：强制回环地址（127.0.0.1 / localhost），受本机 sidecar 与基准测试约束；
 - `gateway / remote`：通用外部模型网关，支持公网 HTTPS 与 VPC 内网，独立会话凭据，支持自定义上下文和输出 Token 预算；
 - `cloud`：全局导演/评论与全流程兜底。

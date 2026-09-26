@@ -47,6 +47,7 @@ const { chapterRepository } = await import('../../../services/database/chapterRe
 const { volumeRepository } = await import('../../../services/database/volumeRepository');
 const { computeContentSha256 } = await import('../../../utils/contentIntegrity');
 const { useWorkbenchTaskRunner } = await import('./useWorkbenchTaskRunner');
+const { useWorkbenchDraftStore } = await import('../../../store/workbenchDraftStore');
 
 const original = {
   getConversation: taskConversationService.get,
@@ -175,13 +176,14 @@ function bundleWith(artifacts: ConversationArtifactCard[]): TaskConversationBund
 function installConversationStore(): void {
   taskConversationService.get = async (conversationId) =>
     conversationId === liveBundle.conversation.conversationId ? liveBundle : null;
-  taskConversationService.appendTurn = async (conversationId, role, content) => {
+  taskConversationService.appendTurn = async (conversationId, role, content, revisionSource) => {
     const turn = {
       turnId: `turn-${liveBundle.turns.length + 1}`,
       conversationId,
       sequence: liveBundle.turns.length,
       role,
       content,
+      ...(revisionSource ? { revisionSource } : {}),
       createdAt: new Date().toISOString(),
     };
     liveBundle.turns.push(turn);
@@ -338,6 +340,7 @@ async function submit(runner: ReturnType<typeof renderRunner>, command: string):
 }
 
 beforeEach(() => {
+  useWorkbenchDraftStore.setState({ drafts: {} });
   localStorage.clear();
   window.sessionStorage.clear();
   liveBundle = bundleWith([]);
@@ -394,6 +397,57 @@ afterEach(() => {
   draftVersionService.create = original.createDraft;
   chapterRepository.getByNovelId = original.chapters;
   volumeRepository.getByNovelId = original.volumes;
+});
+
+test('word-target-only send works without model readiness, credentials or a chapter and records ANS-local receipt', async () => {
+  taskSessionAdapter.startTurn = original.startTurn;
+  let modelPreflights = 0;
+  const unavailableModel: TaskModelSnapshot = {
+    ...MODEL,
+    runtimeMode: 'api',
+    providerId: 'unavailable',
+    modelId: 'Offline',
+    baseUrl: 'https://offline.invalid/v1',
+  };
+  const selectedNovelRef = { current: 'novel-1' };
+  const runner = renderHook(() => {
+    const [conversations, setConversations] = useState([liveBundle.conversation]);
+    return useWorkbenchTaskRunner({
+      selectedNovelId: 'novel-1',
+      selectedConversationId: 'conversation-1',
+      chapterId: undefined,
+      chapters: [],
+      bundle: liveBundle,
+      conversations,
+      setConversations,
+      selectedModel: unavailableModel,
+      selectedNovelRef,
+      selectChapter: async () => undefined,
+      reloadChapters: async () => null,
+      refreshBundle: async () => undefined,
+      loadConversations: async () => undefined,
+      refreshPlugins: async () => {
+        modelPreflights += 1;
+        throw new Error('model offline');
+      },
+    });
+  });
+  await act(async () => runner.result.current.sendMessage('本任务目标字数设为3200字'));
+  assert.equal(runner.result.current.composerError, '');
+  assert.equal(modelPreflights, 0);
+  assert.deepEqual(providerGoals, []);
+  assert.equal(liveBundle.runs.length, 1);
+  assert.equal(liveBundle.runs[0].modelSnapshot.providerId, 'ans-local');
+  assert.equal(liveBundle.runs[0].status, 'completed');
+  assert.match(
+    liveBundle.turns.find((turn) => turn.role === 'assistant')?.content ?? '',
+    /本任务每章目标字数设为 3200 字/u,
+  );
+  assert.equal(liveBundle.artifacts.length, 0);
+  await act(async () => runner.result.current.sendMessage('本章目标字数设为3200字'));
+  assert.match(runner.result.current.composerError, /本任务目标字数设为3200字/u);
+  assert.equal(modelPreflights, 0);
+  assert.equal(liveBundle.runs.length, 1);
 });
 
 test('send preflight exposes preparing and blocks a duplicate send for the conversation', async () => {
@@ -1073,4 +1127,73 @@ test('summary application continues through the normal writer only after an expl
     ),
     true,
   );
+});
+
+test('sending a selected old candidate retains exact identity in the user turn and runtime', async () => {
+  const selected = artifact('chapter_text', 'old-a', { sourceChapterId: CHAPTER.id });
+  selected.content = JSON.stringify({
+    data: { novelId: 'novel-1', chapterId: CHAPTER.id, text: '旧候选A的完整正文。' },
+  });
+  const hash = await computeContentSha256(selected.content);
+  const source = {
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: CHAPTER.id,
+    cardId: selected.cardId,
+    artifactId: selected.artifactId!,
+    artifactHash: hash,
+    artifactType: 'chapter_text',
+    title: selected.title,
+  };
+  liveBundle.artifacts = [
+    selected,
+    artifact('chapter_text', 'new-b', { sourceChapterId: CHAPTER.id }),
+  ];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  const originalStart = taskSessionAdapter.startTurn;
+  let receivedSource: unknown;
+  taskSessionAdapter.startTurn = async (input, onEvent) => {
+    receivedSource = input.revisionSource;
+    return originalStart(input, onEvent);
+  };
+  const runner = renderRunner();
+  await act(async () => {
+    runner.result.current.setDraft('请修改所选章节正文候选，节奏放慢。');
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', source);
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(runner.result.current.composerError, '');
+  assert.deepEqual(receivedSource, source);
+  assert.deepEqual(liveBundle.turns.find((turn) => turn.role === 'user')?.revisionSource, source);
+  assert.equal(runner.result.current.revisionSource, null);
+  assert.equal(runner.result.current.draft, '');
+});
+test('failed source revalidation preserves the draft and never appends a turn or calls runtime', async () => {
+  const selected = artifact('chapter_text', 'old-a', { sourceChapterId: CHAPTER.id });
+  selected.content = JSON.stringify({
+    data: { novelId: 'novel-1', chapterId: CHAPTER.id, text: '旧候选A' },
+  });
+  const hash = await computeContentSha256(selected.content);
+  liveBundle.artifacts = [selected];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  const runner = renderRunner();
+  await act(async () => {
+    runner.result.current.setDraft('修改所选章节正文候选');
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', {
+      conversationId: 'conversation-1',
+      novelId: 'novel-1',
+      chapterId: CHAPTER.id,
+      cardId: selected.cardId,
+      artifactId: selected.artifactId!,
+      artifactHash: '0'.repeat(64),
+      artifactType: 'chapter_text',
+      title: '失效A',
+    });
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.match(runner.result.current.composerError, /修订来源已失效/);
+  assert.equal(liveBundle.turns.length, 0);
+  assert.equal(providerGoals.length, 0);
+  assert.equal(runner.result.current.draft, '修改所选章节正文候选');
+  assert.equal(runner.result.current.revisionSource?.artifactId, selected.artifactId);
 });

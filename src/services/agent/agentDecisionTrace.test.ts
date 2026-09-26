@@ -96,17 +96,23 @@ test('AgentDecisionTrace: 多轮复合任务决策链与自适应调整审计', 
   // 验证第 1 轮感知决策
   const trace1 = result.decisionTraces[0];
   assert.equal(trace1.selectedTool, 'query_world_state');
-  assert.ok(trace1.selectedToolReason?.includes('世界规则') || trace1.selectedToolReason?.includes('设定'));
+  assert.ok(
+    trace1.selectedToolReason?.includes('世界规则') || trace1.selectedToolReason?.includes('设定'),
+  );
 
   // 验证第 2 轮人物决策
   const trace2 = result.decisionTraces[1];
   assert.equal(trace2.selectedTool, 'query_character_state');
-  assert.ok(trace2.selectedToolReason?.includes('心理状态') || trace2.selectedToolReason?.includes('主角'));
+  assert.ok(
+    trace2.selectedToolReason?.includes('心理状态') || trace2.selectedToolReason?.includes('主角'),
+  );
 
   // 验证第 3 轮分镜决策
   const trace3 = result.decisionTraces[2];
   assert.equal(trace3.selectedTool, 'generate_scene_plan');
-  assert.ok(trace3.selectedToolReason?.includes('冲突') || trace3.selectedToolReason?.includes('分镜'));
+  assert.ok(
+    trace3.selectedToolReason?.includes('冲突') || trace3.selectedToolReason?.includes('分镜'),
+  );
 
   // 验证第 4 轮正文决策
   const trace4 = result.decisionTraces[3];
@@ -116,7 +122,9 @@ test('AgentDecisionTrace: 多轮复合任务决策链与自适应调整审计', 
   // 验证第 5 轮质检决策
   const trace5 = result.decisionTraces[4];
   assert.equal(trace5.selectedTool, 'quality_check');
-  assert.ok(trace5.selectedToolReason?.includes('检验') || trace5.selectedToolReason?.includes('质量'));
+  assert.ok(
+    trace5.selectedToolReason?.includes('检验') || trace5.selectedToolReason?.includes('质量'),
+  );
 
   // 验证置信度均符合高质量阈值
   for (const trace of result.decisionTraces) {

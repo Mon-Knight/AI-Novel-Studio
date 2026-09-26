@@ -22,7 +22,10 @@ Object.defineProperties(globalThis, {
 });
 
 const { useRef } = await import('react');
-const { MemoryRouter } = await import('react-router-dom');
+const { MemoryRouter, useLocation } = await import('react-router-dom');
+const { useWorkbenchDraftStore } = await import('../../../store/workbenchDraftStore');
+const { structuredRuleGovernanceService } =
+  await import('../../../services/conversation/structuredRuleGovernanceService');
 const { act, cleanup, renderHook } = await import('@testing-library/react');
 const { artifactDecisionService } =
   await import('../../../services/conversation/artifactDecisionService');
@@ -34,6 +37,9 @@ const { useWorkbenchArtifacts } = await import('./useWorkbenchArtifacts');
 const original = {
   record: artifactDecisionService.record,
   applyStructured: artifactDecisionService.applyStructured,
+  getAuthorization: artifactDecisionService.getAuthorization,
+  rulePreview: structuredRuleGovernanceService.preview,
+  readCandidateForReview: artifactDecisionService.readCandidateForReview,
 };
 
 const ARTIFACT: ConversationArtifactCard = {
@@ -90,6 +96,9 @@ function renderArtifacts(
   const loaded: Array<string | undefined> = [];
   const view = renderHook(
     ({ conversationId, novelId }: { conversationId: string; novelId: string }) => {
+      const location = useLocation();
+      const selectedConversationRef = useRef(conversationId);
+      selectedConversationRef.current = conversationId;
       const selectedNovelRef = useRef(novelId);
       selectedNovelRef.current = novelId;
       const { value: draft, setValue: setDraft } = useConversationScopedState(conversationId, '');
@@ -101,6 +110,7 @@ function renderArtifacts(
         selectedNovelId: novelId,
         chapterId: 'chapter-not-authoritative',
         selectedNovelRef,
+        selectedConversationRef,
         setDraft,
         setComposerError,
         refreshBundle: async (id) => {
@@ -112,7 +122,7 @@ function renderArtifacts(
           await overrides.loadConversations?.(id);
         },
       });
-      return { ...artifacts, draft, setDraft, error };
+      return { ...artifacts, draft, setDraft, error, route: location.pathname + location.search };
     },
     {
       initialProps: { conversationId: ARTIFACT.conversationId, novelId: 'novel-review-1' },
@@ -123,7 +133,12 @@ function renderArtifacts(
 }
 
 beforeEach(() => {
+  useWorkbenchDraftStore.setState({ drafts: {} });
   localStorage.clear();
+  artifactDecisionService.readCandidateForReview = async () => ({
+    content: ARTIFACT.content!,
+    artifactHash: 'verified-review-hash',
+  });
   artifactDecisionService.record = async (input) => ({ decision: decision(input) });
   artifactDecisionService.applyStructured = async (input) => ({
     decision: { ...decision(input), applyTransactionId: 'apply-review-1' },
@@ -134,6 +149,9 @@ afterEach(() => {
   cleanup();
   artifactDecisionService.record = original.record;
   artifactDecisionService.applyStructured = original.applyStructured;
+  artifactDecisionService.getAuthorization = original.getAuthorization;
+  structuredRuleGovernanceService.preview = original.rulePreview;
+  artifactDecisionService.readCandidateForReview = original.readCandidateForReview;
 });
 
 test('artifact apply keeps its identity-only payload and does not consume review notes', async () => {
@@ -366,6 +384,13 @@ for (const firstOutcome of ['success', 'failure'] as const) {
     } else {
       assert.match(result.current.draft, /首个修订意见/);
     }
+    if (firstOutcome === 'success') {
+      // A successful decision binds the visible revision source; another candidate becomes
+      // selectable only after the user removes that chip, exactly as in the composer.
+      await act(async () => {
+        useWorkbenchDraftStore.getState().clearRevisionSource(ARTIFACT.conversationId);
+      });
+    }
     await act(async () => {
       secondOperation = result.current.decideArtifact(
         secondArtifact,
@@ -415,4 +440,189 @@ test('decisions remain locked while post-decision refresh is pending', async () 
     await operation;
   });
   assert.equal(result.current.decisionBusyCardId, '');
+});
+
+const REVIEW_AUTH = {
+  authorizationId: 'auth-review',
+  artifactId: ARTIFACT.artifactId!,
+  chapterId: 'chapter-review',
+  novelId: 'novel-review-1',
+  decisionId: 'decision-review',
+  status: 'issued' as const,
+  issuedAt: ARTIFACT.createdAt,
+};
+const CHAPTER_ARTIFACT: ConversationArtifactCard = {
+  ...ARTIFACT,
+  artifactType: 'chapter_text',
+  artifactEvidence: { ...ARTIFACT.artifactEvidence!, sourceChapterId: REVIEW_AUTH.chapterId },
+};
+for (const failingRefresh of ['refreshBundle', 'loadConversations'] as const) {
+  test(
+    'confirmed chapter still opens its authorized review after ' + failingRefresh + ' fails',
+    async () => {
+      artifactDecisionService.record = async (input) => ({
+        decision: decision(input),
+        authorization: REVIEW_AUTH,
+      });
+      const { result } = renderArtifacts({
+        [failingRefresh]: async () => {
+          throw new Error('refresh failed');
+        },
+      });
+      await act(async () => result.current.decideArtifact(CHAPTER_ARTIFACT, 'confirm'));
+      assert.match(result.current.route, /authorizationId=auth-review/);
+      assert.match(result.current.error, /授权已取得.*刷新失败/);
+    },
+  );
+}
+for (const status of ['issued', 'consumed'] as const) {
+  test(
+    'continuing ' + status + ' review reads authorization without recording another decision',
+    async () => {
+      artifactDecisionService.record = async () => {
+        throw new Error('must not record');
+      };
+      artifactDecisionService.getAuthorization = async () => ({
+        ...REVIEW_AUTH,
+        status,
+        consumedByDraftId: status === 'consumed' ? 'adopted-draft' : undefined,
+      });
+      const { result } = renderArtifacts();
+      await act(async () =>
+        result.current.decideArtifact(
+          { ...CHAPTER_ARTIFACT, reviewAuthorization: REVIEW_AUTH },
+          'confirm',
+        ),
+      );
+      assert.match(result.current.route, /authorizationId=auth-review/);
+      assert.equal(result.current.error, '');
+    },
+  );
+}
+test('expired authorization does not silently reissue or navigate', async () => {
+  artifactDecisionService.record = async () => {
+    throw new Error('must not reissue');
+  };
+  artifactDecisionService.getAuthorization = async () => ({ ...REVIEW_AUTH, status: 'expired' });
+  const { result } = renderArtifacts();
+  await act(async () =>
+    result.current.decideArtifact(
+      { ...CHAPTER_ARTIFACT, reviewAuthorization: REVIEW_AUTH },
+      'confirm',
+    ),
+  );
+  assert.equal(result.current.route, '/');
+  assert.match(result.current.error, /已失效/);
+});
+test('a late confirmation never navigates away from a newly selected task', async () => {
+  const pending = deferred<Awaited<ReturnType<typeof artifactDecisionService.record>>>();
+  artifactDecisionService.record = async () => pending.promise;
+  const view = renderArtifacts();
+  let operation!: Promise<void>;
+  act(() => {
+    operation = view.result.current.decideArtifact(CHAPTER_ARTIFACT, 'confirm');
+  });
+  view.rerender({ conversationId: 'other-task', novelId: 'novel-review-1' });
+  await act(async () => {
+    pending.resolve({
+      decision: decision({
+        conversationId: ARTIFACT.conversationId,
+        cardId: ARTIFACT.cardId,
+        artifactId: ARTIFACT.artifactId!,
+        novelId: 'novel-review-1',
+        chapterId: 'chapter-review',
+        targetType: 'chapter',
+        targetId: 'chapter-review',
+        decision: 'confirm',
+      }),
+      authorization: REVIEW_AUTH,
+    });
+    await operation;
+  });
+  assert.equal(view.result.current.route, '/');
+});
+test('revision selection retains the clicked artifact identity without machine identifiers in prose', async () => {
+  const { result } = renderArtifacts();
+  await act(async () => result.current.decideArtifact(ARTIFACT, 'request_revision', '放慢节奏。'));
+  const source = useWorkbenchDraftStore.getState().drafts[ARTIFACT.conversationId].revisionSource;
+  assert.equal(source?.artifactId, ARTIFACT.artifactId);
+  assert.equal(source?.artifactHash, 'artifact-hash-review-1');
+  assert.match(result.current.draft, /所选人物候选/);
+  assert.doesNotMatch(result.current.draft, /artifact-review-1|artifact-hash-review-1/);
+});
+
+const RULE_PREVIEW = {
+  novelId: 'novel-review-1',
+  ruleSetFingerprint: 'rule-set-a',
+  previewHash: 'preview-a',
+  sources: [],
+  affectedChapters: [],
+  dependentRules: [],
+  blockingConflicts: [],
+  uncertainty: [],
+  requiresConfirmation: true,
+};
+const RULE_CARD: ConversationArtifactCard = { ...ARTIFACT, artifactType: 'setting_candidates' };
+const RULE_GUARD = {
+  expectedRuleSetFingerprint: 'rule-set-a',
+  changeAuthorization: { previewHash: 'preview-a', intent: 'confirm_change' as const },
+};
+test('rule apply previews first and cancel preserves candidate and draft without a write', async () => {
+  let writes = 0;
+  structuredRuleGovernanceService.preview = async () => RULE_PREVIEW;
+  artifactDecisionService.applyStructured = async (input) => {
+    writes++;
+    return { decision: decision(input) };
+  };
+  const { result } = renderArtifacts();
+  await act(async () => result.current.setDraft('保留创作要求'));
+  await act(async () => result.current.decideArtifact(RULE_CARD, 'request_apply'));
+  assert.equal(result.current.pendingRuleChangeReview?.preview.previewHash, 'preview-a');
+  assert.equal(writes, 0);
+  act(() => result.current.cancelRuleChangeReview());
+  assert.equal(result.current.pendingRuleChangeReview, null);
+  assert.equal(result.current.draft, '保留创作要求');
+  assert.equal(writes, 0);
+});
+test('rule confirmation rechecks and passes the exact original preview guard', async () => {
+  const calls: RecordDecisionInput[] = [];
+  let previews = 0;
+  structuredRuleGovernanceService.preview = async () => {
+    previews++;
+    return RULE_PREVIEW;
+  };
+  artifactDecisionService.applyStructured = async (input) => {
+    calls.push(input);
+    return { decision: { ...decision(input), applyTransactionId: 'rule-apply' } };
+  };
+  const { result } = renderArtifacts();
+  await act(async () => result.current.decideArtifact(RULE_CARD, 'request_apply'));
+  await act(async () => result.current.confirmRuleChangeReview(RULE_GUARD));
+  assert.equal(previews, 2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].artifactId, RULE_CARD.artifactId);
+  assert.deepEqual(calls[0].changeAuthorization, RULE_GUARD.changeAuthorization);
+  assert.equal(calls[0].expectedRuleSetFingerprint, RULE_GUARD.expectedRuleSetFingerprint);
+  assert.equal(result.current.pendingRuleChangeReview, null);
+});
+test('changed rule preview fails closed and changing task dismisses pending confirmation', async () => {
+  let writes = 0;
+  structuredRuleGovernanceService.preview = async () => RULE_PREVIEW;
+  artifactDecisionService.applyStructured = async (input) => {
+    writes++;
+    return { decision: decision(input) };
+  };
+  const view = renderArtifacts();
+  await act(async () => view.result.current.decideArtifact(RULE_CARD, 'request_apply'));
+  structuredRuleGovernanceService.preview = async () => ({
+    ...RULE_PREVIEW,
+    previewHash: 'changed',
+  });
+  await act(async () => view.result.current.confirmRuleChangeReview(RULE_GUARD));
+  assert.equal(writes, 0);
+  assert.match(view.result.current.ruleChangeReviewError, /已变化/);
+  view.rerender({ conversationId: 'other-task', novelId: 'novel-review-1' });
+  assert.equal(view.result.current.pendingRuleChangeReview, null);
+  await act(async () => view.result.current.confirmRuleChangeReview(RULE_GUARD));
+  assert.equal(writes, 0);
 });

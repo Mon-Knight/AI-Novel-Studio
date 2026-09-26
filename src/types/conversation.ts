@@ -1,3 +1,4 @@
+import type { ArtifactRevisionSource } from './artifactRevision';
 import type {
   ArtifactProcessingStatus,
   ArtifactValidationIssue,
@@ -66,6 +67,8 @@ export interface ConversationTurn {
   conversationId: string;
   sequence: number;
   role: ConversationTurnRole;
+  /** Immutable revision identity restored from persisted turn metadata. */
+  revisionSource?: ArtifactRevisionSource;
   /** Browser-only legacy preview; desktop cards resolve content from ResultArtifact. */
   content?: string;
   runId?: string;

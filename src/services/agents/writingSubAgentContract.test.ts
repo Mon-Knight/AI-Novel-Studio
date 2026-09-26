@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskModelSnapshot } from '../../types/conversation';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 import {
   assertWritingSubAgentContract,
   DEFAULT_WRITING_SUBAGENT_BUDGET,
@@ -34,7 +35,58 @@ function plan(overrides: Partial<Parameters<typeof planWritingSubAgentTurn>[0]> 
   });
 }
 
+const sourceA: ArtifactRevisionSource = {
+  conversationId: 'conversation-1',
+  novelId: 'novel-1',
+  chapterId: 'chapter-1',
+  cardId: 'card-a',
+  artifactId: 'artifact-a',
+  artifactHash: 'a'.repeat(64),
+  artifactType: 'chapter_text',
+  runId: 'run-a',
+  title: '候选 A',
+  sourceDraftVersion: 1,
+};
+
 describe('writingSubAgentContract', () => {
+  it('preserves the exact clicked source through planning and IPC projection, never a later candidate', () => {
+    const sourceB = {
+      ...sourceA,
+      cardId: 'card-b',
+      artifactId: 'artifact-b',
+      artifactHash: 'b'.repeat(64),
+    };
+    const a = plan({ revisionSource: sourceA });
+    const b = plan({ revisionSource: sourceB });
+    expect(a.revisionSource).toEqual(sourceA);
+    expect(toDshTaskStartContract(a).revisionSource).toEqual(sourceA);
+    expect(toDshTaskStartContract(b).revisionSource).toEqual(sourceB);
+    const projected = toDshTaskStartContract(a);
+    projected.revisionSource!.artifactId = 'changed-after-projection';
+    expect(a.revisionSource?.artifactId).toBe('artifact-a');
+    expect(sourceA.artifactId).toBe('artifact-a');
+    expect(a.formalWrites).toBe('forbidden');
+    expect(a.adoptionPath).toBe('review_authorization');
+    expect(toDshTaskStartContract(plan()).revisionSource).toBeUndefined();
+  });
+
+  it('rejects incomplete or wrong-scope revision identities rather than degrading to generation', () => {
+    for (const source of [
+      { ...sourceA, novelId: 'another-novel' },
+      { ...sourceA, chapterId: 'another-chapter' },
+      { ...sourceA, chapterId: undefined },
+      { ...sourceA, artifactType: 'outline' },
+      { ...sourceA, cardId: '' },
+      { ...sourceA, artifactId: '' },
+      { ...sourceA, conversationId: '' },
+      { ...sourceA, artifactHash: 'not-a-hash' },
+      { ...sourceA, runId: '' },
+      { ...sourceA, sourceDraftVersion: 0 },
+    ]) {
+      expect(() => plan({ revisionSource: source })).toThrow(WritingSubAgentContractViolation);
+    }
+  });
+
   it('plans a candidate-only chapter turn bound to one chapter with read tools plus one candidate tool', () => {
     const contract = plan({ previousChapter: { chapterId: 'chapter-0', sourceHash: 'abc' } });
     expect(contract.mode).toBe('candidate_only');
@@ -49,6 +101,18 @@ describe('writingSubAgentContract', () => {
     expect(contract.continuity).toEqual({ previousChapterId: 'chapter-0', sourceHash: 'abc' });
     expect(contract.budget.maxOutputTokens).toBe(outputTokenBudgetFor(contract.wordRange));
     expect(contract.modelSnapshot).toBe(snapshot);
+  });
+
+  it('projects configured host percents onto the DSH chapter word range', () => {
+    const contract = plan({
+      wordRangePercents: { hardMinimumPercent: 70, hardMaximumPercent: 120 },
+    });
+    expect(contract.wordRange).toEqual({ target: 3000, minimum: 2100, maximum: 3600 });
+    expect(toDshTaskStartContract(contract).chapterWordRange).toEqual({
+      target: 3000,
+      minimum: 2100,
+      maximum: 3600,
+    });
   });
 
   it('projects the contract onto the DSH start contract that Rust re-validates', () => {

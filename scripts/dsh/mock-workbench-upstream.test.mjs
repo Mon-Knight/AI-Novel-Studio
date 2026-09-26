@@ -205,6 +205,79 @@ test('normal mode derives three Workbench phases from actual wire tool names', a
   assert.doesNotMatch(snapshotText, /authorization/iu);
 });
 
+test('candidateTexts advances only on candidate calls, repeats the last entry and resets on configure', async () => {
+  const scripted = ['private-long-candidate', 'private-repaired-candidate'];
+  const original = [...scripted];
+  const server = await start({
+    candidateTexts: scripted,
+    candidateText: 'private-default-candidate',
+  });
+  scripted[0] = 'caller-mutation-must-not-change-the-sequence';
+  const initial = [{ role: 'user', content: 'private sequence test prompt' }];
+  const contextCalls = toolCalls(parseSse(await (await chat(server, initial)).text()));
+  const afterContext = [
+    ...initial,
+    assistantToolMessage(contextCalls),
+    ...toolResults(contextCalls),
+  ];
+  const candidate = async () => {
+    const calls = toolCalls(parseSse(await (await chat(server, afterContext)).text()));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].function.name, actualNames.generate_chapter);
+    return { calls, text: JSON.parse(calls[0].function.arguments).candidateText };
+  };
+  assert.equal(server.snapshot().candidateCalls, 0);
+  const first = await candidate();
+  assert.equal(first.text, original[0]);
+  await (
+    await chat(server, [
+      ...afterContext,
+      assistantToolMessage(first.calls),
+      ...toolResults(first.calls),
+    ])
+  ).text();
+  assert.equal(
+    server.snapshot().candidateCalls,
+    1,
+    'assistant-final must not advance the sequence',
+  );
+  assert.equal((await candidate()).text, original[1]);
+  assert.equal(
+    (await candidate()).text,
+    original[1],
+    'the exhausted sequence repeats its last entry',
+  );
+  assert.equal(server.snapshot().candidateCalls, 3);
+
+  const resolved = server.configure({});
+  assert.ok(Object.isFrozen(resolved.candidateTexts));
+  assert.equal(server.snapshot().candidateCalls, 0);
+  assert.equal((await candidate()).text, original[0]);
+  server.configure({ candidateTexts: [] });
+  assert.equal((await candidate()).text, 'private-default-candidate');
+  const snapshot = server.snapshot();
+  assert.deepEqual(
+    snapshot.requests
+      .filter((request) => request.phase === 'generate-chapter')
+      .map((request) => request.candidateCallNumber),
+    [1, 2, 3, 1, 1],
+  );
+  const serialized = JSON.stringify(snapshot);
+  for (const text of [...original, 'private-default-candidate']) {
+    assert.equal(
+      serialized.includes(text),
+      false,
+      'request evidence must never contain candidate text',
+    );
+  }
+});
+
+test('candidateTexts rejects malformed scripts before opening the upstream', async () => {
+  for (const candidateTexts of [null, 'not-an-array', [''], ['first', '  '], [42]]) {
+    await assert.rejects(startMockWorkbenchUpstream({ candidateTexts }), /candidateTexts/u);
+  }
+});
+
 test('Canonical-only advertised tools call read tools and skip generate_chapter', async () => {
   const canonicalNames = Object.freeze({
     'novel.read': 'mcp__novel__novel.read',

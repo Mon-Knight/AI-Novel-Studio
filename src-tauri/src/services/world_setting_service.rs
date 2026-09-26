@@ -1,9 +1,157 @@
+use crate::domain::world::{DeleteRuleSystemInput, WorldRuleChangeAuthorizationInput};
 use crate::domain::world::{
     ProtagonistDto, RuleSystemDto, SaveProtagonistInput, SaveRuleSystemInput,
     SaveWorldSettingInput, WorldSettingDto,
 };
 use crate::repositories::world_setting_repository;
-use rusqlite::Connection;
+use crate::services::world_rule_governance::{self, RuleChange, RuleChangeAuthorization};
+use rusqlite::{params, Connection, Transaction, TransactionBehavior};
+
+use crate::services::world_rule_schema as metadata;
+
+fn expire_changed_rule_reviews(
+    conn: &Connection,
+    novel_id: &str,
+    previous: Option<&str>,
+) -> Result<(), String> {
+    let current = world_rule_governance::rule_set_snapshot(conn, novel_id)
+        .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    if previous != Some(current.fingerprint.as_str()) {
+        world_rule_governance::expire_rule_dependent_reviews(conn, novel_id)
+            .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    }
+    Ok(())
+}
+
+fn save_governed_change(
+    conn: &Connection,
+    novel_id: &str,
+    mut change: RuleChange,
+    expected_updated_at: Option<&str>,
+    expected_fingerprint: Option<&str>,
+    authorization: Option<&WorldRuleChangeAuthorizationInput>,
+) -> Result<String, String> {
+    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let mut previous_json = None;
+    if let Some(id) = change.target_id.as_deref() {
+        let (owner, updated_at, structured) = if change.target_type == "world_setting" {
+            let row = world_setting_repository::find_world_setting_by_id(&transaction, id)?
+                .ok_or("RULE_SET_SCOPE_MISMATCH: 目标背景不存在")?;
+            (row.novel_id, row.updated_at, row.structured_json)
+        } else {
+            let row = world_setting_repository::find_rule_system_by_id(&transaction, id)?
+                .ok_or("RULE_SET_SCOPE_MISMATCH: 目标规则不存在")?;
+            (row.novel_id, row.updated_at, row.structured_json)
+        };
+        if owner != novel_id {
+            return Err("RULE_SET_SCOPE_MISMATCH: 目标不属于此作品".to_string());
+        }
+        if expected_updated_at != Some(updated_at.as_str()) {
+            return Err(
+                "RULE_RECORD_BASE_CONFLICT: 设定已变化，请保留草稿并重新读取基线".to_string(),
+            );
+        }
+        previous_json = structured;
+        if change.structured_json.is_none() {
+            change.structured_json = previous_json.clone();
+        }
+    } else if expected_updated_at.is_some() {
+        return Err("RULE_RECORD_BASE_CONFLICT: 新建目标不能携带旧版本".to_string());
+    }
+    let auth = authorization.map(|a| RuleChangeAuthorization {
+        preview_hash: a.preview_hash.clone(),
+        intent: a.intent.clone(),
+        notes: a.notes.clone(),
+    });
+    metadata::validate_metadata(
+        change.structured_json.as_deref(),
+        previous_json.as_deref(),
+        auth.as_ref().map(|a| a.intent.as_str()),
+    )?;
+    world_rule_governance::authorize_rule_change(
+        &transaction,
+        novel_id,
+        &[change.clone()],
+        expected_fingerprint,
+        auth.as_ref(),
+    )
+    .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    if change.operation.as_deref() == Some("delete") {
+        let id = change
+            .target_id
+            .as_deref()
+            .ok_or("RULE_SET_SCOPE_MISMATCH: 删除目标缺失")?;
+        if change.target_type != "rule_system" {
+            return Err("RULE_CHANGE_INPUT_INVALID: 未开放此删除类型".to_string());
+        }
+        world_setting_repository::delete_rule_system(&transaction, id)?;
+        let id = id.to_string();
+        expire_changed_rule_reviews(&transaction, novel_id, expected_fingerprint)?;
+        transaction.commit().map_err(|e| e.to_string())?;
+        return Ok(id);
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let target_id = change
+        .target_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    match (change.target_type.as_str(), change.target_id.is_some()) {
+        ("world_setting", true) => world_setting_repository::update_world_setting(
+            &transaction,
+            &target_id,
+            &change.title,
+            &change.content,
+            change.is_active,
+            &now,
+        )?,
+        ("world_setting", false) => world_setting_repository::insert_world_setting(
+            &transaction,
+            &target_id,
+            novel_id,
+            &change.title,
+            &change.content,
+            change.is_active,
+            &now,
+        )?,
+        ("rule_system", true) => world_setting_repository::update_rule_system(
+            &transaction,
+            &target_id,
+            &change.title,
+            change.category.as_deref(),
+            &change.content,
+            change.forbidden_rules.as_deref(),
+            change.is_active,
+            &now,
+        )?,
+        ("rule_system", false) => world_setting_repository::insert_rule_system(
+            &transaction,
+            &target_id,
+            novel_id,
+            &change.title,
+            change.category.as_deref(),
+            &change.content,
+            change.forbidden_rules.as_deref(),
+            change.is_active,
+            &now,
+        )?,
+        _ => return Err("RULE_CHANGE_INPUT_INVALID: 未知目标类型".to_string()),
+    }
+    let sql = if change.target_type == "world_setting" {
+        "UPDATE world_settings SET structured_json=?1 WHERE id=?2 AND novel_id=?3"
+    } else {
+        "UPDATE rule_systems SET structured_json=?1 WHERE id=?2 AND novel_id=?3"
+    };
+    let affected = transaction
+        .execute(sql, params![change.structured_json, target_id, novel_id])
+        .map_err(|e| e.to_string())?;
+    if affected != 1 {
+        return Err("RULE_SET_SCOPE_MISMATCH: 结构化写入目标失效".to_string());
+    }
+    expire_changed_rule_reviews(&transaction, novel_id, expected_fingerprint)?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(target_id)
+}
 
 // ==================== World Setting ====================
 
@@ -24,34 +172,24 @@ pub fn save_world_setting(
     id: Option<String>,
     input: SaveWorldSettingInput,
 ) -> Result<WorldSettingDto, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let target_id = match id {
-        Some(existing_id) => {
-            world_setting_repository::update_world_setting(
-                conn,
-                &existing_id,
-                &input.title,
-                &input.content,
-                input.is_active,
-                &now,
-            )?;
-            existing_id
-        }
-        None => {
-            let new_id = uuid::Uuid::new_v4().to_string();
-            world_setting_repository::insert_world_setting(
-                conn,
-                &new_id,
-                &input.novel_id,
-                &input.title,
-                &input.content,
-                input.is_active,
-                &now,
-            )?;
-            new_id
-        }
-    };
-
+    let target_id = save_governed_change(
+        conn,
+        &input.novel_id,
+        RuleChange {
+            operation: None,
+            target_type: "world_setting".to_string(),
+            target_id: id,
+            title: input.title,
+            content: input.content,
+            category: None,
+            forbidden_rules: None,
+            structured_json: input.structured_json,
+            is_active: input.is_active,
+        },
+        input.expected_updated_at.as_deref(),
+        input.expected_rule_set_fingerprint.as_deref(),
+        input.change_authorization.as_ref(),
+    )?;
     world_setting_repository::find_world_setting_by_id(conn, &target_id)?
         .ok_or_else(|| "无法读取保存后的世界观设定".to_string())
 }
@@ -75,44 +213,57 @@ pub fn save_rule_system(
     id: Option<String>,
     input: SaveRuleSystemInput,
 ) -> Result<RuleSystemDto, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let target_id = match id {
-        Some(existing_id) => {
-            world_setting_repository::update_rule_system(
-                conn,
-                &existing_id,
-                &input.title,
-                input.category.as_deref(),
-                &input.content,
-                input.forbidden_rules.as_deref(),
-                input.is_active,
-                &now,
-            )?;
-            existing_id
-        }
-        None => {
-            let new_id = uuid::Uuid::new_v4().to_string();
-            world_setting_repository::insert_rule_system(
-                conn,
-                &new_id,
-                &input.novel_id,
-                &input.title,
-                input.category.as_deref(),
-                &input.content,
-                input.forbidden_rules.as_deref(),
-                input.is_active,
-                &now,
-            )?;
-            new_id
-        }
-    };
-
+    let target_id = save_governed_change(
+        conn,
+        &input.novel_id,
+        RuleChange {
+            operation: None,
+            target_type: "rule_system".to_string(),
+            target_id: id,
+            title: input.title,
+            content: input.content,
+            category: input.category,
+            forbidden_rules: input.forbidden_rules,
+            structured_json: input.structured_json,
+            is_active: input.is_active,
+        },
+        input.expected_updated_at.as_deref(),
+        input.expected_rule_set_fingerprint.as_deref(),
+        input.change_authorization.as_ref(),
+    )?;
     world_setting_repository::find_rule_system_by_id(conn, &target_id)?
         .ok_or_else(|| "无法读取保存后的规则系统".to_string())
 }
 
-pub fn delete_rule_system(conn: &Connection, id: &str) -> Result<(), String> {
-    world_setting_repository::delete_rule_system(conn, id)
+pub fn delete_rule_system(
+    conn: &Connection,
+    id: &str,
+    input: Option<DeleteRuleSystemInput>,
+) -> Result<(), String> {
+    let input = input.ok_or(
+        "RULE_CHANGE_CONFIRMATION_REQUIRED: 请先预览并明确确认永久删除；建议停用以保留来源",
+    )?;
+    let row = world_setting_repository::find_rule_system_by_id(conn, id)?
+        .ok_or("RULE_SET_SCOPE_MISMATCH")?;
+    save_governed_change(
+        conn,
+        &input.novel_id,
+        RuleChange {
+            operation: Some("delete".to_string()),
+            target_type: "rule_system".to_string(),
+            target_id: Some(id.to_string()),
+            title: row.title,
+            content: row.content,
+            category: row.category,
+            forbidden_rules: row.forbidden_rules,
+            structured_json: row.structured_json,
+            is_active: row.is_active,
+        },
+        input.expected_updated_at.as_deref(),
+        input.expected_rule_set_fingerprint.as_deref(),
+        input.change_authorization.as_ref(),
+    )?;
+    Ok(())
 }
 
 // ==================== Protagonist ====================
@@ -172,134 +323,5 @@ pub fn save_protagonist(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rusqlite::Connection;
-
-    fn setup_test_db() -> Connection {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::db::create_tables(&mut conn).unwrap();
-        conn.execute(
-            "INSERT INTO novels (id, title, created_at, updated_at) VALUES ('novel-1', '测试小说', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        ).unwrap();
-        conn
-    }
-
-    #[test]
-    fn test_world_setting_crud() {
-        let conn = setup_test_db();
-        let setting = save_world_setting(
-            &conn,
-            None,
-            SaveWorldSettingInput {
-                novel_id: "novel-1".to_string(),
-                title: "灵气复苏背景".to_string(),
-                content: "公元2040年，天地异变，灵气爆发。".to_string(),
-                is_active: true,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(setting.title, "灵气复苏背景");
-        assert!(setting.is_active);
-
-        let list = list_world_settings_by_novel(&conn, "novel-1").unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, setting.id);
-
-        let updated = save_world_setting(
-            &conn,
-            Some(setting.id.clone()),
-            SaveWorldSettingInput {
-                novel_id: "novel-1".to_string(),
-                title: "灵气复苏新背景".to_string(),
-                content: "公元2042年，大灾变之后。".to_string(),
-                is_active: false,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(updated.title, "灵气复苏新背景");
-        assert!(!updated.is_active);
-    }
-
-    #[test]
-    fn test_world_setting_list_prioritizes_latest_active_update() {
-        let conn = setup_test_db();
-        conn.execute_batch(
-            "INSERT INTO world_settings
-                (id, novel_id, title, content, is_active, created_at, updated_at)
-             VALUES
-                ('world-old', 'novel-1', '旧世界', '旧世界内容', 1,
-                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
-                ('world-latest', 'novel-1', '最新世界', '最新世界内容', 1,
-                 '2026-01-03T00:00:00Z', '2026-01-04T00:00:00Z'),
-                ('world-inactive', 'novel-1', '停用世界', '停用世界内容', 0,
-                 '2026-01-05T00:00:00Z', '2026-01-06T00:00:00Z');",
-        )
-        .unwrap();
-
-        let list = list_world_settings_by_novel(&conn, "novel-1").unwrap();
-        let ids = list
-            .iter()
-            .map(|setting| setting.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["world-latest", "world-old", "world-inactive"]);
-    }
-
-    #[test]
-    fn test_rule_system_crud() {
-        let conn = setup_test_db();
-        let rule = save_rule_system(
-            &conn,
-            None,
-            SaveRuleSystemInput {
-                novel_id: "novel-1".to_string(),
-                title: "九品修炼体系".to_string(),
-                category: Some("power".to_string()),
-                content: "一品练气，二品筑基，三品金丹。".to_string(),
-                forbidden_rules: Some("不得越级击杀".to_string()),
-                is_active: true,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(rule.title, "九品修炼体系");
-        assert_eq!(rule.category.as_deref(), Some("power"));
-
-        let list = list_rule_systems_by_novel(&conn, "novel-1").unwrap();
-        assert_eq!(list.len(), 1);
-
-        delete_rule_system(&conn, &rule.id).unwrap();
-        let list_after = list_rule_systems_by_novel(&conn, "novel-1").unwrap();
-        assert_eq!(list_after.len(), 0);
-    }
-
-    #[test]
-    fn test_protagonist_crud() {
-        let conn = setup_test_db();
-        let protag = save_protagonist(
-            &conn,
-            None,
-            SaveProtagonistInput {
-                novel_id: "novel-1".to_string(),
-                name: "叶凡".to_string(),
-                identity: Some("荒古圣体".to_string()),
-                personality: Some("坚毅果敢".to_string()),
-                goal: Some("成仙".to_string()),
-                special_ability: Some("皆字秘".to_string()),
-                ability_limits: Some("触发概率低".to_string()),
-                forbidden_behaviors: Some("背叛同伴".to_string()),
-                current_state: Some("初始练气期".to_string()),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(protag.name, "叶凡");
-
-        let fetched = get_protagonist_by_novel(&conn, "novel-1").unwrap().unwrap();
-        assert_eq!(fetched.name, "叶凡");
-        assert_eq!(fetched.identity.as_deref(), Some("荒古圣体"));
-    }
-}
+#[path = "world_setting_service_tests.rs"]
+mod tests;

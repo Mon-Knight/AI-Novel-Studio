@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import { captureTaskModelSnapshot } from '../../services/conversation/taskModelSnapshot';
 import {
   buildCoreAssetEditPath,
@@ -11,19 +10,8 @@ import {
   settleStructuredArtifactDecision,
   type StructuredArtifactDecisionInput,
 } from '../../features/workbench/structuredArtifactDecisionSettlement';
-import { WorkbenchComposer } from './WorkbenchComposer';
-import { WorkbenchMessageStream } from './WorkbenchMessageStream';
-import { WorkbenchNavigation } from './WorkbenchNavigation';
-import { WorkbenchSidePanel } from './WorkbenchSidePanel';
-import {
-  WorkbenchEmptyProjects,
-  WorkbenchEmptyTasks,
-  WorkbenchFailureState,
-  WorkbenchPreparingState,
-  WorkbenchStartupHeader,
-} from './WorkbenchPageStates';
-import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
-import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
+import { WorkbenchPageContent } from './WorkbenchPageContent';
+import { useWorkbenchArtifactFocus } from './hooks/useWorkbenchArtifactFocus';
 import { submitWorkbenchTask } from './workbenchTaskSubmission';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
 import { useWorkbenchVisibility } from './hooks/useWorkbenchVisibility';
@@ -33,6 +21,7 @@ import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
 import { useWorkbenchCompression } from './hooks/useWorkbenchCompression';
 import { useWorkbenchConversations } from './hooks/useWorkbenchConversations';
 import { useWorkbenchIntent } from './hooks/useWorkbenchIntent';
+import { useWorkbenchPageChrome } from './hooks/useWorkbenchPageChrome';
 import { useWorkbenchPlugins } from './hooks/useWorkbenchPlugins';
 import { useWorkbenchSidePanel } from './hooks/useWorkbenchSidePanel';
 import { useWorkbenchStartupReadiness } from './hooks/useWorkbenchStartupReadiness';
@@ -85,6 +74,10 @@ export function WorkbenchPage() {
     reloadChapters,
     loadInitialData,
   } = useWorkbenchConversations();
+  const { artifactFocusRequest, onLocateArtifact } = useWorkbenchArtifactFocus(
+    selectedConversationId,
+    sidePanel.close,
+  );
   useWorkbenchVisibility(
     !projectsLoading && !conversationsLoading && !bundleLoading && !chaptersLoading,
   );
@@ -101,6 +94,8 @@ export function WorkbenchPage() {
   const {
     draft,
     setDraft,
+    revisionSource,
+    clearRevisionSource,
     composerError,
     setComposerError,
     beginComposerErrorOperation,
@@ -141,6 +136,12 @@ export function WorkbenchPage() {
     loadConversations,
     refreshPlugins,
   });
+  const chrome = useWorkbenchPageChrome({
+    sidePanel,
+    selectedConversationId,
+    setDraft,
+    setStartupDraft,
+  });
   useEffect(() => {
     if (!selectedConversationId || !startupDraft || newTaskSubmissionRef.current) return;
     if (!draft) setDraft(startupDraft);
@@ -168,6 +169,7 @@ export function WorkbenchPage() {
   );
   const {
     compressionCandidate,
+    compressionPresentation,
     setCompressionCandidate,
     compressionBusy,
     proposeContextCompression,
@@ -178,16 +180,18 @@ export function WorkbenchPage() {
     beginComposerErrorOperation,
     commitComposerErrorOperation,
   });
-  const { decisionBusyCardId, decideArtifact } = useWorkbenchArtifacts({
+  const artifactActions = useWorkbenchArtifacts({
     selectedNovelId,
     chapterId,
     refreshBundle,
     loadConversations,
     selectedNovelRef,
+    selectedConversationRef,
     setComposerError,
     setDraft,
     onStructuredArtifactDecision: handleStructuredArtifactDecision,
   });
+  const { decisionBusyCardId, decideArtifact } = artifactActions;
   const pluginProbeModel = resolveWorkbenchModelDirectoryTarget(
     taskCreatorOpen,
     selectedModel,
@@ -220,7 +224,7 @@ export function WorkbenchPage() {
     },
     [chapterId, startupDraft],
   );
-  const { searchFocusToken } = useWorkbenchIntent(openTaskCreator);
+  const { searchFocusToken } = useWorkbenchIntent(openTaskCreator, chrome.exitFocusMode);
   const effectiveStatus = resolveWorkbenchConversationStatus({
     runtimeActive: selectedConversationRunning,
     bundleConversation:
@@ -229,42 +233,6 @@ export function WorkbenchPage() {
         : undefined,
     listedConversation: listedSelectedConversation,
   });
-  const composer = (
-    <WorkbenchComposer
-      scopeKey={selectedConversationId || selectedNovelId}
-      templates={WORKBENCH_TASK_TEMPLATES}
-      plugins={plugins}
-      pluginsLoading={pluginsLoading}
-      pluginsError={pluginsError}
-      selectedModel={selectedModel}
-      draft={visibleDraft}
-      composerError={composerError}
-      conflictMessage={targetConflict?.message}
-      selectedConversationPreparing={selectedConversationPreparing}
-      selectedConversationRunning={selectedConversationRunning}
-      selectedConversationArchived={selectedConversationArchived}
-      hasTask={Boolean(selectedConversation)}
-      taskReady={bundleReady}
-      hasChapter={hasChapter}
-      chaptersLoading={chaptersLoading}
-      contextPending={contextPending}
-      contextFailed={contextFailed}
-      assetScope={assetScope.summary}
-      assetScopeLoading={assetScope.loading}
-      assetScopeError={assetScope.error}
-      onDraftChange={selectedConversationId ? setDraft : setStartupDraft}
-      onRetryModels={() =>
-        void refreshPlugins(undefined, true, selectedModel).catch(() => undefined)
-      }
-      onOpenModelSettings={() => navigate('/settings')}
-      onCreateTaskWithCurrentModel={() => openTaskCreator(visibleDraft)}
-      onSend={() => void sendMessage()}
-      onCancel={cancelTask}
-      onRefreshAssetScope={() => void assetScope.refresh()}
-      onOpenAssetScopePath={(path) => navigate(path)}
-      onShowPlugins={sidePanel.openPlugins}
-    />
-  );
   const editMissingAsset = (asset: ChapterCoreAsset) =>
     assetRecovery && navigate(buildCoreAssetEditPath(assetRecovery, asset));
   const closeTaskCreator = useCallback(() => {
@@ -293,181 +261,173 @@ export function WorkbenchPage() {
     });
 
   return (
-    <div
-      className="workbench-page"
-      data-testid="creative-workbench"
-      data-side-panel={sidePanel.view ?? 'closed'}
-    >
-      <WorkbenchNavigation
-        directory={directory}
-        novels={novels}
-        conversations={conversations}
-        selectedNovelId={selectedNovelId}
-        selectedConversationId={selectedConversationId}
-        runningConversationIds={runningConversationIds}
-        projectsLoading={projectsLoading}
-        conversationsLoading={conversationsLoading}
-        projectsError={projectsError}
-        conversationsError={conversationsError}
-        creatingTask={creatingTask}
-        searchFocusToken={searchFocusToken}
-        onCreateTask={openTaskCreator}
-        onSelectProject={selectProject}
-        onSelectTask={selectTask}
-        onRenameTask={renameTask}
-        onSetTaskArchived={setTaskArchived}
-        onRetryProjects={() => void loadInitialData()}
-        onRetryConversations={() => void loadInitialData()}
-        onOpenLibrary={() => navigate('/novels')}
-      />
-
-      <main
-        className="workbench-main agent-console-main"
-        aria-busy={
-          startupPending || Boolean(selectedConversation && !bundleReady && !conversationsError)
-        }
-      >
-        {startupPending || startupFailure ? (
-          <>
-            <WorkbenchStartupHeader
-              novelTitle={selectedNovel?.title || '创作工作台'}
-              failed={Boolean(startupFailure)}
-              onShowPlugins={() => setShowPlugins(true)}
-            />
-            {startupFailure ? (
-              <WorkbenchFailureState
-                message={startupFailure}
-                onRetry={() => (projectsError ? void loadInitialData() : void loadConversations())}
-              />
-            ) : (
-              <WorkbenchPreparingState label="正在恢复项目与任务…" testId="workbench-loading" />
-            )}
-            {composer}
-          </>
-        ) : novels.length === 0 ? (
-          <WorkbenchEmptyProjects onOpenLibrary={() => navigate('/novels')} />
-        ) : !selectedConversation ? (
-          <>
-            <WorkbenchEmptyTasks
-              creatingTask={creatingTask}
-              conversationsLoading={conversationsLoading}
-              onCreateTask={openTaskCreator}
-              onShowPlugins={() => setShowPlugins(true)}
-            />
-            {composer}
-          </>
-        ) : (
-          <>
-            <WorkbenchTaskHeader
-              novelTitle={selectedNovel?.title || '小说项目'}
-              conversation={selectedConversation}
-              chapters={chapters}
-              chapterId={chapterId}
-              hasChapter={hasChapter}
-              chaptersLoading={chaptersLoading}
-              chaptersError={chaptersError}
-              effectiveStatus={effectiveStatus}
-              compressionBusy={compressionBusy}
-              bundleReady={bundleReady}
-              onSelectChapter={(value) => void selectChapter(value)}
-              onCreateChapter={() => navigate(`/novels/${selectedNovelId}`)}
-              onCompress={() => void proposeContextCompression()}
-              onShowPlugins={sidePanel.openPlugins}
-              sidePanelOpen={sidePanel.view !== null}
-              onToggleSidePanel={sidePanel.toggle}
-            />
-
-            <PanelErrorBoundary panelTitle="创作对话">
-              {bundle ? (
-                <WorkbenchMessageStream
-                  bundle={bundle}
-                  compressionCandidate={compressionCandidate}
-                  compressionBusy={compressionBusy}
-                  decisionBusyCardId={decisionBusyCardId}
-                  assetRecovery={assetRecovery}
-                  assetReadinessBusy={assetReadinessBusy}
-                  selectedConversationRunning={selectedConversationRunning}
-                  chapterSummaryOrchestration={chapterSummaryOrchestration}
-                  onDismissCompression={() => setCompressionCandidate(null)}
-                  onReloadArtifacts={() => void refreshBundle(selectedConversation.conversationId)}
-                  onDecideArtifact={decideArtifact}
-                  onRetry={(runId) => void retryRun(runId)}
-                  retryRunBlockedReason={retryRunBlockedReason}
-                  onRetryChapterSummaryStart={retryChapterSummaryStart}
-                  onGenerateMissingAsset={(asset) => void generateMissingAsset(asset)}
-                  onEditMissingAsset={editMissingAsset}
-                  onRefreshAssetReadiness={() =>
-                    void refreshChapterAssetReadiness(selectedConversationId)
-                  }
-                  onResumeChapterGoal={() => void resumeChapterGoal()}
-                  onDismissAssetReadiness={dismissChapterAssetReadiness}
-                />
-              ) : conversationsError ? (
-                <WorkbenchFailureState
-                  message={conversationsError}
-                  onRetry={() => void refreshBundle(selectedConversation.conversationId)}
-                />
-              ) : (
-                <WorkbenchPreparingState
-                  label="正在恢复这项任务的对话与产物…"
-                  testId="workbench-bundle-loading"
-                />
-              )}
-            </PanelErrorBoundary>
-
-            {composer}
-          </>
-        )}
-      </main>
-      {sidePanel.view && (
-        <WorkbenchSidePanel
-          view={sidePanel.view}
-          novelId={selectedNovelId}
-          chapterId={selectedChapter?.id}
-          bundle={bundleReady ? bundle : null}
-          plugins={plugins}
-          pluginsLoading={pluginsLoading}
-          pluginsError={pluginsError}
-          assetScope={assetScope.summary}
-          assetScopeLoading={assetScope.loading}
-          assetScopeError={assetScope.error}
-          onRefreshAssetScope={() => void assetScope.refresh()}
-          onOpenAssetScopePath={(path) => navigate(path)}
-          onOpen={sidePanel.open}
-          onBack={sidePanel.back}
-          onClose={sidePanel.close}
-        />
-      )}
-      {taskCreatorOpen && selectedNovel && (
-        <WorkbenchTaskCreator
-          novelTitle={selectedNovel.title}
-          chapters={chapters}
-          templates={WORKBENCH_TASK_TEMPLATES}
-          plugins={plugins}
-          pluginsLoading={pluginsLoading}
-          pluginsError={pluginsError}
-          contextPending={contextPending}
-          contextFailed={contextFailed}
-          goal={newTaskGoal}
-          chapterId={newTaskChapterId}
-          selectedModel={newTaskModel}
-          creating={creatingTask}
-          error={taskCreatorError}
-          onGoalChange={setNewTaskGoal}
-          onChapterChange={setNewTaskChapterId}
-          onModelChange={(value) => {
-            const [providerId, ...model] = value.split(':');
-            setNewTaskModel(captureTaskModelSnapshot(providerId, model.join(':')));
-          }}
-          onRetryModels={() =>
-            void refreshPlugins(undefined, true, newTaskModel).catch(() => undefined)
-          }
-          onOpenModelSettings={() => navigate('/settings')}
-          onSubmit={() => void submitNewTask()}
-          onCancel={closeTaskCreator}
-        />
-      )}
-    </div>
+    <WorkbenchPageContent
+      pageRef={chrome.pageRef}
+      focusMode={chrome.focusMode}
+      sidePanel={sidePanel}
+      openReference={chrome.openReference}
+      toggleSidePanel={chrome.toggleSidePanel}
+      toggleFocusMode={chrome.toggleFocusMode}
+      composerProps={{
+        scopeKey: selectedConversationId || selectedNovelId,
+        templates: WORKBENCH_TASK_TEMPLATES,
+        plugins,
+        pluginsLoading,
+        pluginsError,
+        selectedModel,
+        draft: visibleDraft,
+        revisionSource,
+        onClearRevisionSource: clearRevisionSource,
+        composerError,
+        conflictMessage: targetConflict?.message,
+        selectedConversationPreparing,
+        selectedConversationRunning,
+        selectedConversationArchived,
+        hasTask: Boolean(selectedConversation),
+        taskReady: bundleReady,
+        hasChapter,
+        chaptersLoading,
+        contextPending,
+        contextFailed,
+        assetScope: assetScope.summary,
+        assetScopeLoading: assetScope.loading,
+        assetScopeError: assetScope.error,
+        onDraftChange: selectedConversationId ? setDraft : setStartupDraft,
+        onRetryModels: () =>
+          void refreshPlugins(undefined, true, selectedModel).catch(() => undefined),
+        onOpenModelSettings: () => navigate('/settings'),
+        onCreateTaskWithCurrentModel: () => openTaskCreator(visibleDraft),
+        onSend: () => void sendMessage(),
+        onCancel: cancelTask,
+        onRefreshAssetScope: () => void assetScope.refresh(),
+        onOpenAssetScopePath: (path) => navigate(path),
+      }}
+      navigationProps={{
+        directory,
+        novels,
+        conversations,
+        selectedNovelId,
+        selectedConversationId,
+        runningConversationIds,
+        projectsLoading,
+        conversationsLoading,
+        projectsError,
+        conversationsError,
+        creatingTask,
+        searchFocusToken,
+        onCreateTask: openTaskCreator,
+        onSelectProject: selectProject,
+        onSelectTask: selectTask,
+        onRenameTask: renameTask,
+        onSetTaskArchived: setTaskArchived,
+        onRetryProjects: () => void loadInitialData(),
+        onRetryConversations: () => void loadInitialData(),
+        onOpenLibrary: () => navigate('/novels'),
+      }}
+      startupPending={startupPending}
+      startupFailure={startupFailure}
+      selectedNovel={selectedNovel}
+      selectedConversation={selectedConversation}
+      novelsEmpty={novels.length === 0}
+      creatingTask={creatingTask}
+      conversationsLoading={conversationsLoading}
+      onCreateTask={openTaskCreator}
+      onOpenLibrary={() => navigate('/novels')}
+      onRetryStartup={() => (projectsError ? void loadInitialData() : void loadConversations())}
+      chapters={chapters}
+      chapterId={chapterId}
+      hasChapter={hasChapter}
+      chaptersLoading={chaptersLoading}
+      chaptersError={chaptersError}
+      effectiveStatus={effectiveStatus}
+      compressionBusy={compressionBusy}
+      bundleReady={bundleReady}
+      bundle={bundle}
+      conversationsError={conversationsError}
+      onSelectChapter={(value) => void selectChapter(value)}
+      onCreateChapter={() => navigate(`/novels/${selectedNovelId}`)}
+      onCompress={() => void proposeContextCompression()}
+      streamProps={
+        bundle && selectedConversation
+          ? {
+              bundle,
+              compressionCandidate,
+              compressionPresentation,
+              artifactFocusRequest,
+              presentationContext: {
+                novelId: selectedNovelId,
+                novelTitle: selectedNovel?.title || '',
+                chapters: chapters.map((chapter) => ({ id: chapter.id, title: chapter.title })),
+              },
+              onInsertExample: chrome.insertExample,
+              compressionBusy,
+              decisionBusyCardId,
+              assetRecovery,
+              assetReadinessBusy,
+              selectedConversationRunning,
+              chapterSummaryOrchestration,
+              onDismissCompression: () => setCompressionCandidate(null),
+              onReloadArtifacts: () => void refreshBundle(selectedConversation.conversationId),
+              onDecideArtifact: decideArtifact,
+              onRetry: (runId) => void retryRun(runId),
+              retryRunBlockedReason,
+              onRetryChapterSummaryStart: retryChapterSummaryStart,
+              onGenerateMissingAsset: (asset) => void generateMissingAsset(asset),
+              onEditMissingAsset: editMissingAsset,
+              onRefreshAssetReadiness: () =>
+                void refreshChapterAssetReadiness(selectedConversationId),
+              onResumeChapterGoal: () => void resumeChapterGoal(),
+              onDismissAssetReadiness: dismissChapterAssetReadiness,
+            }
+          : null
+      }
+      onRetryBundle={() =>
+        selectedConversation && void refreshBundle(selectedConversation.conversationId)
+      }
+      selectedNovelId={selectedNovelId}
+      selectedConversationId={selectedConversationId}
+      selectedChapterId={selectedChapter?.id}
+      plugins={plugins}
+      pluginsLoading={pluginsLoading}
+      pluginsError={pluginsError}
+      assetScope={assetScope.summary}
+      assetScopeLoading={assetScope.loading}
+      assetScopeError={assetScope.error}
+      onRefreshAssetScope={() => void assetScope.refresh()}
+      onOpenAssetScopePath={(path) => navigate(path)}
+      onLocateArtifact={onLocateArtifact}
+      artifactActions={artifactActions}
+      taskCreator={
+        taskCreatorOpen && selectedNovel
+          ? {
+              novelTitle: selectedNovel.title,
+              chapters,
+              templates: WORKBENCH_TASK_TEMPLATES,
+              plugins,
+              pluginsLoading,
+              pluginsError,
+              contextPending,
+              contextFailed,
+              goal: newTaskGoal,
+              chapterId: newTaskChapterId,
+              selectedModel: newTaskModel,
+              creating: creatingTask,
+              error: taskCreatorError,
+              onGoalChange: setNewTaskGoal,
+              onChapterChange: setNewTaskChapterId,
+              onModelChange: (value) => {
+                const [providerId, ...model] = value.split(':');
+                setNewTaskModel(captureTaskModelSnapshot(providerId, model.join(':')));
+              },
+              onRetryModels: () =>
+                void refreshPlugins(undefined, true, newTaskModel).catch(() => undefined),
+              onOpenModelSettings: () => navigate('/settings'),
+              onSubmit: () => void submitNewTask(),
+              onCancel: closeTaskCreator,
+            }
+          : null
+      }
+    />
   );
 }
 export default WorkbenchPage;

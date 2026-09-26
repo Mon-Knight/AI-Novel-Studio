@@ -9,35 +9,50 @@ import type {
   ArtifactDecisionKind,
   ConversationArtifactCard,
   TaskConversationBundle,
-  TaskRun,
   ToolCallEvent,
 } from '../../types/conversation';
 import type { ChapterSummaryOrchestrationState } from '../../services/conversation/chapterSummaryOrchestration';
-import { ArtifactCard } from './WorkbenchComponents';
+import {
+  completedReadDisclosureKey,
+  groupWorkbenchDisplaySegments,
+  presentationArtifactsNeedingAttention,
+  projectWorkbenchEvents,
+  resolvePreparationCandidate,
+  workbenchCandidateNumbers,
+  WORKBENCH_HISTORY_PAGE_SIZE,
+  type WorkbenchArtifactFocusRequest,
+  type WorkbenchCompressionPresentation,
+  type WorkbenchDisplaySegment,
+  type WorkbenchPresentationContext,
+  type WorkbenchPublicEvent,
+} from '../../features/workbench/workbenchPresentation';
+import { workbenchReadingKey } from '../../features/workbench/workbenchPresentationReading';
+import { useWorkbenchPresentationScroll } from './hooks/useWorkbenchPresentationScroll';
 import { WorkbenchAssetReadinessCard } from './WorkbenchAssetReadinessCard';
 import { WorkbenchCompressionCard } from './WorkbenchCompressionCard';
 import { WorkbenchTurn } from './WorkbenchTurn';
+import { resolveWorkbenchRevisionLineage, TOOL_LABELS } from './workbenchHelpers';
 
-const WORKBENCH_HISTORY_PAGE_SIZE = 8;
+export type { WorkbenchPresentationContext };
+
+export const WORKBENCH_EMPTY_TASK_EXAMPLES = [
+  '生成下一章，延续当前悬念',
+  '审计本章人物一致性',
+  '完善后续大纲',
+] as const;
+
 const ARTIFACT_ARRIVAL_CLASS_DURATION_MS = 220;
 const useClientLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+const NO_ARRIVALS: ReadonlySet<string> = new Set();
 
-function preferredUserScrollBehavior(): ScrollBehavior {
-  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-}
-
-function scrollToLatest(node: HTMLElement, behavior: ScrollBehavior): void {
-  if (typeof node.scrollTo === 'function') {
-    node.scrollTo({ top: node.scrollHeight, behavior });
-  } else {
-    node.scrollTop = node.scrollHeight;
-  }
-}
-
-interface WorkbenchMessageStreamProps {
+export interface WorkbenchMessageStreamProps {
   bundle: TaskConversationBundle;
   compressionCandidate: NovelContextCompressionCandidate | null;
   compressionBusy: boolean;
+  compressionPresentation?: WorkbenchCompressionPresentation | null;
+  artifactFocusRequest?: WorkbenchArtifactFocusRequest | null;
+  presentationContext?: WorkbenchPresentationContext;
+  onInsertExample?: (text: string) => void;
   decisionBusyCardId: string;
   assetRecovery: ChapterAssetRecovery | null;
   assetReadinessBusy: boolean;
@@ -60,10 +75,21 @@ interface WorkbenchMessageStreamProps {
   onDismissAssetReadiness: () => void;
 }
 
-export function WorkbenchMessageStream({
+export function WorkbenchMessageStream(props: WorkbenchMessageStreamProps) {
+  const { novelId, conversationId } = props.bundle.conversation;
+  return (
+    <WorkbenchConversationStream key={workbenchReadingKey(novelId, conversationId)} {...props} />
+  );
+}
+
+function WorkbenchConversationStream({
   bundle,
   compressionCandidate,
   compressionBusy,
+  compressionPresentation,
+  artifactFocusRequest,
+  presentationContext,
+  onInsertExample,
   decisionBusyCardId,
   assetRecovery,
   assetReadinessBusy,
@@ -81,86 +107,68 @@ export function WorkbenchMessageStream({
   onResumeChapterGoal,
   onDismissAssetReadiness,
 }: WorkbenchMessageStreamProps) {
-  const scrollRef = useRef<HTMLElement>(null);
-  const followLatestRef = useRef(true);
-  const followFrameRef = useRef<number | null>(null);
-  const historyRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const collapseToLatestRef = useRef(false);
-  const scrollConversationIdRef = useRef<string | null>(null);
+  const { conversationId, novelId } = bundle.conversation;
   const artifactConversationIdRef = useRef<string | null>(null);
   const seenArtifactCardIdsRef = useRef(new Map<string, Set<string>>());
   const artifactArrivalTimersRef = useRef(new Map<string, number>());
-  const [showLatest, setShowLatest] = useState(false);
   const [newlyArrivedArtifacts, setNewlyArrivedArtifacts] = useState<{
     conversationId: string;
     cardIds: Set<string>;
   }>(() => ({ conversationId: '', cardIds: new Set() }));
-  const [historyWindow, setHistoryWindow] = useState(() => ({
-    conversationId: bundle.conversation.conversationId,
-    visibleTurnCount: WORKBENCH_HISTORY_PAGE_SIZE,
-  }));
-  const latestTurn = bundle.turns[bundle.turns.length - 1];
-  const latestRun = bundle.runs[bundle.runs.length - 1];
-  const latestEvent = bundle.toolEvents[bundle.toolEvents.length - 1];
-  const requestedVisibleTurnCount =
-    historyWindow.conversationId === bundle.conversation.conversationId
-      ? historyWindow.visibleTurnCount
-      : WORKBENCH_HISTORY_PAGE_SIZE;
-  const visibleTurnCount = Math.min(bundle.turns.length, requestedVisibleTurnCount);
-  const hiddenTurnCount = Math.max(0, bundle.turns.length - visibleTurnCount);
-  const visibleTurns = useMemo(
-    () => bundle.turns.slice(hiddenTurnCount),
-    [bundle.turns, hiddenTurnCount],
+  const events = useMemo(
+    () =>
+      projectWorkbenchEvents(bundle, {
+        compression:
+          compressionCandidate?.novelId === novelId
+            ? (compressionPresentation ?? {
+                // Compatibility for read-only callers without action metadata: an unscoped preview,
+                // never pretend it belongs to the first or a historical run.
+                conversationId,
+                actionId: 'preview:' + compressionCandidate.sourceRevision,
+                createdAt: bundle.conversation.updatedAt,
+              })
+            : null,
+        recovery: assetRecovery,
+      }),
+    [bundle, novelId, conversationId, compressionCandidate, compressionPresentation, assetRecovery],
   );
-  const runsByTurnId = useMemo(() => {
-    const grouped = new Map<string, TaskRun[]>();
-    for (const run of bundle.runs) {
-      const runs = grouped.get(run.turnId);
-      if (runs) runs.push(run);
-      else grouped.set(run.turnId, [run]);
-    }
-    return grouped;
-  }, [bundle.runs]);
+  const {
+    scrollRef,
+    rounds,
+    hiddenRoundCount,
+    visibleRounds,
+    visibleEvents,
+    showLatest,
+    locatedId,
+    locationNotice,
+    followLatest,
+    locateEvent,
+    jumpToLatest,
+    loadEarlierTurns,
+    collapseEarlierTurns,
+    onScroll,
+    onUserScrollIntent,
+  } = useWorkbenchPresentationScroll({ events, novelId, conversationId, artifactFocusRequest });
+  const displaySegments = useMemo(
+    () => groupWorkbenchDisplaySegments(visibleEvents),
+    [visibleEvents],
+  );
+  const visibleTurnCount = visibleEvents.filter((entry) => entry.kind === 'turn').length;
+  const totalTurnCount = events.filter((entry) => entry.kind === 'turn').length;
+  const projectedTurns = events.filter((entry) => entry.kind === 'turn');
+  const latestTurnId = projectedTurns[projectedTurns.length - 1]?.turnId;
+  const pendingArtifacts = useMemo(() => presentationArtifactsNeedingAttention(events), [events]);
+  const preparationCandidate = resolvePreparationCandidate(bundle, assetRecovery);
   const eventsByRunId = useMemo(() => {
     const grouped = new Map<string, ToolCallEvent[]>();
-    for (const event of bundle.toolEvents) {
-      const events = grouped.get(event.runId);
-      if (events) events.push(event);
-      else grouped.set(event.runId, [event]);
+    for (const entry of events) {
+      if (entry.kind !== 'tool') continue;
+      const runEvents = grouped.get(entry.event.runId) ?? [];
+      runEvents.push(entry.event);
+      grouped.set(entry.event.runId, runEvents);
     }
     return grouped;
-  }, [bundle.toolEvents]);
-  const artifactsByRunId = useMemo(() => {
-    const grouped = new Map<string, ConversationArtifactCard[]>();
-    for (const artifact of bundle.artifacts) {
-      if (!artifact.runId) continue;
-      const artifacts = grouped.get(artifact.runId);
-      if (artifacts) artifacts.push(artifact);
-      else grouped.set(artifact.runId, [artifact]);
-    }
-    return grouped;
-  }, [bundle.artifacts]);
-  const unscopedArtifacts = useMemo(
-    () => bundle.artifacts.filter((artifact) => !artifact.runId),
-    [bundle.artifacts],
-  );
-
-  useClientLayoutEffect(() => {
-    const conversationId = bundle.conversation.conversationId;
-    if (scrollConversationIdRef.current === conversationId) return;
-    scrollConversationIdRef.current = conversationId;
-    followLatestRef.current = true;
-    historyRestoreRef.current = null;
-    collapseToLatestRef.current = false;
-    if (followFrameRef.current !== null) {
-      window.cancelAnimationFrame?.(followFrameRef.current);
-      window.clearTimeout(followFrameRef.current);
-      followFrameRef.current = null;
-    }
-    const node = scrollRef.current;
-    if (node) scrollToLatest(node, 'auto');
-    setShowLatest(false);
-  }, [bundle.conversation.conversationId]);
+  }, [events]);
 
   useClientLayoutEffect(() => {
     const conversationId = bundle.conversation.conversationId;
@@ -226,113 +234,131 @@ export function WorkbenchMessageStream({
     [],
   );
 
-  useEffect(() => {
-    if (!latestRun) return;
-    const activityTurnIndex = bundle.turns.findIndex((turn) => turn.turnId === latestRun.turnId);
-    if (activityTurnIndex < 0) return;
-    const requiredVisibleTurnCount = bundle.turns.length - activityTurnIndex;
-    setHistoryWindow((current) => {
-      if (current.conversationId !== bundle.conversation.conversationId) {
-        return {
-          conversationId: bundle.conversation.conversationId,
-          visibleTurnCount: Math.max(WORKBENCH_HISTORY_PAGE_SIZE, requiredVisibleTurnCount),
-        };
-      }
-      if (current.visibleTurnCount >= requiredVisibleTurnCount) return current;
-      return { ...current, visibleTurnCount: requiredVisibleTurnCount };
-    });
-  }, [bundle.conversation.conversationId, bundle.turns, latestRun]);
-
-  const activityKey = [
-    bundle.turns.length,
-    latestTurn?.turnId,
-    latestTurn?.content?.length ?? 0,
-    bundle.runs.length,
-    latestRun?.status,
-    bundle.toolEvents.length,
-    latestEvent?.status,
-    bundle.artifacts.length,
-    compressionCandidate?.compressedText.length ?? 0,
-    assetRecovery?.checkedAt ?? '',
-    assetRecovery?.missingAssets.join(',') ?? '',
-  ].join(':');
-
-  useEffect(() => {
-    if (!followLatestRef.current) {
-      setShowLatest(true);
-      return;
-    }
-    if (followFrameRef.current !== null) {
-      window.cancelAnimationFrame?.(followFrameRef.current);
-      window.clearTimeout(followFrameRef.current);
-    }
-    const flushFollow = () => {
-      followFrameRef.current = null;
-      const node = scrollRef.current;
-      if (!node || !followLatestRef.current) return;
-      scrollToLatest(node, 'auto');
-      setShowLatest(false);
-    };
-    followFrameRef.current = window.requestAnimationFrame
-      ? window.requestAnimationFrame(flushFollow)
-      : window.setTimeout(flushFollow, 0);
-    return () => {
-      if (followFrameRef.current === null) return;
-      window.cancelAnimationFrame?.(followFrameRef.current);
-      window.clearTimeout(followFrameRef.current);
-      followFrameRef.current = null;
-    };
-  }, [activityKey]);
-
-  useClientLayoutEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    if (collapseToLatestRef.current) {
-      collapseToLatestRef.current = false;
-      scrollToLatest(node, 'auto');
-      followLatestRef.current = true;
-      setShowLatest(false);
-      return;
-    }
-    const restore = historyRestoreRef.current;
-    if (!restore) return;
-    historyRestoreRef.current = null;
-    node.scrollTop = restore.scrollTop + Math.max(0, node.scrollHeight - restore.scrollHeight);
-  }, [bundle.conversation.conversationId, visibleTurnCount]);
-
-  const jumpToLatest = () => {
-    const node = scrollRef.current;
-    if (!node) return;
-    followLatestRef.current = true;
-    scrollToLatest(node, preferredUserScrollBehavior());
-    setShowLatest(false);
+  const locateNextPending = () => {
+    const previous = pendingArtifacts.findIndex((card) => 'artifact:' + card.cardId === locatedId);
+    const card = pendingArtifacts[(previous + 1) % pendingArtifacts.length];
+    if (card) locateEvent('artifact:' + card.cardId);
   };
 
-  const loadEarlierTurns = () => {
-    const node = scrollRef.current;
-    if (node) {
-      historyRestoreRef.current = {
-        scrollHeight: node.scrollHeight,
-        scrollTop: node.scrollTop,
-      };
-    }
-    followLatestRef.current = false;
-    setShowLatest(true);
-    setHistoryWindow({
-      conversationId: bundle.conversation.conversationId,
-      visibleTurnCount: Math.min(
-        bundle.turns.length,
-        visibleTurnCount + WORKBENCH_HISTORY_PAGE_SIZE,
+  const candidateNumbers = useMemo(() => workbenchCandidateNumbers(events), [events]);
+
+  const publicEventAttributes = (entry: WorkbenchPublicEvent) => ({
+    className: 'workbench-public-event',
+    tabIndex: -1,
+    'data-testid': 'workbench-public-event',
+    'data-presentation-id': entry.id,
+    'data-event-kind': entry.kind,
+    'data-conversation-id': entry.conversationId,
+    'data-turn-id': entry.turnId,
+    'data-run-id': entry.runId,
+    'data-run-attempt': entry.attempt,
+    'data-located': locatedId === entry.id ? 'true' : undefined,
+  });
+
+  const renderEventContent = (entry: WorkbenchPublicEvent) => {
+    if (entry.kind === 'compression' && compressionCandidate)
+      return (
+        <WorkbenchCompressionCard
+          candidate={compressionCandidate}
+          busy={compressionBusy}
+          onDismiss={onDismissCompression}
+        />
+      );
+    if (entry.kind === 'asset_recovery' && assetRecovery)
+      return (
+        <WorkbenchAssetReadinessCard
+          recovery={assetRecovery}
+          busy={assetReadinessBusy}
+          running={selectedConversationRunning}
+          candidateCardId={preparationCandidate?.cardId}
+          onViewCandidate={(cardId) => locateEvent('artifact:' + cardId)}
+          onGenerate={onGenerateMissingAsset}
+          onEdit={onEditMissingAsset}
+          onRefresh={onRefreshAssetReadiness}
+          onResume={onResumeChapterGoal}
+          onDismiss={onDismissAssetReadiness}
+        />
+      );
+    const candidateNumber =
+      entry.kind === 'artifact' ? candidateNumbers.get(entry.artifact.cardId) : undefined;
+    const sourceRun =
+      entry.kind === 'artifact' && entry.artifact.runId
+        ? bundle.runs.find((run) => run.runId === entry.artifact.runId)
+        : undefined;
+    const lineage =
+      entry.kind === 'artifact'
+        ? resolveWorkbenchRevisionLineage({
+            sourceRun,
+            turns: bundle.turns,
+            artifacts: bundle.artifacts,
+            candidateNumbers,
+          })
+        : undefined;
+    return (
+      <WorkbenchTurn
+        entry={entry}
+        latestTurnId={latestTurnId}
+        eventsByRunId={eventsByRunId}
+        newlyArrivedArtifacts={
+          newlyArrivedArtifacts.conversationId === conversationId
+            ? newlyArrivedArtifacts.cardIds
+            : NO_ARRIVALS
+        }
+        decisionBusyCardId={decisionBusyCardId}
+        chapterSummaryOrchestration={chapterSummaryOrchestration}
+        retryRunBlockedReason={retryRunBlockedReason}
+        candidateNumber={candidateNumber}
+        sourceRun={sourceRun}
+        presentationContext={presentationContext}
+        parentCandidateNumber={lineage?.parentCandidateNumber}
+        hasRevisionSource={lineage?.hasRevisionSource}
+        onReloadArtifacts={onReloadArtifacts}
+        onDecideArtifact={onDecideArtifact}
+        onRetry={onRetry}
+        onRetryChapterSummaryStart={onRetryChapterSummaryStart}
+        onLocateTurn={(turnId) => locateEvent('turn:' + turnId)}
+      />
+    );
+  };
+
+  const renderPublicEvent = (entry: WorkbenchPublicEvent) => (
+    <div key={entry.id} {...publicEventAttributes(entry)}>
+      {renderEventContent(entry)}
+    </div>
+  );
+
+  const renderDisplaySegment = (segment: WorkbenchDisplaySegment) => {
+    if (segment.kind === 'event') return renderPublicEvent(segment.event);
+    const [first, ...rest] = segment.events;
+    const labels = [
+      ...new Set(
+        segment.events.map((entry) => TOOL_LABELS[entry.event.toolName] ?? entry.event.toolName),
       ),
-    });
-  };
-
-  const collapseEarlierTurns = () => {
-    collapseToLatestRef.current = true;
-    setHistoryWindow({
-      conversationId: bundle.conversation.conversationId,
-      visibleTurnCount: WORKBENCH_HISTORY_PAGE_SIZE,
-    });
+    ];
+    const disclosureKey = completedReadDisclosureKey(segment.events.map((entry) => entry.id));
+    return (
+      <div
+        key={first.id}
+        {...publicEventAttributes(first)}
+        className="workbench-public-event workbench-completed-read"
+        data-testid="workbench-completed-read"
+        data-read-event-ids={segment.events.map((entry) => entry.id).join(',')}
+        data-disclosure-key={disclosureKey}
+      >
+        <details className="workbench-completed-read__details" data-disclosure-key={disclosureKey}>
+          <summary>
+            <span className="workbench-completed-read__title">
+              已读取创作材料 · {segment.events.length} 项
+            </span>
+            <span className="workbench-completed-read__tools">{labels.join('、')}</span>
+          </summary>
+          <div className="workbench-completed-read__events">
+            {renderEventContent(first)}
+            {rest.map((entry) => renderPublicEvent(entry))}
+          </div>
+        </details>
+      </div>
+    );
   };
 
   return (
@@ -341,20 +367,23 @@ export function WorkbenchMessageStream({
         ref={scrollRef}
         className="workbench-message-scroll"
         data-testid="workbench-message-list"
-        data-total-turn-count={bundle.turns.length}
+        data-total-turn-count={totalTurnCount}
         data-visible-turn-count={visibleTurnCount}
-        data-hidden-turn-count={hiddenTurnCount}
+        data-hidden-turn-count={totalTurnCount - visibleTurnCount}
+        data-total-round-count={rounds.length}
+        data-visible-round-count={visibleRounds.length}
+        data-hidden-round-count={hiddenRoundCount}
+        data-latest-event-id={events[events.length - 1]?.id}
+        data-follow-latest={followLatest ? 'true' : 'false'}
         aria-label="任务对话记录"
-        onScroll={(event) => {
-          const node = event.currentTarget;
-          const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-          followLatestRef.current = nearBottom;
-          if (nearBottom) setShowLatest(false);
-        }}
+        onScroll={onScroll}
+        onWheel={onUserScrollIntent}
+        onPointerDown={onUserScrollIntent}
+        onKeyDown={onUserScrollIntent}
       >
-        {(hiddenTurnCount > 0 || visibleTurnCount > WORKBENCH_HISTORY_PAGE_SIZE) && (
+        {(hiddenRoundCount > 0 || visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE) && (
           <div className="workbench-history-controls" data-testid="workbench-history-controls">
-            {hiddenTurnCount > 0 && (
+            {hiddenRoundCount > 0 && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -362,10 +391,10 @@ export function WorkbenchMessageStream({
                 onClick={loadEarlierTurns}
               >
                 <History aria-hidden="true" size={14} strokeWidth={1.8} />
-                加载更早记录（{Math.min(hiddenTurnCount, WORKBENCH_HISTORY_PAGE_SIZE)}）
+                加载更早记录（{Math.min(hiddenRoundCount, WORKBENCH_HISTORY_PAGE_SIZE)} 个完整回合）
               </button>
             )}
-            {visibleTurnCount > WORKBENCH_HISTORY_PAGE_SIZE && (
+            {visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -378,75 +407,57 @@ export function WorkbenchMessageStream({
             )}
           </div>
         )}
-        {bundle.turns.length === 0 && !compressionCandidate && !assetRecovery && (
+        {events.length === 0 && (
           <div className="workbench-intro">
             <div className="workbench-intro-icon">
               <MessageSquareText aria-hidden="true" size={18} strokeWidth={1.8} />
             </div>
-            <h3>当前任务尚无对话记录</h3>
+            <h3>开始你的创作任务</h3>
+            <p>描述方向 → 审阅必要候选 → 逐章采用。你始终保留最终决定权。</p>
+            <div className="workbench-intro-examples" aria-label="创作目标示例">
+              {WORKBENCH_EMPTY_TASK_EXAMPLES.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  className="workbench-intro-example"
+                  data-testid="workbench-intro-example"
+                  onClick={() => onInsertExample?.(text)}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-
-        {compressionCandidate && (
-          <WorkbenchCompressionCard
-            candidate={compressionCandidate}
-            busy={compressionBusy}
-            onDismiss={onDismissCompression}
-          />
-        )}
-
-        {visibleTurns.map((turn) => (
-          <WorkbenchTurn
-            key={turn.turnId}
-            turn={turn}
-            runs={runsByTurnId.get(turn.turnId) ?? []}
-            latestTurnId={latestTurn?.turnId}
-            conversationId={bundle.conversation.conversationId}
-            eventsByRunId={eventsByRunId}
-            artifactsByRunId={artifactsByRunId}
-            newlyArrivedArtifacts={newlyArrivedArtifacts}
-            decisionBusyCardId={decisionBusyCardId}
-            chapterSummaryOrchestration={chapterSummaryOrchestration}
-            retryRunBlockedReason={retryRunBlockedReason}
-            onReloadArtifacts={onReloadArtifacts}
-            onDecideArtifact={onDecideArtifact}
-            onRetry={onRetry}
-            onRetryChapterSummaryStart={onRetryChapterSummaryStart}
-          />
-        ))}
-
-        {unscopedArtifacts.map((artifact) => (
-          <ArtifactCard
-            artifact={artifact}
-            key={artifact.cardId}
-            busy={Boolean(decisionBusyCardId)}
-            newlyArrived={
-              newlyArrivedArtifacts.conversationId === bundle.conversation.conversationId &&
-              newlyArrivedArtifacts.cardIds.has(artifact.cardId)
-            }
-            onReload={onReloadArtifacts}
-            onDecide={(decision, notes) => onDecideArtifact(artifact, decision, notes)}
-          />
-        ))}
-        {assetRecovery && (
-          <WorkbenchAssetReadinessCard
-            recovery={assetRecovery}
-            busy={assetReadinessBusy}
-            running={selectedConversationRunning}
-            onGenerate={onGenerateMissingAsset}
-            onEdit={onEditMissingAsset}
-            onRefresh={onRefreshAssetReadiness}
-            onResume={onResumeChapterGoal}
-            onDismiss={onDismissAssetReadiness}
-          />
-        )}
+        {displaySegments.map(renderDisplaySegment)}
       </section>
-      {showLatest && (
-        <div className="workbench-latest-dock" data-testid="workbench-latest-dock">
-          <button type="button" className="workbench-latest-button" onClick={jumpToLatest}>
-            <span>查看最新进展</span>
-            <ArrowDown aria-hidden="true" size={14} strokeWidth={1.8} />
-          </button>
+      {(showLatest || pendingArtifacts.length > 0 || locationNotice) && (
+        <div
+          className="workbench-latest-dock workbench-pending-navigation"
+          data-testid="workbench-latest-dock"
+        >
+          {pendingArtifacts.length > 0 && (
+            <button
+              type="button"
+              className="workbench-latest-button"
+              data-testid="workbench-locate-pending"
+              onClick={locateNextPending}
+            >
+              查看待处理候选（{pendingArtifacts.length}）
+            </button>
+          )}
+          {showLatest && (
+            <button type="button" className="workbench-latest-button" onClick={jumpToLatest}>
+              <span>查看最新进展</span>
+              <ArrowDown aria-hidden="true" size={14} strokeWidth={1.8} />
+            </button>
+          )}
+          {locationNotice && <span role="status">{locationNotice}</span>}
+          {locationNotice && onReloadArtifacts && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onReloadArtifacts}>
+              重新读取
+            </button>
+          )}
         </div>
       )}
     </div>

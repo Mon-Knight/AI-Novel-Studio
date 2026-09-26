@@ -81,12 +81,20 @@ export function WorkbenchNavigation({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const handledSearchFocusTokenRef = useRef(0);
   const normalizedQuery = directory.displayQuery.trim().toLocaleLowerCase();
   const displayedArchive = directory.displayArchive;
 
   useEffect(() => {
-    if (searchFocusToken > 0) searchInputRef.current?.focus();
-  }, [searchFocusToken]);
+    if (
+      searchFocusToken > handledSearchFocusTokenRef.current &&
+      !directory.initializing &&
+      searchInputRef.current
+    ) {
+      searchInputRef.current.focus({ preventScroll: true });
+      handledSearchFocusTokenRef.current = searchFocusToken;
+    }
+  }, [directory.initializing, searchFocusToken]);
 
   const visibleConversations = useMemo(
     () =>

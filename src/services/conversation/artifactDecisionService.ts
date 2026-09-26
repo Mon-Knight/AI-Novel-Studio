@@ -6,12 +6,17 @@ import type {
   ReviewAuthorization,
 } from '../../types/conversation';
 import type { ChapterDraft } from '../../types/ai';
+import type { WorldRuleSaveGuard } from '../../types/worldRules';
 import { draftVersionService } from '../database/draftVersionService';
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { inspectChapterCandidateIntegrity } from '../generation/chapterCandidateIntegrity';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { taskConversationService } from './taskConversationService';
+import {
+  assertBrowserChapterRuleBaseline,
+  assertBrowserReviewAuthorizationBaseline,
+} from './browserChapterReviewBaseline';
 import { findPreviousChapterForContinuity } from './workbenchChapterWriter';
 import { planStructuredApply, STRUCTURED_APPLY_REJECTION_MESSAGES } from './structuredApplyPolicy';
 
@@ -124,7 +129,10 @@ async function assertReviewAuthorizedDraftIntegrity(
   }
 }
 
-export interface RecordDecisionInput {
+export interface RecordDecisionInput extends Pick<
+  WorldRuleSaveGuard,
+  'expectedRuleSetFingerprint' | 'changeAuthorization'
+> {
   conversationId: string;
   cardId: string;
   artifactId: string;
@@ -158,7 +166,7 @@ async function resolveDecisionArtifactHash(input: RecordDecisionInput): Promise<
       if (!input.chapterId || card.artifactType !== 'chapter_text') {
         throw new Error('章节产物与当前章节不匹配。');
       }
-      let source: { data?: { novelId?: string; chapterId?: string } };
+      let source: { data?: { novelId?: string; chapterId?: string }; browserRuleSet?: unknown };
       try {
         source = JSON.parse(card.content) as { data?: { novelId?: string; chapterId?: string } };
       } catch {
@@ -167,6 +175,8 @@ async function resolveDecisionArtifactHash(input: RecordDecisionInput): Promise<
       if (source.data?.novelId !== input.novelId || source.data.chapterId !== input.chapterId) {
         throw new Error('章节产物与当前章节不匹配。');
       }
+      if (input.decision === 'confirm')
+        await assertBrowserChapterRuleBaseline(input.novelId, source.browserRuleSet);
     }
     return computeContentSha256(card.content);
   }
@@ -220,9 +230,15 @@ export const artifactDecisionService = {
     );
     if (input.decision === 'confirm' && input.targetType === 'chapter' && input.chapterId) {
       if (isTauri()) {
+        const existing = (
+          await taskConversationService.get(input.conversationId, { hydrateArtifacts: false })
+        )?.authorizations?.find((item) => item.decisionId === decision.decisionId);
+        if (existing?.status === 'expired')
+          throw new Error('审阅授权已失效，请重新生成候选后审阅。');
+        if (existing?.status === 'consumed') return { decision, authorization: existing };
         const authorization = await dbCall<ReviewAuthorization>('issue_review_authorization', {
           input: {
-            authorizationId: `review-${generateId()}`,
+            authorizationId: existing?.authorizationId ?? `review-${generateId()}`,
             decisionId: decision.decisionId,
             artifactId: input.artifactId,
             novelId: input.novelId,
@@ -275,7 +291,26 @@ export const artifactDecisionService = {
   async getAuthorization(authorizationId: string): Promise<ReviewAuthorization | null> {
     if (!authorizationId) return null;
     if (!isTauri()) {
-      return taskConversationService.getBrowserReviewAuthorization(authorizationId);
+      const authorization =
+        await taskConversationService.getBrowserReviewAuthorization(authorizationId);
+      if (authorization?.status === 'issued') {
+        try {
+          await assertBrowserReviewAuthorizationBaseline(authorizationId, authorization.novelId);
+        } catch (error) {
+          if (
+            !error ||
+            typeof error !== 'object' ||
+            !('code' in error) ||
+            !['RULE_SET_BASE_CONFLICT', 'RULE_SET_SNAPSHOT_REQUIRED'].includes(String(error.code))
+          )
+            throw error;
+          taskConversationService.expireBrowserReviewAuthorizations(authorization.novelId, [
+            authorizationId,
+          ]);
+          return { ...authorization, status: 'expired' };
+        }
+      }
+      return authorization;
     }
     return dbCall<ReviewAuthorization | null>('get_review_authorization', { authorizationId });
   },
@@ -319,6 +354,9 @@ export const artifactDecisionService = {
       }
       if (existing.status !== 'issued') throw new Error('审阅授权已失效。');
       await assertReviewAuthorizedDraftIntegrity(existing, input);
+      const currentAuthorization = await this.getAuthorization(input.authorizationId);
+      if (currentAuthorization?.status !== 'issued')
+        throw new Error('世界规则或授权状态已变化，已阻止采用。');
       const draft = await draftVersionService.adopt(input.draftId, existing.chapterId);
       if (
         draft.id !== input.draftId ||
@@ -342,6 +380,21 @@ export const artifactDecisionService = {
       await assertReviewAuthorizedDraftIntegrity(existing, input);
     }
     return dbCall<AdoptReviewAuthorizedDraftResult>('adopt_review_authorized_draft', { input });
+  },
+
+  async readCandidateForReview(
+    input: RecordDecisionInput,
+  ): Promise<{ content: string; artifactHash: string }> {
+    const artifactHash = await resolveDecisionArtifactHash(input);
+    if (!isTauri()) throw new Error('规则候选正式审阅仅限桌面持久产物。');
+    const bundle = await aiTaskRuntimeService.getArtifact(input.artifactId);
+    if (
+      !bundle.rawContent.trim() ||
+      (await computeContentSha256(bundle.rawContent)) !== artifactHash
+    ) {
+      throw new Error('候选全文无法读取或哈希不匹配，不能确认应用。');
+    }
+    return { content: bundle.rawContent, artifactHash };
   },
 
   async applyStructured(input: RecordDecisionInput): Promise<{
@@ -391,6 +444,10 @@ export const artifactDecisionService = {
         novelId: artifact.sourceNovelId,
         chapterId: planned.plan.chapterId,
         baseRevision: artifact.sourceBaseContentHash,
+        ...(input.expectedRuleSetFingerprint
+          ? { expectedRuleSetFingerprint: input.expectedRuleSetFingerprint }
+          : {}),
+        ...(input.changeAuthorization ? { changeAuthorization: input.changeAuthorization } : {}),
         createdAt,
       },
     });

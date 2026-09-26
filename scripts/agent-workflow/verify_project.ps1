@@ -113,6 +113,7 @@ $npmSteps = @(
     @{ Name = "npm run test:docs-sync"; Arguments = @("run", "test:docs-sync") },
     @{ Name = "npm run test:coverage"; Arguments = @("run", "test:coverage") },
     @{ Name = "npm run test:component-size"; Arguments = @("run", "test:component-size") },
+    @{ Name = "npm run test:rust-file-size"; Arguments = @("run", "test:rust-file-size") },
     @{ Name = "npm run lint:ci"; Arguments = @("run", "lint:ci") },
     @{ Name = "npm run build"; Arguments = @("run", "build") },
     @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") }

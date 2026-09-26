@@ -67,25 +67,21 @@ test('ToolSelectionEvaluator: 工具选择准确度、冗余度与缺失度评�
   assert.ok(missingPreEval.feedback.includes('generate_prose'), '反馈中应包含缺失前置工具提示');
 
   // 4. 全流程轨迹质量评估
-  const perfectTrajectory = toolSelectionEvaluator.evaluateTrajectory(
-    '完成第五章第一节创作',
-    [
-      'query_world_state',
-      'query_character_state',
-      'generate_scene_plan',
-      'generate_prose',
-      'quality_check',
-      'update_memory',
-      'save_chapter_version',
-    ],
-  );
+  const perfectTrajectory = toolSelectionEvaluator.evaluateTrajectory('完成第五章第一节创作', [
+    'query_world_state',
+    'query_character_state',
+    'generate_scene_plan',
+    'generate_prose',
+    'quality_check',
+    'update_memory',
+    'save_chapter_version',
+  ]);
   assert.equal(perfectTrajectory.isOptimal, true);
   assert.ok(perfectTrajectory.overallScore >= 90);
 
-  const brokenTrajectory = toolSelectionEvaluator.evaluateTrajectory(
-    '完成第五章第一节创作',
-    ['query_world_state'],
-  );
+  const brokenTrajectory = toolSelectionEvaluator.evaluateTrajectory('完成第五章第一节创作', [
+    'query_world_state',
+  ]);
   assert.equal(brokenTrajectory.isOptimal, false);
   assert.ok(brokenTrajectory.missingToolScore > 50);
 });

@@ -28,11 +28,24 @@ import { volumeRepository } from '../database/volumeRepository';
 import { draftVersionService } from '../database/draftVersionService';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { findPreviousChapterForContinuity } from '../conversation/workbenchChapterWriter';
-import { inspectChapterCandidateIntegrity } from '../generation/chapterCandidateIntegrity';
+import {
+  getChapterWordRangePercents,
+  resolveChapterWordRange,
+} from '../conversation/chapterWordRangePolicy';
+import { parseTaskWordTarget } from '../conversation/taskWordTarget';
+import { prepareTaskWritingPreferences } from '../conversation/taskWritingPreferences';
+import {
+  inspectChapterCandidateIntegrity,
+  buildChapterCandidateIntegrityReview,
+  formatChapterCandidateIntegrityReview,
+  type ChapterCandidateIntegrityReview,
+} from '../generation/chapterCandidateIntegrity';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { verifyArtifactRevisionSource } from '../conversation/artifactRevisionSourceService';
 import { isDraftContentReady } from '../../types/draftContentState';
 
 export const WORKBENCH_CONVERSATIONAL_REPLY =
-  '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
+  '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。可直接说“本任务目标字数设为3200字”设置后续每章目标，或说“生成下一章，目标3200字”仅覆盖本次。问候、能力询问与单独设置字数不会调用生成工具。';
 
 /**
  * Stable ANS boundary for the pinned DSH headless carrier. Cordis/DSH objects
@@ -83,6 +96,12 @@ async function completeConversationalTurn(
   input: TaskRuntimeInput,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
+  const target = parseTaskWordTarget(input.goal);
+  const wordRange = target && resolveChapterWordRange(target.target, getChapterWordRangePercents());
+  const reply =
+    target?.settingOnly && wordRange
+      ? `已将本任务每章目标字数设为 ${target.target} 字（当前候选硬区间 ${wordRange.hardMinimum}～${wordRange.hardMaximum} 字）。仅对本任务后续写章生效，未修改章节卡片、未调用模型、未生成或采用正文。接下来可发送“生成下一章”；仅本次覆盖可发送“生成下一章，目标3200字”。`
+      : WORKBENCH_CONVERSATIONAL_REPLY;
   const modelSnapshot = captureLocalConversationalSnapshot();
   const run = await taskConversationService.createRun(
     input.conversationId,
@@ -94,11 +113,7 @@ async function completeConversationalTurn(
   const startedAt = new Date().toISOString();
   let currentRun = await taskConversationService.updateRun(run.runId, 'running', { startedAt });
   onEvent?.({ run: currentRun });
-  await taskConversationService.appendTurn(
-    input.conversationId,
-    'assistant',
-    WORKBENCH_CONVERSATIONAL_REPLY,
-  );
+  await taskConversationService.appendTurn(input.conversationId, 'assistant', reply);
   currentRun = await taskConversationService.updateRun(run.runId, 'completed', {
     finishedAt: new Date().toISOString(),
   });
@@ -132,7 +147,12 @@ async function startWritingSubAgentTurn(
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
   const chapterId = input.chapterId!;
-  const chapter = await chapterRepository.getById(chapterId).catch(() => null);
+  const chapter = await chapterRepository.getById(chapterId);
+  if (!chapter || chapter.novelId !== input.novelId) {
+    throw new Error('目标章节不存在或不属于当前作品。');
+  }
+  const preferences = await prepareTaskWritingPreferences(input);
+  const revision = await verifyArtifactRevisionSource(input);
   const contract = planWritingSubAgentTurn({
     novelId: input.novelId,
     chapterId,
@@ -140,12 +160,14 @@ async function startWritingSubAgentTurn(
     mode:
       selectCandidateTool(input.goal, chapterId)?.name === 'polish_chapter' ? 'polish' : 'generate',
     modelSnapshot: input.modelSnapshot ?? captureTaskModelSnapshot(),
-    targetWordCount: chapter?.targetWordCount || undefined,
+    targetWordCount: preferences.targetWordCount ?? (chapter?.targetWordCount || undefined),
+    wordRangePercents: getChapterWordRangePercents(),
   });
   const result = await dshTaskRuntimeService.start(
     {
       ...input,
       ...toDshTaskStartContract(contract),
+      revisionSource: revision?.source,
       modelSnapshot: contract.modelSnapshot,
     },
     (notice) => {
@@ -162,62 +184,103 @@ async function startWritingSubAgentTurn(
   return result.run;
 }
 
-/** Full adopted text of the immediately preceding chapter, or undefined when unavailable. */
+interface PreviousChapterReviewContext {
+  status: ChapterCandidateIntegrityReview['checks']['previousChapterBoundary'];
+  text?: string;
+  reason?: string;
+}
+
+/** Missing text, failed reads and a first chapter are distinct review states. */
 async function loadPreviousAdoptedChapterText(
   novelId: string,
   chapterId: string,
-): Promise<string | undefined> {
+): Promise<PreviousChapterReviewContext> {
   try {
     const [chapters, volumes] = await Promise.all([
       chapterRepository.getByNovelId(novelId),
       volumeRepository.getByNovelId(novelId),
     ]);
+    if (!chapters.some((chapter) => chapter.id === chapterId && chapter.novelId === novelId)) {
+      return { status: 'not_checked', reason: '章节顺序或作品作用域不可验证。' };
+    }
     const previous = findPreviousChapterForContinuity(chapters, volumes, chapterId);
-    if (!previous) return undefined;
+    if (!previous) return { status: 'not_applicable' };
     const draft = await draftVersionService.getAdoptedByChapterId(previous.id);
-    if (!draft) return undefined;
-    // Only a verified full body is good enough for boundary checks; previews would misfire.
-    if (isDraftContentReady(draft.contentState)) return draft.contentState.content;
-    if (draft.contentState) return undefined;
-    return draft.content.trim() ? draft.content : undefined;
+    if (!draft || !draft.isAdopted || draft.chapterId !== previous.id) {
+      return { status: 'not_checked', reason: '紧邻前章缺少已采用正文。' };
+    }
+    // Previews or failed hydration must never be used for boundary checks.
+    if (draft.contentState && !isDraftContentReady(draft.contentState)) {
+      return { status: 'not_checked', reason: '前章正文未完整读取或完整性校验未完成。' };
+    }
+    const content = isDraftContentReady(draft.contentState)
+      ? draft.contentState.content
+      : draft.content;
+    if (!content.trim()) return { status: 'not_checked', reason: '前章采用稿为空。' };
+    if (
+      isDraftContentReady(draft.contentState) &&
+      (await computeContentSha256(content)) !== draft.contentState.contentHash.toLowerCase()
+    ) {
+      return { status: 'not_checked', reason: '前章采用稿哈希不一致。' };
+    }
+    return { status: 'checked', text: content };
   } catch {
-    return undefined;
+    return { status: 'not_checked', reason: '前章正文复核读取失败。' };
   }
 }
 
-/**
- * Gate E-2: the DSH host only checks scope and word range; the same integrity inspection the
- * deterministic writer applies (opening rollback, boundary repetition, meta leakage, …) runs
- * here on the persisted candidate. Findings are surfaced as an assistant turn so the user can
- * request a revision; the candidate itself is never altered or removed.
- */
+/** Advisory finite text checks never change or adopt the persisted candidate. */
 async function reviewWritingSubAgentCandidate(
   input: TaskRuntimeInput,
   chapterId: string,
   artifactId: string | undefined,
 ): Promise<void> {
   if (!artifactId) return;
+  const scope = { novelId: input.novelId, chapterId, artifactId };
+  let review: ChapterCandidateIntegrityReview;
   try {
     const bundle = await aiTaskRuntimeService.getArtifact(artifactId);
-    if (bundle.artifact.artifactType !== 'chapter_text') return;
-    const candidateText = bundle.displayContent || bundle.rawContent;
-    if (!candidateText.trim()) return;
-    const issues = inspectChapterCandidateIntegrity({
-      candidateText,
-      previousChapterText: await loadPreviousAdoptedChapterText(input.novelId, chapterId),
+    const artifact = bundle.artifact;
+    if (
+      artifact.artifactId !== artifactId ||
+      artifact.artifactType !== 'chapter_text' ||
+      artifact.sourceNovelId !== input.novelId ||
+      artifact.sourceChapterId !== chapterId
+    ) {
+      throw new Error('candidate scope mismatch');
+    }
+    const candidateText = bundle.displayContent ?? bundle.rawContent;
+    const expectedHash =
+      typeof bundle.displayContent === 'string'
+        ? artifact.displayContentHash
+        : artifact.contentHash;
+    const candidateHash = await computeContentSha256(candidateText);
+    if (!candidateText.trim() || !expectedHash || candidateHash !== expectedHash.toLowerCase()) {
+      throw new Error('candidate content unavailable or hash mismatch');
+    }
+    const previous = await loadPreviousAdoptedChapterText(input.novelId, chapterId);
+    review = buildChapterCandidateIntegrityReview({
+      scope: { ...scope, candidateHash },
+      issues: inspectChapterCandidateIntegrity({
+        candidateText,
+        previousChapterText: previous.text,
+      }),
+      previousChapterBoundary: previous.status,
+      // Host context-coverage admission and these text heuristics are separate evidence.
+      // Do not infer full rule coverage from successful tools or a structurally valid artifact.
+      unavailableReasons: previous.reason ? [previous.reason] : [],
     });
-    const errors = issues.filter((issue) => issue.severity === 'error');
-    if (errors.length === 0) return;
-    await taskConversationService.appendTurn(
-      input.conversationId,
-      'assistant',
-      `候选完整性检查发现 ${errors.length} 项需要处理的问题：${errors
-        .map((issue) => `${issue.summary}（${issue.code}）`)
-        .join('；')}。候选已保留供审阅，建议点击「要求修改」让模型重写。`,
-    );
   } catch {
-    // Integrity review is advisory; a failure here must not turn a persisted candidate into an error.
+    review = buildChapterCandidateIntegrityReview({
+      scope,
+      unavailableReasons: ['候选读取、作用域或哈希复核未完成；不是语义检查通过。'],
+    });
   }
+  await taskConversationService.appendTurn(
+    input.conversationId,
+    'assistant',
+    formatChapterCandidateIntegrityReview(review),
+  );
 }
 
 export const taskSessionAdapter = {

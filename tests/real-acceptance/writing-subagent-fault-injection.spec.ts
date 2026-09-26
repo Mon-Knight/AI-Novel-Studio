@@ -7,7 +7,13 @@ import {
   type MockWorkbenchRequestSummary,
   type MockWorkbenchUpstream,
 } from '../../scripts/dsh/mock-workbench-upstream.mjs';
-import { findTestIdByAttribute, navigateHash, waitForTestId } from '../e2e/helpers';
+import {
+  clickTestId,
+  fillTestId,
+  findTestIdByAttribute,
+  navigateHash,
+  waitForTestId,
+} from '../e2e/helpers';
 import {
   collectConversationEvidence,
   createFixtureChapter,
@@ -21,6 +27,7 @@ import {
   startChapterTaskThroughUi,
   waitForTerminalConversationStatus,
   type ChapterDto,
+  type ConversationBundle,
   type NovelDto,
   type SanitizedConversationEvidence,
 } from './production-app-helpers';
@@ -45,15 +52,25 @@ import {
  *   S3a transient failure one completion fails with HTTP 500 → the transport retries on its own,
  *                         the turn still ends with exactly one candidate.
  *   S3b persistent failure every completion fails with HTTP 500 → the run fails closed with no
- *                         candidate; once the upstream recovers an explicit retry succeeds.
+ *                         candidate; a retry while still broken also fails, and only a later
+ *                         retry after the upstream recovers succeeds.
  *   S5 word range         the candidate is far below the host's hard minimum → the E-1 length gate
  *                         rejects it before any artifact exists.
+ *   S6 task word setting  a local conversation turn sets 3200 words; after reloading, a separate
+ *                         write request uses that range without changing the chapter's 1000-word target.
+ *   S7 length repaired    a 3586-word candidate exceeds the 3000-word target's ceiling; the next
+ *                         deterministic candidate is valid after one automatic repair.
  *   S4 restart recovery   the candidate completion hangs, the app process is killed mid-run,
  *                         the restarted app marks the run interrupted and a retry succeeds.
  */
 
 const MODEL_NAME = 'mock-workbench-fault-injection';
 const TARGET_WORD_COUNT = 1000;
+const CONVERSATION_TARGET_WORD_COUNT = 3200;
+const REPAIR_TARGET_WORD_COUNT = 3000;
+const REPAIR_HARD_WORD_RANGE = { minimum: 2400, maximum: 3450 };
+// Independent expected values: do not import the production policy under test.
+const CONVERSATION_HARD_WORD_RANGE = { minimum: 2560, maximum: 3680 };
 const CANDIDATE_PARAGRAPHS = [
   '演武场上风雨骤起，林辰握紧长剑，雷光自云层深处劈落。赵擎的攻势逼至眼前，他侧身让过半寸，护住身后的苏晚。',
   '雷灵根在雨夜中隐隐发热，他以最后一道雷技险胜半招，随即左肩旧伤复发，单膝跪倒在湿透的青石上。',
@@ -91,7 +108,13 @@ interface ScenarioRecord {
   mockRequests?: Array<
     Pick<
       MockWorkbenchRequestSummary,
-      'sequence' | 'phase' | 'outcome' | 'requestedToolNames' | 'userRetryNotice'
+      | 'sequence'
+      | 'phase'
+      | 'outcome'
+      | 'requestedToolNames'
+      | 'userRetryNotice'
+      | 'candidateCallNumber'
+      | 'candidateTextLength'
     >
   >;
   conversation?: SanitizedConversationEvidence;
@@ -113,6 +136,8 @@ const FIXTURE_CHAPTER_TITLES = [
   '上游持续失败试炼',
   '字数越界候选试炼',
   '重启恢复试炼',
+  '对话字数设置试炼',
+  '超长候选修正试炼',
 ] as const;
 
 /**
@@ -284,7 +309,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
   let foreignChapterId = '';
   const chapters: ChapterDto[] = [];
   const knownConversationIds = new Set<string>();
-  const EXPECTED_SCENARIOS = 6;
+  const EXPECTED_SCENARIOS = 8;
 
   const persistEvidence = () => {
     if (!artifactRoot) return;
@@ -308,6 +333,8 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         outcome: request.outcome,
         requestedToolNames: request.requestedToolNames,
         userRetryNotice: request.userRetryNotice,
+        candidateCallNumber: request.candidateCallNumber,
+        candidateTextLength: request.candidateTextLength,
       }));
 
   const record = (scenario: ScenarioRecord) => {
@@ -323,7 +350,11 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       mode: 'normal',
       candidateText: CANDIDATE_TEXT,
     });
-    evidence.mockUpstream = { host: mock.host, port: mock.port };
+    evidence.mockUpstream = {
+      host: mock.host,
+      port: mock.port,
+      configuredEndpointPath: new URL(`${mock.chatCompletionsUrl}/`).pathname,
+    };
 
     await waitForTestId('app-shell');
     // The isolated profile starts empty: point the API runtime at the loopback mock. Loopback
@@ -336,7 +367,8 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       {
         runtimeMode: 'api',
         provider: 'openai_compatible',
-        baseUrl: mock.upstreamBaseUrl,
+        // Exercise pasted full endpoints through both model preflight and DSH proxy routing.
+        baseUrl: `${mock.chatCompletionsUrl}/`,
         apiKey: '',
         modelName: MODEL_NAME,
         temperature: 0.7,
@@ -368,7 +400,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
           volumeId: volume.id,
           title,
           orderIndex: index,
-          targetWordCount: TARGET_WORD_COUNT,
+          targetWordCount: index === 7 ? REPAIR_TARGET_WORD_COUNT : TARGET_WORD_COUNT,
         }),
       );
     }
@@ -400,6 +432,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       foreignNovelId,
       foreignChapterId,
       targetWordCount: TARGET_WORD_COUNT,
+      repairChapterTargetWordCount: REPAIR_TARGET_WORD_COUNT,
     };
     mock.configure({ novelId, foreignNovelId, foreignChapterId });
     persistEvidence();
@@ -432,7 +465,12 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     );
   });
 
-  async function runScenarioTurn(input: { scenario: ScenarioRecord; chapterId: string }): Promise<{
+  async function runScenarioTurn(input: {
+    scenario: ScenarioRecord;
+    chapterId: string;
+    goal?: string;
+    waitForRuntimeIdle?: boolean;
+  }): Promise<{
     conversationId: string;
     conversation: SanitizedConversationEvidence;
     invariants: Awaited<ReturnType<typeof readChapterInvariants>>;
@@ -442,7 +480,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     const started = await startChapterTaskThroughUi({
       novelId,
       chapterId: input.chapterId,
-      goal: goalFor(chapter.title),
+      goal: input.goal ?? goalFor(chapter.title),
       knownConversationIds,
     });
     knownConversationIds.add(started.conversationId);
@@ -452,6 +490,22 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       modelCatalog: started.catalog,
       selectedModelKey: started.selectedModelKey,
     };
+    if (input.waitForRuntimeIdle) {
+      // Failed intermediate runs are evidence, not the end of an automatic length repair.
+      await browser.waitUntil(
+        async () => {
+          const runtime = await invoke<{ status: string } | null>('dsh_get_task_runtime_status', {
+            conversationId: started.conversationId,
+          });
+          return runtime?.status === 'idle';
+        },
+        {
+          timeout: turnTimeoutMs,
+          interval: 500,
+          timeoutMsg: `${input.scenario.name}: the runtime did not finish its repair budget`,
+        },
+      );
+    }
     await waitForTerminalConversationStatus({
       timeoutMs: turnTimeoutMs,
       label: input.scenario.name,
@@ -468,12 +522,19 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
   function assertNoFormalWrites(
     scenario: ScenarioRecord,
     invariants: Awaited<ReturnType<typeof readChapterInvariants>>,
+    expectedTargetWordCount = TARGET_WORD_COUNT,
   ): void {
     if (invariants.chapterWordCount !== 0) {
       scenario.failures.push(`formal chapter word count became ${invariants.chapterWordCount}`);
     }
     if (invariants.draftCount !== 0) {
       scenario.failures.push(`turn created ${invariants.draftCount} chapter draft(s)`);
+    }
+    if (invariants.novelTotalWordCount !== 0) {
+      scenario.failures.push(`formal novel word count became ${invariants.novelTotalWordCount}`);
+    }
+    if (invariants.chapterTargetWordCount !== expectedTargetWordCount) {
+      scenario.failures.push(`formal chapter target became ${invariants.chapterTargetWordCount}`);
     }
   }
 
@@ -695,7 +756,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     record(scenario);
   });
 
-  it('S3b fails closed on a persistent upstream failure and recovers through an explicit retry', async () => {
+  it('S3b keeps a retry failed while the upstream is broken and recovers only after repair', async () => {
     const scenario: ScenarioRecord = {
       name: 'upstream-error-persistent-retry',
       verdict: 'INCOMPLETE',
@@ -724,9 +785,46 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       scenario.failures.push('a failed run persisted an artifact');
     }
     assertNoFormalWrites(scenario, failed.invariants);
+    notes.originalFailure = failed.conversation;
+    notes.originalInvariants = failed.invariants;
+    if (failed.conversation.runs.length !== 1) {
+      scenario.failures.push('the initial failed request created more than one run');
+    }
+
+    // A click must not turn a still-broken connection into a success or silently fall back.
+    // Leave the upstream in persistent-error mode for this first explicit retry.
+    const retryStartSequence = mock!.snapshot().requestCount;
+    notes.stillBrokenRetryAttempts = await retryLatestRun(failed.conversationId);
+    await waitForTerminalConversationStatus({
+      timeoutMs: turnTimeoutMs,
+      label: 'upstream-error-retry-still-broken',
+    });
+    const stillBroken = await collectConversationEvidence({
+      conversationId: failed.conversationId,
+      fixtureNovelId: novelId,
+      fixtureChapterId: chapterId,
+    });
+    const stillBrokenInvariants = await readChapterInvariants({ novelId, chapterId });
+    const stillBrokenRequests = mockRequestsSince(retryStartSequence);
+    notes.stillBrokenConversation = stillBroken.evidence;
+    notes.stillBrokenInvariants = stillBrokenInvariants;
+    if (stillBroken.evidence.runs.length !== 2) {
+      scenario.failures.push(
+        `expected 2 failed runs before upstream recovery, found ${stillBroken.evidence.runs.length}`,
+      );
+    }
+    if (!stillBrokenRequests.some((request) => request.outcome === 'injected_failure')) {
+      scenario.failures.push('the still-broken retry never reached the failing upstream');
+    }
+    if (stillBroken.evidence.artifacts.length > 0) {
+      scenario.failures.push('the still-broken retry persisted an artifact');
+    }
+    assertNoChapterCandidate(scenario, stillBroken.evidence);
+    assertRunsBoundToChapter(scenario, stillBroken.evidence, chapterId);
+    assertNoFormalWrites(scenario, stillBrokenInvariants);
 
     mock!.configure({ mode: 'normal', chapterId });
-    const retryStartSequence = mock!.snapshot().requestCount;
+    notes.recoveryStartSequence = mock!.snapshot().requestCount;
     notes.retryAttempts = await retryLatestRun(failed.conversationId);
     await waitForTerminalConversationStatus({
       timeoutMs: turnTimeoutMs,
@@ -742,10 +840,13 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     scenario.conversation = recovered.evidence;
     scenario.invariants = { ...invariants };
 
-    if (recovered.evidence.runs.length !== 2) {
+    if (recovered.evidence.runs.length !== 3) {
       scenario.failures.push(
-        `expected 2 runs (failed + retry), found ${recovered.evidence.runs.length}`,
+        `expected 3 runs (failed + failed retry + recovered retry), found ${recovered.evidence.runs.length}`,
       );
+    }
+    if (recovered.evidence.runs.slice(0, 2).some((run) => run.status !== 'failed')) {
+      scenario.failures.push('upstream recovery rewrote a previously failed run as successful');
     }
     assertRunsBoundToChapter(scenario, recovered.evidence, chapterId);
     assertRetryNoticeOnlyOnRetriedRun(scenario, scenario.mockRequests, retryStartSequence);
@@ -753,7 +854,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     assertNoFormalWrites(scenario, invariants);
     record(scenario);
   });
-  it('S5 rejects a candidate outside the host word range before it becomes an artifact', async () => {
+  it('S5 rejects persistent short candidates after exactly three attempts without creating artifacts', async () => {
     const scenario: ScenarioRecord = {
       name: 'word-range-rejected',
       verdict: 'INCOMPLETE',
@@ -764,18 +865,53 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'normal', chapterId, candidateText: SHORT_CANDIDATE_TEXT });
     try {
-      const { conversation, invariants } = await runScenarioTurn({ scenario, chapterId });
+      const { conversation, invariants } = await runScenarioTurn({
+        scenario,
+        chapterId,
+        waitForRuntimeIdle: true,
+      });
       scenario.mockRequests = mockRequestsSince(before);
       scenario.conversation = conversation;
       scenario.invariants = { ...invariants };
+      const candidateRequests = scenario.mockRequests.filter(
+        (request) => request.phase === 'generate-chapter',
+      );
+      const candidateEvents = conversation.toolEvents.filter(
+        (event) => event.toolName === WRITING_SUBAGENT_CANDIDATE_TOOL,
+      );
+      const lengthRejectedRuns = conversation.runs.filter(
+        (run) =>
+          run.status === 'failed' && /DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/u.test(run.error ?? ''),
+      );
       scenario.notes = {
         ...scenario.notes,
         scriptedCandidateCjkLength: cjkLength(SHORT_CANDIDATE_TEXT),
+        expectedCandidateAttempts: 3,
+        candidateRequestCount: candidateRequests.length,
+        candidateToolEventCount: candidateEvents.length,
+        lengthRejectedRunCount: lengthRejectedRuns.length,
       };
 
-      if (!scenario.mockRequests.some((request) => request.phase === 'generate-chapter')) {
-        scenario.failures.push('the mock never submitted the short candidate');
+      if (candidateRequests.length !== 3 || candidateEvents.length !== 3) {
+        scenario.failures.push(
+          `expected exactly 3 candidate attempts, got ${candidateRequests.length} requests and ${candidateEvents.length} tool events`,
+        );
       }
+      if (conversation.runs.length !== 3 || lengthRejectedRuns.length !== 3) {
+        scenario.failures.push(
+          `expected 3 length-rejected runs (initial + 2 repairs), got ${conversation.runs.length} runs and ${lengthRejectedRuns.length} length rejections`,
+        );
+      }
+      if (
+        lengthRejectedRuns.some(
+          (run) => candidateEvents.filter((event) => event.runId === run.runId).length !== 1,
+        )
+      ) {
+        scenario.failures.push(
+          'each length-rejected run must retain exactly one candidate attempt',
+        );
+      }
+      assertRunsBoundToChapter(scenario, conversation, chapterId);
       const lastRun = conversation.runs[conversation.runs.length - 1];
       if (!/DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/u.test(lastRun?.error ?? '')) {
         scenario.failures.push(
@@ -787,6 +923,243 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       record(scenario);
     } finally {
       mock!.configure({ candidateText: CANDIDATE_TEXT });
+    }
+  });
+
+  it('S6 persists a task-local 3200-word setting across reload and applies it to a later write', async () => {
+    const scenario: ScenarioRecord = {
+      name: 'conversation-word-target-persisted',
+      verdict: 'INCOMPLETE',
+      failures: [],
+    };
+    const chapterId = chapters[6].id;
+    scenario.chapterId = chapterId;
+    const before = mock!.snapshot().requestCount;
+    const settingGoal = '本任务目标字数设为3200字';
+    const candidateText = buildCandidateText(CONVERSATION_TARGET_WORD_COUNT);
+    mock!.configure({ mode: 'normal', chapterId, candidateText });
+    try {
+      const setting = await runScenarioTurn({ scenario, chapterId, goal: settingGoal });
+      const settingRequests = mockRequestsSince(before);
+      // Opening the task creator can refresh the model catalog before the local command.
+      // Keep those attestation probes visible; only chapter/tool completions must be zero.
+      const settingCompletionRequests = settingRequests.filter(
+        (request) => request.phase !== 'model-tool-attestation',
+      );
+      const settingRun = setting.conversation.runs[0];
+      if (
+        setting.conversation.runs.length !== 1 ||
+        settingRun?.providerId !== 'ans-local' ||
+        settingRun?.status !== 'completed'
+      ) {
+        scenario.failures.push('the word-setting command did not complete as one ans-local run');
+      }
+      if (settingCompletionRequests.length !== 0) {
+        scenario.failures.push(
+          'the local word-setting command unexpectedly requested a completion',
+        );
+      }
+      if (setting.conversation.artifacts.length !== 0) {
+        scenario.failures.push('the word-setting command unexpectedly created an artifact');
+      }
+      assertNoFormalWrites(scenario, setting.invariants);
+      await findTestIdByAttribute('workbench-turn', 'data-role', 'assistant');
+
+      // Reload the WebView, then re-open the same task: an in-memory-only setting is not enough.
+      await browser.execute(() => window.location.reload());
+      await waitForTestId('app-shell');
+      await openConversationThroughUi(novelId, setting.conversationId);
+      const persisted = await invoke<ConversationBundle>('get_task_conversation', {
+        conversationId: setting.conversationId,
+      });
+      const settingPersisted = persisted.turns.some(
+        (turn) => turn.role === 'user' && turn.content === settingGoal,
+      );
+      // Persist only numeric receipt facts, never user turns, instructions or generated prose.
+      const expectedReceipt = [
+        CONVERSATION_TARGET_WORD_COUNT,
+        CONVERSATION_HARD_WORD_RANGE.minimum,
+        CONVERSATION_HARD_WORD_RANGE.maximum,
+      ];
+      const receiptMatchesRange = persisted.turns.some((turn) => {
+        if (turn.role !== 'assistant') return false;
+        const numbers = (turn.content?.match(/[0-9]+/gu) ?? []).map(Number);
+        return expectedReceipt.every((value, index) => numbers[index] === value);
+      });
+      scenario.notes = {
+        ...scenario.notes,
+        chapterTargetWordCount: TARGET_WORD_COUNT,
+        taskTargetWordCount: CONVERSATION_TARGET_WORD_COUNT,
+        expectedHardWordRange: CONVERSATION_HARD_WORD_RANGE,
+        scriptedCandidateCjkLength: cjkLength(candidateText),
+        localSetting: setting.conversation,
+        localSettingInvariants: setting.invariants,
+        settingUpstreamRequestCount: settingRequests.length,
+        settingAttestationRequestCount: settingRequests.length - settingCompletionRequests.length,
+        settingCompletionRequestCount: settingCompletionRequests.length,
+        settingPersistedAfterReload: settingPersisted,
+        receiptMatchesRange,
+      };
+      if (!settingPersisted) scenario.failures.push('the task word setting did not survive reload');
+      if (!receiptMatchesRange) {
+        scenario.failures.push('the local receipt did not report target 3200 and range 2560-3680');
+      }
+
+      // No number in this follow-up: only the earlier persisted user turn can supply 3200.
+      const runsBeforeWrite = await countRuns(setting.conversationId);
+      await fillTestId('workbench-composer-input', goalFor(chapters[6].title));
+      const send = await waitForTestId('workbench-send-task');
+      await send.waitForEnabled({ timeout: 30_000 });
+      await clickTestId('workbench-send-task');
+      await browser.waitUntil(
+        async () => (await countRuns(setting.conversationId)) > runsBeforeWrite,
+        { timeout: 60_000, interval: 500, timeoutMsg: 'the follow-up write did not create a run' },
+      );
+      await waitForTerminalConversationStatus({
+        timeoutMs: turnTimeoutMs,
+        label: 'conversation-word-target-persisted',
+      });
+      const written = await collectConversationEvidence({
+        conversationId: setting.conversationId,
+        fixtureNovelId: novelId,
+        fixtureChapterId: chapterId,
+        hardWordRange: CONVERSATION_HARD_WORD_RANGE,
+      });
+      const invariants = await readChapterInvariants({ novelId, chapterId });
+      scenario.mockRequests = mockRequestsSince(before);
+      scenario.conversation = written.evidence;
+      scenario.invariants = { ...invariants };
+      if (written.evidence.runs.length !== 2) {
+        scenario.failures.push('expected exactly one local setting run and one API write run');
+      }
+      const writeRun = written.evidence.runs[written.evidence.runs.length - 1];
+      if (writeRun?.runtimeMode !== 'api' || writeRun.modelId !== MODEL_NAME) {
+        scenario.failures.push('the follow-up write did not use the configured API model');
+      }
+      const candidates = written.evidence.artifacts.filter(
+        (artifact) => artifact.artifactType === 'chapter_text',
+      );
+      if (
+        candidates.some(
+          (artifact) =>
+            artifact.withinHardRangeByCjkCount !== true || artifact.processingStatus !== 'valid',
+        )
+      ) {
+        scenario.failures.push(
+          'a candidate failed the independently expected 2560-3680 word range',
+        );
+      }
+      assertSingleReviewOnlyCandidate(scenario, written.evidence);
+      assertRunsBoundToChapter(scenario, written.evidence, chapterId);
+      assertNoFormalWrites(scenario, invariants);
+      record(scenario);
+    } finally {
+      mock!.configure({ mode: 'normal', candidateText: CANDIDATE_TEXT });
+    }
+  });
+
+  it('S7 repairs an oversized 3000-target candidate once and produces exactly one valid artifact', async () => {
+    const scenario: ScenarioRecord = {
+      name: 'word-range-oversized-then-repaired',
+      verdict: 'INCOMPLETE',
+      failures: [],
+    };
+    const chapterId = chapters[7].id;
+    scenario.chapterId = chapterId;
+    const before = mock!.snapshot().requestCount;
+    const oversized = buildCandidateText(3586);
+    const repaired = buildCandidateText(REPAIR_TARGET_WORD_COUNT);
+    mock!.configure({ mode: 'normal', chapterId, candidateTexts: [oversized, repaired] });
+    try {
+      const result = await runScenarioTurn({ scenario, chapterId, waitForRuntimeIdle: true });
+      const { evidence: conversation } = await collectConversationEvidence({
+        conversationId: result.conversationId,
+        fixtureNovelId: novelId,
+        fixtureChapterId: chapterId,
+        hardWordRange: REPAIR_HARD_WORD_RANGE,
+      });
+      scenario.mockRequests = mockRequestsSince(before);
+      scenario.conversation = conversation;
+      scenario.invariants = { ...result.invariants };
+      const candidateRequests = scenario.mockRequests.filter(
+        (request) => request.phase === 'generate-chapter',
+      );
+      const candidateEvents = conversation.toolEvents.filter(
+        (event) => event.toolName === WRITING_SUBAGENT_CANDIDATE_TOOL,
+      );
+      const candidates = conversation.artifacts.filter(
+        (artifact) => artifact.artifactType === 'chapter_text',
+      );
+      scenario.notes = {
+        ...scenario.notes,
+        chapterTargetWordCount: REPAIR_TARGET_WORD_COUNT,
+        expectedHardWordRange: REPAIR_HARD_WORD_RANGE,
+        scriptedCandidateCjkLengths: [cjkLength(oversized), cjkLength(repaired)],
+        candidateRequestCount: candidateRequests.length,
+        candidateToolEventCount: candidateEvents.length,
+        runtimeCandidateCallCount: mock!.snapshot().candidateCalls,
+      };
+      if (cjkLength(oversized) <= REPAIR_HARD_WORD_RANGE.maximum) {
+        scenario.failures.push('the first fixture candidate did not exceed the hard maximum');
+      }
+      if (candidateRequests.length !== 2 || candidateEvents.length !== 2) {
+        scenario.failures.push('expected exactly two candidate requests and two tool events');
+      }
+      if (candidateRequests.some((request, index) => request.candidateCallNumber !== index + 1)) {
+        scenario.failures.push('the deterministic candidate sequence was not consumed in order');
+      }
+      const firstRun = conversation.runs[0];
+      const finalRun = conversation.runs[conversation.runs.length - 1];
+      if (
+        conversation.runs.length !== 2 ||
+        firstRun?.status !== 'failed' ||
+        !/DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/u.test(firstRun?.error ?? '') ||
+        finalRun?.status !== 'completed'
+      ) {
+        scenario.failures.push(
+          'expected one preserved length failure followed by one successful repair',
+        );
+      }
+      if (
+        conversation.runs.some(
+          (run) =>
+            run.runtimeMode !== 'api' ||
+            run.modelId !== MODEL_NAME ||
+            candidateEvents.filter((event) => event.runId === run.runId).length !== 1,
+        )
+      ) {
+        scenario.failures.push(
+          'repair changed the frozen API model or candidate attempt ownership',
+        );
+      }
+      if (
+        !WRITING_SUBAGENT_READ_TOOLS.every((tool) =>
+          conversation.toolEvents.some(
+            (event) =>
+              event.runId === finalRun?.runId &&
+              event.toolName === tool &&
+              event.status === 'succeeded',
+          ),
+        )
+      ) {
+        scenario.failures.push('the repair run did not repeat every required context read');
+      }
+      if (
+        candidates.length !== 1 ||
+        candidates[0].processingStatus !== 'valid' ||
+        candidates[0].withinHardRangeByCjkCount !== true ||
+        candidates[0].cjkCharacterCount !== cjkLength(repaired)
+      ) {
+        scenario.failures.push(
+          'the successful repair did not persist only the second valid candidate',
+        );
+      }
+      assertSingleReviewOnlyCandidate(scenario, conversation);
+      assertRunsBoundToChapter(scenario, conversation, chapterId);
+      assertNoFormalWrites(scenario, result.invariants, REPAIR_TARGET_WORD_COUNT);
+      record(scenario);
+    } finally {
+      mock!.configure({ mode: 'normal', candidateTexts: [], candidateText: CANDIDATE_TEXT });
     }
   });
 

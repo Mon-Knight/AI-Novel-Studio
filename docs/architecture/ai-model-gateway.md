@@ -9,6 +9,7 @@
 ## 1. 架构目标与背景
 
 在长篇小说创作工程中，模型调用呈现异构性：
+
 - **云端通用模型**（Cloud Provider: DeepSeek, OpenAI 等）：擅长世界观构建、人物设定、大纲规划与全局审阅（Director / Critic 角色）。
 - **本地微调模型**（Local Chapter Model / llama.cpp 等）：擅长低延迟、离线正文行文创作（Local Writer）。
 - **外部模型网关**（**AI Model Gateway**）：用于统一接入云 GPU 算力集群（如 vLLM、Ollama、Triton、One-API、LiteLLM 等私有网关或第三方聚合服务），作为通用 Remote Model Provider。
@@ -17,7 +18,7 @@
 flowchart TD
     subgraph CreativeRuntime [Dual Model Creative Runtime]
         Director[Director / Critic 角色任务] -->|默认路由| Cloud[Cloud Provider API]
-        
+
         Writer[Writer.Beat_Prose 角色任务] --> Router{Model Router}
         Router -->|1. AVAILABLE & Healthy| Local[Local Chapter Model]
         Router -->|2. Local 不可用 & Gateway 启用| Gateway[AI Model Gateway Client]
@@ -65,6 +66,7 @@ AI Model Gateway 客户端严格采用工业标准 **OpenAI Chat Completions API
 ## 3. 网络与安全治理策略
 
 ### 3.1 网络策略
+
 - **公网访问控制**：如果 Endpoint 位于公网（如 `https://gateway.example.com/v1`），**强制要求 HTTPS** 协议，拒绝明文 HTTP 传输。
 - **局域网 / VPC / 私有云支持**：
   - 自动识别 RFC 1918 私有 IP（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`）；
@@ -73,10 +75,12 @@ AI Model Gateway 客户端严格采用工业标准 **OpenAI Chat Completions API
   - 私有网络下允许 `http://` 或 `https://` 访问。
 
 ### 3.2 鉴权与防匿名调用
+
 - 所有外部网关调用**必须配置非空的 API Key / Token**；
 - 拒绝任何匿名（空 Token）远程调用，防止未授权与链路滥用。
 
 ### 3.3 凭据隔离与存储安全
+
 - Gateway API Key 仅保留在客户端内存会话中（`SessionCredentials`）；
 - 写入 LocalStorage 时统一进行脱敏持久化，杜绝明文凭据泄露。
 
@@ -105,4 +109,5 @@ export interface GatewayModelConfig {
 ```
 
 向下兼容说明：
+
 - 兼容旧版 `remoteWriter` 配置，系统初始化与存储读取时自动无缝迁移至 `gateway`。

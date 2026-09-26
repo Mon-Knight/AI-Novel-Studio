@@ -113,16 +113,23 @@ export class NovelMemoryStateUpdater {
       if (delta.entityType === 'character') {
         const cid = delta.entityId.trim();
         const patch: Partial<CharacterDynamicState> = {};
-        if (typeof delta.changes.characterName === 'string') patch.characterName = delta.changes.characterName;
-        if (typeof delta.changes.currentEmotion === 'string') patch.currentEmotion = delta.changes.currentEmotion;
-        if (typeof delta.changes.currentGoal === 'string') patch.currentGoal = delta.changes.currentGoal;
+        if (typeof delta.changes.characterName === 'string')
+          patch.characterName = delta.changes.characterName;
+        if (typeof delta.changes.currentEmotion === 'string')
+          patch.currentEmotion = delta.changes.currentEmotion;
+        if (typeof delta.changes.currentGoal === 'string')
+          patch.currentGoal = delta.changes.currentGoal;
         if (typeof delta.changes.faction === 'string') patch.faction = delta.changes.faction;
-        if (typeof delta.changes.lastKnownLocation === 'string') patch.lastKnownLocation = delta.changes.lastKnownLocation;
+        if (typeof delta.changes.lastKnownLocation === 'string')
+          patch.lastKnownLocation = delta.changes.lastKnownLocation;
 
         if (Array.isArray(delta.changes.injuries)) {
           patch.injuries = delta.changes.injuries.filter((i): i is string => typeof i === 'string');
         }
-        if (delta.changes.currentRelationship && typeof delta.changes.currentRelationship === 'object') {
+        if (
+          delta.changes.currentRelationship &&
+          typeof delta.changes.currentRelationship === 'object'
+        ) {
           const current = this.getCharacterState(nid, cid)?.currentRelationship ?? {};
           patch.currentRelationship = {
             ...current,
@@ -132,22 +139,34 @@ export class NovelMemoryStateUpdater {
 
         await this.updateCharacterState(nid, cid, patch);
         updatedCharacters.add(cid);
-      } else if (delta.entityType === 'world' || delta.entityType === 'faction' || delta.entityType === 'rule' || delta.entityType === 'mystery') {
+      } else if (
+        delta.entityType === 'world' ||
+        delta.entityType === 'faction' ||
+        delta.entityType === 'rule' ||
+        delta.entityType === 'mystery'
+      ) {
         const patch: Partial<WorldStateSnapshot> = {};
-        if (typeof delta.changes.timelinePosition === 'string') patch.timelinePosition = delta.changes.timelinePosition;
+        if (typeof delta.changes.timelinePosition === 'string')
+          patch.timelinePosition = delta.changes.timelinePosition;
         if (Array.isArray(delta.changes.activeEvents)) {
           const existing = this.getWorldState(nid)?.activeEvents ?? [];
-          const newEvents = delta.changes.activeEvents.filter((e): e is string => typeof e === 'string');
+          const newEvents = delta.changes.activeEvents.filter(
+            (e): e is string => typeof e === 'string',
+          );
           patch.activeEvents = [...new Set([...existing, ...newEvents])];
         }
         if (Array.isArray(delta.changes.worldRules)) {
           const existing = this.getWorldState(nid)?.worldRules ?? [];
-          const newRules = delta.changes.worldRules.filter((r): r is string => typeof r === 'string');
+          const newRules = delta.changes.worldRules.filter(
+            (r): r is string => typeof r === 'string',
+          );
           patch.worldRules = [...new Set([...existing, ...newRules])];
         }
         if (Array.isArray(delta.changes.unresolvedMysteries)) {
           const existing = this.getWorldState(nid)?.unresolvedMysteries ?? [];
-          const newMysteries = delta.changes.unresolvedMysteries.filter((m): m is string => typeof m === 'string');
+          const newMysteries = delta.changes.unresolvedMysteries.filter(
+            (m): m is string => typeof m === 'string',
+          );
           patch.unresolvedMysteries = [...new Set([...existing, ...newMysteries])];
         }
         if (delta.changes.factionStatus && typeof delta.changes.factionStatus === 'object') {

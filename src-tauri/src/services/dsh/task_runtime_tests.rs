@@ -1,5 +1,14 @@
 use super::*;
 
+#[path = "task_runtime_test_fixtures.rs"]
+mod contract_fixtures;
+#[path = "task_runtime_coverage_integration_tests.rs"]
+mod coverage_integration_tests;
+#[path = "task_runtime_revision_tests.rs"]
+mod revision_tests;
+#[path = "task_runtime_revision_transaction_tests.rs"]
+mod revision_transaction_tests;
+
 fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput {
     StartTaskTurnInput {
         conversation_id: "c1".to_string(),
@@ -13,6 +22,8 @@ fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput 
         required_read_tools: Vec::new(),
         book_word_goal: None,
         chapter_word_range: None,
+        revision_source: None,
+        verified_revision_source: None,
         model_snapshot: json!({
             "providerId": provider,
             "modelId": model,
@@ -447,6 +458,8 @@ fn greeting_turn_prompt_forbids_empty_generate_chapter() {
         required_read_tools: Vec::new(),
         book_word_goal: None,
         chapter_word_range: None,
+        revision_source: None,
+        verified_revision_source: None,
         model_snapshot: json!({}),
         request_policy: TaskRequestPolicyInput {
             max_requests_per_minute: 1,
@@ -585,6 +598,508 @@ fn chapter_candidate_length_is_enforced_only_for_writing_turns_with_a_range() {
     let mut summary = chapter_write_input();
     summary.task_kind = "chapter_summary".to_string();
     validate_chapter_candidate_length(&summary, &short).expect("other kinds ignore the range");
+}
+
+fn chapter_length_connection(input: &StartTaskTurnInput) -> rusqlite::Connection {
+    let mut connection = ai_task_service::tests::connection().expect("chapter repair database");
+    connection
+        .execute(
+            "INSERT INTO novels (id,title,created_at,updated_at) VALUES (?1,'长度测试',?2,?2)",
+            rusqlite::params![input.novel_id, now()],
+        )
+        .expect("seed novel");
+    connection.execute(
+        "INSERT INTO chapters (id,novel_id,title,order_index,status,word_count,created_at,updated_at)
+         VALUES (?1,?2,'本章',1,'drafted',0,?3,?3)",
+        rusqlite::params![input.chapter_id, input.novel_id, now()],
+    ).expect("seed chapter");
+    conversation_service::create_initialized(
+        &mut connection,
+        conversation_service::CreateInitializedConversationInput {
+            conversation_id: input.conversation_id.clone(),
+            turn_id: input.turn_id.clone(),
+            novel_id: input.novel_id.clone(),
+            title: "长度恢复".to_string(),
+            goal: input.goal.clone(),
+            default_model: input.model_snapshot.clone(),
+            created_at: now(),
+        },
+    )
+    .expect("seed conversation and user turn");
+    connection
+}
+
+fn chapter_length_tool(
+    connection: &mut rusqlite::Connection,
+    run: &str,
+    tool: &str,
+    step: usize,
+    call: &str,
+    status: &str,
+    payload: Option<Value>,
+) {
+    let event_id = format!("{run}-{call}");
+    conversation_service::append_tool_event(connection, AppendToolEventInput {
+        event_id: event_id.clone(), run_id: run.to_string(), tool_name: tool.to_string(),
+        arguments_summary: json!({"callId":call,"dshTurn":1,"dshStep":step,
+            "dshResponseId":format!("turn:1:step:{step}"),
+            // Every candidate is a distinct governed provider request; repeating one identity
+            // would collide with the attempt uniqueness constraint instead of proving the flow.
+            "governedProviderRequestId":format!("fixture-request-{run}-{call}")}),
+        status: "running".to_string(), duration_ms: None, error: None, result: None,
+        created_at: now(), finished_at: None,
+    }).expect("append tool fact");
+    let result = payload.map(|payload| {
+        let content = payload.to_string();
+        let hash = large_text_repository::sha256(&content);
+        let document_id = format!("{event_id}-result");
+        large_text_repository::insert_document_for_target(
+            connection,
+            &document_id,
+            "tool_event",
+            &event_id,
+            "result",
+            None,
+            &content,
+            &hash,
+            &now(),
+        )
+        .expect("persist verified candidate tool result");
+        json!({"largeTextRefId":document_id,"contentHash":hash,
+            "contentChars":content.chars().count(),"isError":false})
+    });
+    conversation_service::update_tool_event(
+        connection,
+        UpdateToolEventInput {
+            event_id,
+            status: status.to_string(),
+            duration_ms: Some(0),
+            error: (status == "failed").then_some("fixture validation failed".to_string()),
+            result,
+            finished_at: Some(now()),
+        },
+    )
+    .expect("settle tool fact");
+}
+
+fn chapter_length_run(
+    connection: &mut rusqlite::Connection,
+    input: &StartTaskTurnInput,
+    run: &str,
+    words: usize,
+    fresh_reads: bool,
+    failed_calls: usize,
+    candidate_novel: Option<&str>,
+) {
+    conversation_service::create_run(
+        connection,
+        CreateRunInput {
+            run_id: run.to_string(),
+            conversation_id: input.conversation_id.clone(),
+            turn_id: input.turn_id.clone(),
+            model_snapshot: input.model_snapshot.clone(),
+            worker_id: "fixture-worker".to_string(),
+            chapter_id: input.chapter_id.clone(),
+            created_at: now(),
+        },
+    )
+    .expect("create candidate run");
+    conversation_service::update_run(
+        connection,
+        UpdateRunInput {
+            run_id: run.to_string(),
+            status: "running".to_string(),
+            error: None,
+            updated_at: now(),
+            started_at: Some(now()),
+            finished_at: None,
+        },
+    )
+    .expect("start candidate run");
+    if fresh_reads {
+        for (index, tool) in input.required_read_tools.iter().enumerate() {
+            let payload = contract_fixtures::empty_read_payload(connection, input, tool);
+            chapter_length_tool(
+                connection,
+                run,
+                tool,
+                1,
+                &format!("read-{index}"),
+                "succeeded",
+                payload,
+            );
+        }
+    }
+    let tool = input.expected_tool.as_deref().expect("candidate tool");
+    for index in 0..failed_calls {
+        chapter_length_tool(
+            connection,
+            run,
+            tool,
+            index + 2,
+            &format!("failed-{index}"),
+            "failed",
+            None,
+        );
+    }
+    chapter_length_tool(
+        connection,
+        run,
+        tool,
+        failed_calls + 2,
+        "candidate",
+        "succeeded",
+        Some(
+            json!({"ok":true,"candidateOnly":true,"artifactType":"chapter_text", "data":{
+                "novelId":candidate_novel.unwrap_or(&input.novel_id),"chapterId":input.chapter_id,
+                "text":"字".repeat(words)
+            }}),
+        ),
+    );
+}
+
+fn chapter_length_fail_run(connection: &mut rusqlite::Connection, run: &str, error: &str) {
+    conversation_service::update_run(
+        connection,
+        UpdateRunInput {
+            run_id: run.to_string(),
+            status: "failed".to_string(),
+            error: Some(error.to_string()),
+            updated_at: now(),
+            started_at: None,
+            finished_at: Some(now()),
+        },
+    )
+    .expect("retain failed run");
+}
+
+fn assert_chapter_length_no_outputs(connection: &rusqlite::Connection) {
+    for table in [
+        "ai_tasks",
+        "result_artifacts",
+        "conversation_artifact_cards",
+        "chapter_drafts",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count candidate and formal outputs");
+        assert_eq!(
+            count, 0,
+            "{table} must remain untouched before an accepted candidate"
+        );
+    }
+    let chapter: (i64, Option<String>) = connection
+        .query_row(
+            "SELECT word_count,adopted_draft_id FROM chapters",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read formal chapter");
+    assert_eq!(chapter, (0, None));
+}
+
+#[test]
+fn chapter_length_recovery_accepts_overlong_then_in_range_without_formal_writes() {
+    let input = chapter_write_input();
+    let range = input.chapter_word_range.clone();
+    let mut connection = chapter_length_connection(&input);
+    let mut recovery = ChapterLengthRecovery::new(&input);
+    chapter_length_run(&mut connection, &input, "length-first", 3586, true, 0, None);
+    let error = recovery
+        .read_candidate(&connection, &input, "length-first")
+        .err()
+        .expect("3586 rejected");
+    assert!(error.starts_with("DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED:"));
+    assert!(error.contains("3586"));
+    chapter_length_fail_run(&mut connection, "length-first", &error);
+    assert_chapter_length_no_outputs(&connection);
+    assert!(recovery.try_repair(&input, &error, false, true));
+    let message = recovery
+        .failure_message(&error, true)
+        .expect("visible recovery message");
+    assert!(message.contains("自动修复（1/2）"));
+    assert!(message.contains("未创建候选 Artifact"));
+    conversation_service::append_runtime_assistant_turn(
+        &mut connection,
+        "length-message",
+        &input.conversation_id,
+        "length-first",
+        &message,
+        &now(),
+    )
+    .expect("persist transparent recovery turn");
+    let prompt = recovery.prompt(&input, 0, 1);
+    for required in [
+        "3586",
+        "目标 3000 字",
+        "2400～3450 字",
+        "禁止放宽区间",
+        "重新调用本轮全部必需读取工具",
+        "等待全部 Tool Result 返回后",
+        "当前剩余 2 次",
+    ] {
+        assert!(prompt.contains(required), "{required}");
+    }
+    assert!(!prompt.contains("自动总结"));
+    assert!(!prompt.contains("用户重试"));
+    chapter_length_run(
+        &mut connection,
+        &input,
+        "length-repair",
+        3000,
+        true,
+        0,
+        None,
+    );
+    let generated = recovery
+        .read_candidate(&connection, &input, "length-repair")
+        .expect("repaired candidate passes the same gate")
+        .expect("one candidate");
+    assert_eq!(
+        crate::services::draft_service::word_count(&generated.text),
+        3000
+    );
+    assert_eq!(input.chapter_word_range, range);
+    assert!(
+        !recovery.try_repair(&input, &error, false, true),
+        "success clears rejection evidence"
+    );
+    let prior: (String, String) = connection
+        .query_row(
+            "SELECT r.status,e.status FROM task_runs r JOIN tool_call_events e ON e.run_id=r.run_id
+         WHERE r.run_id='length-first' AND e.event_id='length-first-candidate'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("retained prior run and original tool result");
+    assert_eq!(prior, ("failed".to_string(), "succeeded".to_string()));
+    assert_chapter_length_no_outputs(&connection);
+}
+
+#[test]
+fn chapter_length_recovery_accepts_short_polish_then_in_range() {
+    let mut input = chapter_write_input();
+    input.task_kind = "chapter_polish".to_string();
+    input.expected_tool = Some("polish_chapter".to_string());
+    let mut connection = chapter_length_connection(&input);
+    let mut recovery = ChapterLengthRecovery::new(&input);
+    chapter_length_run(&mut connection, &input, "short-polish", 2399, true, 0, None);
+    let error = recovery
+        .read_candidate(&connection, &input, "short-polish")
+        .err()
+        .expect("short rejection");
+    chapter_length_fail_run(&mut connection, "short-polish", &error);
+    assert!(recovery.try_repair(&input, &error, false, true));
+    assert!(recovery
+        .prompt(&input, 0, 1)
+        .contains("唯一候选工具：polish_chapter"));
+    chapter_length_run(&mut connection, &input, "fixed-polish", 3450, true, 0, None);
+    assert!(recovery
+        .read_candidate(&connection, &input, "fixed-polish")
+        .expect("inclusive upper bound")
+        .is_some());
+    assert_chapter_length_no_outputs(&connection);
+}
+
+#[test]
+fn chapter_length_recovery_exhausts_after_three_candidates_and_two_repairs() {
+    let input = chapter_write_input();
+    let mut connection = chapter_length_connection(&input);
+    let mut recovery = ChapterLengthRecovery::new(&input);
+    for attempt in 1..=3 {
+        let run = format!("length-{attempt}");
+        chapter_length_run(&mut connection, &input, &run, 3586, true, 0, None);
+        let error = recovery
+            .read_candidate(&connection, &input, &run)
+            .err()
+            .expect("still overlong");
+        chapter_length_fail_run(&mut connection, &run, &error);
+        let retrying = recovery.try_repair(&input, &error, false, true);
+        assert_eq!(retrying, attempt < 3);
+        let message = recovery
+            .failure_message(&error, retrying)
+            .expect("visible repair status");
+        if attempt == 3 {
+            assert!(message.contains("预算已耗尽"));
+            assert!(!message.contains("正在"));
+        }
+        assert_chapter_length_no_outputs(&connection);
+    }
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM task_runs WHERE status='failed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn chapter_length_recovery_counts_failed_tool_attempts_across_runs() {
+    let input = chapter_write_input();
+    let mut connection = chapter_length_connection(&input);
+    let mut recovery = ChapterLengthRecovery::new(&input);
+    chapter_length_run(&mut connection, &input, "two-calls", 3586, true, 1, None);
+    let error = recovery
+        .read_candidate(&connection, &input, "two-calls")
+        .err()
+        .expect("length gate");
+    chapter_length_fail_run(&mut connection, "two-calls", &error);
+    assert!(recovery.try_repair(&input, &error, false, true));
+    assert!(recovery.prompt(&input, 0, 1).contains("当前剩余 1 次"));
+    // A model ignoring the remaining allowance cannot get its fourth call projected as an Artifact.
+    chapter_length_run(&mut connection, &input, "over-budget", 3000, true, 1, None);
+    let exhausted = recovery
+        .read_candidate(&connection, &input, "over-budget")
+        .err()
+        .expect("aggregate cap");
+    assert!(exhausted.starts_with("DSH_CHAPTER_CANDIDATE_ATTEMPTS_EXHAUSTED:"));
+    assert!(!recovery.try_repair(&input, &exhausted, false, true));
+    assert_chapter_length_no_outputs(&connection);
+}
+
+#[test]
+fn chapter_length_recovery_requires_exact_host_error_and_frozen_contract() {
+    let input = chapter_write_input();
+    let mut connection = chapter_length_connection(&input);
+    let mut recovery = ChapterLengthRecovery::new(&input);
+    let forged = validate_chapter_candidate_length(&input, &"字".repeat(3586))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        !recovery.try_repair(&input, &forged, false, true),
+        "raw error without verified run evidence"
+    );
+    chapter_length_run(&mut connection, &input, "frozen", 3586, true, 0, None);
+    let error = recovery
+        .read_candidate(&connection, &input, "frozen")
+        .err()
+        .expect("length evidence");
+    for other in [
+        format!("prefix {error}"),
+        error.replace("REJECTED:", "REJECTED_EXTRA:"),
+        "DSH_REQUIRED_CONTEXT_READ_MISSING: missing".to_string(),
+        "DSH_EXPECTED_CANDIDATE_FAILED: failed".to_string(),
+        "DSH 回合以错误结束: STREAM_CLOSED".to_string(),
+    ] {
+        assert!(!recovery.try_repair(&input, &other, false, true));
+    }
+    for change in 0..7 {
+        let mut changed = input.clone();
+        match change {
+            0 => changed.model_snapshot["modelId"] = json!("other-model"),
+            1 => changed.chapter_word_range.as_mut().unwrap().maximum = 4000,
+            2 => changed.required_read_tools.pop().map(|_| ()).unwrap(),
+            3 => changed.chapter_id = Some("other-chapter".to_string()),
+            4 => changed.turn_id = "other-turn".to_string(),
+            5 => changed.expected_tool = Some("generate_outline".to_string()),
+            _ => {
+                changed.task_kind = "chapter_summary".to_string();
+                changed.expected_tool = Some("summarize_chapter".to_string());
+            }
+        }
+        assert!(
+            !recovery.try_repair(&changed, &error, false, true),
+            "frozen dimension {change}"
+        );
+    }
+    assert!(!recovery.try_repair(&input, &error, true, true));
+    assert!(!recovery.try_repair(&input, &error, false, false));
+    assert!(recovery.try_repair(&input, &error, false, true));
+}
+
+#[test]
+fn chapter_length_recovery_revalidates_reads_and_scope_on_every_run() {
+    for missing_reads in [true, false] {
+        let input = chapter_write_input();
+        let mut connection = chapter_length_connection(&input);
+        let mut recovery = ChapterLengthRecovery::new(&input);
+        chapter_length_run(&mut connection, &input, "grounded", 3586, true, 0, None);
+        let error = recovery
+            .read_candidate(&connection, &input, "grounded")
+            .err()
+            .expect("length rejection");
+        chapter_length_fail_run(&mut connection, "grounded", &error);
+        assert!(recovery.try_repair(&input, &error, false, true));
+        chapter_length_run(
+            &mut connection,
+            &input,
+            "unsafe-repair",
+            3000,
+            !missing_reads,
+            0,
+            (!missing_reads).then_some("other-novel"),
+        );
+        let error = recovery
+            .read_candidate(&connection, &input, "unsafe-repair")
+            .err()
+            .expect("revalidation");
+        assert!(error.starts_with(if missing_reads {
+            "DSH_REQUIRED_CONTEXT_READ_MISSING:"
+        } else {
+            "DSH_GENERATED_CHAPTER_SCOPE_INVALID:"
+        }));
+        assert!(!recovery.try_repair(&input, &error, false, true));
+        assert_chapter_length_no_outputs(&connection);
+    }
+}
+
+#[test]
+fn chapter_length_recovery_shares_wall_budget_and_honors_cancel() {
+    let input = chapter_write_input();
+    let start = std::time::Instant::now();
+    let mut recovery = ChapterLengthRecovery::new_at(&input, start);
+    assert_eq!(
+        recovery.remaining_at(start + Duration::from_secs(479)),
+        Duration::from_secs(1)
+    );
+    assert!(recovery
+        .remaining_at(start + Duration::from_secs(480))
+        .is_zero());
+    let mut connection = chapter_length_connection(&input);
+    chapter_length_run(&mut connection, &input, "timed", 3586, true, 0, None);
+    let error = recovery
+        .read_candidate(&connection, &input, "timed")
+        .err()
+        .expect("length evidence");
+    assert!(recovery.try_repair(&input, &error, false, true));
+    assert_eq!(
+        recovery.remaining_at(start + Duration::from_secs(479)),
+        Duration::from_secs(1),
+        "repair cannot reset wall budget"
+    );
+    let cancelled = AtomicBool::new(true);
+    assert!(recovery
+        .timeout(Duration::from_secs(480), &cancelled)
+        .unwrap_err()
+        .contains("CANCELLED"));
+    let mut expired = ChapterLengthRecovery::new_at(&input, start - Duration::from_secs(481));
+    let error = expired
+        .read_candidate(&connection, &input, "timed")
+        .err()
+        .expect("same host evidence");
+    assert!(!expired.try_repair(&input, &error, false, true));
+    assert!(expired
+        .timeout(Duration::from_secs(480), &AtomicBool::new(false))
+        .unwrap_err()
+        .contains("WALL_BUDGET_EXHAUSTED"));
+    assert!(expired
+        .failure_message(&error, false)
+        .unwrap()
+        .contains("480 秒总预算已耗尽"));
+    let summary =
+        ChapterLengthRecovery::new_at(&chapter_summary_input(), start - Duration::from_secs(481));
+    assert_eq!(
+        summary
+            .timeout(Duration::from_secs(480), &cancelled)
+            .unwrap(),
+        Duration::from_secs(480),
+        "summary keeps its existing supervisor cancellation and timeout semantics"
+    );
+    assert!(summary.failure_message(&error, false).is_none());
 }
 
 #[test]
@@ -1251,9 +1766,10 @@ fn chapter_summary_contract_still_rejects_same_step_character_state_read() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-novel', 'run-1', 0, 'novel.read_context', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}'),
                     ('read-chapter', 'run-1', 1, 'chapter.read_outline', 'succeeded',
@@ -1266,6 +1782,7 @@ fn chapter_summary_contract_still_rejects_same_step_character_state_read() {
                      '{"dshTurn":1,"dshStep":2,"dshResponseId":"turn:1:step:2"}');"#,
         )
         .expect("seed real failure ordering");
+    contract_fixtures::seed_legacy_coverage(&connection, &input);
 
     let same_step = validate_turn_execution_contract(&connection, &input, "run-1")
         .expect_err("same-step character state read must remain rejected");
@@ -1304,9 +1821,10 @@ fn chapter_summary_contract_keeps_character_and_memory_reads_optional() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-novel', 'run-1', 0, 'novel.read_context', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}'),
                     ('read-chapter', 'run-1', 1, 'chapter.read_outline', 'succeeded',
@@ -1319,6 +1837,7 @@ fn chapter_summary_contract_keeps_character_and_memory_reads_optional() {
                      '{"dshTurn":1,"dshStep":2,"dshResponseId":"turn:1:step:2"}');"#,
         )
         .expect("seed optional context reads beside the summary candidate");
+    contract_fixtures::seed_legacy_coverage(&connection, &input);
 
     assert_eq!(
         validate_turn_execution_contract(&connection, &input, "run-1")
@@ -1358,7 +1877,8 @@ fn read_turn_contract_requires_every_declared_context_read_to_succeed() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );"#,
         )
         .expect("tool event schema");
@@ -1369,7 +1889,7 @@ fn read_turn_contract_requires_every_declared_context_read_to_succeed() {
 
     connection
         .execute(
-            "INSERT INTO tool_call_events VALUES
+            "INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                  ('read-1', 'run-1', 0, 'novel.read', 'failed', '{}')",
             [],
         )
@@ -1431,15 +1951,17 @@ fn turn_contract_rejects_same_step_grounding_and_accepts_the_next_step() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-1', 'run-1', 0, 'novel.read_context', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}'),
                     ('candidate-1', 'run-1', 1, 'generate_outline', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}');"#,
         )
         .expect("seed calls from one model response");
+    contract_fixtures::seed_legacy_coverage(&connection, &input);
     let same_step = validate_turn_execution_contract(&connection, &input, "run-1")
         .expect_err("a read and candidate from the same model step must fail");
     assert_eq!(same_step.code, "DSH_REQUIRED_CONTEXT_READ_MISSING");
@@ -1492,9 +2014,10 @@ fn turn_contract_rejects_legacy_calls_without_response_metadata() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-1', 'run-1', 0, 'novel.read_context', 'succeeded', '{}'),
                     ('candidate-1', 'run-1', 1, 'generate_outline', 'succeeded',
                      '{"dshTurn":1,"dshStep":2,"dshResponseId":"turn:1:step:2"}');"#,
@@ -1531,9 +2054,10 @@ fn turn_contract_distinguishes_a_missing_required_candidate() {
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-1', 'run-1', 0, 'novel.read_context', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}');"#,
         )
@@ -1569,9 +2093,10 @@ fn turn_contract_allows_failed_repairs_and_rejects_wrong_or_duplicate_candidates
                     sequence INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    arguments_summary_json TEXT NOT NULL
+                    arguments_summary_json TEXT NOT NULL,
+                    result_json TEXT
                 );
-                INSERT INTO tool_call_events VALUES
+                INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('read-1', 'run-1', 0, 'novel.read_context', 'succeeded',
                      '{"dshTurn":1,"dshStep":1,"dshResponseId":"turn:1:step:1"}'),
                     ('read-2', 'run-1', 1, 'chapter.read_outline', 'succeeded',
@@ -1580,6 +2105,7 @@ fn turn_contract_allows_failed_repairs_and_rejects_wrong_or_duplicate_candidates
                      '{"dshTurn":1,"dshStep":2,"dshResponseId":"turn:1:step:2"}');"#,
         )
         .expect("seed wrong candidate");
+    contract_fixtures::seed_legacy_coverage(&connection, &input);
     let wrong = validate_turn_execution_contract(&connection, &input, "run-1")
         .expect_err("wrong candidate must fail");
     assert_eq!(wrong.code, "DSH_UNEXPECTED_CANDIDATE_TOOL");
@@ -1594,7 +2120,7 @@ fn turn_contract_allows_failed_repairs_and_rejects_wrong_or_duplicate_candidates
         .expect("turn the first candidate into a failed validation attempt");
     connection
         .execute(
-            r#"INSERT INTO tool_call_events VALUES
+            r#"INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('candidate-2', 'run-1', 3, 'expand_settings', 'succeeded',
                      '{"dshTurn":1,"dshStep":3,"dshResponseId":"turn:1:step:3"}')"#,
             [],
@@ -1619,7 +2145,7 @@ fn turn_contract_allows_failed_repairs_and_rejects_wrong_or_duplicate_candidates
     connection
         .execute_batch(
             r#"UPDATE tool_call_events SET status='failed' WHERE event_id='candidate-1';
-                 INSERT INTO tool_call_events VALUES
+                 INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('candidate-3', 'run-1', 4, 'expand_settings', 'failed',
                      '{"dshTurn":1,"dshStep":4,"dshResponseId":"turn:1:step:4"}')"#,
         )
@@ -1640,7 +2166,7 @@ fn turn_contract_allows_failed_repairs_and_rejects_wrong_or_duplicate_candidates
 
     connection
         .execute(
-            r#"INSERT INTO tool_call_events VALUES
+            r#"INSERT INTO tool_call_events (event_id,run_id,sequence,tool_name,status,arguments_summary_json) VALUES
                     ('candidate-4', 'run-1', 5, 'expand_settings', 'failed',
                      '{"dshTurn":1,"dshStep":5,"dshResponseId":"turn:1:step:5"}')"#,
             [],

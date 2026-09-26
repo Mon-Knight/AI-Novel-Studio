@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  calculateEditMetrics,
-  FeedbackDatasetService,
-} from './feedbackDatasetService';
+import { calculateEditMetrics, FeedbackDatasetService } from './feedbackDatasetService';
 
 test('calculateEditMetrics computes difference and ratio', () => {
   const same = calculateEditMetrics('测试正文内容', '测试正文内容');

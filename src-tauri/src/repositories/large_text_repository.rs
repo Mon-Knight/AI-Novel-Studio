@@ -2,6 +2,10 @@ use crate::errors::{codes, AppError};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+#[path = "large_text_repository_tests.rs"]
+mod tests;
+
 pub const LARGE_TEXT_THRESHOLD_BYTES: usize = 100 * 1024;
 const CHUNK_BYTES: usize = 64 * 1024;
 
@@ -333,7 +337,8 @@ pub fn delete_if_unreferenced(connection: &Connection, document_id: &str) -> Res
                 (SELECT COUNT(*) FROM ai_constraint_snapshots WHERE prompt_template_ref_id = ?1) +
                 (SELECT COUNT(*) FROM result_artifacts
                  WHERE raw_content_ref_id = ?1 OR display_content_ref_id = ?1
-                    OR structured_payload_ref_id = ?1)",
+                    OR structured_payload_ref_id = ?1) +
+                (SELECT COUNT(*) FROM artifact_decisions WHERE apply_transaction_id = ?1)",
             params![document_id],
             |row| row.get(0),
         )

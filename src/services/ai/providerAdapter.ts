@@ -5,6 +5,7 @@ import type {
   AiPricingSnapshot,
   AiSettings,
   AiUsageCost,
+  GatewayModelConfig,
 } from '../../types/ai';
 import type { AiTaskType } from '../../types/ai-task';
 import type { RouteDecision } from '../../types/modelRuntime';
@@ -70,8 +71,14 @@ export function createProviderAdapter(
     throw new Error('Model Router 选择了未启用的专用本地正文模型，已拒绝派发。');
   }
 
-  if (isRemoteChapterScene && taskType !== 'chapter_scene_generate') {
-    throw new Error('专用远程模型 / AI Gateway 只能执行 chapter_scene_generate。');
+  if (
+    isRemoteChapterScene &&
+    taskType !== 'chapter_scene_generate' &&
+    taskType !== 'connection_test'
+  ) {
+    throw new Error(
+      '专用远程模型 / AI Gateway 只能执行 chapter_scene_generate 或 connection_test。',
+    );
   }
   if (isRemoteChapterScene && (!remote || !remote.enabled)) {
     throw new Error('Model Router 选择了未启用的专用远程模型 / AI Gateway，已拒绝派发。');
@@ -127,7 +134,7 @@ export function createProviderAdapter(
             topK: remote.topK,
             repeatPenalty: remote.repeatPenalty,
             seed: remote.seed,
-            allowTruncatedOutput: true,
+            allowTruncatedOutput: taskType === 'chapter_scene_generate',
             requireLoopback: false,
           }
         : {
@@ -284,4 +291,45 @@ export function createProviderAdapter(
       }
     },
   };
+}
+
+/**
+ * Probes one external AI Model Gateway endpoint with a bounded connection test
+ * through the frozen provider adapter, never accepting truncated output.
+ *
+ * Owns provider construction and dispatch so settings UI never wires AI
+ * clients directly. Rejects when the ping fails; the caller maps that failure
+ * to its own presentation while keeping the cancellation signal intact.
+ */
+export async function testGatewayConnection(
+  settings: AiSettings,
+  gateway: GatewayModelConfig,
+  options: AiGenerateOptions = {},
+): Promise<void> {
+  const providerId = gateway.providerId.trim() || 'ai_gateway';
+  const modelId = gateway.modelName.trim();
+  const adapter = createProviderAdapter(
+    { ...settings, gateway: { ...gateway, providerId, enabled: true } },
+    'connection_test',
+    {
+      selected: {
+        endpointId: `remote.${providerId}.${modelId}`,
+        providerId,
+        modelId,
+        kind: 'remote',
+      },
+    },
+  );
+  const response = await adapter.execute(
+    {
+      taskType: 'connection_test',
+      messages: [{ role: 'user', content: 'Reply with exactly OK and no other text.' }],
+      temperature: 0,
+      maxTokens: 128,
+    },
+    options,
+  );
+  if (response.text.trim() !== 'OK') {
+    throw new Error('连接已建立，但模型未按要求返回 OK；请检查模型配置后重试。');
+  }
 }

@@ -57,6 +57,7 @@ export function createVerificationPlan(
     coverage: full,
     rustFull: full,
     rustCheck: full,
+    rustSize: full,
     rustFilters: [],
     desktopFull: full,
     production: full,
@@ -71,6 +72,7 @@ export function createVerificationPlan(
   const units = testFiles.filter((file) => unitFile.test(file));
   for (const file of plan.files) {
     plan.rustCheck ||= /^src-tauri\/.*\.rs$/u.test(file);
+    plan.rustSize ||= /^src-tauri\/.*\.rs$/u.test(file);
     if (existing(file) && formattable.test(file) && !file.endsWith('.mdc')) plan.format.push(file);
     if (sourceFile.test(file) && !unitFile.test(file)) {
       plan.typecheck = true;
@@ -134,6 +136,7 @@ export function createVerificationPlan(
       !selected.length &&
       !rule.coverage &&
       !rule.rustFull &&
+      !rule.rustSize &&
       !rule.rustFilters?.length &&
       !rule.desktopFull &&
       !rule.e2e?.length &&
@@ -151,6 +154,7 @@ export function createVerificationPlan(
     for (const key of [
       'coverage',
       'rustFull',
+      'rustSize',
       'desktopFull',
       'production',
       'docs',
@@ -269,6 +273,7 @@ export function verificationCommands(
       note: 'ensures dist/ exists so tauri::generate_context! can compile (no-op when present)',
     });
   if (compilesRust) add('rust-check', 'native', cargo(['check', '--locked']));
+  if (plan.rustSize) add('rust-file-size', 'native', npmCommand('test:rust-file-size'));
   if (plan.rustFull) {
     add('gateway-clean', 'native', cargo(['clean', '-p', 'novel-domain-gateway']));
     add('gateway-build', 'native', cargo(['build', '--locked', '-p', 'novel-domain-gateway']));

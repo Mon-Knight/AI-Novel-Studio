@@ -17,6 +17,8 @@ import {
 } from '../generation/chapterGenerationPipeline';
 import {
   inspectChapterCandidateIntegrity,
+  buildChapterCandidateIntegrityReview,
+  type ChapterCandidateIntegrityReview,
   type ChapterCandidateIntegrityIssueCode,
   type ChapterCandidateIntegrityIssue,
 } from '../generation/chapterCandidateIntegrity';
@@ -31,21 +33,37 @@ import { generateId } from '../database/db';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { countTextWords } from '../../utils/contentHash';
 import type { TaskModelSnapshot } from '../../types/conversation';
+import {
+  CHAPTER_REVISION_DERIVATION_TYPE,
+  type ArtifactRevisionSource,
+} from '../../types/artifactRevision';
 import type { AiProvider, AiSettings } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
-import type { AiProviderRequestEvidence } from '../ai/aiExecutionPipeline';
+import {
+  linkProviderRequestEvidence,
+  type WorkbenchProviderRequestEvidence,
+} from './workbenchChapterWriterEvidence';
 import type {
   AdoptedPreviousChapterContext,
   GenerationContextSource,
+  GenerationRuleCoverage,
 } from '../../types/generationContext';
+import { getChapterWordRangePercents, resolveChapterWordRange } from './chapterWordRangePolicy';
+
+export { resolveChapterWordRange } from './chapterWordRangePolicy';
+export type { WorkbenchProviderRequestEvidence } from './workbenchChapterWriterEvidence';
 
 export interface WorkbenchChapterWriteInput {
   novelId: string;
   chapterId: string;
   goal: string;
+  targetWordCount?: number;
   mode: 'generate' | 'polish';
   previousCandidateText?: string;
+  revisionSource?: ArtifactRevisionSource;
+  /** Hash of verified unwrapped prose, distinct from a browser artifact wrapper hash. */
+  revisionSourceContentHash?: string;
   memoryContext?: unknown;
   modelSnapshot: TaskModelSnapshot;
   signal?: AbortSignal;
@@ -77,6 +95,10 @@ export interface WorkbenchChapterWriteResult {
   taskId?: string;
   artifactId?: string;
   contextHash?: string;
+  contextCoverage?: {
+    ruleSystems?: GenerationRuleCoverage;
+    worldSettings?: GenerationRuleCoverage;
+  };
   continuitySourceHash?: string;
   continuitySourceChapterId?: string;
   contextSources?: Array<Pick<GenerationContextSource, 'type' | 'title' | 'status'>>;
@@ -87,6 +109,7 @@ export interface WorkbenchChapterWriteResult {
   integrityRepairCount?: number;
   integrityRepairAttempts?: WorkbenchIntegrityRepairAttemptEvidence[];
   integrityWarnings?: ChapterCandidateIntegrityIssue[];
+  integrityReview?: ChapterCandidateIntegrityReview;
   providerRequestEvidence?: WorkbenchProviderRequestEvidence;
   resolvedSettings?: AiSettings;
 }
@@ -95,27 +118,6 @@ export interface WorkbenchIntegrityRepairAttemptEvidence {
   attempt: number;
   issueCodes: ChapterCandidateIntegrityIssueCode[];
   sourceContentHash: string;
-}
-
-export interface WorkbenchProviderRequestEvidence {
-  schemaVersion: 'workbench_provider_request_evidence_v1';
-  hashAlgorithm: 'sha256';
-  messagesSerialization: 'json_stringify_messages_v1';
-  taskId?: string;
-  attemptId?: string;
-  messagesSha256: string;
-  messageCount: number;
-  compiledContextSha256: string;
-  snapshotContextHash: string;
-  snapshotCompiledPromptSha256: string;
-  snapshotRequestSourceSha256: string;
-  includedSnapshotRequestSourceSha256?: string;
-  snapshotRequestSourceStatus: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
-  providerSourceStatus?: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
-  generationSourceStatuses?: Record<
-    string,
-    'included' | 'truncated' | 'omitted_empty' | 'omitted_budget'
-  >;
 }
 
 export interface WorkbenchChapterWriterDependencies {
@@ -138,42 +140,6 @@ export type PreviousChapterContinuityResolution =
 
 const MAX_LENGTH_REPAIR_ATTEMPTS = 3;
 const MAX_INTEGRITY_REPAIR_ATTEMPTS = 2;
-
-export function resolveChapterWordRange(targetWordCount: number | undefined):
-  | {
-      target: number;
-      minimum: number;
-      maximum: number;
-      fallbackMinimum: number;
-      fallbackMaximum: number;
-      finalMinimum: number;
-      finalMaximum: number;
-      hardMinimum: number;
-      hardMaximum: number;
-    }
-  | undefined {
-  if (!Number.isFinite(targetWordCount) || (targetWordCount ?? 0) <= 0) return undefined;
-  const target = Math.round(targetWordCount!);
-  return {
-    target,
-    minimum: Math.max(1, Math.floor(target * 0.9)),
-    // Repair toward a deliberately tighter range, so normal model variance
-    // still lands below the final hard ceiling without truncating the ending.
-    maximum: Math.max(1, Math.floor((target * 105) / 100)),
-    // If the first repair still misses the hard ceiling, the final retry needs
-    // enough headroom for normal model variance to converge deterministically.
-    fallbackMinimum: Math.max(1, Math.floor((target * 85) / 100)),
-    fallbackMaximum: Math.max(1, Math.floor((target * 95) / 100)),
-    // A rare third pass is cheaper than discarding an otherwise valid full
-    // chapter when a provider repeatedly overshoots by only a small margin.
-    finalMinimum: Math.max(1, Math.floor((target * 80) / 100)),
-    finalMaximum: Math.max(1, Math.floor((target * 90) / 100)),
-    hardMinimum: Math.max(1, Math.floor((target * 80) / 100)),
-    // The final hard ceiling leaves a natural-ending margin after the repair
-    // prompt has already targeted the tighter range.
-    hardMaximum: Math.max(1, Math.floor((target * 115) / 100)),
-  };
-}
 
 type ChapterLengthRepairDirection = 'expand' | 'compress';
 
@@ -342,87 +308,6 @@ function formatMemoryContext(memoryContext: unknown): string {
   return lines.join('\n');
 }
 
-async function linkProviderRequestEvidence(
-  snapshot: Awaited<ReturnType<typeof generationContextCompiler.compile>>,
-  requestSourceVersion: string,
-  evidence: AiProviderRequestEvidence | undefined,
-  identity: { taskId?: string; attemptId?: string },
-  currentDraftVersion?: string,
-): Promise<WorkbenchProviderRequestEvidence | undefined> {
-  if (!evidence) return undefined;
-  const snapshotSource = evidence.requestContextSources.find(
-    (source) => source.sourceVersion === requestSourceVersion,
-  );
-  if (!snapshotSource) return undefined;
-  const providerSources = evidence.sources ?? [];
-  const strictestStatus = (
-    statuses: Array<'included' | 'truncated' | 'omitted_empty' | 'omitted_budget'>,
-  ) => {
-    if (statuses.includes('omitted_budget')) return 'omitted_budget' as const;
-    if (statuses.includes('omitted_empty')) return 'omitted_empty' as const;
-    if (statuses.includes('truncated')) return 'truncated' as const;
-    return statuses.length > 0 ? ('included' as const) : undefined;
-  };
-  const generationSourceStatuses: WorkbenchProviderRequestEvidence['generationSourceStatuses'] = {};
-  const mergeGenerationStatus = (
-    sourceType: string,
-    status: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget',
-  ) => {
-    const current = generationSourceStatuses[sourceType];
-    generationSourceStatuses[sourceType] = strictestStatus(current ? [current, status] : [status])!;
-  };
-  for (const section of snapshot.compiledContext.sections) {
-    const providerSource = providerSources.find(
-      (source) => source.sourceVersion === snapshot.contextHash && source.label === section.title,
-    );
-    if (!providerSource) continue;
-    for (const sourceType of section.sourceTypes) {
-      mergeGenerationStatus(sourceType, providerSource.status);
-    }
-  }
-  const requestProviderSource = providerSources.find(
-    (source) =>
-      source.sourceType === 'request_context' && source.sourceVersion === requestSourceVersion,
-  );
-  if (requestProviderSource) {
-    mergeGenerationStatus('user_instruction', requestProviderSource.status);
-  }
-  if (currentDraftVersion) {
-    const draftProviderSource = providerSources.find(
-      (source) =>
-        source.sourceType === 'draft' &&
-        source.sourceVersion === currentDraftVersion &&
-        source.label === 'Current chapter repair draft',
-    );
-    if (draftProviderSource) {
-      mergeGenerationStatus('current_editor', draftProviderSource.status);
-    }
-  }
-  return {
-    schemaVersion: 'workbench_provider_request_evidence_v1',
-    hashAlgorithm: evidence.hashAlgorithm,
-    messagesSerialization: evidence.messagesSerialization,
-    ...(identity.taskId ? { taskId: identity.taskId } : {}),
-    ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
-    messagesSha256: evidence.messagesSha256,
-    messageCount: evidence.messageCount,
-    compiledContextSha256: evidence.compiledContextSha256,
-    snapshotContextHash: snapshot.contextHash,
-    snapshotCompiledPromptSha256: await computeContentSha256(
-      snapshot.compiledPromptText.replace(/\r\n?/g, '\n').trim(),
-    ),
-    snapshotRequestSourceSha256: snapshotSource.contentSha256,
-    ...(snapshotSource.includedSha256
-      ? { includedSnapshotRequestSourceSha256: snapshotSource.includedSha256 }
-      : {}),
-    snapshotRequestSourceStatus: snapshotSource.status,
-    ...(strictestStatus(providerSources.map((source) => source.status))
-      ? { providerSourceStatus: strictestStatus(providerSources.map((source) => source.status)) }
-      : {}),
-    ...(Object.keys(generationSourceStatuses).length > 0 ? { generationSourceStatuses } : {}),
-  };
-}
-
 export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDependencies = {}) {
   const executeGen = deps.executeGeneration ?? executeChapterGeneration;
   const compileCtx =
@@ -468,8 +353,30 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         : undefined;
 
     const memoryText = formatMemoryContext(input.memoryContext);
-    let sourceText = input.previousCandidateText?.trim();
-    if (!sourceText && input.mode === 'polish') {
+    const revisionSource = input.revisionSource ? { ...input.revisionSource } : undefined;
+    const revisionSourceContentHash =
+      input.revisionSourceContentHash ?? revisionSource?.artifactHash;
+    const previousCandidateText = input.previousCandidateText;
+    if (
+      revisionSource &&
+      (revisionSource.novelId !== input.novelId ||
+        revisionSource.chapterId !== input.chapterId ||
+        revisionSource.artifactType !== 'chapter_text' ||
+        !revisionSource.artifactId ||
+        !revisionSource.cardId ||
+        !revisionSource.conversationId ||
+        !previousCandidateText?.trim() ||
+        !/^[a-f0-9]{64}$/i.test(revisionSource.artifactHash) ||
+        (await computeContentSha256(previousCandidateText)) !==
+          revisionSourceContentHash?.toLowerCase())
+    ) {
+      throw workbenchWriterError(
+        'WORKBENCH_REVISION_SOURCE_CONFLICT',
+        '修订来源的作品、章节或正文哈希不匹配，已保留原候选并停止生成。',
+      );
+    }
+    let sourceText = previousCandidateText?.trim();
+    if (!sourceText && input.mode === 'polish' && !revisionSource) {
       const adopted = await draftVersionService.getAdoptedByChapterId(input.chapterId);
       sourceText = adopted?.content?.trim();
     }
@@ -486,6 +393,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       novelId: input.novelId,
       chapterId: input.chapterId,
       userInstruction: input.goal,
+      targetWordCount: input.targetWordCount,
       retrievedMemoryContext: memoryText || undefined,
       currentEditorContent: sourceText,
       styleProfileId: resolvedProfiles.styleProfileId,
@@ -493,10 +401,14 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       requireCoreAssets: true,
       adoptedPreviousChapter,
     });
+    const contextCoverage = {
+      ruleSystems: snapshot.compiledContext.ruleSystemCoverage,
+      worldSettings: snapshot.compiledContext.worldSettingCoverage,
+    };
     const targetWordCount =
       snapshot.compiledContext?.baseContext?.targetWordCount ??
       snapshot.compiledContext?.activeEngineeringState?.chapterCard.targetWordCount;
-    const wordRange = resolveChapterWordRange(targetWordCount);
+    const wordRange = resolveChapterWordRange(targetWordCount, getChapterWordRangePercents());
     const request = buildSnapshotGenerateRequest(snapshot);
     const currentDraftVersion = sourceText ? await computeContentSha256(sourceText) : undefined;
     const compilationSources = buildChapterProviderContextSources({
@@ -595,6 +507,16 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         novelId: input.novelId,
         chapterId: input.chapterId,
         purpose: 'workbench_chapter_candidate',
+        contextCoverage,
+        ...(revisionSource
+          ? {
+              revisionSource,
+              sourceArtifactId: revisionSource.artifactId,
+              sourceContentHash: revisionSourceContentHash,
+              parentArtifactId: revisionSource.artifactId,
+              derivationType: CHAPTER_REVISION_DERIVATION_TYPE,
+            }
+          : {}),
       },
       signal: input.signal,
     });
@@ -660,12 +582,22 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
             content: repairSourceText,
             sourceVersion: repairSourceHash,
           },
+          ...(revisionSource && previousCandidateText && revisionSourceContentHash
+            ? {
+                revisionBase: {
+                  content: previousCandidateText,
+                  sourceVersion: revisionSourceContentHash,
+                },
+              }
+            : {}),
         }),
         taskInput: {
           chapterTitle: snapshot.compiledContext?.baseContext?.chapterTitle ?? '未命名章节',
           contextHash: snapshot.contextHash ?? '',
-          sourceContentHash: repairSourceHash,
-          sourceArtifactId: result.artifactBundle?.artifact.artifactId,
+          sourceContentHash: revisionSource ? revisionSourceContentHash : repairSourceHash,
+          sourceArtifactId:
+            revisionSource?.artifactId ?? result.artifactBundle?.artifact.artifactId,
+          repairSourceHash,
           sourceWordCount: finalWordCount,
           targetWordCount: wordRange.target,
           minimumWordCount: repairRange.minimum,
@@ -677,6 +609,14 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
           novelId: input.novelId,
           chapterId: input.chapterId,
           purpose: 'workbench_chapter_length_repair',
+          contextCoverage,
+          ...(revisionSource
+            ? {
+                revisionSource,
+                parentArtifactId: revisionSource.artifactId,
+                derivationType: CHAPTER_REVISION_DERIVATION_TYPE,
+              }
+            : {}),
         },
         signal: input.signal,
       });
@@ -755,12 +695,22 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
             content: repairSourceText,
             sourceVersion: repairSourceHash,
           },
+          ...(revisionSource && previousCandidateText && revisionSourceContentHash
+            ? {
+                revisionBase: {
+                  content: previousCandidateText,
+                  sourceVersion: revisionSourceContentHash,
+                },
+              }
+            : {}),
         }),
         taskInput: {
           chapterTitle: snapshot.compiledContext?.baseContext?.chapterTitle ?? '未命名章节',
           contextHash: snapshot.contextHash ?? '',
-          sourceContentHash: repairSourceHash,
-          sourceArtifactId: result.artifactBundle?.artifact.artifactId,
+          sourceContentHash: revisionSource ? revisionSourceContentHash : repairSourceHash,
+          sourceArtifactId:
+            revisionSource?.artifactId ?? result.artifactBundle?.artifact.artifactId,
+          repairSourceHash,
           sourceWordCount: finalWordCount,
           targetWordCount: integrityTargetWordCount,
           minimumWordCount: integrityMinimumWordCount,
@@ -772,6 +722,14 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
           novelId: input.novelId,
           chapterId: input.chapterId,
           purpose: 'workbench_chapter_integrity_repair',
+          contextCoverage,
+          ...(revisionSource
+            ? {
+                revisionSource,
+                parentArtifactId: revisionSource.artifactId,
+                derivationType: CHAPTER_REVISION_DERIVATION_TYPE,
+              }
+            : {}),
         },
         signal: input.signal,
       });
@@ -826,6 +784,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       taskId: result.taskId,
       artifactId: result.artifactBundle?.artifact.artifactId,
       contextHash: snapshot.contextHash,
+      contextCoverage,
       continuitySourceHash: adoptedPreviousChapter?.contentHash,
       continuitySourceChapterId: adoptedPreviousChapter?.chapterId,
       contextSources: snapshot.sources.map(({ type, title, status }) => ({
@@ -840,6 +799,17 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       integrityRepairCount,
       integrityRepairAttempts,
       integrityWarnings: integrityIssues.filter((issue) => issue.severity === 'warning'),
+      integrityReview: buildChapterCandidateIntegrityReview({
+        scope: {
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          artifactId: result.artifactBundle?.artifact.artifactId,
+          candidateHash: await computeContentSha256(text),
+        },
+        issues: integrityIssues,
+        previousChapterBoundary: adoptedPreviousChapter ? 'checked' : 'not_applicable',
+        ruleCoverage: snapshot.compiledContext.ruleSystemCoverage,
+      }),
       providerRequestEvidence,
       resolvedSettings: settings,
     };

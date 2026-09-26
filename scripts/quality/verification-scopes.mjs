@@ -141,6 +141,24 @@ export const verificationScopes = [
     e2e: ['conversational-workbench', 'workbench-writing-smoke', 'domain-facade-sqlite'],
   },
   {
+    name: 'world rule and revision native authority',
+    match:
+      /^src-tauri\/(?:shared\/world_rule_fingerprint\.rs$|src\/services\/(?:world_rule[^/]*|world_setting_service|setting_suggestion[^/]*|structured_rule_apply_receipt|chapter_revision[^/]*)\.rs$|src\/commands\/(?:world|setting_suggestions)\.rs$)/u,
+    rustFull: true,
+    e2e: [
+      'interaction-world-rules-repair',
+      'workbench-writing-smoke',
+      'story-assets-transaction',
+      'project-backup-boundary',
+    ],
+  },
+  {
+    name: 'native startup guard tests',
+    match: /^src-tauri\/src\/main_startup_tests\.rs$/u,
+    rustFilters: ['startup_tests::'],
+    e2e: ['app-start'],
+  },
+  {
     name: 'native packaging',
     // rust-toolchain.toml selects the compiler for every native build, so it
     // carries the same blast radius as Cargo.toml and the packaging config.
@@ -186,8 +204,13 @@ export const verificationScopes = [
   {
     name: 'native draft persistence',
     match:
-      /^src-tauri\/src\/(?:large_text_save|services\/draft_service|repositories\/(?:draft|large_text)_repository|commands\/drafts)\.rs$/u,
-    rustFilters: ['services::draft_service::', 'large_text_save::', 'commands::tests::'],
+      /^src-tauri\/src\/(?:large_text_save|services\/draft_service|repositories\/(?:draft|large_text)_repository(?:_tests)?|commands\/drafts)\.rs$/u,
+    rustFilters: [
+      'services::draft_service::',
+      'large_text_save::',
+      'repositories::large_text_repository::',
+      'commands::tests::',
+    ],
     e2e: ['workbench-writing-smoke', 'large-text-save'],
   },
   ...nativeServiceOwners.map((name) => ({
@@ -221,6 +244,38 @@ export const verificationScopes = [
     name: 'native window state',
     match: /^src-tauri\/src\/window_state\.rs$/u,
     e2e: ['app-start'],
+  },
+  {
+    // Fallback owner for any Rust source not matched above. The native lane runs
+    // the Rust size budget gate for every `src-tauri/**/*.rs` change.
+    name: 'native source size',
+    match: /^src-tauri\/.*\.rs$/u,
+    rustSize: true,
+  },
+  {
+    name: 'world rule schema and persistence',
+    match:
+      /^src\/(?:services\/worldRules\/|services\/database\/settingRepository(?:\.|\/)|types\/(?:worldRules|setting)\.|features\/settingSuggestions\/)/u,
+    tests: [
+      'src/services/worldRules/',
+      'src/services/settingSuggestions/',
+      'src/pages/NovelDetail/',
+      'src/pages/SettingSuggestions/',
+    ],
+    rustFull: true,
+    e2e: ['interaction-world-rules-repair', 'story-assets-transaction', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'workbench interaction and candidate continuity',
+    match:
+      /^src\/(?:pages\/Workbench\/(?:Workbench(?:Composer|TemplateControls|ModelSelect|SidePanel|MessageStream|Turn|RuleChangeReview)|hooks\/useWorkbench(?:ArtifactFocus|PresentationScroll|Artifacts|Conversations|TaskRunner|Compression|ComposerDisclosure|SidePanelAccessibility))|features\/workbench\/workbenchPresentation|services\/conversation\/(?:artifactRevision|browserChapterReviewBaseline|structuredRuleGovernance)|store\/workbenchDraftStore|types\/artifactRevision|components\/layout\/(?:AppShell|FrameBar)|styles\/(?:app-shell|workbench))/u,
+    tests: [
+      'src/pages/Workbench/',
+      'src/features/workbench/',
+      'src/services/conversation/',
+      'src/test/components/WritingShell.test.tsx',
+    ],
+    e2e: ['interaction-world-rules-repair', 'workbench-writing-smoke'],
   },
   {
     name: 'task directory',
@@ -317,7 +372,7 @@ export const verificationScopes = [
 ];
 
 export const isDocumentation = (file) =>
-  /^(?:docs\/|\.github\/(?:skills|instructions|checklists|prompts|workflows-docs)\/|\.cursor\/rules\/)/u.test(
+  /^(?:docs\/|reports\/|\.github\/(?:skills|instructions|checklists|prompts|workflows-docs)\/|\.cursor\/rules\/)/u.test(
     file,
   ) ||
   /^(?:AGENTS|README|CHANGELOG|LICENSE|CONTRIBUTING)(?:\.|$)/u.test(file) ||

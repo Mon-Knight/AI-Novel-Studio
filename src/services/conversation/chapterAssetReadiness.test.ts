@@ -98,6 +98,59 @@ test('E2E core-asset fixture validates every chapter scope before mutating SQLit
   assert.equal(mutationCount, 0);
 });
 
+test('E2E core-asset setup serializes fresh world and rule previews through production author guards', async () => {
+  const order: string[] = [];
+  let revision = 0;
+  const evidence = await seedE2eChapterCoreAssets(e2eCoreAssetFixture, {
+    isDesktop: () => true,
+    getNovel: async () => ({ id: 'novel-1' }) as never,
+    getChapter: async (id) => ({ id, novelId: 'novel-1' }) as never,
+    updateChapter: async (id, updates) =>
+      ({ id, targetWordCount: updates.targetWordCount }) as never,
+    previewWorldRuleChange: async (novelId, changes) => {
+      order.push('preview:' + changes[0].targetType);
+      return {
+        novelId,
+        ruleSetFingerprint: 'rules-' + revision,
+        previewHash: 'preview-' + revision,
+        sources: [],
+        affectedChapters: [],
+        dependentRules: [],
+        uncertainty: ['前置测试授权，不代替被测UI'],
+        blockingConflicts: [],
+        requiresConfirmation: true,
+      };
+    },
+    saveWorldSetting: async (_id, input) => {
+      order.push('save:world_setting');
+      assert.equal(input.expectedRuleSetFingerprint, 'rules-0');
+      assert.equal(input.changeAuthorization?.previewHash, 'preview-0');
+      assert.equal(input.changeAuthorization?.intent, 'confirm_change');
+      revision = 1;
+      return { id: 'world-1' } as never;
+    },
+    saveRuleSystem: async (_id, input) => {
+      order.push('save:rule_system');
+      assert.equal(input.expectedRuleSetFingerprint, 'rules-1');
+      assert.equal(input.changeAuthorization?.previewHash, 'preview-1');
+      revision = 2;
+      return { id: 'rule-1' } as never;
+    },
+    saveProtagonist: async () => ({ id: 'protagonist-1' }) as never,
+    saveChapterOutline: async (input) => ({ id: 'outline-' + input.chapterId }) as never,
+    setActiveChapterOutline: async () => undefined as never,
+    inspectReadiness: async () => ({ ready: true, missingAssets: [] }),
+  });
+  assert.deepEqual(order, [
+    'preview:world_setting',
+    'save:world_setting',
+    'preview:rule_system',
+    'save:rule_system',
+  ]);
+  assert.equal(evidence.storageMode, 'sqlite');
+  assert.equal(evidence.ruleSystemId, 'rule-1');
+});
+
 test('chapter readiness reports the exact writer core assets in a stable user-facing order', async () => {
   const result = await inspectChapterAssetReadiness(
     { novelId: 'novel-1', chapterId: 'chapter-1', userInstruction: '生成本章正文' },

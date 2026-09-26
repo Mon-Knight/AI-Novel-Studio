@@ -98,52 +98,8 @@ where
 }
 
 #[cfg(test)]
-mod startup_tests {
-    use super::{run_instance_guarded_startup, InstanceStartup};
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    #[test]
-    fn secondary_instance_requests_focus_without_initializing_database() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                false
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Secondary);
-        assert_eq!(events.into_inner(), ["instance-check", "focus-request"]);
-    }
-
-    #[test]
-    fn primary_instance_initializes_database_after_acquiring_lock() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                true
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Primary);
-        assert_eq!(
-            events.into_inner(),
-            ["instance-check", "database-initialization"]
-        );
-    }
-}
+#[path = "main_startup_tests.rs"]
+mod startup_tests;
 
 fn main() {
     let startup_at = std::time::Instant::now();
@@ -243,6 +199,7 @@ fn main() {
             commands::import_txt_novel,
             commands::get_world_settings,
             commands::save_world_setting,
+            commands::world::preview_world_rule_change,
             commands::get_rule_systems,
             commands::save_rule_system,
             commands::delete_rule_system,
@@ -288,6 +245,7 @@ fn main() {
             commands::agent_plans::cancel_agent_plan,
             commands::agent_plans::recover_interrupted_agent_plans,
             commands::artifacts::create_result_artifact,
+            commands::artifacts::create_chapter_revision_artifact,
             commands::artifacts::get_result_artifact,
             commands::artifacts::list_result_artifacts_for_task,
             commands::placements::prepare_placement_proposal,
@@ -346,6 +304,7 @@ fn main() {
             commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
             commands::conversations::apply_structured_artifact,
+            services::structured_artifact_apply_service::preview_structured_artifact_rule_change,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
             commands::conversations::get_review_authorization,
@@ -432,6 +391,9 @@ fn main() {
             commands::setting_suggestions::get_setting_suggestion,
             commands::setting_suggestions::save_setting_suggestions,
             commands::setting_suggestions::decide_setting_suggestion,
+            commands::setting_suggestions::adopt_setting_suggestion,
+            commands::setting_suggestions::preview_setting_suggestion_adoption,
+            commands::setting_suggestions::get_world_rule_set_snapshot,
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,

@@ -8,8 +8,12 @@
  * 候选，绝不获得正式写入能力。
  */
 import type { TaskModelSnapshot } from '../../types/conversation';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 import type { ContextReadToolName } from '../conversation/taskGoalRouting';
-import { resolveChapterWordRange } from '../conversation/workbenchChapterWriter';
+import {
+  resolveChapterWordRange,
+  type ChapterWordRangePercents,
+} from '../conversation/chapterWordRangePolicy';
 
 export const WRITING_SUBAGENT_CONTRACT_VERSION = 'writing_subagent_contract_v1_draft' as const;
 export const WRITING_SUBAGENT_ID = 'writing-subagent' as const;
@@ -69,6 +73,8 @@ export interface WritingSubAgentContract {
   allowedTools: readonly string[];
   wordRange?: { target: number; minimum: number; maximum: number };
   continuity?: { previousChapterId: string; sourceHash?: string };
+  /** Exact candidate identity only; the native host re-reads and verifies its full text. */
+  revisionSource?: ArtifactRevisionSource;
   budget: WritingSubAgentBudget;
   modelSnapshot: TaskModelSnapshot;
 }
@@ -80,7 +86,9 @@ export interface PlanWritingSubAgentTurnInput {
   mode: 'generate' | 'polish';
   modelSnapshot: TaskModelSnapshot;
   targetWordCount?: number;
+  wordRangePercents?: ChapterWordRangePercents;
   previousChapter?: { chapterId: string; sourceHash?: string };
+  revisionSource?: ArtifactRevisionSource;
   budget?: Partial<WritingSubAgentBudget>;
 }
 
@@ -94,7 +102,7 @@ export function outputTokenBudgetFor(wordRange: { maximum: number } | undefined)
 export function planWritingSubAgentTurn(
   input: PlanWritingSubAgentTurnInput,
 ): WritingSubAgentContract {
-  const range = resolveChapterWordRange(input.targetWordCount);
+  const range = resolveChapterWordRange(input.targetWordCount, input.wordRangePercents);
   const wordRange = range
     ? { target: range.target, minimum: range.hardMinimum, maximum: range.hardMaximum }
     : undefined;
@@ -120,6 +128,7 @@ export function planWritingSubAgentTurn(
     requiredReadTools: [...WRITING_SUBAGENT_READ_TOOLS],
     allowedTools: [...WRITING_SUBAGENT_READ_TOOLS, expectedTool],
     wordRange,
+    ...(input.revisionSource ? { revisionSource: { ...input.revisionSource } } : {}),
     continuity: input.previousChapter
       ? {
           previousChapterId: input.previousChapter.chapterId,
@@ -169,6 +178,23 @@ export function assertWritingSubAgentContract(contract: WritingSubAgentContract)
   if (contract.taskKind !== expectedKind) {
     throw new WritingSubAgentContractViolation('taskKind 必须与候选工具一一对应');
   }
+  const source = contract.revisionSource;
+  if (source) {
+    if (
+      source.novelId !== contract.novelId ||
+      source.chapterId !== contract.chapterId ||
+      source.artifactType !== 'chapter_text' ||
+      ![source.conversationId, source.cardId, source.artifactId, source.title].every(
+        (value) => typeof value === 'string' && value.trim().length > 0,
+      ) ||
+      !/^[0-9a-f]{64}$/u.test(source.artifactHash) ||
+      (source.runId !== undefined && !source.runId.trim()) ||
+      (source.sourceDraftVersion !== undefined &&
+        (!Number.isSafeInteger(source.sourceDraftVersion) || source.sourceDraftVersion <= 0))
+    ) {
+      throw new WritingSubAgentContractViolation('修订必须绑定同作品同章节的精确有效候选身份');
+    }
+  }
   const expectedAllowed = new Set<string>([...contract.requiredReadTools, contract.expectedTool]);
   const allowed = new Set(contract.allowedTools);
   if (
@@ -207,6 +233,7 @@ export function toDshTaskStartContract(contract: WritingSubAgentContract): {
   requiredReadTools: WritingSubAgentReadTool[];
   allowedTools: string[];
   chapterWordRange?: { target: number; minimum: number; maximum: number };
+  revisionSource?: ArtifactRevisionSource;
 } {
   assertWritingSubAgentContract(contract);
   return {
@@ -216,6 +243,7 @@ export function toDshTaskStartContract(contract: WritingSubAgentContract): {
     requiredReadTools: [...contract.requiredReadTools],
     allowedTools: [...contract.allowedTools],
     chapterWordRange: contract.wordRange ? { ...contract.wordRange } : undefined,
+    ...(contract.revisionSource ? { revisionSource: { ...contract.revisionSource } } : {}),
   };
 }
 

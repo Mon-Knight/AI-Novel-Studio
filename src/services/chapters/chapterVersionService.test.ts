@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  ChapterVersionService,
-  computeProseCounts,
-} from './chapterVersionService';
+import { ChapterVersionService, computeProseCounts } from './chapterVersionService';
 
 test('computeProseCounts calculates CJK and word counts accurately', () => {
   const counts = computeProseCounts('夜幕降临，林清玄在竹林中小憩。\n周围一片寂静。');
@@ -146,11 +143,7 @@ test('ChapterVersionService executes safe rollback to a previous revision', asyn
   });
 
   // 回滚到 v1
-  const rolledBack = await service.rollbackToRevision(
-    'chap-004',
-    v1.revisionId,
-    '撤销错误的修改',
-  );
+  const rolledBack = await service.rollbackToRevision('chap-004', v1.revisionId, '撤销错误的修改');
 
   assert.equal(rolledBack.revisionNumber, 3);
   assert.equal(rolledBack.source, 'rollback');

@@ -17,7 +17,12 @@ import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard
 import ExportCard from '../../components/novel-card/ExportCard';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { Novel } from '../../types/novel';
-import type { WorldSetting, RuleSystem, RuleCategory } from '../../types/setting';
+import type { WorldSetting, RuleSystem } from '../../types/setting';
+import type { SettingEditInput } from '../../components/novel-detail/SettingEditForm';
+import WorldRuleChangeConfirmation, {
+  type WorldRuleApplicationGuard,
+} from '../../components/novel-detail/WorldRuleChangeConfirmation';
+import type { WorldRuleChangeImpact } from '../../types/worldRules';
 import type { Protagonist } from '../../types/protagonist';
 import { formatNumber } from '../../utils/format';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -53,6 +58,19 @@ function NovelDetailPage() {
   const [protagonist, setProtagonist] = useState<Protagonist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingDeletion, setPendingDeletion] = useState<{
+    source: RuleSystem;
+    preview: WorldRuleChangeImpact;
+  } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleting = useRef(false);
+  const currentNovelId = useRef(novelId);
+  currentNovelId.current = novelId;
+  useEffect(() => {
+    setPendingDeletion(null);
+    setDeleteError('');
+  }, [novelId]);
 
   const loadData = useCallback(async () => {
     if (!novelId) return;
@@ -140,16 +158,12 @@ function NovelDetailPage() {
     }
   };
 
-  const handleSaveWorldSetting = async (
-    id: string | null,
-    data: { title: string; content: string },
-  ) => {
+  const handleSaveWorldSetting = async (id: string | null, data: SettingEditInput) => {
     if (!novelId) return;
     try {
       const result = await settingRepository.saveWorldSetting(id, {
+        ...data,
         novelId,
-        title: data.title,
-        content: data.content,
       });
       setWorldSettings((prev) => {
         const idx = prev.findIndex((s) => s.id === result.id);
@@ -170,23 +184,12 @@ function NovelDetailPage() {
     }
   };
 
-  const handleSaveRuleSystem = async (
-    id: string | null,
-    data: {
-      title: string;
-      category?: string;
-      content: string;
-      forbiddenRules?: string;
-    },
-  ) => {
+  const handleSaveRuleSystem = async (id: string | null, data: SettingEditInput) => {
     if (!novelId) return;
     try {
       const result = await settingRepository.saveRuleSystem(id, {
+        ...data,
         novelId,
-        title: data.title,
-        category: data.category as RuleCategory | undefined,
-        content: data.content,
-        forbiddenRules: data.forbiddenRules,
       });
       setRuleSystems((prev) => {
         const idx = prev.findIndex((s) => s.id === result.id);
@@ -208,18 +211,52 @@ function NovelDetailPage() {
   };
 
   const handleDeleteRuleSystem = async (id: string) => {
-    if (!novelId) return;
+    if (!novelId || deleting.current) return;
+    const source = ruleSystems.find((rule) => rule.id === id && rule.novelId === novelId);
+    if (!source) throw new Error('规则目标已失效，请刷新后重试');
+    deleting.current = true;
+    setDeleteBusy(true);
+    setDeleteError('');
     try {
-      await settingRepository.deleteRuleSystem(id);
-      const reloaded = await settingRepository.getRuleSystems(novelId);
-      setRuleSystems(reloaded);
-    } catch (e: unknown) {
-      appLogger.captureError('NOVEL_DETAIL_DELETE_RULE_FAILED', e, { novelId });
-      await showError({
-        title: '删除法则体系失败',
-        message: describeUnknownError(e, '删除法则体系失败'),
+      const preview = await settingRepository.previewWorldRuleChange(novelId, [
+        {
+          operation: 'delete',
+          targetType: 'rule_system',
+          targetId: source.id,
+          title: source.title,
+          content: source.content,
+          category: source.category,
+          forbiddenRules: source.forbiddenRules,
+          structuredJson: source.structuredJson,
+          isActive: source.isActive,
+        },
+      ]);
+      if (currentNovelId.current === novelId) setPendingDeletion({ source, preview });
+    } finally {
+      deleting.current = false;
+      setDeleteBusy(false);
+    }
+  };
+  const confirmDeleteRuleSystem = async (guard: WorldRuleApplicationGuard) => {
+    if (!pendingDeletion || deleting.current || pendingDeletion.source.novelId !== novelId) return;
+    deleting.current = true;
+    setDeleteBusy(true);
+    setDeleteError('');
+    const source = pendingDeletion.source;
+    try {
+      await settingRepository.deleteRuleSystem(source.id, {
+        novelId: source.novelId,
+        expectedUpdatedAt: source.updatedAt,
+        ...guard,
       });
-      throw e;
+      if (currentNovelId.current !== source.novelId) return;
+      setRuleSystems((rules) => rules.filter((rule) => rule.id !== source.id));
+      setPendingDeletion(null);
+    } catch (e) {
+      setDeleteError(describeUnknownError(e, '删除失败；请解决依赖或重新预览，记录已保留'));
+    } finally {
+      deleting.current = false;
+      setDeleteBusy(false);
     }
   };
 
@@ -258,6 +295,21 @@ function NovelDetailPage() {
 
   return (
     <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
+      <WorldRuleChangeConfirmation
+        title="永久删除规则（建议优先停用）"
+        previewedContent={
+          pendingDeletion
+            ? `删除《${pendingDeletion.source.title}》及其规则内容，保留已采用正文；若存在依赖须先解决。\n${pendingDeletion.source.content}`
+            : undefined
+        }
+        preview={pendingDeletion?.preview}
+        busy={deleteBusy}
+        error={deleteError}
+        onConfirm={confirmDeleteRuleSystem}
+        onCancel={() => {
+          if (!deleteBusy) setPendingDeletion(null);
+        }}
+      />
       {/* 紧凑详情头部 */}
       <div className="detail-header">
         <div className="detail-cover">
@@ -374,7 +426,9 @@ function NovelDetailPage() {
           <PanelErrorBoundary panelTitle="世界观设定">
             <WorldSettingCard
               novelId={novel.id}
+              key={novel.id}
               settings={worldSettings}
+              onPreview={(change) => settingRepository.previewWorldRuleChange(novel.id, [change])}
               onSave={handleSaveWorldSetting}
             />
           </PanelErrorBoundary>
@@ -389,7 +443,9 @@ function NovelDetailPage() {
           <PanelErrorBoundary panelTitle="法则体系">
             <RuleSystemCard
               novelId={novel.id}
+              key={novel.id}
               ruleSystems={ruleSystems}
+              onPreview={(change) => settingRepository.previewWorldRuleChange(novel.id, [change])}
               onSave={handleSaveRuleSystem}
               onDelete={handleDeleteRuleSystem}
             />

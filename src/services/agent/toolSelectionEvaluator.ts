@@ -62,8 +62,7 @@ export class ToolSelectionEvaluator {
       ),
     );
 
-    const isOptimal =
-      overallScore >= 80 && unnecessaryToolScore === 0 && missingToolScore === 0;
+    const isOptimal = overallScore >= 80 && unnecessaryToolScore === 0 && missingToolScore === 0;
 
     let feedback = `工具 [${tool}] 选择有效，与创作目标匹配。`;
     if (unnecessaryToolScore > 0) {
@@ -167,7 +166,12 @@ export class ToolSelectionEvaluator {
     if (goal.includes('大纲') || goal.includes('架构') || goal.includes('分卷')) {
       return 'outline';
     }
-    if (goal.includes('分镜') || goal.includes('scene') || goal.includes('节奏') || goal.includes('beat')) {
+    if (
+      goal.includes('分镜') ||
+      goal.includes('scene') ||
+      goal.includes('节奏') ||
+      goal.includes('beat')
+    ) {
       return 'scene';
     }
     return 'general';
@@ -198,11 +202,7 @@ export class ToolSelectionEvaluator {
     }
   }
 
-  private isComplementaryTool(
-    tool: string,
-    intent: string,
-    _completed: string[],
-  ): boolean {
+  private isComplementaryTool(tool: string, intent: string, _completed: string[]): boolean {
     if (intent === 'character' && (tool === 'update_memory' || tool === 'generate_scene_plan')) {
       return true;
     }
@@ -216,12 +216,12 @@ export class ToolSelectionEvaluator {
     return tool === 'generate_prose' || tool === 'quality_check';
   }
 
-  private getMissingPrerequisites(
-    tool: string,
-    completed: string[],
-    intent: string,
-  ): string[] {
-    if (tool === 'generate_prose' && !completed.includes('generate_scene_plan') && intent === 'full_chapter') {
+  private getMissingPrerequisites(tool: string, completed: string[], intent: string): string[] {
+    if (
+      tool === 'generate_prose' &&
+      !completed.includes('generate_scene_plan') &&
+      intent === 'full_chapter'
+    ) {
       return ['generate_scene_plan'];
     }
     if (tool === 'save_chapter_version' && !completed.includes('generate_prose')) {

@@ -94,6 +94,7 @@ test('SettingsPage: 桌面级左侧分类导航与面板动态切换', async () 
 
   await waitFor(() => {
     assert.ok(screen.getByTestId('settings-tab-pane-governance'));
+    assert.ok(screen.getByTestId('settings-chapter-word-range-card'));
     assert.ok(screen.getByTestId('settings-security-card'));
   });
 
@@ -631,4 +632,36 @@ test('SettingsPage groups API models that share a source endpoint onto one card'
     fireEvent.click(within(sharedCard).getByRole('button', { name: '编辑' }));
   });
   await waitFor(() => assert.equal(screen.queryByTestId('ai-api-model-editor'), null));
+});
+
+test('SettingsPage persists chapter word-range percents from the governance card', async () => {
+  localStorage.removeItem('ai_novel_studio_chapter_word_range');
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-governance'));
+  });
+  await waitFor(() => assert.ok(screen.getByTestId('settings-chapter-word-range-card')));
+  await act(async () => {
+    fireEvent.change(screen.getByTestId('chapter-word-range-min'), { target: { value: '70' } });
+    fireEvent.change(screen.getByTestId('chapter-word-range-max'), { target: { value: '120' } });
+  });
+  await waitFor(() => {
+    const preview = screen.getByTestId('chapter-word-range-preview').textContent ?? '';
+    assert.equal(preview.includes('2100～3600'), true);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('chapter-word-range-save'));
+  });
+  const stored = JSON.parse(localStorage.getItem('ai_novel_studio_chapter_word_range') ?? '{}') as {
+    hardMinimumPercent?: number;
+    hardMaximumPercent?: number;
+  };
+  assert.equal(stored.hardMinimumPercent, 70);
+  assert.equal(stored.hardMaximumPercent, 120);
 });

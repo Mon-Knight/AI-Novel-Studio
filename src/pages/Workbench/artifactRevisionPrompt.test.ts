@@ -8,15 +8,15 @@ import {
 } from './artifactRevisionPrompt';
 
 const expectedDrafts: Array<[ConversationArtifactCard['artifactType'], string]> = [
-  ['chapter_text', '请根据以下要求修改上一版章节正文候选：\n'],
-  ['outline', '请根据以下要求修改上一版大纲候选：\n'],
-  ['character_candidates', '请根据以下要求修改上一版人物候选：\n'],
-  ['event_candidates', '请根据以下要求修改上一版事件候选：\n'],
-  ['setting_candidates', '请根据以下要求修改上一版设定候选：\n'],
-  ['chapter_summary', '请根据以下要求修改上一版章节总结候选：\n'],
+  ['chapter_text', '请根据以下要求修改所选章节正文候选：\n'],
+  ['outline', '请根据以下要求修改所选大纲候选：\n'],
+  ['character_candidates', '请根据以下要求修改所选人物候选：\n'],
+  ['event_candidates', '请根据以下要求修改所选事件候选：\n'],
+  ['setting_candidates', '请根据以下要求修改所选设定候选：\n'],
+  ['chapter_summary', '请根据以下要求修改所选章节总结候选：\n'],
   ['quality_report', '请根据以下要求重新检查正文并更新质量检查报告：\n'],
   ['style_analysis', '请根据以下要求重新分析风格并更新风格分析报告：\n'],
-  ['generic', '请根据以下要求调整上一版创作产物：\n'],
+  ['generic', '请根据以下要求调整所选创作产物：\n'],
 ];
 
 test('buildArtifactRevisionDraft returns domain-specific revision openings', () => {
@@ -34,14 +34,14 @@ test('read-only report revision drafts do not imply candidate application', () =
 });
 
 test('unmapped artifact types use the neutral generic opening', () => {
-  assert.equal(buildArtifactRevisionDraft('tool_result'), '请根据以下要求调整上一版创作产物：\n');
+  assert.equal(buildArtifactRevisionDraft('tool_result'), '请根据以下要求调整所选创作产物：\n');
 });
 
 test('revision drafts preserve complete review notes without trimming or truncation', () => {
   const notes = `  保留原人物，仅调整动机。\n${'补充要求。'.repeat(1000)}\n  `;
   assert.equal(
     buildArtifactRevisionDraft('character_candidates', notes),
-    `请根据以下要求修改上一版人物候选：\n${notes}`,
+    `请根据以下要求修改所选人物候选：\n${notes}`,
   );
   assert.equal(
     buildArtifactRevisionDraft('character_candidates', ' \n '),

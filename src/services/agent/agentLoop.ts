@@ -144,7 +144,8 @@ export class CreativeAgentHarness {
       decisionTrace.toolResult = record.output;
       decisionTrace.toolSuccess = record.success;
       decisionTrace.nextAdjustment =
-        evaluation.suggestedAdjustment || (evaluation.needsRetry ? '调整入参重试' : '继续推进下一步');
+        evaluation.suggestedAdjustment ||
+        (evaluation.needsRetry ? '调整入参重试' : '继续推进下一步');
       context.decisionTraces.push(decisionTrace);
       events?.onDecisionTrace?.(decisionTrace);
 

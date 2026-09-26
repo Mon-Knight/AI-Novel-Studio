@@ -1,6 +1,8 @@
 import { stripTaskCourtesy, taskGoalDirective } from './taskGoalDirective';
+import { isTaskWordTargetSetting, parseTaskWordTarget } from './taskWordTarget';
 
 export function assertTaskGoalExecutable(goal: string): void {
+  parseTaskWordTarget(goal);
   if (!taskGoalDirective(goal).needsClarification) return;
   throw Object.assign(
     new Error(
@@ -208,6 +210,7 @@ function isShortCreativeBrief(goal: string): boolean {
 }
 
 export function isConversationalGoal(goal: string): boolean {
+  if (isTaskWordTargetSetting(goal)) return true;
   const text = goal.trim();
   if (!text || Array.from(text).length > 40) return false;
   if (DOMAIN_GOAL.test(text)) return false;

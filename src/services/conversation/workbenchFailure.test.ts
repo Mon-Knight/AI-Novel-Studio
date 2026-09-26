@@ -6,6 +6,16 @@ import {
   formatWorkbenchFailure,
 } from './workbenchFailure';
 
+test('length rejection gives a recoverable target instruction without suggesting wider acceptance', () => {
+  const message = 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED: 章节候选3586字超出2400～3450（目标3000）';
+  const failure = classifyWorkbenchFailure(message);
+  assert.equal(failure.code, 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED');
+  assert.equal(failure.message, message);
+  assert.match(failure.hint, /未生成可采用产物/u);
+  assert.match(failure.hint, /有限修正/u);
+  assert.match(failure.hint, /本任务目标字数设为3200字/u);
+});
+
 test('goal clarification is a parameter decision, not a model retry failure', () => {
   const failure = classifyWorkbenchFailure(
     Object.assign(new Error('请明确本回合动作。'), {

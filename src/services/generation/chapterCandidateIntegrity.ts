@@ -1,24 +1,18 @@
-export const CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES = [
-  'chapter_opening_rollback',
-  'chapter_boundary_sentence_repetition',
-  'chapter_boundary_action_replay',
-  'chapter_tail_pollution',
-  'chapter_meta_reasoning_leakage',
-  'chapter_authorial_label_leakage',
-  'chapter_source_chain_break',
-  'chapter_dialogue_reference_conflict',
-  'chapter_temporal_semantics_conflict',
-  'chapter_audit_voice_leakage',
-] as const;
+import type {
+  ChapterCandidateIntegrityIssue,
+  ChapterCandidateIntegrityIssueCode,
+  InspectChapterCandidateIntegrityInput,
+} from './chapterCandidateIntegrityReview';
 
-export type ChapterCandidateIntegrityIssueCode =
-  (typeof CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES)[number];
-
-export interface ChapterCandidateIntegrityIssue {
-  code: ChapterCandidateIntegrityIssueCode;
-  summary: string;
-  severity: 'error' | 'warning';
-}
+export {
+  CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES,
+  buildChapterCandidateIntegrityReview,
+  formatChapterCandidateIntegrityReview,
+  type ChapterCandidateIntegrityIssue,
+  type ChapterCandidateIntegrityIssueCode,
+  type ChapterCandidateIntegrityReview,
+  type InspectChapterCandidateIntegrityInput,
+} from './chapterCandidateIntegrityReview';
 
 const SEMANTIC_REVIEW_WARNINGS = new Set<ChapterCandidateIntegrityIssueCode>([
   'chapter_boundary_action_replay',
@@ -27,11 +21,6 @@ const SEMANTIC_REVIEW_WARNINGS = new Set<ChapterCandidateIntegrityIssueCode>([
   'chapter_temporal_semantics_conflict',
   'chapter_audit_voice_leakage',
 ]);
-
-export interface InspectChapterCandidateIntegrityInput {
-  candidateText: string;
-  previousChapterText?: string;
-}
 
 const OPENING_MATCH_CHARS = 28;
 const PREVIOUS_TAIL_ALLOWANCE_CHARS = 240;

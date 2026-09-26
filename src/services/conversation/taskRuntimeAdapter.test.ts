@@ -16,6 +16,7 @@ import { volumeRepository } from '../database/volumeRepository';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { artifactDecisionService } from './artifactDecisionService';
 import { taskConversationService } from './taskConversationService';
+import { captureBrowserChapterRuleBaseline } from './browserChapterReviewBaseline';
 import {
   createTaskRuntimeAdapter,
   findLatestCandidateText,
@@ -582,7 +583,12 @@ test('short follow-up writing inherits only explicit task-wide constraints', asy
   await taskConversationService.appendTurn(
     conversation.conversationId,
     'user',
-    ['全程使用第三人称限知。', '本章必须在钟楼开场。', '第十二章让馆长现身。'].join('\n'),
+    [
+      '全程使用第三人称限知。',
+      '本章必须在钟楼开场。',
+      '第十二章让馆长现身。',
+      '本任务目标字数设为3200字。',
+    ].join('\n'),
   );
   const current = await taskConversationService.appendTurn(
     conversation.conversationId,
@@ -594,6 +600,7 @@ test('short follow-up writing inherits only explicit task-wide constraints', asy
     chapterWriter: {
       generate: async (input) => {
         writerGoal = input.goal;
+        assert.equal(input.targetWordCount, 3200);
         return {
           text: '这是由短提示触发并读取正式小说资产后生成的章节候选正文，长度足够进入人工审阅。',
           source: 'writer',
@@ -1318,7 +1325,7 @@ test('artifact cards render persisted source, baseline, and validation evidence'
   assert.match(html, /data-processing-status="valid_with_warnings"/);
   assert.match(html, /生成来源：作品 novel-001 · 章节 chapter-003 · 草稿 draft-007/);
   assert.match(html, /生成时基线：源草稿 v7 · 内容哈希 1234567890ab\.\.\./);
-  assert.match(html, /结构与来源校验通过，含警告 · 1 个警告/);
+  assert.match(html, /结构与来源校验通过，含警告 · 内容仍需审阅 · 1 个警告/);
 });
 
 test('invalid artifact evidence blocks confirmation but keeps revision and rejection available', () => {
@@ -2042,6 +2049,7 @@ test('browser chapter confirmation stays pending until authorized adoption succe
     title: '章节正文候选',
     summary: '等待确认审阅',
     structuredPayloadJson: {
+      browserRuleSet: await captureBrowserChapterRuleBaseline('novel-001'),
       candidateOnly: true,
       data: {
         novelId: 'novel-001',

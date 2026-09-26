@@ -1,5 +1,6 @@
 import { browser } from '@wdio/globals';
 import { redactLogText } from '../../scripts/e2e/artifact-sanitizer.ts';
+import type { WorldRuleChangePreview } from '../../src/types/worldRules';
 import {
   clickTestId,
   fillTestId,
@@ -178,26 +179,75 @@ export async function readWritingSubAgentFlag(): Promise<string | null> {
 }
 
 export async function seedCoreAssets(novelId: string): Promise<void> {
+  const worldInput = {
+    novelId,
+    title: '苍穹大陆',
+    content:
+      '苍穹大陆宗门林立，青云宗坐落于连绵山脉之间，演武场是外门弟子每季试炼之地。灵气随季节涨落，雷雨之夜常有天象异变。',
+    isActive: true,
+  };
+  const worldPreview = await invoke<WorldRuleChangePreview>('preview_world_rule_change', {
+    novelId,
+    changes: [
+      {
+        targetType: 'world_setting',
+        title: worldInput.title,
+        content: worldInput.content,
+        isActive: worldInput.isActive,
+      },
+    ],
+  });
+  if (worldPreview.blockingConflicts.length) {
+    throw new Error('Acceptance core-asset fixture world preview has blocking dependencies.');
+  }
   await invoke('save_world_setting', {
     id: null,
     input: {
-      novelId,
-      title: '苍穹大陆',
-      content:
-        '苍穹大陆宗门林立，青云宗坐落于连绵山脉之间，演武场是外门弟子每季试炼之地。灵气随季节涨落，雷雨之夜常有天象异变。',
-      isActive: true,
+      ...worldInput,
+      expectedRuleSetFingerprint: worldPreview.ruleSetFingerprint,
+      changeAuthorization: {
+        previewHash: worldPreview.previewHash,
+        intent: 'confirm_change',
+        notes: '已授权的验收前置资产；不代替被测生产 UI 决定。',
+      },
     },
   });
+  // The world insertion changes the rule-set baseline; preview the rule only after it commits.
+  const ruleInput = {
+    novelId,
+    title: '修炼规则',
+    category: null,
+    content:
+      '修为分炼气、筑基、金丹三境，每境九层。突破需要长期积累与代价，不能凭空掌握新的力量；灵力耗尽后需静养恢复。',
+    forbiddenRules: '不得忽略伤势和疲劳；不得出现无来由的越级战胜。',
+    isActive: true,
+  };
+  const rulePreview = await invoke<WorldRuleChangePreview>('preview_world_rule_change', {
+    novelId,
+    changes: [
+      {
+        targetType: 'rule_system',
+        title: ruleInput.title,
+        category: ruleInput.category,
+        content: ruleInput.content,
+        forbiddenRules: ruleInput.forbiddenRules,
+        isActive: ruleInput.isActive,
+      },
+    ],
+  });
+  if (rulePreview.blockingConflicts.length) {
+    throw new Error('Acceptance core-asset fixture rule preview has blocking dependencies.');
+  }
   await invoke('save_rule_system', {
     id: null,
     input: {
-      novelId,
-      title: '修炼规则',
-      category: null,
-      content:
-        '修为分炼气、筑基、金丹三境，每境九层。突破需要长期积累与代价，不能凭空掌握新的力量；灵力耗尽后需静养恢复。',
-      forbiddenRules: '不得忽略伤势和疲劳；不得出现无来由的越级战胜。',
-      isActive: true,
+      ...ruleInput,
+      expectedRuleSetFingerprint: rulePreview.ruleSetFingerprint,
+      changeAuthorization: {
+        previewHash: rulePreview.previewHash,
+        intent: 'confirm_change',
+        notes: '已授权的验收前置资产；不代替被测生产 UI 决定。',
+      },
     },
   });
   await invoke('save_protagonist', {
@@ -485,6 +535,7 @@ export async function readChapterInvariants(input: {
 }): Promise<{
   chapterStatus: string | null;
   chapterWordCount: number | null;
+  chapterTargetWordCount: number | null;
   draftCount: number | null;
   novelTotalWordCount: number | null;
 }> {
@@ -497,6 +548,7 @@ export async function readChapterInvariants(input: {
   return {
     chapterStatus: chapter?.status ?? null,
     chapterWordCount: chapter?.wordCount ?? null,
+    chapterTargetWordCount: chapter?.targetWordCount ?? null,
     draftCount: Array.isArray(drafts) ? drafts.length : null,
     novelTotalWordCount: novel?.totalWordCount ?? null,
   };

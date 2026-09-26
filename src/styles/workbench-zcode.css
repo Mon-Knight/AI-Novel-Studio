@@ -13,26 +13,175 @@
   background: var(--color-bg-app);
 }
 
-/* 任何已打开的侧面板视图（launcher / plugins / context / artifacts / events）都占第三列 */
-.workbench-page[data-side-panel]:not([data-side-panel='closed']) {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--side-panel-width);
+/* Overlay is the default for an open panel. Only pinned + >1180 occupies a column. */
+.workbench-page[data-panel-intent='transient'] > .workbench-side-panel,
+.workbench-page[data-panel-intent='pinned'] > .workbench-side-panel {
+  position: absolute;
+  top: var(--workbench-panel-top, 0px);
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-right-panel);
+  width: min(var(--side-panel-width), 100%);
+  box-shadow: -12px 0 32px var(--color-shadow);
 }
 
-/* 窄窗口：保持两列，侧面板改为覆盖在对话流右侧，避免把对话流压扁 */
-@media (max-width: 1180px) {
-  .workbench-page[data-side-panel]:not([data-side-panel='closed']) {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+@media (min-width: 1181px) {
+  .workbench-page[data-panel-intent='pinned'] {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--side-panel-width);
   }
 
-  .workbench-page[data-side-panel]:not([data-side-panel='closed']) > .workbench-side-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(var(--side-panel-width), calc(100% - var(--sidebar-width)));
-    z-index: var(--z-right-panel);
-    box-shadow: -12px 0 32px var(--color-shadow);
+  .workbench-page[data-panel-intent='pinned'] > .workbench-side-panel {
+    position: static;
+    inset: auto;
+    width: auto;
+    z-index: auto;
+    box-shadow: none;
   }
+}
+
+.workbench-side-plugin-frame {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.workbench-side-plugin-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 6px 10px 0;
+}
+
+.workbench-side-launcher-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Auxiliary sections share one bounded scroll area; the target and send controls
+   never participate in its scroll. The two transient disclosures are mutually exclusive. */
+.workbench-composer-extras {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.workbench-composer-surface > textarea {
+  flex: 0 1 auto;
+}
+
+.workbench-composer-surface > .workbench-template-undo {
+  flex: 0 0 auto;
+  margin: 6px 10px 0;
+}
+
+.workbench-revision-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.workbench-revision-source > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workbench-model-control.workbench-fixed-model,
+.workbench-model-control.workbench-fixed-model:hover {
+  flex: 0 1 auto;
+  max-width: min(280px, 100%);
+  flex-wrap: nowrap;
+  column-gap: 5px;
+  padding: 3px 4px 3px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.workbench-fixed-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.workbench-fixed-model-details {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.workbench-fixed-model-details summary {
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workbench-fixed-model-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.workbench-fixed-model-details p {
+  margin: 4px 0 0;
+  max-width: 220px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.workbench-public-event {
+  width: 100%;
+  max-width: var(--workbench-content-width);
+  margin-inline: auto;
+  min-width: 0;
+  scroll-margin-block: 12px;
+  border-radius: var(--radius-md);
+}
+
+.workbench-public-event[data-located='true'] {
+  outline: 1px solid var(--color-border-strong);
+  outline-offset: 3px;
+  background: var(--color-bg-selected);
+}
+
+.workbench-pending-navigation {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workbench-message-scroll {
+  overflow-anchor: none;
+}
+
+.workbench-pending-navigation button {
+  min-height: 28px;
+  max-width: 100%;
+  padding: 3px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-panel);
+  color: inherit;
+}
+
+.workbench-pending-navigation button:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 /* === 左侧：快捷操作 + 项目/任务树 === */
@@ -192,6 +341,28 @@
   background: var(--color-bg-app);
 }
 
+.workbench-task-header .chapter-locator {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 6px;
+  width: min(260px, 100%);
+}
+
+.workbench-task-header .chapter-locator-search input {
+  height: 26px;
+  padding: 2px 6px;
+}
+
+.workbench-task-header .chapter-locator-current {
+  min-height: 26px;
+  padding: 2px 6px;
+}
+
+.workbench-task-header .chapter-locator select {
+  grid-column: 1 / -1;
+  height: 26px;
+}
+
 .workbench-task-header-inner {
   min-height: 52px;
   padding: 6px 0;
@@ -299,6 +470,8 @@
 /* === 底部：悬浮输入卡片 === */
 .workbench-composer,
 .agent-console-composer {
+  --workbench-composer-height: min(55vh, 440px);
+  max-height: var(--workbench-composer-height);
   padding: 4px 24px 18px;
   border-top: 0;
   background: transparent;
@@ -402,6 +575,10 @@
 }
 
 .workbench-composer-surface {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(var(--workbench-composer-height) - 24px);
   border-radius: var(--radius-xl);
   background: var(--color-bg-composer);
   box-shadow: var(--shadow-composer);
@@ -427,6 +604,8 @@
 }
 
 .workbench-composer-toolbar {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 6px;
   min-height: 44px;
   padding: 4px 10px 10px 12px;
@@ -654,6 +833,16 @@
   border-left: 1px solid var(--color-border);
   background: var(--color-bg-sidebar);
   animation: workbench-side-panel-enter var(--motion-panel) var(--ease-enter) both;
+}
+
+.workbench-side-panel:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.workbench-plugin-header > div {
+  flex: 1;
+  min-width: 0;
 }
 
 .workbench-side-panel .workbench-plugin-panel {

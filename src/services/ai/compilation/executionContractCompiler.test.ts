@@ -472,3 +472,50 @@ test('compiler rejects unsupported sources, scope drift and unregistered tools',
     /Novel 来源与 Task scope/,
   );
 });
+
+test('exact revision identity enters the context manifest before compilation hash and cannot cross scope', async () => {
+  const source = {
+    conversationId: 'conversation-a',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    cardId: 'card-a',
+    artifactId: 'artifact-a',
+    artifactHash: 'b'.repeat(64),
+    artifactType: 'chapter_text',
+    title: '候选A',
+  };
+  const compile = (revisionSource: typeof source) =>
+    compileAiExecutionContract({
+      definition: {
+        ...definition,
+        taskType: 'chapter_generate',
+        expectedArtifactType: 'chapter_text',
+      },
+      scope: { scopeType: 'chapter', novelId: 'novel-1', chapterId: 'chapter-1' },
+      compilation: {
+        sources: sources(),
+        taskInput: {
+          revisionSource,
+          parentArtifactId: revisionSource.artifactId,
+          sourceArtifactId: revisionSource.artifactId,
+          sourceContentHash: revisionSource.artifactHash,
+          derivationType: 'revision',
+        },
+      },
+      settings,
+      providerId: 'deepseek',
+      modelId: 'test-model',
+      toolRegistry: registry,
+    });
+  const first = await compile(source);
+  assert.deepEqual(first.contextSnapshot.sourceManifestJson.revisionSource, source);
+  assert.deepEqual(first.inputPayloadJson.taskInput.revisionSource, source);
+  assert.notEqual(first.contextSnapshot.sourceManifestJson.revisionSource, source);
+  const second = await compile({ ...source, artifactId: 'artifact-b', cardId: 'card-b' });
+  assert.notEqual(first.inputPayloadJson.compilationHash, second.inputPayloadJson.compilationHash);
+  assert.deepEqual(first.request.messages, second.request.messages);
+  await assert.rejects(
+    compile({ ...source, chapterId: 'other-chapter' }),
+    /修订来源与编译任务作用域不一致/,
+  );
+});
