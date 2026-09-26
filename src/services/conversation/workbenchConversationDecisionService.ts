@@ -5,6 +5,7 @@ import type {
 } from '../../types/conversation';
 import { artifactDecisionService, type RecordDecisionInput } from './artifactDecisionService';
 import { adoptWorkbenchChapterCandidateFromConversation } from './workbenchChapterConversationAdoption';
+import { resolveArtifactDecisionTarget } from './structuredApplyPolicy';
 import type { WorkbenchDecisionIntent } from './workbenchDecisionIntent';
 
 const VALID_ARTIFACT_STATUSES = new Set(['valid', 'valid_with_warnings']);
@@ -175,21 +176,21 @@ function decisionPayload(
   artifact: ConversationArtifactCard,
   decision: RecordDecisionInput['decision'],
 ): RecordDecisionInput {
-  const sourceChapterId = artifact.artifactEvidence?.sourceChapterId;
-  const chapterScoped =
-    artifact.artifactType === 'chapter_text' ||
-    artifact.artifactType === 'event_candidates' ||
-    artifact.artifactType === 'chapter_summary' ||
-    (artifact.artifactType === 'outline' && Boolean(sourceChapterId));
+  // 结构化产物只认证据里的权威章节，不回退到当前打开的章节。
+  const target = resolveArtifactDecisionTarget({
+    artifactType: artifact.artifactType,
+    sourceChapterId: artifact.artifactEvidence?.sourceChapterId,
+    novelId: input.novelId,
+  });
   return {
     conversationId: input.conversationId,
     cardId: artifact.cardId,
     artifactId: artifact.artifactId!,
     decision,
-    targetType: artifact.artifactType === 'chapter_text' ? 'chapter' : 'asset',
-    targetId: chapterScoped && sourceChapterId ? sourceChapterId : input.novelId,
+    targetType: target.targetType,
+    targetId: target.targetId,
     novelId: input.novelId,
-    chapterId: sourceChapterId,
+    chapterId: target.chapterId,
     baseRevision: artifact.artifactEvidence?.baseContentHash,
   };
 }

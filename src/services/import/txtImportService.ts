@@ -1,6 +1,9 @@
 /**
  * AI Novel Studio - TXT 导入服务
  */
+import { dbCall } from '../database/db';
+import { normalizeNovel } from '../../features/novels/novelNormalizer';
+import type { Novel } from '../../types/novel';
 
 export interface ImportedChapterDraft {
   title: string;
@@ -107,4 +110,147 @@ export function analyzeTxtForChapters(content: string): TxtAnalyzeResult {
   }
 
   return { totalChars, totalWords, detectedChapterCount: chapters.length, chapters, warnings };
+}
+
+export interface ImportTxtNovelInput {
+  title: string;
+  genre?: string;
+  description?: string;
+  volumeTitle?: string;
+  chapters: Array<Pick<ImportedChapterDraft, 'title' | 'content' | 'orderIndex'>>;
+}
+
+export interface ImportedTxtChapter {
+  chapterId: string;
+  draftId: string;
+  title: string;
+  orderIndex: number;
+  wordCount: number;
+  storageMode: 'inline' | 'chunked';
+}
+
+export interface ImportTxtNovelResult {
+  novel: Novel;
+  volumeId: string;
+  chapterCount: number;
+  totalWordCount: number;
+  chapters: ImportedTxtChapter[];
+}
+
+export interface ImportTxtNovelProgress {
+  stage: string;
+  message: string;
+  percent: number;
+}
+
+/**
+ * 浏览器开发模式没有 SQLite 事务：逐步写入，失败时级联删除已创建的作品作为补偿。
+ * 桌面端不会走到这里。
+ */
+export interface BrowserImportSteps {
+  createNovel: (input: { title: string; genre?: string; description: string }) => Promise<Novel>;
+  createVolume: (input: { novelId: string; title: string; orderIndex: number }) => Promise<{
+    id: string;
+  }>;
+  createChapter: (input: {
+    novelId: string;
+    volumeId: string;
+    title: string;
+    orderIndex: number;
+  }) => Promise<{ id: string }>;
+  createDraft: (input: {
+    novelId: string;
+    chapterId: string;
+    content: string;
+  }) => Promise<{ id: string }>;
+  deleteNovelCascade: (novelId: string) => Promise<void>;
+}
+
+export async function importTxtNovelInBrowser(
+  input: ImportTxtNovelInput,
+  steps: BrowserImportSteps,
+  onProgress?: (progress: ImportTxtNovelProgress) => void,
+): Promise<ImportTxtNovelResult> {
+  const chapters = [...input.chapters].sort((left, right) => left.orderIndex - right.orderIndex);
+  onProgress?.({ stage: '创建作品……', message: '正在创建作品和章节……', percent: 0 });
+  const novel = await steps.createNovel({
+    title: input.title.trim(),
+    genre: input.genre?.trim() || undefined,
+    description: input.description?.trim() || '由 TXT 导入',
+  });
+  try {
+    const volume = await steps.createVolume({
+      novelId: novel.id,
+      title: input.volumeTitle?.trim() || '第一卷',
+      orderIndex: 1,
+    });
+    const imported: ImportedTxtChapter[] = [];
+    let totalWordCount = 0;
+    for (const [index, chapter] of chapters.entries()) {
+      onProgress?.({
+        stage: `正在写入：${chapter.title}`,
+        message: `正在导入章节 ${index + 1} / ${chapters.length}……`,
+        percent: Math.round(((index + 1) / chapters.length) * 90),
+      });
+      const created = await steps.createChapter({
+        novelId: novel.id,
+        volumeId: volume.id,
+        title: chapter.title,
+        orderIndex: chapter.orderIndex,
+      });
+      const draft = await steps.createDraft({
+        novelId: novel.id,
+        chapterId: created.id,
+        content: chapter.content,
+      });
+      const wordCount = countWords(chapter.content);
+      totalWordCount += wordCount;
+      imported.push({
+        chapterId: created.id,
+        draftId: draft.id,
+        title: chapter.title,
+        orderIndex: chapter.orderIndex,
+        wordCount,
+        storageMode: 'inline',
+      });
+    }
+    return {
+      novel,
+      volumeId: volume.id,
+      chapterCount: imported.length,
+      totalWordCount,
+      chapters: imported,
+    };
+  } catch (error) {
+    // Compensation: a half-imported novel must not survive a failed browser import.
+    await steps.deleteNovelCascade(novel.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * 桌面端：作品、卷、章节与导入草稿在 Rust 单一 SQLite 事务内落库（`import_txt_novel`），
+ * 任一步失败零部分写入；浏览器模式回退到带补偿的逐步写入。
+ */
+export function importTxtNovel(
+  input: ImportTxtNovelInput,
+  browserSteps: BrowserImportSteps,
+  onProgress?: (progress: ImportTxtNovelProgress) => void,
+): Promise<ImportTxtNovelResult> {
+  const payload: ImportTxtNovelInput = {
+    ...input,
+    chapters: input.chapters.map((chapter) => ({
+      title: chapter.title,
+      content: chapter.content,
+      orderIndex: chapter.orderIndex,
+    })),
+  };
+  onProgress?.({ stage: '正在原子写入作品与章节……', message: '正在导入……', percent: 10 });
+  return dbCall<ImportTxtNovelResult>('import_txt_novel', { input: payload }, () =>
+    importTxtNovelInBrowser(payload, browserSteps, onProgress),
+  ).then((result) => {
+    const novel = normalizeNovel(result.novel);
+    if (!novel) throw new Error('导入结果中的作品数据无效');
+    return { ...result, novel };
+  });
 }

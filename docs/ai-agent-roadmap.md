@@ -3,7 +3,7 @@
 > 文件：`docs/ai-agent-roadmap.md`  
 > 用途：规划 AI Agent 能力的演进路线  
 > 适用：产品规划 + 技术决策
-> 当前版本：v3.6.1；v3.6.0 保持为功能基线。本文的“已完成”只表示已经进入当前版本的能力，后续阶段仍以各自门禁为准
+> 当前版本：v3.7.0；v3.6.0 保持为功能基线。本文的“已完成”只表示已经进入当前版本的能力，后续阶段仍以各自门禁为准
 
 ---
 
@@ -184,7 +184,7 @@ AI 面向用户的回复、工具调用、错误和产物共同构成任务对�
 - 普通回复不能直接修改小说正式事实。
 - 产物形成后在对话中推送专用卡片。
 - 章节候选先由用户确认进入人工审阅，再显式编辑、保存和采用；桌面端由一个 Rust/SQLite 事务同时消费 `ReviewAuthorization`、复验草稿版本/hash 并采用正文。
-- 通用结构化产物可以记录确认或申请应用决定，但“领域写入 + `ArtifactDecision`”尚未完成同事务迁移；当前 `request_apply` 固定失败关闭且不产生领域写入。
+- 通用结构化产物可以记录确认、修订、拒绝或申请应用决定。桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 与精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务内执行“领域写入 + `ArtifactDecision`”；质量/风格报告、其他 `generic_json`、未知类型与浏览器回退失败关闭且零领域写入。前端的类型白名单、章节作用域与目标解析统一由 `structuredApplyPolicy` 提供，与 Rust `validate_static_scope` 保持一致。
 - 基线漂移、重复应用和并发写入继续由 revision、CAS 和幂等事务处理。
 
 ### 5.5 DSH 与内部 Runtime 边界
@@ -209,25 +209,26 @@ Phase 1A-D / R3     Portable Manifest + Drift Gate    VERIFIED
 Canonical catalog/manifest exposure                   DONE（4 项 stable）
 Canonical model-visible identities                    4（Catalog/Manifest）
 R4 真实 DSH Main Agent Runtime                         IN PROGRESS（未 VERIFIED）
-Writing/Context/Quality SubAgent                      POSTPONED
+Writing SubAgent（桌面 + 真实 API 默认）              OPEN（v3.7.0）
+Context/Quality SubAgent                              POSTPONED
 ```
 
 四个只读 Canonical Tool 已是 `stable` + `working`，共享 Manifest 的 `modelVisibleToolIdentities` 为 `context.read@1 / memory.search@1 / novel.read@1 / structure.read@1`。不得再把 `catalog_only` 或可见数为 0 写成当前状态。
 
-当前门禁是 **R4：Canonical-only DSH 只读回合**。Gateway 在 Canonical allowlist 下会列出 `novel.read / structure.read / context.read / memory.search`；宿主 `task_runtime` 仍注入 legacy `ALLOWED_TOOLS`，生产 `tools/list` 尚未切过去。`mainAgentRuntimeService` 脚手架不能代替真实模型在 DSH Agent Loop 中自主选择 Canonical Tool。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
+当前门禁是 **R4 live 云端只读验收**。`read` 回合在 start 契约、Worker 环境与宿主授权三处使用 Canonical-only allowlist，Gateway `tools/list` 列出 `novel.read / structure.read / context.read / memory.search`；候选与审计回合保留 legacy `ALLOWED_TOOLS`。仓内 loopback 已有证据，不得宣称 R4 VERIFIED。`mainAgentRuntimeService` 脚手架不能代替真实模型在 DSH Agent Loop 中自主选择 Canonical Tool。Writing SubAgent 已对桌面端 + 真实 API 模型的 `chapter_write` 默认开放；mock / 本地模型与浏览器模式继续走确定性 Writer。
 
 ---
 
 ## 6. 关键技术能力演进
 
-| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                                                        |
-| ------------ | ---------------- | ---------------- | ------------------------------------------------------------------------------ |
-| Rules        | 静态文档         | 动态检查         | 自动执行                                                                       |
-| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                                                      |
-| Memory       | 章节上下文       | 持久摘要与状态   | SQLite 长期/混合检索已实现；自动 embedding 与 Agent 准入待建设                 |
-| Tool Calling | 无               | 工具注册         | Catalog 可见 4 项 Canonical 只读 Tool；生产 DSH 仍用 legacy 名，R4 未 VERIFIED |
-| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现                                                    |
-| Verification | 人工             | 自动化           | 持续验证                                                                       |
+| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                                                                                    |
+| ------------ | ---------------- | ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| Rules        | 静态文档         | 动态检查         | 自动执行                                                                                                   |
+| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                                                                                  |
+| Memory       | 章节上下文       | 持久摘要与状态   | SQLite 长期/混合检索已实现；自动 embedding 与 Agent 准入待建设                                             |
+| Tool Calling | 无               | 工具注册         | Catalog 可见 4 项 Canonical 只读 Tool；read 回合用 Canonical 名，候选/审计仍用 legacy；R4 live 未 VERIFIED |
+| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现                                                                                |
+| Verification | 人工             | 自动化           | 持续验证                                                                                                   |
 
 ---
 

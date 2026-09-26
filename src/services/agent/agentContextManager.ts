@@ -2,10 +2,7 @@
  * Creative Agent Harness - Context Manager
  * 管理多轮上下文、系统提示词与工具调用历史
  */
-import type {
-  AgentContext,
-  AgentToolExecutionRecord,
-} from '../../types/agentHarness';
+import type { AgentContext, AgentToolExecutionRecord } from '../../types/agentHarness';
 import { agentToolRegistry } from './agentToolRegistry';
 
 export class AgentContextManager {
@@ -76,10 +73,7 @@ export class AgentContextManager {
   buildSystemPrompt(context: AgentContext): string {
     const tools = agentToolRegistry.getToolDescriptors();
     const toolDescriptions = tools
-      .map(
-        (t) =>
-          `- **${t.name}**: ${t.description}\n  参数: ${JSON.stringify(t.parameters)}`,
-      )
+      .map((t) => `- **${t.name}**: ${t.description}\n  参数: ${JSON.stringify(t.parameters)}`)
       .join('\n\n');
 
     return `你是由 AI Novel Studio 驱动的专业长篇小说创作智能体（Creative Autonomous Agent）。

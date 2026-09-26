@@ -211,7 +211,14 @@ describe('U12 production inline text floor', () => {
         onDelete={vi.fn()}
       />,
     );
-    expectReadableInlineText(view.container);
+    expect(
+      Array.from(view.container.querySelectorAll<HTMLElement>('[style]')).filter((element) =>
+        Boolean(element.style.fontSize),
+      ),
+    ).toEqual([]);
+    expect(view.container.firstElementChild?.classList.contains('resource-card')).toBe(true);
+    expect(view.container.querySelectorAll('.resource-pill').length).toBe(3);
+    expect(view.container.querySelector('.resource-pre')?.textContent).toBe(template.content);
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
     expect(onUse).toHaveBeenCalledWith(template.content, template.name);
     view.unmount();
@@ -235,8 +242,7 @@ describe('U12 production inline text floor', () => {
       />,
     );
     const close = screen.getByRole('button', { name: '关闭表单' });
-    expect(Number.parseFloat(close.style.minHeight)).toBeGreaterThanOrEqual(28);
-    expect(Number.parseFloat(close.style.minWidth)).toBeGreaterThanOrEqual(28);
+    expect(close.classList.contains('resource-icon-button')).toBe(true);
     expect(close.querySelector('svg')?.getAttribute('width')).toBe('16');
     fireEvent.click(close);
     expect(onCancel).toHaveBeenCalledTimes(1);

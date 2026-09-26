@@ -56,6 +56,7 @@ npm run tauri build
 
 ## 下一步
 
+- 查看 [创作工作流指南](workflow-guide.md)
 - 查看 [桌面端使用说明](desktop-usage.md)
 - 查看 [AI 设置说明](ai-settings.md)
 - 查看 [用户使用手册](../user-guide.md)

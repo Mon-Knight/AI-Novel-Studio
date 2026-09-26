@@ -20,17 +20,23 @@
 
 ## 验证证据
 
+<!-- 粘贴 dry-run 的变更归属与实际结果（命令数 / 用例数 / 耗时）；PR CI 使用同一选择规则。 -->
+
 ```text
-npm run lint:ci
-npm run test:all
-npm run test:component-size
-npm run build
-npm run test:bundle-size
+npm run verify:change -- --base origin/main --dry-run
+npm run verify:change -- --base origin/main
+```
+
+仅当选择器因 migration / 共享持久化 / DSH / 打包 / 工作流变更扩大到完整 Rust 领域门禁时补充：
+
+```text
 cargo fmt --all -- --check --manifest-path src-tauri/Cargo.toml
 cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
 cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
 cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 ```
+
+- [ ] 未映射路径已在 `scripts/quality/verification-scopes.mjs` 补充归属；不适用项写明 NOT_APPLICABLE，NOT_RUN 与失败未被写成通过
 
 ## UI / 桌面体验
 

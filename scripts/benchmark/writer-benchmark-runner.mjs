@@ -51,7 +51,9 @@ async function main() {
   const options = parseCliArgs(process.argv.slice(2));
 
   console.log(`[Writer Benchmark] 正在对模型 [${options.model}] 启动长篇小说场景创作评测...`);
-  console.log(`[Writer Benchmark] 加载测试用例: ${WRITER_BENCHMARK_FIXTURES.length} 组标准分镜场景.`);
+  console.log(
+    `[Writer Benchmark] 加载测试用例: ${WRITER_BENCHMARK_FIXTURES.length} 组标准分镜场景.`,
+  );
 
   const report = await runComparativeBenchmark({
     modelName: options.model,
@@ -61,7 +63,11 @@ async function main() {
   const markdownReport = formatBenchmarkReportMarkdown(report);
 
   if (options.outPath) {
-    writeFileSync(options.outPath, options.jsonOutput ? JSON.stringify(report, null, 2) : markdownReport, 'utf8');
+    writeFileSync(
+      options.outPath,
+      options.jsonOutput ? JSON.stringify(report, null, 2) : markdownReport,
+      'utf8',
+    );
     console.log(`[Writer Benchmark] 评测报告已成功保存至: ${options.outPath}`);
   }
 
@@ -73,7 +79,9 @@ async function main() {
     console.log('\n' + '='.repeat(60));
     console.log(`评测完成! Benchmark ID: ${report.benchmarkId}`);
     console.log(`Baseline 综合得分:  ${report.summary.avgBaselineComposite}`);
-    console.log(`Enhanced 综合得分:  ${report.summary.avgEnhancedComposite} (▲ +${report.summary.overallImprovement} / +${report.summary.improvementPercentage}%)`);
+    console.log(
+      `Enhanced 综合得分:  ${report.summary.avgEnhancedComposite} (▲ +${report.summary.overallImprovement} / +${report.summary.improvementPercentage}%)`,
+    );
     console.log('='.repeat(60) + '\n');
   }
 }

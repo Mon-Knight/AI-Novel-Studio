@@ -60,12 +60,27 @@ function TemplatesPage() {
   const [formTags, setFormTags] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const loadUserTemplates = () => {
-    setUserTemplates(templateService.getAll());
+  const loadUserTemplates = async () => {
+    try {
+      setUserTemplates(await templateService.getAll());
+    } catch (err: unknown) {
+      flash('模板读取失败：' + describeUnknownError(err, '未知错误'));
+    }
   };
 
   useEffect(() => {
-    loadUserTemplates();
+    let active = true;
+    templateService
+      .getAll()
+      .then((items) => {
+        if (active) setUserTemplates(items);
+      })
+      .catch((err: unknown) => {
+        if (active) setMsg('模板读取失败：' + describeUnknownError(err, '未知错误'));
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const flash = (m: string) => {
@@ -152,7 +167,7 @@ function TemplatesPage() {
         .filter(Boolean);
 
       if (editingId) {
-        templateService.update(editingId, {
+        await templateService.update(editingId, {
           name: formName.trim(),
           type: formType,
           description: formDesc.trim(),
@@ -161,7 +176,7 @@ function TemplatesPage() {
         });
         flash('模板已更新！');
       } else {
-        templateService.create({
+        await templateService.create({
           name: formName.trim(),
           type: formType,
           description: formDesc.trim(),
@@ -178,7 +193,7 @@ function TemplatesPage() {
       setFormDesc('');
       setFormContent('');
       setFormTags('');
-      loadUserTemplates();
+      await loadUserTemplates();
     } catch (err: unknown) {
       flash('保存失败：' + describeUnknownError(err, '未知错误'));
     } finally {
@@ -206,9 +221,13 @@ function TemplatesPage() {
     ) {
       return;
     }
-    templateService.remove(tpl.id);
-    loadUserTemplates();
-    flash(`已删除模板「${tpl.name}」`);
+    try {
+      await templateService.remove(tpl.id);
+      await loadUserTemplates();
+      flash(`已删除模板「${tpl.name}」`);
+    } catch (err: unknown) {
+      flash('删除失败：' + describeUnknownError(err, '未知错误'));
+    }
   };
 
   const handleUse = async (content: string, title: string) => {
@@ -285,7 +304,7 @@ function TemplatesPage() {
   };
 
   const pageActions = (
-    <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+    <div className="resource-row resource-row--wrap">
       <button
         type="button"
         className="btn btn-primary btn-sm"
@@ -328,7 +347,7 @@ function TemplatesPage() {
         type="file"
         accept=".txt,.md,.json"
         onChange={handleFileUpload}
-        style={{ display: 'none' }}
+        hidden
       />
     </div>
   );
@@ -344,18 +363,10 @@ function TemplatesPage() {
 
       {msg && (
         <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: msg.includes('失败')
-              ? 'var(--color-error-bg, #fee2e2)'
-              : 'var(--color-primary-light, #e0e7ff)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: msg.includes('失败')
-              ? 'var(--color-error, #b91c1c)'
-              : 'var(--color-primary, #4338ca)',
-          }}
+          className={`resource-notice ${
+            msg.includes('失败') ? 'resource-notice--error' : 'resource-notice--success'
+          }`}
+          role={msg.includes('失败') ? 'alert' : 'status'}
         >
           {msg}
         </div>
@@ -396,26 +407,11 @@ function TemplatesPage() {
 
         {/* 模板卡片网格 */}
         {visibleUsers.length === 0 && visibleBuiltins.length === 0 ? (
-          <div
-            style={{
-              padding: 40,
-              textAlign: 'center',
-              color: 'var(--color-text-secondary)',
-              fontSize: 14,
-              border: '1px dashed var(--color-border)',
-              borderRadius: 10,
-            }}
-          >
+          <div className="resource-empty">
             该分类下暂无模板，可点击上方「新建模板」或「上传模板」快速添加。
           </div>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: 12,
-            }}
-          >
+          <div className="resource-grid">
             {visibleUsers.map((template) => (
               <UserTemplateCard
                 key={template.id}

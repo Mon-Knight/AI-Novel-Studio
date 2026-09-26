@@ -105,6 +105,7 @@ async function startFixture({
   upstreamResponse,
   timeoutMs = 2_000,
   model = 'fixture-model',
+  upstreamBasePath = '',
   environment = {},
 }) {
   const policyCalls = [];
@@ -140,7 +141,7 @@ async function startFixture({
     const proxyEnvironment = {
       ...process.env,
       PROXY_PORT: '0',
-      PROXY_UPSTREAM: `http://${HOST}:${upstreamPort}`,
+      PROXY_UPSTREAM: `http://${HOST}:${upstreamPort}${upstreamBasePath}`,
       PROXY_UPSTREAM_KEY: 'fixture-secret-never-log',
       PROXY_POLICY_URL: `http://${HOST}:${policyPort}`,
       PROXY_REQUEST_PREFIX: 'integration',
@@ -439,6 +440,74 @@ test('governed proxy settles successful usage with the measured token pair', asy
     assert.equal(fixture.output().includes('fixture-secret-never-log'), false);
   } finally {
     await fixture.stop();
+  }
+});
+
+test('proxy accepts API bases and full chat completion endpoints without duplicating paths', async () => {
+  for (const [upstreamBasePath, expectedPath] of [
+    ['', '/chat/completions'],
+    ['/v1', '/v1/chat/completions'],
+    ['/compatible-mode/v1/', '/compatible-mode/v1/chat/completions'],
+    ['/v1/chat/completions', '/v1/chat/completions'],
+    ['/compatible-mode/v1/chat/completions/', '/compatible-mode/v1/chat/completions'],
+  ]) {
+    const fixture = await startFixture({
+      upstreamBasePath,
+      upstreamResponse: async (request, response) => {
+        response.writeHead(request.url === expectedPath ? 200 : 404, {
+          'content-type': 'application/json',
+        });
+        response.end(
+          JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }),
+        );
+      },
+    });
+    try {
+      for (const downstreamPath of ['/chat/completions', '/v1/chat/completions']) {
+        const response = await fetch(`${fixture.url}${downstreamPath}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: requestBody(),
+        });
+        await response.text();
+        assert.equal(response.status, 200, upstreamBasePath);
+      }
+      assert.deepEqual(fixture.upstreamPaths, [expectedPath, expectedPath]);
+    } finally {
+      await fixture.stop();
+    }
+  }
+});
+
+test('proxy preserves Responses routes when configured with a full chat endpoint', async () => {
+  for (const [upstreamBasePath, expectedPath] of [
+    ['/chat/completions', '/responses'],
+    ['/v1/chat/completions/', '/v1/responses'],
+    ['/compatible-mode/v1/chat/completions/', '/compatible-mode/v1/responses'],
+  ]) {
+    const fixture = await startFixture({
+      upstreamBasePath,
+      upstreamResponse: async (request, response) => {
+        response.writeHead(request.url === expectedPath ? 200 : 400, {
+          'content-type': 'application/json',
+        });
+        response.end(JSON.stringify({ object: 'response', status: 'completed', output: [] }));
+      },
+    });
+    try {
+      for (const downstreamPath of ['/responses', '/v1/responses']) {
+        const response = await fetch(fixture.url + downstreamPath, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: 'fixture-model', input: 'fixture input', stream: false }),
+        });
+        await response.text();
+        assert.equal(response.status, 200, upstreamBasePath);
+      }
+      assert.deepEqual(fixture.upstreamPaths, [expectedPath, expectedPath]);
+    } finally {
+      await fixture.stop();
+    }
   }
 });
 

@@ -1,0 +1,25 @@
+---
+description: 任务完成后必须更新本地 release EXE（AGENTS.md 第 7.6 节）
+alwaysApply: true
+---
+
+# 完成后更新本地 release EXE
+
+仓库开发规则入口是根 `AGENTS.md`，不要另建 `agent.md`。
+
+完成任务、写完成汇报之前，必须把当前工作区打进：
+
+`src-tauri/target/release/AI Novel Studio.exe`
+
+```powershell
+Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+npm run dsh:assets
+npx tauri build --bundles none
+```
+
+- 必须更新 `AI Novel Studio.exe`（产品名），不能只留下 `ai-novel-studio.exe`
+- 这是给用户打开的本地 EXE，不是获准发布，也不提交该文件
+- 不要用 `tauri:build` / `tauri:build:release` 代替（安装包与 updater 签名是另一条发布边界）
+- 禁止写到沙箱或其他 `CARGO_TARGET_DIR`
+- EXE 正在运行则停止覆盖，请用户先退出
+- 纯文档且不改变可执行行为时，汇报中写明未重建；其余任务不得跳过

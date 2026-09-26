@@ -1,14 +1,19 @@
+---
+name: tauri-desktop-build
+description: 仅在用户明确要求 Tauri 构建、打包、安装包、窗口配置或图标更新时使用；普通前端/服务修改由 npm run verify:change 选择检查，不触发完整安装包构建。
+---
+
 # Skill: tauri-desktop-build
 
 > **Skill 名称**：Tauri 桌面构建
-> **触发条件**：Tauri 构建、打包、安装包生成、窗口配置、图标更新
+> **触发条件**：用户明确要求 Tauri 构建、打包、安装包生成、窗口配置或图标更新；普通前端/服务修改不触发完整安装包构建
 > **Skill 类型**：多步骤工作流
 
 ---
 
 ## 概述
 
-`tauri-desktop-build` 处理 Tauri 桌面端的构建、打包和调试全流程。
+`tauri-desktop-build` 处理 Tauri 桌面端的构建、打包和调试全流程。遵循根 [AGENTS.md](../../../AGENTS.md)；打包配置、依赖图或发布任务才运行完整构建，日常修改由 `npm run verify:change` 选择检查。
 
 ---
 
@@ -59,7 +64,7 @@ node --version
 npm --version
 ```
 
-### 步骤 2：开发模式验证
+### 步骤 2：开发模式验证（窗口/图标/系统能力任务时）
 
 ```powershell
 npm run tauri dev
@@ -68,7 +73,7 @@ npm run tauri dev
 检查：
 
 - [ ] 窗口是否正常打开
-- [ ] 窗口尺寸是否符合要求（默认 1440x900）
+- [ ] 窗口尺寸是否符合 `tauri.conf.json`（默认 1280×820，最小 1024×700）
 - [ ] 最大化是否正常
 - [ ] 应用标题是否为 "AI Novel Studio"
 - [ ] 前端页面是否正常加载
@@ -78,18 +83,18 @@ npm run tauri dev
 
 对照 `tauri-build.checklist.md`：
 
-- [ ] `npm run build` 通过
-- [ ] `cargo check` 通过
+- [ ] `cargo check --locked --manifest-path src-tauri/Cargo.toml` 通过
 - [ ] 图标资源存在（`src-tauri/icons/`）
 - [ ] `tauri.conf.json` 配置正确
+- [ ] 固定 DSH 载体可由 `npm run dsh:assets` 准备
 
 ### 步骤 4：完整构建
 
 ```powershell
-npm run tauri build
+npm run tauri:build
 ```
 
-检查：
+该入口先准备 DSH assets 再生成 MSI 与 NSIS，并已包含前端构建，不必提前重复 `npm run build`。检查：
 
 - [ ] 编译是否成功
 - [ ] 安装包路径
@@ -124,8 +129,8 @@ npm run tauri build
 
 ### 构建结果
 
-- `cargo check`：✅ / ❌
-- `npm run tauri build`：✅ / ❌
+- `cargo check --locked`：✅ / ❌
+- `npm run tauri:build`：✅ / ❌
 
 ### 产物
 

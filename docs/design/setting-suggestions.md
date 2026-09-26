@@ -1,5 +1,9 @@
 # 设定库 AI 推演设计
 
+> **当前校正（v3.7.0 修复，待统一验收）**：以下 v1.7.9～v1.7.10 原文作为历史保留，不再将其中“仅 LocalStorage”“尚无独立势力/地点模块”当作当前全产品事实。桌面候选已由 migration 037 存入 SQLite；本次旧推演采用经 `setting_suggestion_adoption_service` 单个 `IMMEDIATE` 事务复验候选/编辑内容 hash、规则基线、作者授权，写入目标、候选 CAS 和幂等回执，重放不得换请求或覆盖漂移目标。旧入口映射仍为角色 → character、规则 → rule_system、势力/地点 → world_setting，不等于改写为正式故事资产模块。
+> 世界/规则变更须先预览拟改全文、来源、影响与候选身份，再确认变更、修订正史或批准明确例外；同事务失效依赖旧规则集的 issued 审阅授权，保留 consumed 与已采用历史。`world_rules_v1` 的六类性质、独立权威/认知/强度、八类渐进参数及旧 JSON 兼容见 [世界规则契约](world-rule-contract.md)。
+> 浏览器只提供本机恢复 journal、校验与补偿，不冒充 SQLite 事务或桌面验收；旧候选缺生成时基线须明确重新审查。代码仍在集成，本次未执行任何测试、格式检查、构建、桌面/live 或模型调用，未新增通过结论，云端 NOT VERIFIED 不变。历史日期、验证命令和记录不回填。
+
 > 当前状态：✅ v1.7.9～v1.7.10 基础版已实现  
 > 入口：`/#/novels/:id/setting-suggestions`、`/#/worlds/:worldId/lore/suggestions`
 

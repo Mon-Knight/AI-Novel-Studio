@@ -2,8 +2,6 @@
  * AI Novel Studio - AI 类型定义（v1.0.6 增强版）
  */
 
-// ==================== AI 设置 ====================
-
 export type AiRuntimeMode = 'mock' | 'api';
 export type AiProvider = 'mock' | 'deepseek' | 'openai_compatible';
 export type CloudApiProvider = Exclude<AiProvider, 'mock'>;
@@ -14,8 +12,11 @@ export interface SavedApiModelProfile {
   provider: CloudApiProvider;
   baseUrl: string;
   modelName: string;
+  sourceId?: string;
+  sourceLabel?: string;
   temperature?: number;
   maxTokens?: number;
+  contextTokens?: number;
   timeoutSeconds?: number;
   inputPricePerMillionTokens?: number;
   outputPricePerMillionTokens?: number;
@@ -427,73 +428,4 @@ export interface ChapterPromptDebugInfo {
   requiredCharacterNames: string[];
   promptLength: number;
 }
-
-export interface ChapterGenerationContext {
-  novelTitle: string;
-  novelGenre?: string;
-  novelDescription?: string;
-  novelOutline?: string;
-  masterOutline?: string;
-  worldBackground?: string;
-  worldSettingSources?: Array<{
-    id: string;
-    title: string;
-    role: 'primary' | 'supplemental';
-    updatedAt: string;
-  }>;
-  ruleSystems?: string;
-  protagonist?: string;
-  specialAbility?: string;
-  abilityLimits?: string;
-  forbiddenBehaviors?: string;
-  protagonistMode?: string;
-  protagonistsSummary?: string;
-  dualProtagonistSummary?: string;
-  protagonistNames?: string;
-  protagonistAppearance?: string;
-  protagonistMustAppear?: boolean;
-  volumeTitle?: string;
-  volumeOutline?: string;
-  volumeGoal?: string;
-  volumeConflict?: string;
-  chapterTitle: string;
-  chapterOutline?: string;
-  outlineKeyPoints?: OutlineKeyPoint[];
-  outlineChecklistText?: string;
-  chapterGoal?: string;
-  targetWordCount?: number;
-  styleProfile?: string;
-  outputProfile?: string;
-  chapterCharacters?: string;
-  chapterCharacterList?: ChapterCharacterContext[];
-  requiredCharacters?: ChapterCharacterContext[];
-  requiredCharactersSummary?: string;
-  requiredCharacterNames?: string;
-  characterStates?: string;
-  characterStateSources?: Array<{
-    id: string;
-    characterId: string;
-    characterName: string;
-    chapterId?: string;
-    origin: 'character_state' | 'character_current_state';
-  }>;
-  chapterEvents?: string;
-  chapterSettings?: string;
-  /** Read-time projection from persisted adopted summaries and ContextRecords. */
-  worldStateTimeline?: string;
-  worldStateTimelineSource?: {
-    latestChapterId: string;
-    chapterCount: number;
-    sourceSummaryIds: string[];
-    sourceContextRecordIds: string[];
-  };
-  previousContext?: string;
-  userInstruction?: string;
-  /** 当前草稿正文（重新生成/改写模式时传入） */
-  draftContent?: string;
-  chapterOutlineSource?: 'active_chapter_outline' | 'chapter_field' | 'draft' | 'empty';
-  volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
-  masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';
-  /** Optional context sources that could not be read while this context was built. */
-  contextWarnings?: string[];
-}
+export type { ChapterGenerationContext } from './chapterGenerationContext';

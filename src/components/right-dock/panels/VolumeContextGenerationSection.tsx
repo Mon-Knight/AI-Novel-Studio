@@ -27,7 +27,7 @@ export function VolumeContextGenerationSection({
     <div style={{ marginBottom: 12 }}>
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 600,
           color: 'var(--color-text-muted)',
           marginBottom: 6,
@@ -39,7 +39,7 @@ export function VolumeContextGenerationSection({
         </span>
       </div>
       {volumes.length === 0 && (
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', padding: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: 8 }}>
           暂无分卷。请先在作品详情页创建分卷。
         </div>
       )}
@@ -74,7 +74,7 @@ export function VolumeContextGenerationSection({
               {check && (
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     marginLeft: 6,
                     padding: '1px 6px',
                     borderRadius: 3,
@@ -96,7 +96,7 @@ export function VolumeContextGenerationSection({
               )}
             </div>
             {check && !check.completed && check.reasons.length > 0 && (
-              <div style={{ fontSize: 10, color: 'var(--color-warning-text)', marginBottom: 6 }}>
+              <div style={{ fontSize: 12, color: 'var(--color-warning-text)', marginBottom: 6 }}>
                 {check.reasons.map((reason, index) => (
                   <div key={index}>• {reason}</div>
                 ))}
@@ -109,7 +109,7 @@ export function VolumeContextGenerationSection({
                 disabled={isLoading}
                 style={{
                   width: '100%',
-                  fontSize: 11,
+                  fontSize: 12,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -130,10 +130,10 @@ export function VolumeContextGenerationSection({
               </button>
             )}
             {error && (
-              <div style={{ fontSize: 10, color: 'var(--color-error)', marginTop: 4 }}>{error}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 4 }}>{error}</div>
             )}
             {result && (
-              <div style={{ marginTop: 6, fontSize: 11 }}>
+              <div style={{ marginTop: 6, fontSize: 12 }}>
                 <div
                   style={{
                     fontWeight: 500,
@@ -160,7 +160,7 @@ export function VolumeContextGenerationSection({
                   <button
                     className="btn btn-sm btn-primary"
                     onClick={() => onSave(volume)}
-                    style={{ flex: 1, fontSize: 10 }}
+                    style={{ flex: 1, fontSize: 12 }}
                   >
                     <Save size={12} strokeWidth={1.8} aria-hidden="true" />
                     保存为上下文
@@ -168,7 +168,7 @@ export function VolumeContextGenerationSection({
                   <button
                     className="btn btn-sm btn-secondary"
                     onClick={() => onDiscard(volume.id)}
-                    style={{ flex: 1, fontSize: 10 }}
+                    style={{ flex: 1, fontSize: 12 }}
                   >
                     放弃
                   </button>

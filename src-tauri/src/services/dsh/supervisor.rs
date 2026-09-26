@@ -163,6 +163,16 @@ impl Drop for JobObject {
 }
 
 /// Folds one `session.event` notification into the per-session snapshot.
+/// Keeps the first observer failure. It names the root cause (for example an
+/// unauthorized tool call); the follow-on `tool/result` event can only report that
+/// its call was never projected, which would hide the reason from the run error.
+fn record_observer_error(slot: &Mutex<Option<String>>, error: String) {
+    let mut guard = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_none() {
+        *guard = Some(error);
+    }
+}
+
 fn apply_session_event(sessions: &mut HashMap<String, SessionSnapshot>, value: &Value) {
     let params = match value.get("params") {
         Some(params) => params,
@@ -293,6 +303,17 @@ mod event_tests {
         apply_session_event(
             sessions,
             &json!({"params":{"sessionId":"session-1","event":event}}),
+        );
+    }
+
+    #[test]
+    fn observer_error_keeps_the_first_root_cause() {
+        let slot = Mutex::new(None);
+        record_observer_error(&slot, "DSH 调用了未授权工具: expand_settings".to_string());
+        record_observer_error(&slot, "tool/result 找不到对应调用: call_1".to_string());
+        assert_eq!(
+            slot.lock().unwrap().as_deref(),
+            Some("DSH 调用了未授权工具: expand_settings")
         );
     }
 
@@ -453,8 +474,10 @@ impl RuntimeHandle {
                                                         &value,
                                                     ),
                                                     Err(error) => {
-                                                        *observer_error.lock().unwrap() =
-                                                            Some(error);
+                                                        record_observer_error(
+                                                            &observer_error,
+                                                            error,
+                                                        );
                                                     }
                                                 }
                                             }

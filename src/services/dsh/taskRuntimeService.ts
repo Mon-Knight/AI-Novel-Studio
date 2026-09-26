@@ -11,6 +11,7 @@ import type {
   TaskModelSnapshot,
   TaskRun,
 } from '../../types/conversation';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { CANONICAL_TOOL_IDS } from '../capabilities/canonical/canonicalToolTypes';
@@ -48,6 +49,10 @@ export interface DshTaskRuntimeInput {
    * Structured write/audit omit this field so DSH keeps the legacy allowlist.
    */
   allowedTools?: readonly string[];
+  /** Writing SubAgent turns: the host enforces this word range on the chapter candidate. */
+  chapterWordRange?: { target: number; minimum: number; maximum: number };
+  /** Untrusted identity, never client-verified content or adoption authorization. */
+  revisionSource?: ArtifactRevisionSource;
 }
 
 /** Canonical-only tools requested by desktop read-intent DSH turns. */

@@ -34,10 +34,51 @@ import { captureTaskModelSnapshot } from './taskModelSnapshot';
 import { aiSettingsService } from '../ai/aiClient';
 import { createWorkbenchChapterWriter, workbenchChapterWriter } from './workbenchChapterWriter';
 import { createTaskRuntimeAdapter } from './taskRuntimeAdapter';
+import { captureArtifactRevisionSource } from './artifactRevisionSourceService';
 import { resolveEditorDraftContent } from '../../components/workspace/editor-area/editorDocumentSafety';
 import type { AiSettings } from '../../types/ai';
 import type { ReviewCandidateDocument } from '../../types/conversation';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
+
+async function saveGuardedWorldSetting(
+  novelId: string,
+  title: string,
+  content: string,
+): Promise<void> {
+  const change = { targetType: 'world_setting' as const, title, content, isActive: true };
+  const preview = await settingRepository.previewWorldRuleChange(novelId, [change]);
+  await settingRepository.saveWorldSetting(null, {
+    novelId,
+    title,
+    content,
+    isActive: true,
+    expectedRuleSetFingerprint: preview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: preview.previewHash,
+      intent: 'confirm_change',
+    },
+  });
+}
+
+async function saveGuardedRuleSystem(
+  novelId: string,
+  title: string,
+  content: string,
+): Promise<void> {
+  const change = { targetType: 'rule_system' as const, title, content, isActive: true };
+  const preview = await settingRepository.previewWorldRuleChange(novelId, [change]);
+  await settingRepository.saveRuleSystem(null, {
+    novelId,
+    title,
+    content,
+    isActive: true,
+    expectedRuleSetFingerprint: preview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: preview.previewHash,
+      intent: 'confirm_change',
+    },
+  });
+}
 
 test.before(async () => {
   await aiSettingsService.saveSettings({
@@ -100,25 +141,23 @@ test('2. 捕获实际传给执行服务的 settings，断言快照 settings 在�
     title: '第1章',
     outline: '主角进入封锁区，确认不能公开真实身份的长期约束。',
   });
-  await Promise.all([
-    settingRepository.saveWorldSetting(null, {
-      novelId: novel.id,
-      title: '封锁区世界设定',
-      content: '封锁区实行身份分级制度，公开真实身份会触发追捕。',
-      isActive: true,
-    }),
-    settingRepository.saveRuleSystem(null, {
-      novelId: novel.id,
-      title: '身份保密规则',
-      content: '调查员不得主动公开真实身份，否则会立即触发追捕。',
-      isActive: true,
-    }),
-    protagonistRepository.save(null, {
-      novelId: novel.id,
-      name: '林舟',
-      identity: '隐藏身份的调查员',
-    }),
-  ]);
+  // Rule material shares one rule-set baseline, so a guarded save must be sequential:
+  // two concurrent guarded writes would each preview the other's pre-change state.
+  await saveGuardedWorldSetting(
+    novel.id,
+    '封锁区世界设定',
+    '封锁区实行身份分级制度，公开真实身份会触发追捕。',
+  );
+  await saveGuardedRuleSystem(
+    novel.id,
+    '身份保密规则',
+    '调查员不得主动公开真实身份，否则会立即触发追捕。',
+  );
+  await protagonistRepository.save(null, {
+    novelId: novel.id,
+    name: '林舟',
+    identity: '隐藏身份的调查员',
+  });
 
   let capturedSettings: AiSettings | undefined;
   let capturedPrompt = '';
@@ -285,12 +324,27 @@ test('5 & 6. 显式注入 Writer 的 Runtime 生成与修改协议形成两张�
     'user',
     '重新修改这一版，强化风雨压迫感',
   );
+  // The user action "要求修改" is what makes this card the revision source; the runtime
+  // re-verifies that exact recorded decision and never falls back to the newest candidate.
+  const revisionHash = await computeContentSha256(card.content ?? '');
+  await artifactDecisionService.record({
+    conversationId: conv.conversationId,
+    cardId: card.cardId,
+    artifactId: card.artifactId!,
+    decision: 'request_revision',
+    targetType: 'chapter',
+    targetId: chapter.id,
+    novelId: novel.id,
+    chapterId: chapter.id,
+  });
+  // Revisions never fall back to the newest candidate: the exact reviewed card must be named.
   const revisionRun = await testRuntime.start({
     conversationId: conv.conversationId,
     novelId: novel.id,
     chapterId: chapter.id,
     turnId: revisionTurn.turnId,
     goal: '重新修改这一版，强化风雨压迫感',
+    revisionSource: captureArtifactRevisionSource(card, novel.id, revisionHash),
   });
   assert.equal(revisionRun.status, 'completed', revisionRun.error ?? '修改运行必须完成');
   const revisedBundle = await taskConversationService.get(conv.conversationId);

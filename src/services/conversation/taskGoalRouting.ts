@@ -1,6 +1,8 @@
 import { stripTaskCourtesy, taskGoalDirective } from './taskGoalDirective';
+import { isTaskWordTargetSetting, parseTaskWordTarget } from './taskWordTarget';
 
 export function assertTaskGoalExecutable(goal: string): void {
+  parseTaskWordTarget(goal);
   if (!taskGoalDirective(goal).needsClarification) return;
   throw Object.assign(
     new Error(
@@ -38,7 +40,10 @@ export type DshTaskKind =
   | 'character_generate'
   | 'event_suggest'
   | 'quality_check'
-  | 'chapter_summary';
+  | 'chapter_summary'
+  /** Writing SubAgent（特性开关，默认关闭）：只读工具 + 单一章节候选工具。 */
+  | 'chapter_write'
+  | 'chapter_polish';
 
 export interface CandidateToolChoice {
   name: CandidateToolName;
@@ -205,6 +210,7 @@ function isShortCreativeBrief(goal: string): boolean {
 }
 
 export function isConversationalGoal(goal: string): boolean {
+  if (isTaskWordTargetSetting(goal)) return true;
   const text = goal.trim();
   if (!text || Array.from(text).length > 40) return false;
   if (DOMAIN_GOAL.test(text)) return false;

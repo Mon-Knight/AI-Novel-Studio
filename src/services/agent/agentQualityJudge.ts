@@ -61,7 +61,11 @@ export class AgentQualityJudge {
     }
 
     // 检查人物性格与心境吻合度
-    if (input.userGoal.includes('果决') || input.userGoal.includes('隐忍') || input.userGoal.includes('谨慎')) {
+    if (
+      input.userGoal.includes('果决') ||
+      input.userGoal.includes('隐忍') ||
+      input.userGoal.includes('谨慎')
+    ) {
       characterConsistency = 94;
     }
 
@@ -73,10 +77,7 @@ export class AgentQualityJudge {
 
     // 综合加权得分
     const overallScore = Math.round(
-      coherence * 0.25 +
-        characterConsistency * 0.3 +
-        plotProgression * 0.25 +
-        styleMatch * 0.2,
+      coherence * 0.25 + characterConsistency * 0.3 + plotProgression * 0.25 + styleMatch * 0.2,
     );
 
     const passed = overallScore >= threshold;

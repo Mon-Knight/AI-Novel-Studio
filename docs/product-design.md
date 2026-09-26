@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -13,7 +13,7 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是 SQLite 等安全修复，v3.6.2 是当前 Canonical 只读链路与桌面体验收口补丁；版本号以 `package.json` 和同步检查为准。
+> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是功能基线，v3.6.1 是 SQLite 等安全修复，v3.6.2 放行 Canonical 只读链路；v3.7.0 开放 Writing SubAgent 与 ZCode 工作台。版本号以 `package.json` 和同步检查为准。
 
 ---
 
@@ -1300,6 +1300,8 @@ v0.1.0 完成后，应满足：
 
 # 21. v3.3.0+ 对话式并发创作工作台（已实现）
 
+> 当前 v3.7.0 本批修复仅同步已落实现，代码仍在集成；全部修复完成后统一验收，不新增测试、桌面或 live 通过结论，云端 NOT VERIFIED 不变。前文历史产品设计不据此改写。
+
 ## 21.1 产品中心迁移
 
 产品以创作工作台为默认首界面，小说作为工作台内的项目，每个项目下可以创建多个任务对话：
@@ -1312,7 +1314,7 @@ v0.1.0 完成后，应满足：
    └─ 任务：完善后续大纲
 ```
 
-任务对话是用户可见的独立工作单元。每个任务拥有自己的消息、模型、执行状态、工具调用和产物，可以在全局 AI 请求治理范围内并发运行。
+任务对话是用户可见的独立工作单元。每个任务拥有自己的消息、模型、执行状态、工具调用和产物，可以在全局 AI 请求治理范围内并发运行。模型在任务创建时选择并冻结，输入区用固定模型徽标解释来源；不开放同一任务后续回合换模型，更换须新建任务。
 
 ## 21.2 对话承担执行界面
 
@@ -1323,9 +1325,10 @@ v0.1.0 完成后，应满足：
 ## 21.3 用户确认与章节审阅
 
 - 结构化候选可以在对话中确认并申请应用。桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务中写入领域事实并追加 `ArtifactDecision`；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续失败关闭且零领域写入。章节正文仍走 `ReviewAuthorization` 原子采用，不经 `request_apply`。
-- 审计报告只提供结论与后续任务入口，本身不写入小说事实。
+- 审计/质量/风格报告按类型提供“标记已阅”、结论与后续任务入口，本身不写入小说事实，也不因阅读标记获得应用权限。
 - 章节正文采用双阶段流程：对话中确认进入审阅，再由人工审阅/编辑器显式编辑、保存和采用；桌面端由单一 Rust/SQLite 事务复验并消费 `ReviewAuthorization`、采用草稿并收敛任务状态。
-- 未确认的 AI 候选不能进入章节采用路径；打开审阅不等于保存或采用。
+- 未确认的 AI 候选不能进入章节采用路径；打开审阅不等于保存或采用。授权 issued 支持继续审阅、consumed 查看正式正文、expired 提示失效而不自动重签。用户也可对唯一、精确作用域的未修改候选显式发出对话采用指令；这只缩短 UI 路径，仍验证权威候选、签发/复验授权、持久草稿并走原子采用。
+- 修订意见与候选来源分离：source chip 绑定任务、作品/章节、card/artifact/hash，发送和失败重试均复验原来源；无源或失效不猜“最新”。派生新候选用 revision 关系保留旧候选，不能借修订取得正式写入权限。
 
 ## 21.4 既有页面调整
 
@@ -1346,9 +1349,24 @@ v0.1.0 完成后，应满足：
 
 Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成。四个 Canonical 只读 identity（`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`）现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4。这只是 Catalog/Manifest exposure。
 
-R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置，详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
+R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 已于 v3.7.0 对桌面端 + 真实 API 的 `chapter_write` 默认开放；mock / 本地 / 浏览器走确定性 Writer。详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
+
+## 21.7 本批交互与阅读收口
+
+临时菜单有关闭/焦点/IME 保护；参考面板默认临时覆盖（上边界按实测任务头底部定位），只有作者明确固定才在宽窗占参考列；专注是会话内可逆布局，不写侧栏偏好、不清草稿、不停运行。项目树与右侧面板的四种开关组合及 Composer 有界辅助区保持正文可读。对话由公开持久事实扁平排序，同毫秒只做稳定 tie-break，不虚构全局事件序号或显示隐藏推理。连续成功且无警告的只读读取合并为可展开摘要，运行中、失败与含警告读取不被隐藏；候选首屏给出可识别的作品/章节名称、序号、来源、基线与下一步。更早记录按完整用户轮次加载，精确候选定位不触发决定；阅读锚点、展开项与跟随状态仅在当前应用会话内恢复，不是新的领域数据或跨重启保证。
+
+## 21.8 世界规则与作者控制
+
+- `world_rules_v1` schemaVersion 1 复用既有 structuredJson；世界事实、因果规则、社会规范、角色信念、作者约束和叙事偏好分开，authority / epistemic / strength 不互相替代。法律禁止不等于剧情中不能发生，角色相信不等于世界真实；参考作品不复制专有设定。
+- 条件/范围、故事生效时间/揭示、知情者/获知证据、代价/上限、例外批准、来源版本与依赖可逐步补充；八类世界参数目录不是必填百科，未知/N/A 和旧 JSON 保留。
+- 作者修改、停用、规则永久删除或采用世界/规则候选前预览拟改全文、来源与潜在影响，确认绑定本次候选/内容版本；支持 confirm_change / retcon / approve_exception。推荐停用保留历史，但不移除已授权永久删除功能；明确依赖冲突阻断，确认不能绕过。
+- 第二轮编辑体验采用“最小起步、按需展开”：卡片首屏显示标题、正文摘要与分组事实（性质 / 范围 / 限制与代价 / 角色知道 / 八类参数进度），编辑区再按需展开八类参数（含填写示例）、例外、来源与依赖和认知信息；卡片以中性缺口提示帮助补全，不把未知/N/A当错误，也不把角色信念当世界事实。
+- AI 候选冻结原生规则集；规则变化在同一事务内失效旧 issued reviews，保留 consumed 与正式历史，最终采用再核对。不自动改写采用正文，也不把保守影响范围称为已证明矛盾。
+- 模型所需世界、规则与工程材料完整读取或失败关闭；公开 warning / error / not_checked 区分有限检查与未检查，semanticRules 始终 not_checked。浏览器只提供本机恢复与校验，不冒充 SQLite/桌面/live 证据；本机规则保存守卫缺 previewHash、规则集指纹或 intent 任一项即拒绝，不自动补签作者确认。
+
+结构、字段和实际门禁详见 [世界规则契约](design/world-rule-contract.md)。本批实现与验收分开，最终结论仅在全部修复后由父任务统一记录。
 
 ---
 

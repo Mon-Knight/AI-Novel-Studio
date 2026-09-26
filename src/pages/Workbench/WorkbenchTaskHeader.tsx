@@ -1,4 +1,13 @@
-import { Minimize2, Puzzle } from 'lucide-react';
+import {
+  Database,
+  FileText,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRight,
+  Puzzle,
+} from 'lucide-react';
+import type { WorkbenchSidePanelView } from './hooks/useWorkbenchSidePanel';
 import type { Chapter } from '../../types/chapter';
 import type { TaskConversation } from '../../types/conversation';
 import { statusLabel } from './workbenchHelpers';
@@ -19,6 +28,13 @@ interface WorkbenchTaskHeaderProps {
   onCreateChapter: () => void;
   onCompress: () => void;
   onShowPlugins: () => void;
+  sidePanelOpen?: boolean;
+  sidePanelView?: WorkbenchSidePanelView | null;
+  onToggleSidePanel?: () => void;
+  focusMode?: boolean;
+  onToggleFocus?: () => void;
+  onOpenContext?: () => void;
+  onOpenArtifacts?: () => void;
 }
 
 export function WorkbenchTaskHeader({
@@ -36,6 +52,13 @@ export function WorkbenchTaskHeader({
   onCreateChapter,
   onCompress,
   onShowPlugins,
+  sidePanelOpen = false,
+  sidePanelView = null,
+  onToggleSidePanel,
+  focusMode = false,
+  onToggleFocus,
+  onOpenContext,
+  onOpenArtifacts,
 }: WorkbenchTaskHeaderProps) {
   return (
     <header
@@ -102,16 +125,86 @@ export function WorkbenchTaskHeader({
           >
             <Minimize2 aria-hidden="true" size={16} strokeWidth={1.8} />
           </button>
+          {onOpenContext && (
+            <button
+              type="button"
+              className={
+                'workbench-header-icon-button' + (sidePanelView === 'context' ? ' is-active' : '')
+              }
+              data-testid="workbench-open-context"
+              aria-label="查看创作上下文"
+              aria-pressed={sidePanelView === 'context'}
+              aria-controls="workbench-side-panel"
+              title="查看创作上下文"
+              onClick={onOpenContext}
+            >
+              <Database aria-hidden="true" size={16} strokeWidth={1.8} />
+            </button>
+          )}
+          {onOpenArtifacts && (
+            <button
+              type="button"
+              className={
+                'workbench-header-icon-button' + (sidePanelView === 'artifacts' ? ' is-active' : '')
+              }
+              data-testid="workbench-open-artifacts"
+              aria-label="查看本任务产物"
+              aria-pressed={sidePanelView === 'artifacts'}
+              aria-controls="workbench-side-panel"
+              title="查看本任务产物"
+              onClick={onOpenArtifacts}
+            >
+              <FileText aria-hidden="true" size={16} strokeWidth={1.8} />
+            </button>
+          )}
           <button
             type="button"
-            className="workbench-header-icon-button"
+            className={
+              'workbench-header-icon-button' + (sidePanelView === 'plugins' ? ' is-active' : '')
+            }
             data-testid="workbench-current-plugins"
             aria-label="查看当前插件"
+            aria-pressed={sidePanelView === 'plugins'}
+            aria-controls="workbench-side-panel"
             title="查看当前插件"
             onClick={onShowPlugins}
           >
             <Puzzle aria-hidden="true" size={16} strokeWidth={1.8} />
           </button>
+          {onToggleSidePanel && (
+            <button
+              type="button"
+              className={
+                'workbench-header-icon-button' + (sidePanelView === 'launcher' ? ' is-active' : '')
+              }
+              data-testid="workbench-toggle-side-panel"
+              aria-label={sidePanelOpen ? '关闭辅助面板菜单' : '打开辅助面板菜单'}
+              aria-pressed={sidePanelView === 'launcher'}
+              aria-expanded={sidePanelOpen}
+              aria-controls="workbench-side-panel"
+              title={sidePanelOpen ? '关闭辅助面板菜单' : '打开辅助面板菜单'}
+              onClick={onToggleSidePanel}
+            >
+              <PanelRight aria-hidden="true" size={16} strokeWidth={1.8} />
+            </button>
+          )}
+          {onToggleFocus && (
+            <button
+              type="button"
+              className={'workbench-header-icon-button' + (focusMode ? ' is-active' : '')}
+              data-testid="workbench-toggle-focus"
+              aria-label={focusMode ? '退出专注并显示项目树' : '进入专注并隐藏项目树'}
+              aria-pressed={focusMode}
+              title={focusMode ? '退出专注并显示项目树' : '进入专注并隐藏项目树'}
+              onClick={onToggleFocus}
+            >
+              {focusMode ? (
+                <PanelLeftOpen aria-hidden="true" size={16} strokeWidth={1.8} />
+              ) : (
+                <PanelLeftClose aria-hidden="true" size={16} strokeWidth={1.8} />
+              )}
+            </button>
+          )}
         </div>
       </div>
     </header>

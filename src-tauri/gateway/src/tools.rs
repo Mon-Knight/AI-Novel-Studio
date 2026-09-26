@@ -17,6 +17,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+#[path = "../../shared/world_rule_fingerprint.rs"]
+mod world_rule_fingerprint;
+
 pub const TOOL_VERSION: &str = "v1";
 
 const ID_MAX: usize = 160;
@@ -47,10 +50,13 @@ const VOLUME_OUTLINE_CLIP: usize = 2_000;
 const CONTEXT_TEXT_CLIP: usize = 1_200;
 const CONTEXT_JSON_CLIP: usize = 800;
 const CHARACTER_FIELD_CLIP: usize = 800;
-const ENGINEERING_FIELD_CLIP: usize = 4_000;
 const SUMMARY_FIELD_CLIP: usize = 2_000;
-const WORLD_SETTING_LIMIT: usize = 6;
-const RULE_SYSTEM_LIMIT: usize = 8;
+const WORLD_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+// Hard rules are atomic context: fit all active scoped rows, or reject as incomplete.
+const RULE_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+const ENGINEERING_CONTEXT_MAX_BYTES: usize = 64 * 1024;
+// Matches the existing Gateway transport envelope; never enlarge Canonical responses.
+const CONTEXT_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const VOLUME_OUTLINE_LIMIT: usize = 8;
 const VOLUME_LIMIT: usize = 24;
 const CHAPTER_LIMIT: usize = 160;
@@ -2199,11 +2205,126 @@ fn read_current_adopted_body(
 // get_metadata
 // ---------------------------------------------------------------------------
 
+fn bounded_context_response(response: Value) -> Result<Value, String> {
+    let bytes = serde_json::to_vec(&response).map_err(|error| error.to_string())?.len();
+    if bytes > CONTEXT_RESPONSE_MAX_BYTES {
+        return Err("context_incomplete: scoped context exceeds the existing 2 MiB response budget".to_string());
+    }
+    Ok(response)
+}
+
+fn read_rule_set_fingerprint(connection: &Connection, novel_id: &str) -> Result<Value, String> {
+    // Same complete camelCase DTOs (including nulls and inactive rows) as the desktop authority.
+    let mut world_statement = connection.prepare(
+        "SELECT id, novel_id, title, content, structured_json, is_active, created_at, updated_at
+         FROM world_settings WHERE novel_id = ?1 ORDER BY id",
+    ).map_err(|error| error.to_string())?;
+    let worlds = world_statement.query_map(params![novel_id], |row| Ok(json!({
+        "id": row.get::<_, String>(0)?, "novelId": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?, "content": row.get::<_, String>(3)?,
+        "structuredJson": row.get::<_, Option<String>>(4)?,
+        "isActive": row.get::<_, i64>(5)? != 0,
+        "createdAt": row.get::<_, String>(6)?, "updatedAt": row.get::<_, String>(7)?
+    }))).map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let mut rule_statement = connection.prepare(
+        "SELECT id, novel_id, title, category, content, forbidden_rules, structured_json,
+                is_active, created_at, updated_at
+         FROM rule_systems WHERE novel_id = ?1 ORDER BY id",
+    ).map_err(|error| error.to_string())?;
+    let rules = rule_statement.query_map(params![novel_id], |row| Ok(json!({
+        "id": row.get::<_, String>(0)?, "novelId": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?, "category": row.get::<_, Option<String>>(3)?,
+        "content": row.get::<_, String>(4)?, "forbiddenRules": row.get::<_, Option<String>>(5)?,
+        "structuredJson": row.get::<_, Option<String>>(6)?,
+        "isActive": row.get::<_, i64>(7)? != 0,
+        "createdAt": row.get::<_, String>(8)?, "updatedAt": row.get::<_, String>(9)?
+    }))).map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(world_rule_fingerprint::snapshot_from_records(novel_id, &worlds, &rules)["fingerprint"].clone())
+}
+
+fn read_rule_context(connection: &Connection, novel_id: &str) -> Result<(Vec<Value>, Value), String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, title, category, content, forbidden_rules, structured_json, updated_at
+             FROM rule_systems WHERE novel_id = ?1 AND is_active = 1 ORDER BY id ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![novel_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "novelId": novel_id,
+                "title": row.get::<_, String>(1)?,
+                "category": row.get::<_, Option<String>>(2)?,
+                "content": row.get::<_, String>(3)?,
+                "forbiddenRules": row.get::<_, Option<String>>(4)?,
+                "structuredJson": row.get::<_, Option<String>>(5)?,
+                "updatedAt": row.get::<_, Option<String>>(6)?
+            }))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut rules = Vec::new();
+    let mut required_count = 0usize;
+    let mut required_bytes = 2usize; // JSON array brackets; every row includes its full fields.
+    for row in rows {
+        let rule = row.map_err(|error| error.to_string())?;
+        let row_bytes = serde_json::to_vec(&rule).map_err(|error| error.to_string())?.len();
+        required_bytes = required_bytes.saturating_add(row_bytes + usize::from(required_count > 0));
+        required_count += 1;
+        if required_bytes <= RULE_CONTEXT_MAX_BYTES {
+            rules.push(rule);
+        } else {
+            // A partial list is not a usable hard-rule context, even when the omitted row is old.
+            rules.clear();
+        }
+    }
+    let complete = required_bytes <= RULE_CONTEXT_MAX_BYTES;
+    let projection = serde_json::to_string(&rules).map_err(|error| error.to_string())?;
+    let source_ids: Vec<&Value> = rules.iter().map(|rule| &rule["id"]).collect();
+    let coverage = json!({
+        "status": if complete { "complete" } else { "context_incomplete" },
+        "requiredCount": required_count,
+        "includedCount": rules.len(),
+        "sourceIds": source_ids,
+        "projectionHash": sha256(&projection),
+        "ruleSetFingerprint": read_rule_set_fingerprint(connection, novel_id)?,
+        "requiredBytes": required_bytes,
+        "projectedBytes": projection.len(),
+        "maxBytes": RULE_CONTEXT_MAX_BYTES,
+        "semanticValidation": "not_checked"
+    });
+    Ok((rules, coverage))
+}
+
+fn incomplete_context_response(novel_id: &str, chapter_id: Option<&str>, coverage: Value) -> Value {
+    json!({
+        "ok": false,
+        "toolVersion": TOOL_VERSION,
+        "error": {
+            "code": "context_incomplete",
+            "message": "Required scoped context cannot be projected in full within the existing response budget. Do not generate a candidate or claim semantic validation; reduce the authored context or use an explicitly verified complete read.",
+            "retryable": false
+        },
+        "data": {
+            "ruleSystems": [],
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "chapterId": chapter_id,
+                "ruleSystems": coverage
+            }
+        }
+    })
+}
+
 fn get_metadata(
     connection: &Connection,
     arguments: &Value,
     require_chapter: bool,
 ) -> Result<Value, String> {
+    let _read_snapshot = connection.unchecked_transaction().map_err(|error| error.to_string())?;
     let novel_id = arg_id(arguments, "novelId")?;
     let chapter_id = if require_chapter {
         Some(arg_id(arguments, "chapterId")?)
@@ -2270,79 +2391,53 @@ fn get_metadata(
     )?;
 
     let mut world_settings = Vec::new();
+    let mut world_required_count = 0usize;
+    let mut world_required_bytes = 2usize;
     {
-        let mut statement = connection
-            .prepare(
-                "SELECT id, title, content, structured_json, created_at, updated_at
-                 FROM world_settings
-                 WHERE novel_id = ?1 AND is_active = 1
-                 ORDER BY updated_at DESC, created_at DESC, id DESC",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map(params![novel_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .map_err(|error| error.to_string())?;
+        let mut statement = connection.prepare(
+            "SELECT id, title, content, structured_json, created_at, updated_at
+             FROM world_settings WHERE novel_id = ?1 AND is_active = 1
+             ORDER BY updated_at DESC, created_at DESC, id DESC",
+        ).map_err(|error| error.to_string())?;
+        let mut primary_selected = false;
+        let rows = statement.query_map(params![novel_id], |row| Ok(json!({
+            "id": row.get::<_, String>(0)?, "novelId": novel_id,
+            "title": row.get::<_, String>(1)?, "content": row.get::<_, String>(2)?,
+            "structuredJson": row.get::<_, Option<String>>(3)?,
+            "createdAt": row.get::<_, String>(4)?, "updatedAt": row.get::<_, String>(5)?,
+            "isActive": true
+        }))).map_err(|error| error.to_string())?;
         for row in rows {
-            let (id, title, content, structured_json, created_at, updated_at) =
-                row.map_err(|error| error.to_string())?;
-            if content.trim().is_empty() {
-                continue;
-            }
-            let role = if world_settings.is_empty() {
-                "primary"
-            } else {
-                "supplemental"
-            };
-            world_settings.push(json!({
-                "id": id,
-                "novelId": novel_id,
-                "title": title,
-                "content": clip_to(content, CONTEXT_TEXT_CLIP),
-                "structuredJson": clip_to(structured_json, CONTEXT_JSON_CLIP),
-                "isActive": true,
-                "role": role,
-                "createdAt": created_at,
-                "updatedAt": updated_at
-            }));
-            if world_settings.len() == WORLD_SETTING_LIMIT {
-                break;
-            }
+            let mut world = row.map_err(|error| error.to_string())?;
+            let primary = !primary_selected && world["content"].as_str().is_some_and(|v| !v.trim().is_empty());
+            primary_selected |= primary;
+            world["role"] = json!(if primary { "primary" } else { "supplemental" });
+            world_required_bytes = world_required_bytes.saturating_add(
+                serde_json::to_vec(&world).map_err(|error| error.to_string())?.len()
+                    + usize::from(world_required_count > 0),
+            );
+            world_required_count += 1;
+            if world_required_bytes <= WORLD_CONTEXT_MAX_BYTES { world_settings.push(world); }
+            else { world_settings.clear(); }
         }
     }
-
-    let mut rule_systems = Vec::new();
-    {
-        let mut statement = connection
-            .prepare(
-                "SELECT id, title, category, content, forbidden_rules, structured_json
-                 FROM rule_systems WHERE novel_id = ?1 AND is_active = 1
-                 ORDER BY updated_at DESC",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map(params![novel_id], |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, String>(1)?,
-                    "category": row.get::<_, Option<String>>(2)?,
-                    "content": clip_to(row.get::<_, String>(3)?, CONTEXT_TEXT_CLIP),
-                    "forbiddenRules": clip_to(row.get::<_, Option<String>>(4)?.unwrap_or_default(), CONTEXT_JSON_CLIP),
-                    "structuredJson": clip_to(row.get::<_, Option<String>>(5)?.unwrap_or_default(), CONTEXT_JSON_CLIP)
-                }))
-            })
-            .map_err(|error| error.to_string())?;
-        for row in rows.take(RULE_SYSTEM_LIMIT) {
-            rule_systems.push(row.map_err(|error| error.to_string())?);
-        }
+    let world_projection = serde_json::to_string(&world_settings).map_err(|error| error.to_string())?;
+    let (rule_systems, rule_coverage) = read_rule_context(connection, &novel_id)?;
+    let world_coverage = json!({
+        "status": if world_required_bytes <= WORLD_CONTEXT_MAX_BYTES { "complete" } else { "context_incomplete" },
+        "requiredCount": world_required_count, "includedCount": world_settings.len(),
+        "sourceIds": world_settings.iter().map(|row| &row["id"]).collect::<Vec<_>>(),
+        "projectionHash": sha256(&world_projection),
+        "ruleSetFingerprint": rule_coverage["ruleSetFingerprint"],
+        "requiredBytes": world_required_bytes, "projectedBytes": world_projection.len(),
+        "maxBytes": WORLD_CONTEXT_MAX_BYTES, "semanticValidation": "not_checked"
+    });
+    if rule_coverage["status"] != "complete" || world_coverage["status"] != "complete" {
+        let mut response = incomplete_context_response(&novel_id, chapter_id.as_deref(), rule_coverage);
+        response["data"]["ruleSystems"] = json!(rule_systems);
+        response["data"]["worldSettings"] = json!(world_settings);
+        response["data"]["contextCoverage"]["worldSettings"] = world_coverage;
+        return bounded_context_response(response);
     }
 
     let master_outline = connection
@@ -2736,7 +2831,7 @@ fn get_metadata(
         }
     }
 
-    Ok(json!({
+    bounded_context_response(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
         "revisions": {
@@ -2762,6 +2857,12 @@ fn get_metadata(
             "protagonists": protagonists,
             "worldSettings": world_settings,
             "ruleSystems": rule_systems,
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "ruleSystems": rule_coverage,
+                "worldSettings": world_coverage
+            },
             "masterOutline": master_outline,
             "volumeOutlines": volume_outlines,
             "currentChapterOutline": current_chapter_outline,
@@ -2778,8 +2879,10 @@ fn get_metadata(
             "referenceWorks": reference_works,
             "referenceExcerpts": reference_excerpts,
             "projectionLimits": {
-                "worldSettings": WORLD_SETTING_LIMIT,
-                "ruleSystems": RULE_SYSTEM_LIMIT,
+                "worldSettings": "all_active_or_context_incomplete",
+                "worldSettingBytes": WORLD_CONTEXT_MAX_BYTES,
+                "ruleSystems": "all_active_or_context_incomplete",
+                "ruleSystemBytes": RULE_CONTEXT_MAX_BYTES,
                 "volumeOutlines": VOLUME_OUTLINE_LIMIT,
                 "volumes": VOLUME_LIMIT,
                 "chapters": CHAPTER_LIMIT,
@@ -2800,6 +2903,7 @@ fn get_metadata(
 // ---------------------------------------------------------------------------
 
 fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Value, String> {
+    let _read_snapshot = connection.unchecked_transaction().map_err(|error| error.to_string())?;
     let novel_id = arg_id(arguments, "novelId")?;
     let chapter_id = arg_id(arguments, "chapterId")?;
 
@@ -2909,13 +3013,43 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
                 Ok(json!({
                     "activeVersion": row.get::<_, i64>(0)?,
                     "status": row.get::<_, String>(1)?,
-                    "chapterCard": clip_to(row.get::<_, String>(2)?, ENGINEERING_FIELD_CLIP),
-                    "scenePlan": clip_to(row.get::<_, String>(3)?, ENGINEERING_FIELD_CLIP),
-                    "generationConstraints": clip_to(row.get::<_, String>(4)?, ENGINEERING_FIELD_CLIP)
+                    "chapterCard": row.get::<_, String>(2)?,
+                    "scenePlan": row.get::<_, String>(3)?,
+                    "generationConstraints": row.get::<_, String>(4)?
                 }))
             },
         )
-        .ok();
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let engineering_projection = serde_json::to_string(&engineering_state)
+        .map_err(|error| error.to_string())?;
+    let engineering_complete = engineering_projection.len() <= ENGINEERING_CONTEXT_MAX_BYTES;
+    let engineering_coverage = json!({
+        "status": if engineering_complete { "complete" } else { "context_incomplete" },
+        "requiredCount": usize::from(engineering_state.is_some()),
+        "includedCount": if engineering_complete { usize::from(engineering_state.is_some()) } else { 0 },
+        "projectionHash": sha256(if engineering_complete { &engineering_projection } else { "null" }),
+        "requiredBytes": engineering_projection.len(),
+        "projectedBytes": if engineering_complete { engineering_projection.len() } else { 4 },
+        "maxBytes": ENGINEERING_CONTEXT_MAX_BYTES,
+        "semanticValidation": "not_checked"
+    });
+    if !engineering_complete {
+        return Ok(json!({
+            "ok": false,
+            "toolVersion": TOOL_VERSION,
+            "error": { "code": "context_incomplete", "message": "Chapter engineering constraints exceed the complete-context budget; generation is not admitted.", "retryable": false },
+            "data": {
+                "engineeringState": null,
+                "contextCoverage": {
+                    "schemaVersion": "writing_context_coverage_v1",
+                    "novelId": novel_id,
+                    "chapterId": chapter_id,
+                    "engineeringState": engineering_coverage
+                }
+            }
+        }));
+    }
 
     let mut events = Vec::new();
     {
@@ -3048,7 +3182,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
     }
     let current_adopted_draft = read_current_adopted_body(connection, &novel_id, &chapter_id)?;
 
-    Ok(json!({
+    bounded_context_response(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
         "revisions": {
@@ -3067,6 +3201,12 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
             "volumeOutline": volume_outline,
             "outline": outline,
             "engineeringState": engineering_state,
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "chapterId": chapter_id,
+                "engineeringState": engineering_coverage
+            },
             "chapterRoles": chapter_roles,
             "currentAdoptedDraft": current_adopted_draft,
             "chapterEvents": events,
@@ -3076,7 +3216,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
                 "chapterEvents": CHAPTER_EVENT_LIMIT,
                 "chapterRoles": CHAPTER_ROLE_LIMIT,
                 "previousChapterSummaries": 3,
-                "engineeringFieldChars": ENGINEERING_FIELD_CLIP,
+                "engineeringBytes": ENGINEERING_CONTEXT_MAX_BYTES,
                 "outlineFieldChars": VOLUME_OUTLINE_CLIP
             }
         }
@@ -3734,7 +3874,8 @@ mod tests {
                 CREATE TABLE rule_systems (
                     id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
                     category TEXT, content TEXT NOT NULL, forbidden_rules TEXT,
-                    structured_json TEXT, is_active INTEGER NOT NULL, updated_at TEXT
+                    structured_json TEXT, is_active INTEGER NOT NULL, updated_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE master_outlines (
                     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -3876,7 +4017,8 @@ mod tests {
                     '2026-08-21T00:00:00Z',
                     '2026-08-21T00:00:00Z'
                 );
-                INSERT INTO rule_systems VALUES (
+                INSERT INTO rule_systems (id, novel_id, title, category, content, forbidden_rules,
+                    structured_json, is_active, updated_at) VALUES (
                     'rule-1', 'novel-1', '回响规则', '能力', '记忆可换取力量',
                     '不可复活死者', '{}', 1, '2026-08-21T00:00:00Z'
                 );
@@ -5238,6 +5380,108 @@ mod tests {
     }
 
     #[test]
+    fn rule_context_covers_twelve_rules_long_forbidden_and_unknown_json() {
+        let connection = fixture_connection();
+        connection.execute("DELETE FROM rule_systems", []).expect("clear fixture rules");
+        for index in 0..12 {
+            connection.execute(
+                "INSERT INTO rule_systems (id, novel_id, title, content, forbidden_rules, structured_json, is_active, updated_at, created_at)
+                 VALUES (?1, 'novel-1', ?2, ?3, ?4, ?5, 1, ?6, 'created')",
+                params![format!("rule-{index:02}"), format!("Rule {index}"),
+                    format!("{}CONTENT_{index}_TAIL", "约".repeat(1300)),
+                    format!("{}FORBIDDEN_{index}_TAIL", "禁".repeat(350)),
+                    format!(r#"{{"unknown":"{}UNKNOWN_{index}_TAIL"}}"#, "x".repeat(900)),
+                    format!("2026-09-{index:02}")],
+            ).expect("insert long rule");
+        }
+        connection.execute("INSERT INTO rule_systems (id, novel_id, title, content, is_active, updated_at) VALUES ('inactive', 'novel-1', 'inactive', 'INACTIVE_CANARY', 0, 't'), ('foreign', 'other', 'foreign', 'FOREIGN_CANARY', 1, 't')", []).expect("insert excluded rules");
+        let result = call_tool(&connection, "novel.read_context", &json!({"novelId":"novel-1"})).expect("read rules");
+        let rules = &result["data"]["ruleSystems"];
+        let coverage = &result["data"]["contextCoverage"]["ruleSystems"];
+        assert_eq!(result["ok"], true);
+        assert_eq!(rules.as_array().expect("rules").len(), 12);
+        assert_eq!(coverage["requiredCount"], 12);
+        assert_eq!(coverage["includedCount"], 12);
+        assert_eq!(coverage["status"], "complete");
+        assert_eq!(coverage["semanticValidation"], "not_checked");
+        assert_eq!(coverage["projectionHash"], sha256(&rules.to_string()));
+        assert_eq!(coverage["ruleSetFingerprint"], read_rule_set_fingerprint(&connection, "novel-1").expect("fingerprint"));
+        for index in 0..12 {
+            assert!(rules[index]["content"].as_str().expect("content").ends_with(&format!("CONTENT_{index}_TAIL")));
+            assert!(rules[index]["forbiddenRules"].as_str().expect("forbidden").ends_with(&format!("FORBIDDEN_{index}_TAIL")));
+            assert!(rules[index]["structuredJson"].as_str().expect("metadata").contains(&format!("UNKNOWN_{index}_TAIL")));
+        }
+        assert!(!rules.to_string().contains("INACTIVE_CANARY"));
+        assert!(!rules.to_string().contains("FOREIGN_CANARY"));
+        let fingerprint = coverage["ruleSetFingerprint"].clone();
+        connection.execute("UPDATE rule_systems SET content = 'changed inactive' WHERE id = 'inactive'", []).expect("change inactive baseline");
+        assert_ne!(fingerprint, read_rule_set_fingerprint(&connection, "novel-1").expect("new fingerprint"));
+    }
+
+    #[test]
+    fn rule_context_over_budget_is_incomplete_instead_of_recent_rule_sampling() {
+        let connection = fixture_connection();
+        connection.execute("UPDATE rule_systems SET forbidden_rules = ?1", params!["禁".repeat(RULE_CONTEXT_MAX_BYTES)]).expect("oversize forbidden rule");
+        let result = call_tool(&connection, "novel.read_context", &json!({"novelId":"novel-1"})).expect("explicit incomplete result");
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["error"]["code"], "context_incomplete");
+        assert_eq!(result["data"]["ruleSystems"], json!([]));
+        let coverage = &result["data"]["contextCoverage"]["ruleSystems"];
+        assert_eq!(coverage["status"], "context_incomplete");
+        assert_eq!(coverage["requiredCount"], 1);
+        assert_eq!(coverage["includedCount"], 0);
+        assert_eq!(coverage["sourceIds"], json!([]));
+        assert_eq!(coverage["projectionHash"], sha256("[]"));
+        assert!(result.to_string().len() < CONTEXT_RESPONSE_MAX_BYTES);
+    }
+
+    #[test]
+    fn world_context_retains_old_structured_constraints_or_reports_incomplete() {
+        let connection = fixture_connection();
+        for index in 0..12 {
+            connection.execute("INSERT INTO world_settings VALUES (?1,'novel-1',?2,?3,?4,1,'created',?5)",
+                params![format!("world-{index:02}"), format!("World {index}"),
+                    format!("{}WORLD_{index}_TAIL", "界".repeat(1400)),
+                    format!(r#"{{"schemaVersion":"unknown","constraint":"{}METADATA_{index}_TAIL"}}"#, "x".repeat(900)),
+                    format!("2026-09-{index:02}")]).expect("insert world canary");
+        }
+        let result = call_tool(&connection,"novel.read_context",&json!({"novelId":"novel-1"})).expect("read all worlds");
+        let worlds = &result["data"]["worldSettings"];
+        assert_eq!(result["ok"], true);
+        assert_eq!(worlds.as_array().expect("worlds").len(), 13);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["projectionHash"], sha256(&worlds.to_string()));
+        for index in 0..12 {
+            assert!(worlds.to_string().contains(&format!("WORLD_{index}_TAIL")));
+            assert!(worlds.to_string().contains(&format!("METADATA_{index}_TAIL")));
+        }
+        connection.execute("UPDATE world_settings SET structured_json = ?1 WHERE id = 'world-00'",params!["x".repeat(WORLD_CONTEXT_MAX_BYTES)]).expect("oversize world metadata");
+        let incomplete = call_tool(&connection,"novel.read_context",&json!({"novelId":"novel-1"})).expect("incomplete world result");
+        assert_eq!(incomplete["ok"], false);
+        assert_eq!(incomplete["data"]["worldSettings"], json!([]));
+        assert_eq!(incomplete["data"]["contextCoverage"]["worldSettings"]["status"], "context_incomplete");
+        assert_eq!(incomplete["data"]["contextCoverage"]["ruleSystems"]["status"], "complete");
+    }
+
+    #[test]
+    fn engineering_context_retains_viewpoint_knowledge_and_rejects_partial_json() {
+        let connection = fixture_connection();
+        let card = json!({"chapterGoal":"目标".repeat(2500),"viewpointCharacter":"VIEWPOINT_CANARY", "knownInformation":["KNOWN_CANARY"], "unknownInformation":["UNKNOWN_CANARY"]}).to_string();
+        connection.execute("INSERT INTO chapter_engineering_states VALUES ('engineering','novel-1','chapter-1',1,'active',?1,'[]','{}','t')",params![card]).expect("engineering");
+        let args = json!({"novelId":"novel-1","chapterId":"chapter-1"});
+        let result = call_tool(&connection,"chapter.read_outline",&args).expect("engineering read");
+        let state = &result["data"]["engineeringState"];
+        assert_eq!(state["chapterCard"], card);
+        assert!(state["chapterCard"].as_str().expect("card").contains("UNKNOWN_CANARY"));
+        assert_eq!(result["data"]["contextCoverage"]["engineeringState"]["projectionHash"],sha256(&state.to_string()));
+        connection.execute("UPDATE chapter_engineering_states SET chapter_card_json = ?1",params!["x".repeat(ENGINEERING_CONTEXT_MAX_BYTES)]).expect("oversize card");
+        let incomplete = call_tool(&connection,"chapter.read_outline",&args).expect("explicit incomplete card");
+        assert_eq!(incomplete["ok"],false);
+        assert_eq!(incomplete["data"]["engineeringState"],Value::Null);
+        assert_eq!(incomplete["data"]["contextCoverage"]["engineeringState"]["status"],"context_incomplete");
+        assert!(bounded_context_response(json!({"text":"x".repeat(CONTEXT_RESPONSE_MAX_BYTES)})).is_err());
+    }
+
+    #[test]
     fn read_context_exposes_active_domain_assets_and_outline_chain() {
         let connection = fixture_connection();
         let result = call_tool(
@@ -5785,8 +6029,9 @@ mod tests {
             .iter()
             .filter_map(|world| world["id"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["world-b", "world-a", "world-c", "world-d"]);
-        assert_eq!(worlds.len(), 4);
+        assert_eq!(ids, vec!["world-b", "world-a", "world-c", "world-blank", "world-d"]);
+        assert_eq!(worlds.len(), 5);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["requiredCount"], 5);
         assert_eq!(worlds[0]["role"], "primary");
         assert_eq!(worlds[0]["isActive"], true);
         assert_eq!(worlds[0]["novelId"], "novel-1");
@@ -5800,7 +6045,7 @@ mod tests {
     fn context_projection_enforces_item_and_field_budgets_without_chapter_bodies() {
         let connection = fixture_connection();
         let oversized = "界".repeat(CONTEXT_TEXT_CLIP + 500);
-        for index in 0..(WORLD_SETTING_LIMIT + 4) {
+        for index in 0..10 {
             connection
                 .execute(
                     "INSERT INTO world_settings (
@@ -5844,11 +6089,10 @@ mod tests {
         let worlds = result["data"]["worldSettings"]
             .as_array()
             .expect("world settings array");
-        assert_eq!(worlds.len(), WORLD_SETTING_LIMIT);
-        assert!(worlds.iter().all(|world| {
-            world["content"]
-                .as_str()
-                .is_some_and(|content| content.chars().count() <= CONTEXT_TEXT_CLIP + 20)
+        assert_eq!(worlds.len(), 11);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["status"], "complete");
+        assert!(worlds.iter().filter(|world| world["id"].as_str().unwrap_or_default().starts_with("world-budget-")).all(|world| {
+            world["content"].as_str() == Some(oversized.as_str())
         }));
         assert!(result["data"]["chapters"]
             .as_array()

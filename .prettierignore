@@ -4,6 +4,8 @@ build/
 coverage/
 reports/
 test-results/
+# Hash-frozen prompt templates: Rust validates CRLF->LF + trimmed SHA-256 identities.
+prompts/
 tmp/
 .e2e-tools/
 .understand-anything/

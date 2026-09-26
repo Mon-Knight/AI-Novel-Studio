@@ -201,7 +201,11 @@ export class ChapterVersionService {
   /**
    * 根据版本 ID 对比两个版本
    */
-  compareByRevisionIds(chapterId: string, fromRevisionId: string, toRevisionId: string): RevisionDiff {
+  compareByRevisionIds(
+    chapterId: string,
+    fromRevisionId: string,
+    toRevisionId: string,
+  ): RevisionDiff {
     const fromRev = this.getRevision(chapterId, fromRevisionId);
     const toRev = this.getRevision(chapterId, toRevisionId);
 

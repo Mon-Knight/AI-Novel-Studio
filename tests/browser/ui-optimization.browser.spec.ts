@@ -1,6 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { $, $$, browser, expect } from '@wdio/globals';
+import {
+  boxesOverlap,
+  readCenterHits,
+  recordRound2Metrics,
+  resetRound2Metrics,
+  setExactViewport,
+  takeRound2Screenshot,
+  waitForStableBoxSet,
+  waitForStableWorkbenchBoxes,
+} from './workbenchGeometry';
 
 const NOVEL_ID = 'ui-optimization-novel';
 const VOLUME_ID = 'ui-optimization-volume';
@@ -9,20 +19,12 @@ const TASK_B = 'ui-optimization-task-b';
 const screenshotDirectory = path.resolve(import.meta.dirname, '../../test-results/ui-optimization');
 const longGoal = `  ${'保留人物动机、章节目标和已确认的情节约束。'.repeat(25)}\n${'要求逐段审阅，不直接采用。'.repeat(40)}\n保留末尾空格。  `;
 const metrics: Array<Record<string, unknown>> = [];
+/** Keeps this spec's round-two geometry evidence separate from the other browser specs. */
+const round2SpecId = 'ui-optimization';
 
+/** Delegates to the shared helper so the 1180px pinned/overlay boundary stays exact. */
 async function setViewport(width: number, height: number): Promise<void> {
-  await browser.setWindowSize(width, height);
-  const outer = await browser.getWindowSize();
-  const inner = await browser.execute(() => ({ width: innerWidth, height: innerHeight }));
-  if (inner.width !== width || inner.height !== height) {
-    await browser.setWindowSize(
-      outer.width + width - inner.width,
-      outer.height + height - inner.height,
-    );
-  }
-  await browser.waitUntil(async () =>
-    browser.execute((w, h) => innerWidth === w && innerHeight === h, width, height),
-  );
+  await setExactViewport(width, height);
 }
 
 async function waitForWorkbench(): Promise<void> {
@@ -225,6 +227,11 @@ async function seed(theme: 'light' | 'dark' = 'light'): Promise<void> {
   await (await $('[data-testid="workbench-task-header"]')).waitForDisplayed();
   await (await $('[data-testid="workbench-artifact-candidates"]')).waitForDisplayed();
   await (await $('[data-testid="workbench-chapter-select"]')).waitForDisplayed();
+  const recoveryDialog = await $('[data-testid="conversation-recovery-dialog"]');
+  if (await recoveryDialog.isExisting()) {
+    await (await recoveryDialog.$('[data-testid="conversation-recovery-dismiss"]')).click();
+    await recoveryDialog.waitForExist({ reverse: true });
+  }
   await installNetworkGuard();
 }
 
@@ -265,7 +272,10 @@ async function screenshot(name: string): Promise<void> {
 }
 
 describe('UI optimization browser acceptance', () => {
-  before(() => fs.mkdirSync(screenshotDirectory, { recursive: true }));
+  before(() => {
+    fs.mkdirSync(screenshotDirectory, { recursive: true });
+    resetRound2Metrics(round2SpecId);
+  });
   after(() =>
     fs.writeFileSync(
       path.join(screenshotDirectory, 'layout-metrics.json'),
@@ -351,12 +361,21 @@ describe('UI optimization browser acceptance', () => {
         expect(box.top).toBeGreaterThanOrEqual(0);
         expect(box.bottom).toBeLessThanOrEqual(viewport.height + 1);
       }
+      // Templates live in the composer "+" menu; open it before using the chips.
+      await (await $('[data-testid="workbench-composer-attach"]')).click();
+      await (await $('[data-testid="workbench-template-generate-chapter"]')).waitForDisplayed();
       await (await $('[data-testid="workbench-template-generate-chapter"]')).click();
       await expect(input).toHaveValue(longGoal, { trim: false });
       await (await $('button=替换目标')).click();
       await expect(input).toHaveValue('生成下一章');
+      await expect($('[data-testid="workbench-composer-attach"]')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      expect(await input.isFocused()).toBe(true);
       await (await $('button=撤销模板')).click();
       await expect(input).toHaveValue(longGoal, { trim: false });
+      await (await $('[data-testid="workbench-composer-attach"]')).click();
       await (await $('.workbench-template-more > summary')).click();
       await (await $('[data-testid="workbench-template-events"]')).waitForDisplayed();
       await (await $('[data-testid="workbench-template-events"]')).click();
@@ -364,7 +383,11 @@ describe('UI optimization browser acceptance', () => {
       await expect(input).toHaveValue(`${longGoal}\n\n生成本章剧情事件候选`, { trim: false });
       await (await $('button=撤销模板')).click();
       await expect(input).toHaveValue(longGoal, { trim: false });
-      await (await $('.workbench-template-more > summary')).click();
+      await expect($('[data-testid="workbench-composer-attach"]')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      expect(await input.isFocused()).toBe(true);
       const chapterSearch = await $('.workbench-chapter-target input[type="search"]');
       expect((await $$('#workbench-chapter-select option')).length).toBeLessThanOrEqual(81);
       await chapterSearch.setValue('第999章');
@@ -377,6 +400,81 @@ describe('UI optimization browser acceptance', () => {
       await assertNoExecution();
     });
   }
+
+  it('keeps expanded controls bounded and makes collapsed-tree search visible without executing', async () => {
+    for (const viewport of [
+      { width: 1024, height: 700 },
+      { width: 1280, height: 820 },
+    ]) {
+      await seed();
+      await setViewport(viewport.width, viewport.height);
+      const input = await $('[data-testid="workbench-composer-input"]');
+      await input.setValue(longGoal);
+      await (await $('[data-testid="workbench-asset-scope-toggle"]')).click();
+      await (await $('[data-testid="workbench-asset-scope-panel"]')).waitForDisplayed();
+      await (await $('[data-testid="workbench-composer-attach"]')).click();
+      await (
+        await $('[data-testid="workbench-asset-scope-panel"]')
+      ).waitForExist({ reverse: true });
+      await (await $('.workbench-template-more > summary')).click();
+      await (await $('[data-testid="workbench-template-generate-chapter"]')).click();
+      const geometry = await browser.execute(() => {
+        const rect = (selector: string) =>
+          document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+        const extras = document.querySelector<HTMLElement>('.workbench-composer-extras')!;
+        const composer = rect('.workbench-composer');
+        const input = rect('[data-testid="workbench-composer-input"]');
+        const send = rect('[data-testid="workbench-send-task"]');
+        return {
+          viewportHeight: innerHeight,
+          viewportWidth: innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          composerHeight: composer.height,
+          inputTop: input.top,
+          inputHeight: input.height,
+          inputBottom: input.bottom,
+          sendBottom: send.bottom,
+          sendRight: send.right,
+          messagesHeight: rect('.workbench-message-region').height,
+          extrasOverflow: getComputedStyle(extras).overflowY,
+          extrasHeight: extras.clientHeight,
+          extrasContent: extras.scrollHeight,
+        };
+      });
+      expect(geometry.composerHeight).toBeLessThanOrEqual(
+        Math.min(geometry.viewportHeight * 0.55, 440) + 1,
+      );
+      expect(geometry.inputHeight).toBeGreaterThanOrEqual(58);
+      expect(geometry.inputTop).toBeGreaterThan(0);
+      expect(geometry.inputBottom).toBeLessThanOrEqual(geometry.viewportHeight);
+      expect(geometry.sendBottom).toBeLessThanOrEqual(geometry.viewportHeight);
+      expect(geometry.sendRight).toBeLessThanOrEqual(geometry.viewportWidth);
+      expect(geometry.messagesHeight).toBeGreaterThanOrEqual(120);
+      expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+      expect(geometry.extrasOverflow).toBe('auto');
+      expect(geometry.extrasContent).toBeGreaterThanOrEqual(geometry.extrasHeight);
+      await browser.keys('Escape'); // Cancel template confirmation, not the goal.
+      await browser.keys('Escape'); // Close the transient menu.
+      await expect(input).toHaveValue(longGoal, { trim: false });
+      await (await $('[data-testid="shell-toggle-sidebar"]')).click();
+      await expect($('[data-testid="app-shell"]')).toHaveAttribute('data-sidebar', 'collapsed');
+      await browser.execute(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'k',
+            ctrlKey: true,
+            bubbles: true,
+          }),
+        ),
+      );
+      await expect($('[data-testid="app-shell"]')).toHaveAttribute('data-sidebar', 'expanded');
+      const search = await $('input[aria-label="搜索创作任务"]');
+      await search.waitForDisplayed();
+      expect(await search.isFocused()).toBe(true);
+      await expect(input).toHaveValue(longGoal, { trim: false });
+      await assertNoExecution();
+    }
+  });
 
   it('protects creator text, preserves IME composition and restores focus without executing', async () => {
     await seed();
@@ -526,6 +624,198 @@ describe('UI optimization browser acceptance', () => {
       expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
     }
+    await assertNoExecution();
+  });
+
+  it('keeps the reference panel an overlay by default, docks it only when pinned and wide, and honours focus', async () => {
+    const preferenceKey = 'ai_novel_studio_sidebar_collapsed:workbench';
+    const headerTriggers = [
+      '[data-testid="workbench-open-context"]',
+      '[data-testid="workbench-open-artifacts"]',
+      '[data-testid="workbench-current-plugins"]',
+      '[data-testid="workbench-toggle-focus"]',
+    ];
+
+    for (const viewport of [
+      { width: 1024, height: 700 },
+      { width: 1280, height: 820 },
+      { width: 1440, height: 900 },
+      { width: 2560, height: 1440 },
+    ]) {
+      await seed();
+      await setViewport(viewport.width, viewport.height);
+      const label = `${viewport.width}x${viewport.height}`;
+      const docked = viewport.width > 1180;
+      const input = await $('[data-testid="workbench-composer-input"]');
+      // A transient panel closes when the composer receives focus. Seed the
+      // draft first so the panel can be opened and then hidden by focus mode.
+      await input.setValue(longGoal);
+
+      const closed = await waitForStableWorkbenchBoxes(`closed ${label}`);
+      expect(closed.panel.found).toBe(false);
+      const expandedMain = closed.main;
+
+      // The header's direct actions open the default transient overlay without taking a column.
+      await (await $('[data-testid="workbench-open-artifacts"]')).click();
+      const transient = await waitForStableWorkbenchBoxes(`transient ${label}`, {
+        requireFound: true,
+      });
+      await expect($('[data-testid="creative-workbench"]')).toHaveAttribute(
+        'data-panel-intent',
+        'transient',
+      );
+      await expect($('[data-testid="workbench-side-panel"]')).toHaveAttribute(
+        'data-view',
+        'artifacts',
+      );
+      expect(transient.panel.position).toBe('absolute');
+      expect(Math.abs(transient.panel.width - 360)).toBeLessThanOrEqual(1);
+      expect(Math.abs(transient.panel.right - viewport.width)).toBeLessThanOrEqual(1);
+      expect(transient.panel.top).toBeGreaterThanOrEqual(transient.header.bottom - 1);
+      expect(Math.abs(transient.main.left - expandedMain.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(transient.main.width - expandedMain.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(transient.main.height - expandedMain.height)).toBeLessThanOrEqual(1);
+      expect(transient.page.right).toBeLessThanOrEqual(viewport.width + 1);
+      const overlayHits = await readCenterHits(headerTriggers);
+      expect(overlayHits.every((hit) => hit.found && hit.hitInsideTarget)).toBe(true);
+
+      // Pinning claims the reference column above 1180px only.
+      await (await $('[data-testid="workbench-side-pin"]')).click();
+      const pinned = await waitForStableWorkbenchBoxes(`pinned ${label}`, { requireFound: true });
+      await expect($('[data-testid="workbench-side-panel"]')).toHaveAttribute(
+        'data-panel-intent',
+        'pinned',
+      );
+      if (docked) {
+        expect(pinned.panel.position).toBe('static');
+        expect(Math.abs(pinned.panel.left - pinned.main.right)).toBeLessThanOrEqual(1);
+        expect(Math.abs(pinned.panel.right - viewport.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(pinned.panel.top - pinned.main.top)).toBeLessThanOrEqual(2);
+        expect(
+          Math.abs(pinned.main.width - (viewport.width - pinned.tree.width - 360)),
+        ).toBeLessThanOrEqual(2);
+      } else {
+        expect(pinned.panel.position).toBe('absolute');
+        expect(pinned.panel.top).toBeGreaterThanOrEqual(pinned.header.bottom - 1);
+        expect(Math.abs(pinned.main.width - expandedMain.width)).toBeLessThanOrEqual(1);
+      }
+      await takeRound2Screenshot(`ui-panel-pinned-${label}`);
+
+      // Unpinning returns to the overlay and the full transcript width.
+      await (await $('[data-testid="workbench-side-pin"]')).click();
+      const unpinned = await waitForStableWorkbenchBoxes(`unpinned ${label}`, {
+        requireFound: true,
+      });
+      await expect($('[data-testid="creative-workbench"]')).toHaveAttribute(
+        'data-panel-intent',
+        'transient',
+      );
+      expect(unpinned.panel.position).toBe('absolute');
+      expect(Math.abs(unpinned.main.width - expandedMain.width)).toBeLessThanOrEqual(1);
+      expect(unpinned.panel.top).toBeGreaterThanOrEqual(unpinned.header.bottom - 1);
+
+      // Focus hides the tree and the transient overlay for this session only.
+      const preferenceBefore = await browser.execute(
+        (key) => window.localStorage.getItem(key),
+        preferenceKey,
+      );
+      expect(preferenceBefore).toBe('0');
+      await (await $('[data-testid="workbench-toggle-focus"]')).click();
+      const focused = await waitForStableWorkbenchBoxes(`focus ${label}`, { requireFound: true });
+      await expect($('[data-testid="app-shell"]')).toHaveAttribute('data-focus-mode', 'true');
+      expect(focused.tree.display).toBe('none');
+      expect(focused.panel.hidden).toBe(true);
+      expect(await browser.execute((key) => window.localStorage.getItem(key), preferenceKey)).toBe(
+        preferenceBefore,
+      );
+      await expect(input).toHaveValue(longGoal, { trim: false });
+      await takeRound2Screenshot(`ui-focus-${label}`);
+      recordRound2Metrics(round2SpecId, 'ui-panel-focus', {
+        viewport,
+        docked,
+        closedMain: expandedMain,
+        transientPanel: transient.panel,
+        pinnedPanel: pinned.panel,
+        focusedPanel: focused.panel,
+        focusedTreeDisplay: focused.tree.display,
+      });
+
+      // Leaving focus restores the same reference view without touching the preference.
+      await (await $('[data-testid="workbench-toggle-focus"]')).click();
+      const restored = await waitForStableWorkbenchBoxes(`focus exited ${label}`, {
+        requireFound: true,
+      });
+      await expect($('[data-testid="app-shell"]')).toHaveAttribute('data-focus-mode', 'false');
+      expect(restored.panel.hidden).toBe(false);
+      expect(restored.tree.display).not.toBe('none');
+      expect(await browser.execute((key) => window.localStorage.getItem(key), preferenceKey)).toBe(
+        preferenceBefore,
+      );
+      await expect(input).toHaveValue(longGoal, { trim: false });
+
+      await (await $('[data-testid="workbench-side-close"]')).click();
+      const reclosed = await waitForStableWorkbenchBoxes(`cleanup ${label}`);
+      expect(reclosed.panel.found).toBe(false);
+      await assertNoExecution();
+    }
+  });
+
+  it('shows the candidate name, card target/source and next step on the first screen without clipping', async () => {
+    await seed();
+    // Desktop-first baseline: the whole candidate first screen has to fit without scrolling.
+    await setViewport(1440, 900);
+    const boxes = await waitForStableBoxSet({
+      selectors: {
+        card: '[data-testid="workbench-artifact-card"]',
+        heading: '[data-testid="workbench-artifact-card"] h3',
+        identity: '[data-testid="workbench-artifact-identity"]',
+        target: '[data-testid="workbench-artifact-target"]',
+        model: '[data-testid="workbench-artifact-model"]',
+        nextStep: '[data-testid="workbench-artifact-next-step"]',
+        candidates: '[data-testid="workbench-artifact-candidates"]',
+        firstCandidate: '[data-testid="workbench-artifact-candidate"]',
+        firstName: '.workbench-artifact-candidate-title',
+        firstSummary: '.workbench-artifact-candidate-summary',
+        modelReason: '[data-testid="workbench-fixed-model-reason"]',
+        messages: '.workbench-message-region',
+      },
+      label: 'candidate first screen',
+      requireFound: true,
+    });
+    expect(await (await $('.workbench-artifact-candidate-title')).getText()).toBe('A岑舟');
+    expect(await (await $('[data-testid="workbench-artifact-target"]')).getText()).toContain(
+      '目标：',
+    );
+    expect(await (await $('[data-testid="workbench-artifact-model"]')).getText()).toContain(
+      '来源：',
+    );
+    expect(await (await $('[data-testid="workbench-artifact-next-step"]')).getText()).toContain(
+      '下一步：',
+    );
+    // The identifiable name, source row and next step are readable without scrolling or hover.
+    expect(boxes.heading.top).toBeGreaterThanOrEqual(boxes.messages.top - 1);
+    expect(boxes.heading.bottom).toBeLessThanOrEqual(boxes.messages.bottom + 1);
+    expect(boxes.identity.top).toBeGreaterThanOrEqual(boxes.messages.top - 1);
+    expect(boxes.identity.bottom).toBeLessThanOrEqual(boxes.messages.bottom + 1);
+    expect(boxes.nextStep.bottom).toBeLessThanOrEqual(boxes.messages.bottom + 1);
+    expect(boxes.firstName.width).toBeGreaterThan(0);
+    expect(boxes.firstName.top).toBeGreaterThanOrEqual(boxes.firstCandidate.top - 1);
+    expect(boxes.firstName.bottom).toBeLessThanOrEqual(boxes.firstCandidate.bottom + 1);
+    expect(boxes.firstName.bottom).toBeLessThanOrEqual(boxes.messages.bottom + 1);
+    expect(boxes.firstSummary.top).toBeGreaterThanOrEqual(boxes.firstName.bottom - 1);
+    expect(boxesOverlap(boxes.identity, boxes.nextStep)).toBe(false);
+    expect(boxesOverlap(boxes.heading, boxes.identity)).toBe(false);
+    // Nothing inside the card or the transcript is clipped horizontally.
+    expect(boxes.card.scrollWidth).toBeLessThanOrEqual(boxes.card.clientWidth + 1);
+    expect(boxes.messages.scrollWidth).toBeLessThanOrEqual(boxes.messages.clientWidth + 1);
+    expect(boxes.candidates.right).toBeLessThanOrEqual(boxes.card.right + 1);
+    expect(boxes.identity.right).toBeLessThanOrEqual(boxes.card.right + 1);
+    // The frozen-model reason stays a disclosure the author opens on demand.
+    expect(
+      await (await $('[data-testid="workbench-fixed-model-reason"]')).getAttribute('open'),
+    ).toBe(null);
+    await takeRound2Screenshot('ui-candidate-first-screen-1440x900');
+    recordRound2Metrics(round2SpecId, 'ui-candidate-first-screen', { boxes });
     await assertNoExecution();
   });
 

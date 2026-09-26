@@ -104,7 +104,7 @@ function GlobalAiTaskModal({ state }: GlobalAiTaskModalProps) {
           />
         </div>
 
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{state.progress}%</div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{state.progress}%</div>
       </div>
     </div>
   );

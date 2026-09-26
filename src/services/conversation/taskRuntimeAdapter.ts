@@ -1,5 +1,11 @@
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
-import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
+import { verifyArtifactRevisionSource } from './artifactRevisionSourceService';
+import {
+  captureBrowserChapterRuleBaseline,
+  assertBrowserChapterRuleBaseline,
+  type BrowserChapterRuleBaseline,
+} from './browserChapterReviewBaseline';
 import { isTauri } from '../database/db';
 import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
@@ -9,11 +15,7 @@ import {
   classifyTaskIntent,
   selectCandidateTool,
 } from './taskGoalRouting';
-import {
-  composeWorkbenchInstruction,
-  deriveTaskConstraintBrief,
-  summarizeTaskConstraintBrief,
-} from './taskConstraintBrief';
+import { prepareTaskWritingPreferences } from './taskWritingPreferences';
 import { workbenchChapterWriter } from './workbenchChapterWriter';
 import { buildWorkbenchMemoryQuery } from './workbenchMemoryQuery';
 import { taskGoalDirective } from './taskGoalDirective';
@@ -31,6 +33,7 @@ export interface TaskRuntimeInput {
   modelSnapshot?: TaskModelSnapshot;
   /** Stable per-task worker identity supplied by the DSH session adapter. */
   workerId?: string;
+  revisionSource?: ArtifactRevisionSource;
 }
 
 export interface TaskRuntimeEvent {
@@ -85,6 +88,8 @@ function withWriterContextEvidence(
   result: ToolResult,
   written:
     | {
+        integrityReview?: unknown;
+        contextCoverage?: unknown;
         contextHash?: string;
         continuitySourceHash?: string;
         continuitySourceChapterId?: string;
@@ -144,6 +149,8 @@ function withWriterContextEvidence(
       lengthRepairCount: written.lengthRepairCount,
       integrityRepairCount: written.integrityRepairCount,
       integrityWarnings: written.integrityWarnings,
+      integrityReview: written.integrityReview,
+      contextCoverage: written.contextCoverage,
       ...(taskConstraints ? { taskConstraints } : {}),
       ...(written.integrityRepairAttempts
         ? { integrityRepairAttempts: written.integrityRepairAttempts }
@@ -221,10 +228,14 @@ async function publishChapterCandidate(input: {
   novelId: string;
   chapterId: string;
   runId: string;
+  // Desktop cards must carry the same turn identity as the DSH path, otherwise the exact
+  // revision-source authority cannot match a card whose turn_id stayed NULL.
+  turnId: string;
   text: string;
   artifactId?: string;
   mode: 'generate' | 'polish';
   warningCount?: number;
+  browserRuleSet?: BrowserChapterRuleBaseline;
 }): Promise<void> {
   const title = input.mode === 'polish' ? '润色章节候选' : '章节正文候选';
   const summary =
@@ -235,6 +246,7 @@ async function publishChapterCandidate(input: {
   if (input.artifactId && isTauri()) {
     await taskConversationService.createArtifactCard({
       conversationId: input.conversationId,
+      turnId: input.turnId,
       runId: input.runId,
       artifactId: input.artifactId,
       artifactType: 'chapter_text',
@@ -247,11 +259,13 @@ async function publishChapterCandidate(input: {
   }
   await taskConversationService.publishStructuredCandidate({
     conversationId: input.conversationId,
+    runId: input.runId,
     novelId: input.novelId,
     artifactType: 'chapter_text',
     title,
     summary,
     structuredPayloadJson: {
+      ...(input.browserRuleSet ? { browserRuleSet: input.browserRuleSet } : {}),
       ok: true,
       toolVersion: 'v1',
       artifactType: 'chapter_text',
@@ -261,50 +275,7 @@ async function publishChapterCandidate(input: {
   });
 }
 
-export async function findLatestCandidateText(
-  conversationId: string,
-  novelId: string,
-  chapterId: string,
-): Promise<string | undefined> {
-  const conversation = await taskConversationService.get(conversationId);
-  if (!conversation) throw new Error('修改来源任务会话不存在。');
-  const cards = conversation.artifacts.filter((item) => item.artifactType === 'chapter_text');
-  for (let index = cards.length - 1; index >= 0; index -= 1) {
-    const card = cards[index];
-    if (!isTauri()) {
-      if (!card.content) throw new Error('浏览器候选卡片缺少修改来源正文。');
-      let payload: { data?: { novelId?: string; chapterId?: string; text?: string } };
-      try {
-        payload = JSON.parse(card.content) as typeof payload;
-      } catch {
-        throw new Error('浏览器候选卡片无法解析修改来源正文。');
-      }
-      if (payload.data?.novelId !== novelId || payload.data?.chapterId !== chapterId) continue;
-      if (!payload.data.text?.trim()) {
-        throw new Error('浏览器候选卡片修改来源正文为空。');
-      }
-      return payload.data.text;
-    }
-
-    if (!card.artifactId) throw new Error('上一版章节候选缺少 ResultArtifact 引用。');
-    const artifact = await aiTaskRuntimeService.getArtifact(card.artifactId);
-    if (artifact.artifact.artifactType !== 'chapter_text') {
-      throw new Error('上一版章节候选的 ResultArtifact 类型无效。');
-    }
-    if (
-      artifact.artifact.sourceNovelId !== novelId ||
-      artifact.artifact.sourceChapterId !== chapterId
-    ) {
-      continue;
-    }
-    if (!['valid', 'valid_with_warnings'].includes(artifact.artifact.processingStatus)) {
-      throw new Error('上一版章节候选未通过 ResultArtifact 处理状态校验。');
-    }
-    if (!artifact.rawContent.trim()) throw new Error('上一版章节候选正文为空。');
-    return artifact.rawContent;
-  }
-  return undefined;
-}
+export { findLatestCandidateText } from './legacyCandidateReader';
 
 async function execute(
   input: TaskRuntimeInput,
@@ -313,6 +284,11 @@ async function execute(
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
   assertTaskGoalExecutable(input.goal);
+  const revision = await verifyArtifactRevisionSource(input);
+  const browserRuleSet =
+    !isTauri() && WRITER_TOOLS.has(selectCandidateTool(input.goal, input.chapterId)?.name ?? '')
+      ? await captureBrowserChapterRuleBaseline(input.novelId)
+      : undefined;
   const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
   const workerId = input.workerId ?? 'worker-' + input.conversationId + '-' + String(Date.now());
   const run = await taskConversationService.createRun(
@@ -361,17 +337,10 @@ async function execute(
       }),
     });
     const candidateTool = selectCandidateTool(input.goal, input.chapterId);
-    let writerInstruction = input.goal;
-    let taskConstraints: TaskConstraintBriefReceipt | undefined;
-    if (candidateTool && WRITER_TOOLS.has(candidateTool.name)) {
-      const bundle = await taskConversationService.get(input.conversationId);
-      if (!bundle || bundle.conversation.novelId !== input.novelId) {
-        throw new Error('写章任务对话不存在或不属于当前作品。');
-      }
-      const brief = deriveTaskConstraintBrief(bundle.turns, input.turnId);
-      writerInstruction = composeWorkbenchInstruction(input.goal, brief.constraints);
-      taskConstraints = brief.entries.length > 0 ? summarizeTaskConstraintBrief(brief) : undefined;
-    }
+    const { writerInstruction, taskConstraints, targetWordCount } =
+      candidateTool && WRITER_TOOLS.has(candidateTool.name)
+        ? await prepareTaskWritingPreferences(input)
+        : { writerInstruction: input.goal, taskConstraints: undefined, targetWordCount: undefined };
     if (candidateTool) {
       steps.push({
         name: candidateTool.name,
@@ -408,17 +377,27 @@ async function execute(
       try {
         if (WRITER_TOOLS.has(step.name) && input.chapterId) {
           const isPolishOrRewrite =
-            step.name === 'polish_chapter' || isChapterRevisionGoal(input.goal);
-          const prevCandidate = isPolishOrRewrite
-            ? await findLatestCandidateText(input.conversationId, input.novelId, input.chapterId)
-            : undefined;
+            Boolean(revision) ||
+            step.name === 'polish_chapter' ||
+            isChapterRevisionGoal(input.goal);
+          if (revision && revision.source.artifactType !== 'chapter_text') {
+            throw new Error('修订来源不是章节正文，不能交给写章运行。');
+          }
+          const prevCandidate = revision?.content;
 
           const written = await chapterWriter.generate({
             novelId: input.novelId,
             chapterId: input.chapterId,
             goal: writerInstruction,
+            targetWordCount,
             mode: isPolishOrRewrite ? 'polish' : 'generate',
             previousCandidateText: prevCandidate,
+            ...(revision
+              ? {
+                  revisionSource: revision.source,
+                  revisionSourceContentHash: revision.contentHash,
+                }
+              : {}),
             memoryContext: evidence['search_memory'],
             modelSnapshot: currentRun.modelSnapshot ?? run.modelSnapshot,
             signal: controller.signal,
@@ -447,6 +426,8 @@ async function execute(
         const written = WRITER_TOOLS.has(step.name)
           ? (evidence.writer as
               | {
+                  integrityReview?: unknown;
+                  contextCoverage?: unknown;
                   contextHash?: string;
                   continuitySourceHash?: string;
                   continuitySourceChapterId?: string;
@@ -511,14 +492,18 @@ async function execute(
               ? String((result.data as { text?: string }).text ?? '')
               : '');
           if (text) {
+            if (browserRuleSet)
+              await assertBrowserChapterRuleBaseline(input.novelId, browserRuleSet);
             await publishChapterCandidate({
               conversationId: input.conversationId,
               novelId: input.novelId,
               chapterId: input.chapterId,
               runId: run.runId,
+              turnId: input.turnId,
               text,
               artifactId: writtenCandidate?.artifactId,
               warningCount: writtenCandidate?.integrityWarnings?.length,
+              browserRuleSet,
               mode:
                 step.name === 'polish_chapter' || isChapterRevisionGoal(input.goal)
                   ? 'polish'

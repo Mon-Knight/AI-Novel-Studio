@@ -1,4 +1,4 @@
-import type { ChapterGenerationContext } from './ai';
+import type { ChapterGenerationContext } from './chapterGenerationContext';
 import type { ChapterEngineeringState } from './chapterEngineering';
 
 export type GenerationContextSourceType =
@@ -55,12 +55,29 @@ export interface GenerationContextSection {
   sourceTypes: GenerationContextSourceType[];
 }
 
+/** Coverage of the rule material projected for this scope, never a semantic verdict. */
+export interface GenerationRuleCoverage {
+  schemaVersion: 'generation_rule_coverage_v1';
+  novelId: string;
+  status: 'complete' | 'context_incomplete';
+  requiredCount: number;
+  includedCount: number;
+  sourceIds: string[];
+  /** The shared authority fingerprint, when supplied by the rule governance service. */
+  ruleSetFingerprint?: string;
+  /** SHA-256 of exact rule text, or JSON of the worldBackground/chapterSettings projection. */
+  projectionHash: string;
+  reason?: string;
+}
+
 export interface CompiledGenerationContext {
   chapterId: string;
   novelId: string;
   volumeId?: string;
   baseContext: ChapterGenerationContext;
   activeEngineeringState?: ChapterEngineeringState;
+  ruleSystemCoverage?: GenerationRuleCoverage;
+  worldSettingCoverage?: GenerationRuleCoverage;
   sections: GenerationContextSection[];
   sources: GenerationContextSource[];
   warnings: string[];
@@ -91,6 +108,8 @@ export interface CompileGenerationContextInput {
   styleProfileId?: string;
   outputProfileId?: string;
   userInstruction?: string;
+  /** Task-scoped override; never changes the persisted chapter card. */
+  targetWordCount?: number;
   /** Retrieved durable facts frozen into the same snapshot as the final prompt. */
   retrievedMemoryContext?: string;
   currentEditorContent?: string;

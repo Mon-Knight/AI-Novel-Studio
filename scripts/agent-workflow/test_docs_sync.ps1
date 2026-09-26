@@ -149,9 +149,9 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Checkout pinned DSH runtime source"
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Build installers and signed updater archives" "Checkout pinned DSH runtime source"
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
-    Assert-CheckResult "release tests before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Assert-CheckResult "release packaging before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
@@ -173,15 +173,15 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Build current novel-domain gateway"
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Build installers and signed updater archives" "Build current novel-domain gateway"
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
-    Assert-CheckResult "release tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Assert-CheckResult "release packaging before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseParallelRust = $releaseWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
-    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseParallelRust -Encoding UTF8
-    Assert-CheckResult "release Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    $releaseWrongEvidence = $releaseWorkflow.Replace('$actualSha -ne $env:VERIFIED_SHA', '$actualSha -eq $env:VERIFIED_SHA')
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWrongEvidence -Encoding UTF8
+    Assert-CheckResult "release without matching commit evidence" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath

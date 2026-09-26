@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { TaskConversationBundle, TaskRun, ToolCallEvent } from '../../types/conversation';
 import { ArtifactCard } from './WorkbenchComponents';
 import { WorkbenchMessageStream } from './WorkbenchMessageStream';
+import { resolveWorkbenchRevisionLineage } from './workbenchHelpers';
 import {
   formatRunActivityAge,
   formatRunDuration,
@@ -331,10 +332,10 @@ test('artifact card defers failed content details until the disclosure is opened
   );
 
   assert.match(html, /查看候选内容/);
-  assert.doesNotMatch(html, /role="alert"/);
-  assert.doesNotMatch(html, /候选内容读取失败/);
-  assert.doesNotMatch(html, />重新读取</);
-  assert.doesNotMatch(html, /候选内容正在载入/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /候选内容读取失败/);
+  assert.match(html, />重新读取</);
+  assert.doesNotMatch(html, /候选内容暂不可用/);
 });
 
 test('structured artifact cards separate local review marks from whole-artifact application', () => {
@@ -413,4 +414,371 @@ test('chapter summaries show readable paragraphs and chapter text keeps prose di
   assert.match(chapterHtml, /查看候选内容/);
   assert.doesNotMatch(chapterHtml, /不应当作候选项/);
   assert.doesNotMatch(chapterHtml, /原始数据/);
+});
+
+test('message stream groups contiguous successful reads while retaining public tool facts on expansion', () => {
+  const readRun: TaskRun = {
+    ...run,
+    runId: 'run-read-group',
+    conversationId: 'conversation-read-group',
+    turnId: 'turn-read-group',
+    status: 'completed',
+    finishedAt: '2026-08-29T01:02:00.000Z',
+  };
+  const bundle: TaskConversationBundle = {
+    conversation: {
+      conversationId: 'conversation-read-group',
+      novelId: 'novel-safe',
+      title: '读取摘要',
+      status: 'completed',
+      createdAt: readRun.createdAt,
+      updatedAt: readRun.updatedAt,
+    },
+    turns: [
+      {
+        turnId: readRun.turnId,
+        conversationId: readRun.conversationId,
+        sequence: 1,
+        role: 'user',
+        content: '读取上下文',
+        createdAt: readRun.createdAt,
+      },
+    ],
+    runs: [readRun],
+    toolEvents: [
+      {
+        eventId: 'read-group-a',
+        runId: readRun.runId,
+        sequence: 1,
+        toolName: 'novel.read_context',
+        argumentsSummary: {},
+        status: 'succeeded',
+        durationMs: 210,
+        createdAt: '2026-08-29T01:00:01.000Z',
+        finishedAt: '2026-08-29T01:00:02.000Z',
+      },
+      {
+        eventId: 'read-group-b',
+        runId: readRun.runId,
+        sequence: 2,
+        toolName: 'structure.read',
+        argumentsSummary: {},
+        status: 'succeeded',
+        durationMs: 320,
+        createdAt: '2026-08-29T01:00:03.000Z',
+        finishedAt: '2026-08-29T01:00:04.000Z',
+      },
+    ],
+    artifacts: [],
+  };
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchMessageStream, {
+      bundle,
+      compressionCandidate: null,
+      compressionBusy: false,
+      decisionBusyCardId: '',
+      assetRecovery: null,
+      assetReadinessBusy: false,
+      selectedConversationRunning: false,
+      chapterSummaryOrchestration: { phase: 'none' },
+      onDismissCompression: () => undefined,
+      onDecideArtifact: () => undefined,
+      onRetry: () => undefined,
+      onGenerateMissingAsset: () => undefined,
+      onEditMissingAsset: () => undefined,
+      onRefreshAssetReadiness: () => undefined,
+      onResumeChapterGoal: () => undefined,
+      onDismissAssetReadiness: () => undefined,
+    }),
+  );
+  assert.match(html, /data-testid="workbench-completed-read"/);
+  assert.match(html, /已读取创作材料 · 2 项/);
+  assert.match(html, /data-disclosure-key="completed-read:tool:read-group-a,tool:read-group-b"/);
+  assert.match(html, /data-read-event-ids="tool:read-group-a,tool:read-group-b"/);
+  assert.match(html, /data-event-id="read-group-a"/);
+  assert.match(html, /data-event-id="read-group-b"/);
+  assert.match(html, /210 ms/);
+  assert.match(html, /320 ms/);
+});
+
+test('artifact card exposes identity, next step, load errors, and safe validation details', () => {
+  const html = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-visible-evidence',
+        conversationId: run.conversationId,
+        runId: run.runId,
+        artifactId: 'artifact-visible-evidence',
+        artifactType: 'outline',
+        title: '章节大纲候选',
+        summary: '候选摘要。',
+        contentLoadError: '候选内容读取失败，请重新读取当前任务产物。',
+        status: 'candidate',
+        createdAt: run.createdAt,
+        artifactEvidence: {
+          sourceNovelId: 'novel-safe',
+          sourceChapterId: 'chapter-safe',
+          sourceDraftVersion: 7,
+          baseContentHash: 'hash-visible-evidence',
+          processingStatus: 'invalid',
+          validationIssues: [
+            {
+              issueId: 'issue-visible-evidence',
+              artifactId: 'artifact-visible-evidence',
+              validationRunId: 'validation-visible-evidence',
+              issueIndex: 0,
+              severity: 'error',
+              code: 'OUTLINE_SOURCE_MISMATCH',
+              message: '章节来源与候选目标不一致。',
+              jsonPath: '$.chapterId',
+              detailsJson: { secret: 'must not render' },
+              validatorVersion: 'test-validator',
+              createdAt: run.createdAt,
+            },
+          ],
+        },
+      },
+      candidateNumber: 3,
+      sourceRun: run,
+      onReload: () => undefined,
+    }),
+  );
+  assert.match(html, /候选 03/);
+  assert.match(html, /data-testid="workbench-artifact-target"[^>]*>目标：作品待恢复 · 章节待恢复</);
+  assert.match(html, /data-testid="workbench-artifact-model"[^>]*>来源：model-safe</);
+  const identity =
+    html.match(/data-testid="workbench-artifact-identity"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+  assert.doesNotMatch(identity, /run-long/);
+  assert.match(html, /基线：草稿 v7/);
+  assert.match(html, /下一步：修复结构或来源问题后再处理/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /候选内容读取失败/);
+  assert.match(html, /查看全部校验证据（1）/);
+  assert.match(html, /OUTLINE_SOURCE_MISMATCH/);
+  assert.match(html, /\$\.chapterId/);
+  assert.doesNotMatch(html, /must not render/);
+});
+
+test('empty workbench introduces the author flow with examples without creating a run', () => {
+  const bundle: TaskConversationBundle = {
+    conversation: {
+      conversationId: 'conversation-empty',
+      novelId: 'novel-safe',
+      title: '空任务',
+      status: 'idle',
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    },
+    turns: [],
+    runs: [],
+    toolEvents: [],
+    artifacts: [],
+  };
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchMessageStream, {
+      bundle,
+      compressionCandidate: null,
+      compressionBusy: false,
+      decisionBusyCardId: '',
+      assetRecovery: null,
+      assetReadinessBusy: false,
+      selectedConversationRunning: false,
+      chapterSummaryOrchestration: { phase: 'none' },
+      onDismissCompression: () => undefined,
+      onDecideArtifact: () => undefined,
+      onRetry: () => undefined,
+      onGenerateMissingAsset: () => undefined,
+      onEditMissingAsset: () => undefined,
+      onRefreshAssetReadiness: () => undefined,
+      onResumeChapterGoal: () => undefined,
+      onDismissAssetReadiness: () => undefined,
+    }),
+  );
+  assert.match(html, /开始你的创作任务/);
+  assert.match(html, /描述方向 → 审阅必要候选 → 逐章采用/);
+  assert.match(html, /生成下一章，延续当前悬念/);
+  assert.match(html, /审计本章人物一致性/);
+  assert.match(html, /完善后续大纲/);
+  assert.match(html, /data-testid="workbench-intro-example"/);
+  assert.doesNotMatch(html, /data-testid="workbench-run"/);
+});
+
+test('artifact header uses matched author names, parent candidate, and applied next step', () => {
+  const html = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-named',
+        conversationId: run.conversationId,
+        runId: run.runId,
+        artifactId: 'artifact-named',
+        artifactType: 'chapter_text',
+        title: '修订后的章节',
+        summary: '已应用。',
+        status: 'confirmed',
+        createdAt: run.createdAt,
+        latestDecision: {
+          decisionId: 'decision-applied',
+          artifactId: 'artifact-named',
+          artifactHash: 'hash-named',
+          cardId: 'card-named',
+          conversationId: run.conversationId,
+          decision: 'request_apply',
+          idempotencyKey: 'card-named:request_apply',
+          actor: 'user',
+          targetType: 'chapter',
+          targetId: 'chapter-rain',
+          applyTransactionId: 'tx-applied',
+          createdAt: run.createdAt,
+        },
+        artifactEvidence: {
+          sourceNovelId: 'novel-rain',
+          sourceChapterId: 'chapter-rain',
+          processingStatus: 'valid',
+          validationIssues: [
+            {
+              issueId: 'issue-warning',
+              artifactId: 'artifact-named',
+              validationRunId: 'validation-named',
+              issueIndex: 0,
+              severity: 'warning',
+              code: 'STYLE_HINT',
+              message: '语气可再收一点。',
+              validatorVersion: 'test-validator',
+              createdAt: run.createdAt,
+            },
+          ],
+        },
+      },
+      candidateNumber: 4,
+      sourceRun: { ...run, chapterId: 'chapter-rain' },
+      presentationContext: {
+        novelId: 'novel-rain',
+        novelTitle: '夜雨江湖',
+        chapters: [{ id: 'chapter-rain', title: '第三章 雨夜' }],
+      },
+      parentCandidateNumber: 2,
+      hasRevisionSource: true,
+      onDecide: () => undefined,
+    }),
+  );
+  assert.match(html, /候选 04/);
+  assert.match(html, /目标：夜雨江湖 · 第三章 雨夜/);
+  assert.match(html, /来源：model-safe/);
+  assert.match(html, /修订自候选 02/);
+  assert.match(html, /下一步：已应用到作品/);
+  assert.match(html, /workbench-artifact-status">已应用</);
+  assert.match(html, /语气可再收一点/);
+  const identity =
+    html.match(/data-testid="workbench-artifact-identity"[\s\S]*?<\/div>/)?.[0] ?? '';
+  assert.match(identity, /夜雨江湖/);
+  assert.doesNotMatch(identity, /novel-rain/);
+  assert.doesNotMatch(identity, /run-long/);
+  assert.doesNotMatch(html, /workbench-artifact-actions/);
+});
+
+test('missing presentation names stay neutral and never borrow the current chapter', () => {
+  const html = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-foreign',
+        conversationId: run.conversationId,
+        artifactId: 'artifact-foreign',
+        artifactType: 'outline',
+        title: '外源大纲',
+        summary: '',
+        status: 'candidate',
+        createdAt: run.createdAt,
+        artifactEvidence: {
+          sourceNovelId: '11111111-1111-4111-8111-111111111111',
+          sourceChapterId: '22222222-2222-4222-8222-222222222222',
+          processingStatus: 'valid',
+          validationIssues: [],
+        },
+      },
+      candidateNumber: 1,
+      presentationContext: {
+        novelId: 'novel-safe',
+        novelTitle: '当前打开的小说',
+        chapters: [{ id: 'chapter-current', title: '当前章节' }],
+      },
+    }),
+  );
+  assert.match(html, /目标：作品待恢复 · 章节待恢复/);
+  assert.doesNotMatch(html, /当前打开的小说/);
+  assert.doesNotMatch(html, /当前章节/);
+  assert.doesNotMatch(html, /11111111-1111-4111-8111-111111111111/);
+  assert.match(html, /来源：来源模型待恢复/);
+});
+
+test('revision parent requires card, artifact and conversation identities to match together', () => {
+  const numbers = new Map([
+    ['card-parent', 2],
+    ['card-other', 9],
+  ]);
+  const source = {
+    conversationId: run.conversationId,
+    novelId: 'novel-safe',
+    cardId: 'card-parent',
+    artifactId: 'artifact-parent',
+    artifactHash: 'ab'.repeat(32),
+    artifactType: 'chapter_text',
+    title: '父候选',
+  };
+  const turns = [
+    {
+      turnId: run.turnId,
+      conversationId: run.conversationId,
+      sequence: 1,
+      role: 'user' as const,
+      content: '请修订',
+      createdAt: run.createdAt,
+      revisionSource: source,
+    },
+  ];
+  const parentCard = {
+    cardId: 'card-parent',
+    conversationId: run.conversationId,
+    artifactId: 'artifact-parent',
+    artifactType: 'chapter_text' as const,
+    title: '父候选',
+    summary: '',
+    status: 'candidate' as const,
+    createdAt: run.createdAt,
+  };
+  assert.equal(
+    resolveWorkbenchRevisionLineage({
+      sourceRun: run,
+      turns,
+      artifacts: [parentCard],
+      candidateNumbers: numbers,
+    }).parentCandidateNumber,
+    2,
+  );
+  assert.equal(
+    resolveWorkbenchRevisionLineage({
+      sourceRun: run,
+      turns,
+      artifacts: [{ ...parentCard, artifactId: 'artifact-other' }],
+      candidateNumbers: numbers,
+    }).parentCandidateNumber,
+    undefined,
+  );
+  assert.equal(
+    resolveWorkbenchRevisionLineage({
+      sourceRun: run,
+      turns,
+      artifacts: [{ ...parentCard, cardId: 'card-other' }],
+      candidateNumbers: numbers,
+    }).parentCandidateNumber,
+    undefined,
+  );
+  assert.equal(
+    resolveWorkbenchRevisionLineage({
+      sourceRun: run,
+      turns,
+      artifacts: [{ ...parentCard, conversationId: 'other-task' }],
+      candidateNumbers: numbers,
+    }).parentCandidateNumber,
+    undefined,
+  );
 });

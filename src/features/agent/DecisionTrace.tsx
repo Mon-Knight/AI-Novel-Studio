@@ -50,7 +50,7 @@ export const DecisionTraceCard = memo(function DecisionTraceCard({
             style={{
               padding: '1px 6px',
               borderRadius: 4,
-              fontSize: 11,
+              fontSize: 12,
               background: '#ede9fe',
               color: '#6d28d9',
               fontWeight: 600,
@@ -98,7 +98,7 @@ export const DecisionTraceCard = memo(function DecisionTraceCard({
           </div>
         )}
         {trace.nextAdjustment && (
-          <div style={{ marginTop: 2, color: '#6366f1', fontSize: 11 }}>
+          <div style={{ marginTop: 2, color: '#6366f1', fontSize: 12 }}>
             <strong>下一步调整: </strong>
             <span>{trace.nextAdjustment}</span>
           </div>
@@ -187,7 +187,7 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             border: '1px solid #fef3c7',
           }}
         >
-          <div style={{ color: '#9a3412', fontSize: 11 }}>人物一致性</div>
+          <div style={{ color: '#9a3412', fontSize: 12 }}>人物一致性</div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>
             {review.characterConsistency}
           </div>
@@ -200,7 +200,7 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             border: '1px solid #fef3c7',
           }}
         >
-          <div style={{ color: '#9a3412', fontSize: 11 }}>剧情推进</div>
+          <div style={{ color: '#9a3412', fontSize: 12 }}>剧情推进</div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>
             {review.plotProgression}
           </div>
@@ -213,7 +213,7 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             border: '1px solid #fef3c7',
           }}
         >
-          <div style={{ color: '#9a3412', fontSize: 11 }}>文风匹配</div>
+          <div style={{ color: '#9a3412', fontSize: 12 }}>文风匹配</div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.styleMatch}</div>
         </div>
         <div
@@ -224,13 +224,13 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             border: '1px solid #fef3c7',
           }}
         >
-          <div style={{ color: '#9a3412', fontSize: 11 }}>连贯性</div>
+          <div style={{ color: '#9a3412', fontSize: 12 }}>连贯性</div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.coherence}</div>
         </div>
       </div>
 
       {review.suggestions.length > 0 && (
-        <div style={{ color: '#78350f', fontSize: 11 }}>
+        <div style={{ color: '#78350f', fontSize: 12 }}>
           <span style={{ fontWeight: 600 }}>建议: </span>
           {review.suggestions.join('; ')}
         </div>

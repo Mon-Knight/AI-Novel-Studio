@@ -62,6 +62,10 @@ export const aiTaskRuntimeService = {
     return tauriInvoke<ResultArtifactBundle>('create_result_artifact', { input });
   },
 
+  createChapterRevisionArtifact(input: CreateResultArtifactInput): Promise<ResultArtifactBundle> {
+    return tauriInvoke<ResultArtifactBundle>('create_chapter_revision_artifact', { input });
+  },
+
   getArtifact(artifactId: string): Promise<ResultArtifactBundle> {
     return tauriInvoke<ResultArtifactBundle>('get_result_artifact', {
       input: { artifactId },

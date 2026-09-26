@@ -1,5 +1,7 @@
 # AI Novel Studio v3.0.0 功能不足与演进优先级分析
 
+> **历史快照（2026-07-28）。** 本文保留审计当日证据，不代表 v3.7.0 代码现状。当前缺口与已关闭项见 [`feature-gap-analysis-v3.7.0.md`](feature-gap-analysis-v3.7.0.md)。
+>
 > 审计日期：2026-07-28
 > 审计基线：`v3.0.0` 当前工作树、React 18 + TypeScript + Tauri 1.x + Rust + SQLite
 > 文档性质：现状审计与后续版本建议，不代表对应功能已经进入开发或发布承诺。

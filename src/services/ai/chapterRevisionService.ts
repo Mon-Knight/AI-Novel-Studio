@@ -1,11 +1,12 @@
 import type {
-  AiClient,
   AiGenerateOptions,
   AiGenerateRequest,
   AiGenerateResponse,
+  AiSettings,
   ChapterCharacterContext,
   OutlineKeyPoint,
 } from '../../types/ai';
+import { runAiGenerate } from './aiClient';
 
 export interface ReviseChapterByOutlineInput {
   originalDraft: string;
@@ -93,8 +94,8 @@ export function buildReviseChapterByOutlineRequest(
 
 export async function reviseChapterByOutline(
   input: ReviseChapterByOutlineInput,
-  client: AiClient,
+  settings: AiSettings,
   options: AiGenerateOptions = {},
 ): Promise<AiGenerateResponse> {
-  return client.generate(buildReviseChapterByOutlineRequest(input), options);
+  return runAiGenerate(buildReviseChapterByOutlineRequest(input), options, settings);
 }

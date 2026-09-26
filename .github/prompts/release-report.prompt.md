@@ -59,10 +59,16 @@
 
 ## 八、测试结果
 
-- cargo check：✅ / ❌
-- npm run build：✅ / ❌
-- npm run tauri build：✅ / ❌
+逐项记录 `scripts/agent-workflow/verify_project.ps1` 完整矩阵的实际命令、状态、用例数与耗时；未运行项写 NOT_RUN 并说明原因，不用定向检查替代：
+
+- npm run test:version-sync / test:docs-sync：✅ / ❌
+- npm run test:coverage（含关键组件阈值）：✅ / ❌
+- npm run lint:ci / build / test:bundle-size / test:component-size：✅ / ❌
+- cargo check --locked、Gateway 重建、完整串行 cargo test：✅ / ❌
+- npm run test:e2e（完整桌面套件）：✅ / ❌
+- npm run tauri:build：✅ / ❌
 - git status：clean / dirty
+- 云端 CI：已运行 / 未运行（明确标注）
 
 ## 九、Git 信息
 

@@ -314,6 +314,13 @@ pub struct LocalChapterModelHealthRequest {
     pub timeout_seconds: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListCloudModelsRequest {
+    pub base_url: String,
+    pub api_key: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalChapterModelHealthResponse {
@@ -337,6 +344,43 @@ fn build_chat_completions_url(base_url: &str) -> String {
         return format!("{}/chat/completions", clean);
     }
     format!("{}/v1/chat/completions", clean)
+}
+
+fn build_models_url(base_url: &str) -> String {
+    let clean = base_url.trim().trim_end_matches('/').to_string();
+    if clean.ends_with("/models") {
+        return clean;
+    }
+    if let Some(root) = clean.strip_suffix("/chat/completions") {
+        return format!("{}/models", root.trim_end_matches('/'));
+    }
+    if clean.ends_with("/v1") {
+        return format!("{}/models", clean);
+    }
+    format!("{}/v1/models", clean)
+}
+
+fn parse_cloud_model_ids(body: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    for key in ["data", "models"] {
+        let Some(items) = body.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            let candidate = item.as_str().map(str::to_string).or_else(|| {
+                ["id", "model", "name"]
+                    .iter()
+                    .find_map(|field| item.get(*field).and_then(Value::as_str).map(str::to_string))
+            });
+            let Some(id) = candidate.map(|value| value.trim().to_string()) else {
+                continue;
+            };
+            if !id.is_empty() && !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
 }
 
 fn is_loopback_url(base_url: &str) -> bool {
@@ -795,6 +839,38 @@ pub async fn check_local_chapter_model_availability(
     request: LocalChapterModelHealthRequest,
 ) -> Result<LocalChapterModelHealthResponse, String> {
     check_local_chapter_model_availability_internal(&request).await
+}
+
+#[tauri::command]
+pub async fn list_cloud_models(request: ListCloudModelsRequest) -> Result<Vec<String>, String> {
+    ensure_ai_network_allowed(crate::runtime::is_network_blocked(), &request.base_url)?;
+    if request.base_url.trim().is_empty() {
+        return Err("缺少 API 地址，无法获取上游模型。".into());
+    }
+    if request.api_key.trim().is_empty() {
+        return Err("缺少 API 密钥，无法获取上游模型。".into());
+    }
+    let client = http_client_builder(&request.base_url, Duration::from_secs(30))
+        .build()
+        .map_err(|_| "无法初始化上游模型请求。".to_string())?;
+    let response = client
+        .get(build_models_url(&request.base_url))
+        .bearer_auth(request.api_key.trim())
+        .send()
+        .await
+        .map_err(|_| "获取上游模型失败。".to_string())?;
+    if !response.status().is_success() {
+        return Err(if matches!(response.status().as_u16(), 401 | 403) {
+            "上游拒绝了鉴权，请检查 API 密钥。".into()
+        } else {
+            format!("获取上游模型返回 HTTP {}。", response.status().as_u16())
+        });
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| "上游模型列表不是有效 JSON。".to_string())?;
+    Ok(parse_cloud_model_ids(&body))
 }
 
 #[tauri::command]
@@ -2291,6 +2367,42 @@ mod tests {
         server.thread.join().unwrap();
         assert_eq!(registry_counts(), (0, 0, 1));
         assert!(!cancel_ai_request(request_id.to_string()));
+    }
+
+    #[test]
+    fn build_models_url_mirrors_openai_compatible_roots() {
+        assert_eq!(
+            build_models_url("https://api.x.test/v1"),
+            "https://api.x.test/v1/models"
+        );
+        assert_eq!(
+            build_models_url("https://api.x.test/v1/"),
+            "https://api.x.test/v1/models"
+        );
+        assert_eq!(
+            build_models_url("https://api.x.test"),
+            "https://api.x.test/v1/models"
+        );
+        assert_eq!(
+            build_models_url("https://api.x.test/v1/models"),
+            "https://api.x.test/v1/models"
+        );
+        assert_eq!(
+            build_models_url("https://api.x.test/v1/chat/completions"),
+            "https://api.x.test/v1/models"
+        );
+    }
+
+    #[test]
+    fn parse_cloud_model_ids_reads_openai_data_array() {
+        let body = json!({
+            "data": [{ "id": "grok-4.6" }, { "id": "grok-4.6" }, { "name": "other" }],
+            "models": ["extra"]
+        });
+        assert_eq!(
+            parse_cloud_model_ids(&body),
+            vec!["grok-4.6", "other", "extra"]
+        );
     }
 
     #[test]

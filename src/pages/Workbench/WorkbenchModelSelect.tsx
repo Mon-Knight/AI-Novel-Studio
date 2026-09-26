@@ -13,6 +13,7 @@ interface WorkbenchModelSelectProps {
   locked?: boolean;
   testId?: string;
   onChange?: (value: string) => void;
+  lockedReason?: string;
 }
 
 export function WorkbenchModelSelect({
@@ -25,6 +26,7 @@ export function WorkbenchModelSelect({
   locked = false,
   testId,
   onChange,
+  lockedReason = '任务创建时固定；更换模型请新建任务。',
 }: WorkbenchModelSelectProps) {
   const selectedValue = `${selectedModel.providerId}:${selectedModel.modelId}`;
   const availability = getWorkbenchModelAvailability({
@@ -35,14 +37,51 @@ export function WorkbenchModelSelect({
     selectionLocked: locked,
   });
   const selectedMissing = !availability.selectedOption;
+  const statusTitle =
+    availability.status === 'available'
+      ? '模型可用'
+      : availability.status === 'refreshing'
+        ? '正在刷新模型目录'
+        : availability.message || '模型不可用';
+
+  if (locked) {
+    return (
+      <div
+        id={id}
+        className={`workbench-model-control workbench-fixed-model is-${availability.status}`}
+        role="group"
+        aria-label="当前任务固定模型"
+        aria-describedby={`${id}-fixed-reason`}
+        data-testid={testId}
+        data-model-locked="true"
+        data-model-value={selectedValue}
+        data-model-status={availability.status}
+      >
+        <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
+        <span className="workbench-model-status-dot" aria-hidden="true" />
+        <span className="workbench-fixed-model-name" title={`${selectedValue} · ${statusTitle}`}>
+          {availability.selectedOption?.name || selectedModel.modelId}
+        </span>
+        <details
+          className="workbench-fixed-model-details"
+          data-testid="workbench-fixed-model-reason"
+        >
+          <summary title={lockedReason}>固定原因</summary>
+          <p id={`${id}-fixed-reason`}>{lockedReason}</p>
+        </details>
+      </div>
+    );
+  }
 
   return (
     <label
-      className={`workbench-model-control${locked ? ' is-locked' : ''}`}
+      className={`workbench-model-control${locked ? ' is-locked' : ''} is-${availability.status}`}
       htmlFor={id}
-      title={locked ? '模型已在任务创建时固定' : undefined}
+      title={locked ? `模型已在任务创建时固定 · ${statusTitle}` : statusTitle}
+      data-model-status={availability.status}
     >
       <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
+      <span className="workbench-model-status-dot" aria-hidden="true" />
       <span className="workbench-model-label">模型</span>
       <select
         id={id}

@@ -10,7 +10,7 @@ import {
   chapterOutlineService,
   loadOutlineContext,
 } from '../../services/outlines/outlineService';
-import { createAiClient, aiSettingsService } from '../../services/ai/aiClient';
+import { aiSettingsService, runAiGenerate } from '../../services/ai/aiClient';
 import { aiTaskService } from '../../services/ai/aiTaskService';
 import {
   buildOutlineGeneratePrompt,
@@ -235,11 +235,14 @@ function OutlineEditor({
 
           let response: AiGenerateResponse;
           try {
-            const client = createAiClient(settings);
-            response = await client.generate(request, {
-              signal,
-              cancel: () => cancelLoadingOperation(operationId),
-            });
+            response = await runAiGenerate(
+              request,
+              {
+                signal,
+                cancel: () => cancelLoadingOperation(operationId),
+              },
+              settings,
+            );
             throwIfAiRequestCancelled(signal);
 
             if (task) {

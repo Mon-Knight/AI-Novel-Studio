@@ -47,7 +47,7 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
           <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-primary)' }}>
             {summaryCount}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>章节总结</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>章节总结</div>
         </div>
         <div
           style={{
@@ -60,7 +60,7 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
           <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-success)' }}>
             {activeRecordCount}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>启用上下文</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>启用上下文</div>
         </div>
         <div
           style={{
@@ -73,7 +73,7 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
           <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text-muted)' }}>
             {recordCount}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>总记录数</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>总记录数</div>
         </div>
       </div>
       <div className="detail-card-desc" style={{ marginTop: 8 }}>

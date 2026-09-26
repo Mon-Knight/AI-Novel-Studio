@@ -80,6 +80,35 @@ test('missing supplemental entry fails instead of silently omitting new tests', 
   );
 });
 
+test('the same test assigned by two default commands fails closed instead of running twice', () => {
+  assert.throws(
+    () =>
+      inventory(
+        { 'src/shared.test.mjs': nodeTest },
+        {
+          scripts: {
+            ...scripts,
+            test: 'node --test src/existing.test.mjs src/shared.test.mjs && node --test src/shared.test.mjs',
+          },
+        },
+      ),
+    /duplicate assignment.*src\/shared\.test\.mjs/u,
+  );
+  assert.throws(
+    () =>
+      inventory(
+        { 'src/shared.test.mjs': nodeTest },
+        {
+          scripts: {
+            ...scripts,
+            test: 'node --test src/existing.test.mjs src/shared.test.mjs src/shared.test.mjs',
+          },
+        },
+      ),
+    /listed twice in one command/u,
+  );
+});
+
 test('rejects stale paths, unknown runners and Node tests sent to Vitest folder filters', () => {
   assert.throws(
     () => inventory({}, { scripts: { ...scripts, test: 'node --test src/deleted.test.mjs' } }),
@@ -107,14 +136,24 @@ test('performance discovery preserves expose-gc and never invokes live or deskto
       'scripts/performance/new.test.ts': nodeTest,
       'tests/e2e/example.spec.ts': 'describe("desktop", () => {});',
       'tests/real-acceptance/conversation-60000.spec.ts': 'describe("live", () => {});',
+      'tests/real-acceptance/writing-subagent-real-profile.spec.ts':
+        'describe("real profile", () => {});',
+      'tests/real-acceptance/writing-subagent-fault-injection.spec.ts':
+        'describe("fault injection", () => {});',
     },
     {
       desktopRunner: "const allSpecs = ['example.spec.ts'];",
       liveRunner: "'conversation-60000.spec.ts'",
+      realProfileRunner:
+        "specs: ['writing-subagent-real-profile.spec.ts']\nspecs: ['writing-subagent-fault-injection.spec.ts']",
     },
   );
   assert.equal(result.supplemental[0].runner, 'performance');
-  assert.equal(result.excluded.length, 2);
+  assert.equal(result.excluded.length, 4);
+  assert.ok(result.excluded.some(({ runner }) => runner === 'test:real-profile:writing-subagent'));
+  assert.ok(
+    result.excluded.some(({ runner }) => runner === 'test:fault-injection:writing-subagent'),
+  );
   assert.ok(result.excluded.every(({ reason }) => reason.length > 20));
   assert.equal(executionBatches(result.supplemental)[0].runner, 'performance');
 });
@@ -122,6 +161,10 @@ test('performance discovery preserves expose-gc and never invokes live or deskto
 test('unregistered desktop spec and unrecognized spec scope fail closed', () => {
   assert.throws(() => inventory({ 'tests/e2e/new.spec.ts': '' }), /not registered/u);
   assert.throws(() => inventory({ 'src/new.spec.ts': '' }), /unowned spec/u);
+  assert.throws(
+    () => inventory({ 'tests/real-acceptance/writing-subagent-real-profile.spec.ts': '' }),
+    /unowned spec/u,
+  );
 });
 
 test('bounded batches cover every selected file once without exceeding Windows command budget', () => {

@@ -85,6 +85,26 @@ function storageSnapshot(): string {
   return JSON.stringify(rows);
 }
 
+async function saveGuardedWorldSetting(
+  novelId: string,
+  title: string,
+  content: string,
+): Promise<void> {
+  const change = { targetType: 'world_setting' as const, title, content, isActive: true };
+  const preview = await settingRepository.previewWorldRuleChange(novelId, [change]);
+  await settingRepository.saveWorldSetting(null, {
+    novelId,
+    title,
+    content,
+    isActive: true,
+    expectedRuleSetFingerprint: preview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: preview.previewHash,
+      intent: 'confirm_change',
+    },
+  });
+}
+
 async function fixture() {
   const novelA = await novelRepository.create({
     title: 'Facade A',
@@ -105,11 +125,7 @@ async function fixture() {
     goal: 'A 的章节目标',
     targetWordCount: 1200,
   });
-  await settingRepository.saveWorldSetting(null, {
-    novelId: novelA.id,
-    title: 'A 世界规则',
-    content: 'A 的世界设定细节',
-  });
+  await saveGuardedWorldSetting(novelA.id, 'A 世界规则', 'A 的世界设定细节');
   await protagonistRepository.save(null, {
     novelId: novelA.id,
     name: 'A 主角',
@@ -319,6 +335,8 @@ test('conversation and artifact facades expose runtime facts and preserve review
   assert.equal(listed.ok, true);
   assert.equal(listed.data?.[0].conversationId, conversation.conversationId);
 
+  const { captureBrowserChapterRuleBaseline } =
+    await import('../../conversation/browserChapterReviewBaseline');
   const published = await artifactCapability.publishCandidate({
     novelId: novelA.id,
     chapterId: chapterA.id,
@@ -327,6 +345,9 @@ test('conversation and artifact facades expose runtime facts and preserve review
     title: '候选正文',
     summary: '仅供审阅',
     structuredPayload: {
+      // Browser candidates freeze the rule baseline they were generated under; review later
+      // fails closed when that baseline is missing or the world rules have changed.
+      browserRuleSet: await captureBrowserChapterRuleBaseline(novelA.id),
       data: {
         novelId: novelA.id,
         chapterId: chapterA.id,

@@ -11,11 +11,13 @@ import {
   maskAiApiKey,
   normalizeAiSettings,
   resolveSessionModelApiKey,
+  rememberSessionModelApiKey,
   restoreSessionModelCredentialsFromNative,
   saveAiSettings,
   syncSessionModelCredentialsToNative,
   type SessionModelCredentialIdentity,
 } from './aiSettingsStore';
+import type { SavedApiModelProfile } from '../../types/ai';
 
 export function validateApiSettings(settings: AiSettings): void {
   if (settings.runtimeMode !== 'api') return;
@@ -50,6 +52,21 @@ export const aiSettingsService = {
 
   resolveSessionApiKey(identity: SessionModelCredentialIdentity): string {
     return resolveSessionModelApiKey(identity);
+  },
+
+  rememberProviderApiKey(
+    profile: Pick<SavedApiModelProfile, 'provider' | 'baseUrl' | 'modelName'>,
+    apiKey: string,
+  ): void {
+    rememberSessionModelApiKey(
+      {
+        scope: 'provider',
+        providerId: profile.provider,
+        baseUrl: profile.baseUrl,
+        modelId: profile.modelName,
+      },
+      apiKey,
+    );
   },
 
   async restoreSessionCredentials(): Promise<void> {

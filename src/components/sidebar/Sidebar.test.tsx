@@ -1,41 +1,76 @@
-import { render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import Sidebar from './Sidebar';
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="location">
+      {location.pathname}|{JSON.stringify(location.state)}
+    </output>
+  );
+}
+
+function renderSidebar(route: string, compact = false) {
+  return render(
+    <MemoryRouter initialEntries={[route]}>
+      <Sidebar compact={compact} />
+      <Routes>
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('Sidebar', () => {
-  it('renders a compact icon rail with an accessible current route', () => {
-    render(
-      <MemoryRouter initialEntries={['/novels/novel-1']}>
-        <Sidebar compact />
-      </MemoryRouter>,
-    );
+  it('exposes workspace sections, the active project pages and an accessible current route', () => {
+    renderSidebar('/novels/novel-1/outline');
 
     const navigation = screen.getByRole('navigation', { name: '全局导航' });
-    const currentLink = within(navigation).getByRole('link', { name: '小说作品' });
+    expect(screen.getByLabelText('应用导航').getAttribute('data-compact')).toBe('false');
+    expect(within(navigation).getAllByRole('link')).toHaveLength(10);
+
+    const current = within(navigation).getByRole('link', { name: '大纲' });
+    expect(current.getAttribute('aria-current')).toBe('page');
+    expect(current.getAttribute('href')).toBe('/novels/novel-1/outline');
+    expect(
+      within(navigation).getByRole('link', { name: '项目' }).getAttribute('aria-current'),
+    ).toBe('page');
+    expect(
+      within(navigation).getByRole('link', { name: '会话' }).getAttribute('aria-current'),
+    ).toBe(null);
+
+    const icons = navigation.querySelectorAll('.nav-icon svg');
+    expect(icons).toHaveLength(10);
+    icons.forEach((icon) => {
+      expect(icon.getAttribute('width')).toBe('18');
+      expect(icon.getAttribute('stroke-width')).toBe('1.8');
+      expect(icon.getAttribute('fill')).toBe('none');
+    });
+  });
+
+  it('keeps only the workspace entries outside a project and hands quick actions to the workbench', () => {
+    renderSidebar('/novels');
+
+    const navigation = screen.getByRole('navigation', { name: '全局导航' });
+    expect(
+      within(navigation)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['会话', '项目', '资源中心']);
+
+    fireEvent.click(screen.getByRole('button', { name: '新建创作任务' }));
+    expect(screen.getByTestId('location').textContent).toBe('/|{"workbenchIntent":"new-task"}');
+  });
+
+  it('collapses to an icon rail without quick actions or labels', () => {
+    renderSidebar('/novels/novel-1/workspace', true);
 
     expect(screen.getByLabelText('应用导航').getAttribute('data-compact')).toBe('true');
-    expect(currentLink.getAttribute('aria-current')).toBe('page');
-    expect(currentLink.getAttribute('title')).toBe('小说作品');
-    expect(within(navigation).getAllByRole('link')).toHaveLength(8);
-    expect(navigation.querySelectorAll('.nav-icon svg')).toHaveLength(8);
-
-    const preservedIcons = [
-      ['创作工作台', 'lucide-sparkles'],
-      ['小说作品', 'lucide-book-open-text'],
-      ['创作资产', 'lucide-boxes'],
-      ['风格方案', 'lucide-palette'],
-      ['模板中心', 'lucide-layout-template'],
-      ['AI任务记录', 'lucide-bot'],
-      ['导入导出', 'lucide-arrow-down-to-line'],
-      ['设置中心', 'lucide-settings-2'],
-    ] as const;
-    preservedIcons.forEach(([label, iconClass]) => {
-      const icon = within(navigation).getByRole('link', { name: label }).querySelector('svg');
-      expect(icon?.classList.contains(iconClass)).toBe(true);
-      expect(icon?.getAttribute('width')).toBe('18');
-      expect(icon?.getAttribute('stroke-width')).toBe('1.8');
-      expect(icon?.getAttribute('fill')).toBe('none');
-    });
+    expect(screen.queryByRole('group', { name: '快捷操作' })).toBeNull();
+    expect(screen.getByRole('link', { name: '章节审阅' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
   });
 });

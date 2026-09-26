@@ -98,52 +98,8 @@ where
 }
 
 #[cfg(test)]
-mod startup_tests {
-    use super::{run_instance_guarded_startup, InstanceStartup};
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    #[test]
-    fn secondary_instance_requests_focus_without_initializing_database() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                false
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Secondary);
-        assert_eq!(events.into_inner(), ["instance-check", "focus-request"]);
-    }
-
-    #[test]
-    fn primary_instance_initializes_database_after_acquiring_lock() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                true
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Primary);
-        assert_eq!(
-            events.into_inner(),
-            ["instance-check", "database-initialization"]
-        );
-    }
-}
+#[path = "main_startup_tests.rs"]
+mod startup_tests;
 
 fn main() {
     let startup_at = std::time::Instant::now();
@@ -240,8 +196,10 @@ fn main() {
             commands::delete_novel,
             commands::delete_novel_cascade,
             commands::repair_database,
+            commands::import_txt_novel,
             commands::get_world_settings,
             commands::save_world_setting,
+            commands::world::preview_world_rule_change,
             commands::get_rule_systems,
             commands::save_rule_system,
             commands::delete_rule_system,
@@ -287,6 +245,7 @@ fn main() {
             commands::agent_plans::cancel_agent_plan,
             commands::agent_plans::recover_interrupted_agent_plans,
             commands::artifacts::create_result_artifact,
+            commands::artifacts::create_chapter_revision_artifact,
             commands::artifacts::get_result_artifact,
             commands::artifacts::list_result_artifacts_for_task,
             commands::placements::prepare_placement_proposal,
@@ -345,6 +304,7 @@ fn main() {
             commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
             commands::conversations::apply_structured_artifact,
+            services::structured_artifact_apply_service::preview_structured_artifact_rule_change,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
             commands::conversations::get_review_authorization,
@@ -386,6 +346,7 @@ fn main() {
             ai::ai_chat_completion_stream,
             ai::check_local_chapter_model,
             ai::check_local_chapter_model_availability,
+            ai::list_cloud_models,
             ai::cancel_ai_request,
             runtime::get_e2e_diagnostics,
             runtime::get_e2e_novel_commit_state,
@@ -415,6 +376,24 @@ fn main() {
             commands::output_profiles::save_output_profile,
             commands::output_profiles::set_default_output_profile,
             commands::output_profiles::delete_output_profile,
+            commands::local_assets::list_imported_assets,
+            commands::local_assets::save_imported_asset,
+            commands::local_assets::delete_imported_asset,
+            commands::local_assets::list_polish_records,
+            commands::local_assets::get_polish_record,
+            commands::local_assets::create_polish_record,
+            commands::local_assets::update_polish_record,
+            commands::local_assets::delete_polish_record,
+            commands::user_templates::list_user_templates,
+            commands::user_templates::save_user_template,
+            commands::user_templates::delete_user_template,
+            commands::setting_suggestions::list_setting_suggestions,
+            commands::setting_suggestions::get_setting_suggestion,
+            commands::setting_suggestions::save_setting_suggestions,
+            commands::setting_suggestions::decide_setting_suggestion,
+            commands::setting_suggestions::adopt_setting_suggestion,
+            commands::setting_suggestions::preview_setting_suggestion_adoption,
+            commands::setting_suggestions::get_world_rule_set_snapshot,
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,

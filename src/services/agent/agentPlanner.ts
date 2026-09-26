@@ -4,6 +4,10 @@ import { createAiClient } from '../ai/aiClient';
 import { aiSettingsService } from '../ai/aiSettingsService';
 import { agentContextManager } from './agentContextManager';
 import { toolUsageMemory } from './toolUsageMemory';
+import {
+  characterModificationContinuation,
+  goalDrivenPlanningBranch,
+} from './agentPlannerBranches';
 
 const FALLBACK_AI_SETTINGS: AiSettings = {
   runtimeMode: 'mock',
@@ -18,10 +22,7 @@ const FALLBACK_AI_SETTINGS: AiSettings = {
 };
 
 export class AgentPlanner {
-  async decideNextStep(
-    context: AgentContext,
-    config?: AgentHarnessConfig,
-  ): Promise<AgentDecision> {
+  async decideNextStep(context: AgentContext, config?: AgentHarnessConfig): Promise<AgentDecision> {
     let settings: AiSettings = config?.modelSettings ?? FALLBACK_AI_SETTINGS;
     if (!config?.modelSettings) {
       try {
@@ -36,7 +37,8 @@ export class AgentPlanner {
     const historyText = context.messages
       .map((m) => {
         if (m.role === 'user') return `User: ${m.content}`;
-        if (m.role === 'assistant') return `Assistant Thought: ${m.thought || ''}\nAssistant: ${m.content}`;
+        if (m.role === 'assistant')
+          return `Assistant Thought: ${m.thought || ''}\nAssistant: ${m.content}`;
         if (m.role === 'tool') return `Tool [${m.name}] Observation:\n${m.content}`;
         return `${m.role}: ${m.content}`;
       })
@@ -67,7 +69,8 @@ export class AgentPlanner {
             messages: [
               {
                 role: 'system',
-                content: 'You are an autonomous creative writing agent. Respond strictly with a valid JSON block.',
+                content:
+                  'You are an autonomous creative writing agent. Respond strictly with a valid JSON block.',
               },
               {
                 role: 'user',
@@ -112,8 +115,7 @@ export class AgentPlanner {
         reasoningSummary: parsed.reasoningSummary || parsed.thought,
         selectedToolReason: parsed.selectedToolReason || parsed.reason,
         expectedOutcome: parsed.expectedOutcome || parsed.expected,
-        confidenceScore:
-          typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.9,
+        confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.9,
         finalResponse: isFinal ? parsed.actionInput?.response || parsed.thought : undefined,
         isDone: isFinal,
       };
@@ -169,70 +171,15 @@ export class AgentPlanner {
 
     // B. 自主多步骤任务推进 (Autonomous Multi-Step Execution)
     if (records.length > 0) {
-      // 场景 0: 人物性格调整专项链路 (Character Modification Trajectory: query_character_state -> generate_scene_plan -> update_memory)
-      if (
-        (userGoal.includes('性格') || userGoal.includes('修改人物') || userGoal.includes('调整角色')) &&
-        !userGoal.includes('完成') &&
-        !userGoal.includes('全篇')
-      ) {
-        if (lastRecord?.toolName === 'query_character_state' && !records.some((r) => r.toolName === 'generate_scene_plan')) {
-          return {
-            thought: '参考历史成功案例[修改人物性格]，角色状态已就绪，现在规划展示性格转变的分镜节拍。',
-            plan: ['查询人物状态 (已完成)', '分镜规划', '更新记忆'],
-            selectedTool: {
-              name: 'generate_scene_plan',
-              arguments: {
-                novelId: context.novelId || 'novel-01',
-                chapterId: context.chapterId || 'chap-01',
-                chapterTitle: '角色性格转变篇',
-                goal: userGoal,
-              },
-            },
-            reasoningSummary: '参考历史成功经验，为性格调整编排分镜节拍',
-            selectedToolReason: '已有角色状态，需要通过场景分镜呈现性格转变的戏剧冲突',
-            expectedOutcome: '获得体现新性格的分镜节拍',
-            confidenceScore: 0.94,
-            isDone: false,
-          };
-        }
-
-        if (lastRecord?.toolName === 'generate_scene_plan' && !records.some((r) => r.toolName === 'update_memory')) {
-          return {
-            thought: '参考历史成功案例，性格调整分镜已就绪，将新性格特征沉淀至 Novel Memory Layer。',
-            plan: ['分镜规划 (已完成)', '更新记忆', '任务交付'],
-            selectedTool: {
-              name: 'update_memory',
-              arguments: {
-                novelId: context.novelId || 'novel-01',
-                characterId: 'char-protagonist',
-                emotion: '果决坚毅',
-                goal: '贯彻新信念并破局前行',
-              },
-            },
-            reasoningSummary: '参考历史成功经验，持久化角色最新性格与动态心境',
-            selectedToolReason: '性格调整分镜已就绪，需将新性格与心境更新至记忆层',
-            expectedOutcome: '记忆层角色性格更新并生成新版本快照',
-            confidenceScore: 0.96,
-            isDone: false,
-          };
-        }
-
-        if (lastRecord?.toolName === 'update_memory') {
-          return {
-            thought: '人物性格调整与记忆层更新已闭环达成，输出成果报告。',
-            plan: ['全流程闭环达成'],
-            selectedTool: undefined,
-            reasoningSummary: '人物性格优化全流程完成',
-            selectedToolReason: '目标已达成',
-            expectedOutcome: '交付角色性格调整结果',
-            confidenceScore: 1.0,
-            finalResponse: `已根据需求“${userGoal}”成功完成主角性格与心境的动态调整，分镜节拍与记忆层快照均已妥善沉淀。`,
-            isDone: true,
-          };
-        }
-      }
-
-      // 场景 1: 查询世界状态完成 -> 如果需要人物心境且未查询过，调用 query_character_state
+      // 场景 0: 人物性格调整专项链路 (Character Modification Trajectory)
+      const characterContinuation = characterModificationContinuation({
+        context,
+        config,
+        userGoal,
+        records,
+        lastRecord,
+      });
+      if (characterContinuation) return characterContinuation;
       if (
         lastRecord?.toolName === 'query_world_state' &&
         (userGoal.includes('完成') || userGoal.includes('节') || userGoal.includes('章')) &&
@@ -240,7 +187,15 @@ export class AgentPlanner {
       ) {
         return {
           thought: '世界状态与规则已就绪，接下来检索视点人物的动态心境与伤势状态。',
-          plan: ['查询世界状态 (已完成)', '查询人物状态', '分镜规划', '正文生成', '质量检查', '更新记忆', '保存版本'],
+          plan: [
+            '查询世界状态 (已完成)',
+            '查询人物状态',
+            '分镜规划',
+            '正文生成',
+            '质量检查',
+            '更新记忆',
+            '保存版本',
+          ],
           selectedTool: {
             name: 'query_character_state',
             arguments: {
@@ -259,8 +214,12 @@ export class AgentPlanner {
       // 场景 2: 查询人物状态或世界状态完成 -> 规划分镜
       if (
         (lastRecord?.toolName === 'query_character_state' ||
-          (lastRecord?.toolName === 'query_world_state' && !records.some((r) => r.toolName === 'generate_scene_plan'))) &&
-        (userGoal.includes('完成') || userGoal.includes('写') || userGoal.includes('创作') || userGoal.includes('分镜')) &&
+          (lastRecord?.toolName === 'query_world_state' &&
+            !records.some((r) => r.toolName === 'generate_scene_plan'))) &&
+        (userGoal.includes('完成') ||
+          userGoal.includes('写') ||
+          userGoal.includes('创作') ||
+          userGoal.includes('分镜')) &&
         !records.some((r) => r.toolName === 'generate_scene_plan')
       ) {
         return {
@@ -278,7 +237,7 @@ export class AgentPlanner {
           reasoningSummary: '背景与人物上下文完备，开始构建章节情节节奏与冲突节点',
           selectedToolReason: '已有角色和世界信息，需要生成冲突结构与分镜节拍',
           expectedOutcome: '获得分镜列表与各 Beat 节奏安排',
-          confidenceScore: 0.90,
+          confidenceScore: 0.9,
           isDone: false,
         };
       }
@@ -286,7 +245,10 @@ export class AgentPlanner {
       // 场景 3: 分镜生成完成 -> 生成正文
       if (
         lastRecord?.toolName === 'generate_scene_plan' &&
-        (userGoal.includes('正文') || userGoal.includes('完成') || userGoal.includes('创作') || userGoal.includes('节')) &&
+        (userGoal.includes('正文') ||
+          userGoal.includes('完成') ||
+          userGoal.includes('创作') ||
+          userGoal.includes('节')) &&
         !records.some((r) => r.toolName === 'generate_prose')
       ) {
         return {
@@ -328,7 +290,8 @@ export class AgentPlanner {
                 chapterId: context.chapterId || 'chap-01',
                 chapterTitle: '第五章 第一节 遗迹探秘 (重写修订版)',
                 sceneGoal: '主角进入遗迹探寻线索，隐忍克制不揭开最终谜底（重写扩充细节）',
-                sceneBeats: '主角深入古代遗迹殿堂，仔细勘查断裂石柱与古老铭文，感知四周隐蔽的机关波动，神情戒备谨慎推进。',
+                sceneBeats:
+                  '主角深入古代遗迹殿堂，仔细勘查断裂石柱与古老铭文，感知四周隐蔽的机关波动，神情戒备谨慎推进。',
                 rewriteMode: true,
                 improvementSuggestions: latestReview.suggestions,
               },
@@ -348,7 +311,8 @@ export class AgentPlanner {
               : '正文生成完成';
 
           return {
-            thought: '正文已生成完毕并通过质量裁判初审，现在自主触发质量合规检查以确保没有错别字、大纲偏离或约束违规。',
+            thought:
+              '正文已生成完毕并通过质量裁判初审，现在自主触发质量合规检查以确保没有错别字、大纲偏离或约束违规。',
             plan: ['正文生成 (已通过质量裁判)', '质量检查', '更新记忆', '保存版本'],
             selectedTool: {
               name: 'quality_check',
@@ -374,7 +338,8 @@ export class AgentPlanner {
         !records.some((r) => r.toolName === 'update_memory')
       ) {
         return {
-          thought: '正文质检通过，现在将主角进入遗迹后的动态心境与新目标沉淀更新至 Novel Memory Layer。',
+          thought:
+            '正文质检通过，现在将主角进入遗迹后的动态心境与新目标沉淀更新至 Novel Memory Layer。',
           plan: ['质量检查 (已完成)', '更新记忆', '保存版本', '生成交付报告'],
           selectedTool: {
             name: 'update_memory',
@@ -405,7 +370,8 @@ export class AgentPlanner {
             : '第五章第一节正文草稿';
 
         return {
-          thought: '记忆状态已演化并创建快照，现在为本章节保存不可变修订版本（Revision）与创作存证。',
+          thought:
+            '记忆状态已演化并创建快照，现在为本章节保存不可变修订版本（Revision）与创作存证。',
           plan: ['更新记忆 (已完成)', '保存版本', '生成交付报告'],
           selectedTool: {
             name: 'save_chapter_version',
@@ -438,7 +404,8 @@ export class AgentPlanner {
             : '正文已就绪';
 
         return {
-          thought: '全流程 7 个阶段（感知、分镜、正文、质检、记忆演进、版本存证）均已圆满达成，生成最终交付报告。',
+          thought:
+            '全流程 7 个阶段（感知、分镜、正文、质检、记忆演进、版本存证）均已圆满达成，生成最终交付报告。',
           plan: ['全流程闭环达成'],
           selectedTool: undefined,
           reasoningSummary: '全流程各环节验证通过，生成结构化交付报告',
@@ -477,12 +444,15 @@ export class AgentPlanner {
 
     // 目标 0.1: 人物性格修改（匹配 ToolUsageMemory 推荐轨迹）
     if (
-      (userGoal.includes('性格') || userGoal.includes('修改人物') || userGoal.includes('调整角色')) &&
+      (userGoal.includes('性格') ||
+        userGoal.includes('修改人物') ||
+        userGoal.includes('调整角色')) &&
       !userGoal.includes('完成') &&
       !userGoal.includes('全篇')
     ) {
       return {
-        thought: '参考历史成功案例[修改人物性格与心理动态]，推荐执行链：query_character_state -> generate_scene_plan -> update_memory。首先查询当前人物心境。',
+        thought:
+          '参考历史成功案例[修改人物性格与心理动态]，推荐执行链：query_character_state -> generate_scene_plan -> update_memory。首先查询当前人物心境。',
         plan: ['查询人物状态', '分镜规划', '更新记忆'],
         selectedTool: {
           name: 'query_character_state',
@@ -496,14 +466,32 @@ export class AgentPlanner {
       };
     }
 
+    // 目标 0/0.1: 显式工具与人物性格修改意图（纯分支，保持原顺序）
+    const intentPlanning = goalDrivenPlanningBranch(
+      { context, config, userGoal, records, lastRecord },
+      'intent',
+    );
+    if (intentPlanning) return intentPlanning;
+
     // 目标 1: 复合全流程任务（例如：“完成第五章第一节”、“完成第三章创作”、“写第三章”）
     if (
       userGoal.includes('完成') &&
-      (userGoal.includes('章') || userGoal.includes('节') || userGoal.includes('创作') || userGoal.includes('小说'))
+      (userGoal.includes('章') ||
+        userGoal.includes('节') ||
+        userGoal.includes('创作') ||
+        userGoal.includes('小说'))
     ) {
       return {
         thought: `识别到端到端章节创作目标：“${userGoal}”。规划自主执行链路：检索世界设定 -> 检索人物状态 -> 规划分镜节奏 -> 生成正文 -> 质量核验 -> 演进记忆状态 -> 保存版本存证。首先执行 query_world_state。`,
-        plan: ['查询世界状态', '查询人物状态', '规划分镜', '生成正文', '质量检查', '更新记忆', '保存版本'],
+        plan: [
+          '查询世界状态',
+          '查询人物状态',
+          '规划分镜',
+          '生成正文',
+          '质量检查',
+          '更新记忆',
+          '保存版本',
+        ],
         selectedTool: {
           name: 'query_world_state',
           arguments: { novelId: context.novelId || 'novel-01' },
@@ -516,39 +504,12 @@ export class AgentPlanner {
       };
     }
 
-    // 目标 2: 查询世界观与状态
-    if (userGoal.includes('世界观') || userGoal.includes('世界状态') || userGoal.includes('规则')) {
-      return {
-        thought: '作者需要了解当前作品的世界观与状态快照，选择 query_world_state 工具。',
-        plan: ['查询世界状态', '输出分析'],
-        selectedTool: {
-          name: 'query_world_state',
-          arguments: { novelId: context.novelId || 'novel-01' },
-        },
-        reasoningSummary: '作者请求查询作品世界规则与世界状态',
-        selectedToolReason: '检索世界观规则库以提供精准设定信息',
-        expectedOutcome: '输出世界观规则与当前状态',
-        confidenceScore: 0.95,
-        isDone: false,
-      };
-    }
-
-    // 目标 3: 查询角色状态
-    if (userGoal.includes('人物') || userGoal.includes('主角') || userGoal.includes('心境')) {
-      return {
-        thought: '作者要求检索角色动态心境与伤势状态，选择 query_character_state 工具。',
-        plan: ['查询人物状态', '输出人物档案'],
-        selectedTool: {
-          name: 'query_character_state',
-          arguments: { novelId: context.novelId || 'novel-01', characterId: 'char-protagonist' },
-        },
-        reasoningSummary: '作者请求检索指定角色的心境与状态',
-        selectedToolReason: '正文生成需要确认主角当前心理状态',
-        expectedOutcome: '获得角色目标和情绪',
-        confidenceScore: 0.92,
-        isDone: false,
-      };
-    }
+    // 目标 2/3: 世界观与角色状态查询（纯分支，保持原顺序）
+    const readPlanning = goalDrivenPlanningBranch(
+      { context, config, userGoal, records: [], lastRecord: null },
+      'history',
+    );
+    if (readPlanning) return readPlanning;
 
     // 目标 4: 分镜规划与正文生成
     if (userGoal.includes('分镜') || userGoal.includes('Scene') || userGoal.includes('章节')) {
@@ -567,7 +528,7 @@ export class AgentPlanner {
         reasoningSummary: '作者请求章节分镜与冲突规划',
         selectedToolReason: '已有角色和世界信息，需要生成冲突结构与分镜节拍',
         expectedOutcome: '获得分镜列表与各 Beat 节奏安排',
-        confidenceScore: 0.90,
+        confidenceScore: 0.9,
         isDone: false,
       };
     }
@@ -584,7 +545,7 @@ export class AgentPlanner {
         reasoningSummary: '作者请求构思长篇小说大纲架构',
         selectedToolReason: '调用大纲生成工具构建长篇情节脉络',
         expectedOutcome: '获得主线与分卷大纲结构',
-        confidenceScore: 0.90,
+        confidenceScore: 0.9,
         isDone: false,
       };
     }

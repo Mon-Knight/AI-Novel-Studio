@@ -1326,6 +1326,8 @@ AI 任务记录显示
 
 # 18. v3.3.0+ 工作台 UI 目标（已实现）
 
+> 当前 v3.7.0 修复说明：本节新增交互、时序、候选与世界规则内容以已落源码为依据，仍在集成，待全部修复后统一验收；不产生新的测试/桌面/live 通过结论，R4 live 云端 NOT VERIFIED 不变。第 1～17 节和既有带版本记录保持历史语义。
+
 ## 18.1 默认首界面
 
 应用启动后进入对话式创作工作台，而不是作品卡片首页。工作台使用稳定的双栏主布局：
@@ -1356,7 +1358,7 @@ AI 任务记录显示
 ● 生成章节候选     generate_chapter         运行中
 ```
 
-失败时，对应调用行变为错误状态并显示可公开的原因、重试或修复动作。UI 不显示模型思维链，也不设置独立的“对话与执行时间线”“任务计划”或“工具”面板。
+失败时，在对应公开发生位置显示错误原因、重试或修复动作，不把一次工具失败在多层重复展开。`workbenchPresentation` 以公开时间与稳定身份将用户/助手回复、Run 起止、工具、错误、产物、准备/压缩事实扁平投影；同毫秒用回合序号、事件类别、域内序号与 ID 稳定 tie-break，不以 hydration 到达顺序或隐藏推理排序，也不宣称存在新的全局运行序号。侧边运行日志是辅助只读投影，不代替对话内执行与决定入口。
 
 ## 18.4 产物卡片
 
@@ -1371,12 +1373,14 @@ AI 任务记录显示
 
 结构化条目的原始标题与摘要保持只读。“已审阅”是默认未勾选的本地阅读标记，不表达应用选择集；建议标题、建议摘要和补充要求单独标为修订意见，不替换原文。应用范围说明始终可见：既有桌面事务处理整份原始候选，本地标记与意见不改变实际写入范围。
 
-卡片底部统一提供“带出全部意见（数量）”，没有已填意见时显示“要求修改”。该动作将本卡全部意见追加到原任务输入区，不覆盖已有草稿、不自动发送。决定失败保留意见和草稿；决定成功后的刷新失败不能丢掉已带出的意见。意见仅在当前应用会话内按任务与不可变候选身份暂存，切换任务/页面可恢复，同一候选内容失效时清除旧意见，退出应用不保存；在忙碌、已决定或校验失败时禁止继续编辑。真正局部应用不属于这套审阅交互的能力。
+卡片底部统一提供“带出全部意见（数量）”，没有已填意见时显示“要求修改”。该动作将本卡全部意见追加到原任务输入区，不覆盖已有草稿、不自动发送；同时在独立 source chip 显示精确修订来源与可用草稿版本。来源不是从意见正文推断，不能静默换成最新候选；输入区已有另一来源时必须先发送或显式移除，原意见保留。决定失败保留意见和草稿；决定成功后的刷新失败不能丢掉已带出的意见。意见仅在当前应用会话内按任务与不可变候选身份暂存，切换任务/页面可恢复，同一候选内容失效时清除旧意见，退出应用不保存；在忙碌、已决定或校验失败时禁止继续编辑。真正局部应用不属于这套审阅交互的能力。
+
+章节卡片按 `ReviewAuthorization` 显示：`issued` → “继续审阅”，`consumed` → “查看正式正文”，`expired` → 失效提示并要求修改取得新候选，不自动重签。打开审阅默认只读；“进入编辑”“保存”“采用”保持独立，未修改候选可显式采用但仍经原授权与原子采用。质量/风格报告按类型提供“标记已阅”，不是应用到作品。候选导航、阅读勾选和 source chip 均不授予正式写入权限。
 
 ## 18.5 任务级模型选择与并发反馈
 
-- 模型选择器位于输入区附近，并始终明确作用于当前任务。
-- 更换模型只影响后续运行，历史消息和产物继续显示原模型快照。
+- 模型在新建任务时选择并冻结；已建任务的输入区展示“当前任务固定模型”徽标，不呈现可更换的下拉控件。
+- 当前不开放同任务未来回合更换模型。更换须新建任务；目录刷新、失败重试和插件浏览都不改变已冻结的 Provider/模型身份，历史消息和产物继续显示原快照。
 - 不同任务可以选择不同模型并并发运行。
 - 项目树和任务标题区都要显示足够的后台运行状态，避免用户切换后误以为任务停止。
 
@@ -1428,6 +1432,36 @@ v3.6.0 的动效语言是“安静、快速、连续、可中断”。普通交�
 - 作品列表、资产中心和 AI 任务记录区分读取中、首次为空、筛选为空和读取失败；资产统计绑定作品与请求代次。任务目录搜索保留旧结果直到新结果可用，章节定位按章号/标题查找并保持有界渲染。
 - 大纲候选到达只显示“已就绪”提示，由用户点击查看；点击定位尊重 `prefers-reduced-motion`。Toast 与 LoadingModal 各只有一个关闭计时源，悬停/焦点暂停，重要错误不自动消失，未知进度只显示 Spinner。
 - 页面容器分为资源页、表单页和审阅页规格；静态分组卡不模拟可点击入口，导航/资源卡使用明确的按钮和焦点状态。辅助文字、按钮命中区及系统强调色按浅色/深色主题分别验收。
+
+## 18.11 Agent 工作台式桌面壳层（当前基线）
+
+当前壳层以桌面 Agent 工作台（ZCode 一类产品）的形态组织，所有页面共享同一套令牌、壳层与页面框架，功能集中在“会话”与“项目”两个入口，其余能力收进“资源中心”：
+
+- **设计令牌**：深色优先的低饱和中性面板（`--color-bg-app / -sidebar / -panel / -card / -elevated / -composer`）、细边框（`--color-border / -strong`）、6～16px 圆角（`--radius-sm～xl`）、克制阴影与统一 80～260ms 动效；选中态使用中性 `--color-bg-selected`，强调色只用于主按钮、进度和状态。浅色主题使用同一组语义令牌。
+- **顶部标签栏即窗口标题栏** `.app-frame-bar`（38px，`data-testid="app-frame-bar"`）：主窗口 `decorations: false`，标签栏空白区带 `data-tauri-drag-region`（拖动窗口、双击最大化），按钮与链接不带；内容为品牌标记、收起/展开侧栏、工作区标签（会话 / 项目）与当前页面标签、版本、资源中心入口，桌面端最右侧为自绘最小化 / 最大化（还原） / 关闭（46px 宽，关闭悬停红底），关闭经 `appWindow.close()` 进入既有 `onCloseRequested` 离开保护。窗口控制由 `useWindowChrome` 提供，浏览器模式不渲染；壳层根节点以 `data-window-frame="custom|browser"`、`data-window-maximized` 标记，无边框窗口非最大化时用 1px 内边缘与桌面区分。允许列表：`window.close / minimize / maximize / unmaximize / startDragging`。
+- **侧栏**：快捷操作（新建任务 Ctrl+N、搜索 Ctrl+K、自主创作、项目库）+ 分组导航（工作区：会话 / 项目 / 资源中心；进入某作品后追加“当前项目”七个页面）+ 底部身份行。创作工作台路由不渲染全局侧栏，由项目/任务树承担同一套快捷操作与身份行；章节审阅路由使用 56px 图标轨；资源中心路由使用自己的分组导航。
+- **创作工作台**：任务行只保留标题、相对时间与状态色点；对话流居中（860px），用户回合为卡片气泡、Agent 回合为纯文本、运行块与产物卡为 12px 圆角卡；输入框为悬浮 16px 圆角卡片——左侧「+」插入菜单收纳任务模板与运行时入口（关闭时控件保留在 DOM 并 `hidden`），上下文 pill 紧随其后，模型固定徽标（`workbench-fixed-model`，带可用/刷新/不可用状态点与短名，固定原因放在可键盘打开的 details）与圆形发送按钮在右，不再提供可换模型的下拉（见 18.5）；模型目录不可用以一行状态条呈现，可展开完整说明，同排提供「新建任务 / 重试 / 设置」。任务头部可打开右侧面板：启动页列出创作上下文、本任务产物、运行日志、当前插件（均在面板内打开，带返回/关闭）以及章节审阅、作品概览、AI 任务记录（跳转）；产物列表点击后定位并高亮对话中的产物卡。
+- **项目框架** `.project-frame`：作品概览、章节审阅、大纲、设定推演、参考资料、故事资产、自主创作共用一条横向标签条（`/novels/:id/*`，章节审阅保持全屏编辑器）。
+- **章节审阅右侧工具轨** `.right-toolbar` / `.right-panel`：工具轨与全局图标轨同为 56px（`--right-toolbar-width` = `--sidebar-rail-width`），按钮 44px（图标 + 12px 标签），激活态为中性选中底色与左侧细指示条；工具面板以 360px（`--right-panel-width` = `--side-panel-width`）覆盖在编辑区右侧，头部 44px（14px 标题、28px 关闭按钮）、正文 12px 内边距，与工作台右侧面板 `.workbench-side-view-header` 同规格；面板保持 opacity/transform 过渡、点击外部关闭与 `aria-pressed/expanded` 契约。
+- **资源中心** `.hub-layout`：风格方案、模板中心、创作资产、导入导出、AI 任务记录与设置五类共用左侧分组导航（“返回工作区”置顶），设置分类由 `?tab=` 驱动，可从侧栏直接进入。
+- **资源页组件规格**（`page-layout.css`，随 `PageLayout` 加载）：五页内部只使用同一组类——`resource-grid`（300px 自适应栅格）、`resource-card`（12px 圆角、细边框、内容组 + 动作行；`--flow` 为未分组卡片把动作钉在底部，`--roomy` 20px 内边距，`--interactive` 悬停加深边框，`.is-active` 表示“当前 / 默认”）、`resource-card-header / -title(--lg) / -description`、`resource-pill`（20px 高圆角状态标签，`--primary / --success / --warning / --error` 变体）、`resource-meta`（12px 辅助文字）、`resource-actions / resource-footer / resource-toolbar`、`resource-form / resource-form-grid(--3) / resource-field(-label) / resource-editor(-header/-footer) / resource-icon-button(28px)`、`resource-pre`（等宽预览块）、`resource-notice(--success/--error/--after)`、`resource-empty`（虚线空态）、`resource-list(-item)`、`resource-stat-card`（创作资产统计卡）、`resource-trace`（风格来源追溯，按 `data-source-state` 着色）。AI 任务记录卡 `.ai-task-record` 以 `data-status` 驱动左侧 3px 状态条、`data-selected` 驱动选中底色；`.btn-xs` 为 12px / 最小 28px 高的筛选按钮。页面内不允许再出现 `style={{}}`，尺寸与颜色只来自令牌。
+- **设置卡片规格**（`hub.css`）：`settings-card-block / settings-card-header / settings-card-title / settings-card-text / settings-card-paragraph / settings-card-note`、子块 `settings-subcard(-title)`、开关行 `settings-toggle-row(--plain)` + `settings-checkbox`（18px）、结果条 `settings-result.is-ok|is-error|is-info`、模式横幅 `settings-mode-banner.is-mock|is-live`、危险提示 `settings-danger-card / -text / -list`、编辑器跨列 `settings-span-full`。AI 运行时概览 `runtime-overview` 使用中性底色，优先级链 `runtime-priority-step[data-active]` 与四个 `runtime-tile` 的状态文字（`data-tone=ok|info|warn|error|off`）是唯一的彩色元素。
+- **作品详情卡片规格**（`novel-detail.css`）：`detail-card-header(--roomy) / detail-card-title`、表单 `detail-form(--tight/--compact) / detail-form-grid(--tight/--3/--gap-top) / detail-form-actions / detail-fill / detail-input-title / detail-textarea(--sm/--md/--lg/--xl)`、事实展示 `detail-fact-value(--strong) / detail-fact-text(--pre/--sm) / detail-fact-grid`、子项 `detail-list-item(--inset/--sm/.is-editing) / detail-list-item-header / -title / -main`、小节标题 `detail-subsection-title(--md/--tight)`、`detail-tag / detail-badge / detail-divider / detail-empty-hint / detail-save-status(.is-ok)`、角色库 `detail-avatar / detail-character-*`。
+- 既有 `data-testid`、路由与 IPC 契约保持不变；浏览器布局规格按新壳层重新标定（树宽 248px、资源中心导航 232px、标签栏 38px）。
+
+---
+
+## 18.12 当前修复：布局、阅读与世界规则交互
+
+- **临时控件闭合**：插入模板与创作上下文互斥；模板应用后关闭并回到输入框，撤销条独立保留。Escape、外部点击、焦点转移、视图/任务切换按各控件作用域关闭，不清草稿。任务菜单支持方向键、Home/End、Tab 与关闭后回焦；内层确认、原生 select 和活动弹窗优先处理自己的键盘事件，IME 组合态不得误发送、误确认或误关闭。
+- **四态布局与专注**：项目树展开/收起 × 参考面板 pinned/关闭分别布局；侧栏偏好按 standard / writing / workbench / hub 保存，focus 为会话投影不写偏好。Ctrl+K 与 FrameBar 展开会退出 focus 并显示树。仅 pinned 且宽窗（>1180px）占固定参考列；transient 与窄窗覆盖对话且不遮任务头（`--workbench-panel-top` 由 header/page 实测）。pinned 宽窗外点不自动收起；transient/窄窗外点可关闭。暂隐藏须 `hidden`/`inert`。视图内 Escape/关闭返回合适触发点，复原不抢焦点；再次点击同一入口可关闭。
+- **Composer 预算**：整体上限 `min(55vh, 440px)`；辅助状态、插入和上下文说明共用 `.workbench-composer-extras` 滚动区，输入、撤销与发送/停止区不随辅助区滚走。树与参考面板同时打开时仍保留有界阅读列，不把 Composer 辅助内容无限叠高。
+- **完整轮次阅读**：默认窗口按 8 个完整用户轮次组织，加载更早记录也以完整轮次递增，助手回复与自动准备不单独占用户轮次。侧边产物、待处理提示和准备提示定位精确 cardId；准备候选必须匹配记录的 artifact/run/turn，歧义或缺失提示重读，不随意找同类型最新卡片。导航仅定位/聚焦，不顺便确认或采用。
+- **会话内阅读恢复**：按作品/任务保存窗口、公开事件锚点与偏移、展开项和跟随状态，仅当前应用会话内恢复。滚离底部暂停跟随；显式“查看最新进展”恢复跟随。加载早期轮次、正文 hydration、面板或尺寸变化尽量恢复原锚点；恢复历史不重播新卡高亮，不宣称应用重启持久恢复阅读位置。
+- **世界与规则编辑**：六类性质与权威、认知、强度独立呈现，八类世界参数渐进填写，可留未知/N/A；保留旧 JSON。卡片首屏先显示标题、正文摘要与分组事实（性质 / 范围 / 限制代价 / 角色知道 / 八类参数进度），来源与依赖、参数示例在对应分组按需展开，未填项是待补缺口而不是错误。预览展示本次拟改全文、source、影响与候选身份，再勾选确认；修改后旧确认失效。收起编辑器保留未保存内容，基线变化给出对照/重新预览，不静默覆盖。规则永久删除仍可用，提示推荐停用；有明确依赖时禁止继续。
+- **第二轮体验细化**：侧面板默认是 transient，覆盖层上边界取实测任务头底部（`--workbench-panel-top`），只有明确点击“固定参考面板”才在 >1180px 宽窗占参考列；transient 与 pinned 的关闭、点外、Esc、焦点恢复和窄窗覆盖分别遵守作用域。新增会话内“专注写作”按钮（AppShell 的 React Context 会话态，不写侧栏偏好），只临时隐藏项目树和 transient 辅助面板，不停止运行、不清除草稿；退出或 Ctrl+K 可恢复。连续成功且无警告的只读读取合并为可展开的“已读取创作材料 · N 项”，运行中、失败、含 warning 或证据不完整的读取保持单条外显；候选首屏常显可识别的作品/章节名称、候选序号、来源模型短名、基线和下一步，校验错误、读取失败与冲突外显。终态运行把模型身份折叠为“来源模型”紧凑标签，完整 `provider · model` 在可访问 title 中。
+
+实际结构与保存门禁见 [世界规则契约](design/world-rule-contract.md)，时序来源为 `workbenchPresentation` / `workbenchPresentationReading`、`WorkbenchMessageStream` / `WorkbenchTurn` 和相应 hooks。上述为当前实现说明；明暗主题、宽窄窗、焦点/IME 与真实桌面效果均待统一验收，不由源码阅读推定通过。
 
 ---
 

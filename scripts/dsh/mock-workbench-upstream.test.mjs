@@ -205,6 +205,79 @@ test('normal mode derives three Workbench phases from actual wire tool names', a
   assert.doesNotMatch(snapshotText, /authorization/iu);
 });
 
+test('candidateTexts advances only on candidate calls, repeats the last entry and resets on configure', async () => {
+  const scripted = ['private-long-candidate', 'private-repaired-candidate'];
+  const original = [...scripted];
+  const server = await start({
+    candidateTexts: scripted,
+    candidateText: 'private-default-candidate',
+  });
+  scripted[0] = 'caller-mutation-must-not-change-the-sequence';
+  const initial = [{ role: 'user', content: 'private sequence test prompt' }];
+  const contextCalls = toolCalls(parseSse(await (await chat(server, initial)).text()));
+  const afterContext = [
+    ...initial,
+    assistantToolMessage(contextCalls),
+    ...toolResults(contextCalls),
+  ];
+  const candidate = async () => {
+    const calls = toolCalls(parseSse(await (await chat(server, afterContext)).text()));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].function.name, actualNames.generate_chapter);
+    return { calls, text: JSON.parse(calls[0].function.arguments).candidateText };
+  };
+  assert.equal(server.snapshot().candidateCalls, 0);
+  const first = await candidate();
+  assert.equal(first.text, original[0]);
+  await (
+    await chat(server, [
+      ...afterContext,
+      assistantToolMessage(first.calls),
+      ...toolResults(first.calls),
+    ])
+  ).text();
+  assert.equal(
+    server.snapshot().candidateCalls,
+    1,
+    'assistant-final must not advance the sequence',
+  );
+  assert.equal((await candidate()).text, original[1]);
+  assert.equal(
+    (await candidate()).text,
+    original[1],
+    'the exhausted sequence repeats its last entry',
+  );
+  assert.equal(server.snapshot().candidateCalls, 3);
+
+  const resolved = server.configure({});
+  assert.ok(Object.isFrozen(resolved.candidateTexts));
+  assert.equal(server.snapshot().candidateCalls, 0);
+  assert.equal((await candidate()).text, original[0]);
+  server.configure({ candidateTexts: [] });
+  assert.equal((await candidate()).text, 'private-default-candidate');
+  const snapshot = server.snapshot();
+  assert.deepEqual(
+    snapshot.requests
+      .filter((request) => request.phase === 'generate-chapter')
+      .map((request) => request.candidateCallNumber),
+    [1, 2, 3, 1, 1],
+  );
+  const serialized = JSON.stringify(snapshot);
+  for (const text of [...original, 'private-default-candidate']) {
+    assert.equal(
+      serialized.includes(text),
+      false,
+      'request evidence must never contain candidate text',
+    );
+  }
+});
+
+test('candidateTexts rejects malformed scripts before opening the upstream', async () => {
+  for (const candidateTexts of [null, 'not-an-array', [''], ['first', '  '], [42]]) {
+    await assert.rejects(startMockWorkbenchUpstream({ candidateTexts }), /candidateTexts/u);
+  }
+});
+
 test('Canonical-only advertised tools call read tools and skip generate_chapter', async () => {
   const canonicalNames = Object.freeze({
     'novel.read': 'mcp__novel__novel.read',
@@ -374,4 +447,189 @@ test('cancel mode records client_closed without leaking the request', async () =
   assert.equal(snapshot.requests[0].outcome, 'client_closed');
   assert.equal(snapshot.activeRequests, 0);
   assert.doesNotMatch(JSON.stringify(snapshot), /cancel-private-content/u);
+});
+
+async function completeContextReads(server, initial) {
+  const firstCalls = toolCalls(parseSse(await (await chat(server, initial)).text()));
+  assert.equal(firstCalls.length, 4);
+  return [...initial, assistantToolMessage(firstCalls), ...toolResults(firstCalls)];
+}
+
+test('forbidden-tool mode calls a tool outside the advertised roster exactly once', async () => {
+  const server = await start({ mode: 'forbidden-tool' });
+  const afterContext = await completeContextReads(server, [{ role: 'user', content: '写本章' }]);
+
+  const forbiddenEvents = parseSse(await (await chat(server, afterContext)).text());
+  const forbiddenCalls = toolCalls(forbiddenEvents);
+  assert.equal(finishReason(forbiddenEvents), 'tool_calls');
+  assert.equal(forbiddenCalls.length, 1);
+  assert.equal(forbiddenCalls[0].function.name, 'mcp__novel__expand_settings');
+  assert.ok(!Object.values(actualNames).includes(forbiddenCalls[0].function.name));
+  assert.deepEqual(Object.keys(JSON.parse(forbiddenCalls[0].function.arguments)), [
+    'novelId',
+    'settings',
+  ]);
+
+  const afterForbidden = [
+    ...afterContext,
+    assistantToolMessage(forbiddenCalls),
+    { role: 'tool', tool_call_id: forbiddenCalls[0].id, content: JSON.stringify({ error: 'x' }) },
+  ];
+  const finalRaw = await (await chat(server, afterForbidden)).text();
+  const finalEvents = parseSse(finalRaw);
+  assert.equal(finishReason(finalEvents), 'stop');
+  assert.equal(toolCalls(finalEvents).length, 0);
+  assert.match(finalRaw, /越权工具调用已被拒绝/u);
+  const snapshot = await (await fetch(server.requestsUrl)).json();
+  assert.deepEqual(
+    snapshot.requests.map((request) => request.phase),
+    ['context-tools', 'forbidden-tool', 'forbidden-tool-final'],
+  );
+});
+
+test('cross-novel mode keeps reads in scope and submits the candidate for the foreign book', async () => {
+  const server = await start({
+    mode: 'cross-novel',
+    foreignNovelId: 'novel-foreign',
+    foreignChapterId: 'chapter-foreign',
+  });
+  const initial = [{ role: 'user', content: '写本章' }];
+  const firstCalls = toolCalls(parseSse(await (await chat(server, initial)).text()));
+  for (const call of firstCalls) {
+    assert.equal(JSON.parse(call.function.arguments).novelId, 'novel-fixture');
+  }
+  const afterContext = [...initial, assistantToolMessage(firstCalls), ...toolResults(firstCalls)];
+  const generateCalls = toolCalls(parseSse(await (await chat(server, afterContext)).text()));
+  assert.equal(generateCalls.length, 1);
+  assert.equal(generateCalls[0].function.name, actualNames.generate_chapter);
+  const args = JSON.parse(generateCalls[0].function.arguments);
+  assert.equal(args.novelId, 'novel-foreign');
+  assert.equal(args.chapterId, 'chapter-foreign');
+  assert.ok(args.candidateText.length > 0);
+});
+
+test('upstream-error-once fails the first non-attestation completion with HTTP 500 only', async () => {
+  const server = await start({ mode: 'upstream-error-once' });
+  const initial = [{ role: 'user', content: '写本章' }];
+  const failed = await chat(server, initial);
+  assert.equal(failed.status, 500);
+  const body = await failed.json();
+  assert.equal(body.error.code, 'MOCK_INJECTED_UPSTREAM_FAILURE');
+
+  const recovered = await chat(server, initial);
+  assert.equal(recovered.status, 200);
+  assert.equal(toolCalls(parseSse(await recovered.text())).length, 4);
+  const snapshot = await (await fetch(server.requestsUrl)).json();
+  assert.equal(snapshot.injectedUpstreamFailures, 1);
+  assert.deepEqual(
+    snapshot.requests.map((request) => [request.phase, request.outcome]),
+    [
+      ['injected-upstream-failure', 'injected_failure'],
+      ['context-tools', 'completed'],
+    ],
+  );
+});
+
+test('upstream-error keeps failing until the mode changes and resets its counter on switch', async () => {
+  const server = await start({ mode: 'upstream-error' });
+  const initial = [{ role: 'user', content: '写本章' }];
+  assert.equal((await chat(server, initial)).status, 500);
+  assert.equal((await chat(server, initial)).status, 500);
+  assert.equal(server.snapshot().injectedUpstreamFailures, 2);
+  server.configure({ mode: 'normal' });
+  assert.equal((await chat(server, initial)).status, 200);
+  assert.equal(server.configure({ mode: 'upstream-error' }).mode, 'upstream-error');
+  assert.equal(server.snapshot().injectedUpstreamFailures, 0);
+});
+
+test('hold-generate parks the candidate completion until the client disconnects', async () => {
+  const server = await start({ mode: 'hold-generate' });
+  const afterContext = await completeContextReads(server, [{ role: 'user', content: '写本章' }]);
+  const controller = new AbortController();
+  const held = await chat(server, afterContext, { signal: controller.signal });
+  const reader = held.body.getReader();
+  const first = await reader.read();
+  assert.equal(first.done, false);
+  const raced = await Promise.race([
+    reader.read().then(() => 'chunk'),
+    delay(300).then(() => 'held'),
+  ]);
+  assert.equal(raced, 'held');
+  controller.abort();
+  await assert.rejects(reader.read());
+  let snapshot;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    snapshot = await (await fetch(server.requestsUrl)).json();
+    if (snapshot.requests[1]?.outcome === 'client_closed') break;
+    await delay(10);
+  }
+  assert.equal(snapshot.requests[1].phase, 'hold-generate');
+  assert.equal(snapshot.requests[1].outcome, 'client_closed');
+  assert.equal(snapshot.activeRequests, 0);
+});
+
+test('a resumed session only counts tool calls made after the newest user message', async () => {
+  const server = await start();
+  const previousTurn = await completeContextReads(server, [{ role: 'user', content: '写本章' }]);
+  // The previous turn was interrupted before generate_chapter; the retry appends a new user
+  // message behind the replayed transcript.
+  const resumed = [...previousTurn, { role: 'user', content: '重试：写本章' }];
+  const calls = toolCalls(parseSse(await (await chat(server, resumed)).text()));
+  assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map((call) => call.function.name),
+    [
+      actualNames['novel.read_context'],
+      actualNames['chapter.read_outline'],
+      actualNames.get_character_states,
+      actualNames.search_memory,
+    ],
+  );
+  const afterReRead = [...resumed, assistantToolMessage(calls), ...toolResults(calls)];
+  const generate = toolCalls(parseSse(await (await chat(server, afterReRead)).text()));
+  assert.equal(generate.length, 1);
+  assert.equal(generate[0].function.name, actualNames.generate_chapter);
+});
+
+test('request summaries record only whether the host retry notice was present', async () => {
+  const server = await start();
+  await chat(server, [{ role: 'user', content: '写本章' }]);
+  await chat(server, [
+    { role: 'user', content: '写本章' },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: '用户意图：写本章\n\n用户重试：同一目标此前已有 1 次失败或中断的运行。私密提示词',
+        },
+      ],
+    },
+  ]);
+  const snapshot = await (await fetch(server.requestsUrl)).json();
+  assert.deepEqual(
+    snapshot.requests.map((request) => request.userRetryNotice),
+    [false, true],
+  );
+  assert.doesNotMatch(JSON.stringify(snapshot), /私密提示词/u);
+});
+
+test('configure switches mode and ids in place while keeping the bound port', async () => {
+  const server = await start({ mode: 'hold-generate' });
+  const port = server.port;
+  assert.equal(server.mode, 'hold-generate');
+  const options = server.configure({ mode: 'normal', chapterId: 'chapter-second' });
+  assert.equal(options.mode, 'normal');
+  assert.equal(options.delayMs, 0);
+  assert.equal(server.mode, 'normal');
+  assert.equal(server.port, port);
+  const initial = [{ role: 'user', content: '写本章' }];
+  const afterContext = await completeContextReads(server, initial);
+  const generateCalls = toolCalls(parseSse(await (await chat(server, afterContext)).text()));
+  assert.equal(JSON.parse(generateCalls[0].function.arguments).chapterId, 'chapter-second');
+  assert.equal(server.configure({ mode: 'cancel' }).delayMs, 30_000);
+  assert.equal(server.configure({ mode: 'upstream-error-once' }).mode, 'upstream-error-once');
+  assert.equal(server.snapshot().injectedUpstreamFailures, 0);
+  assert.equal((await (await fetch(server.healthUrl)).json()).mode, 'upstream-error-once');
+  assert.throws(() => server.configure({ mode: 'nonsense' }), /mode must be one of/u);
 });

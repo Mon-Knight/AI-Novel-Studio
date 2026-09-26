@@ -23,23 +23,23 @@
 
 ---
 
-## 验证脚本检查
+## 验证选择检查
 
-- [ ] 是否有验证脚本（`scripts/agent-workflow/`）？
-- [ ] `verify_project.ps1` 可正常运行？
-- [ ] `check_docs_sync.ps1` 可正常运行？
-- [ ] `run_feature_workflow.ps1` 可正常运行？
-- [ ] 验证失败是否能定位到具体原因？
+- [ ] `npm run verify:change -- --dry-run` 已列出本次变更的归属与命令？
+- [ ] 未映射路径已在 `scripts/quality/verification-scopes.mjs` 补充行为归属（没有以零测试通过）？
+- [ ] 同一批未变化且已通过的检查未重复运行？
+- [ ] 验证失败是否能定位到具体原因，并原样传播退出码？
 
 ---
 
 ## 构建检查
 
-- [ ] 与改动相关的动态测试通过？
-- [ ] 前端改动的 `npm run lint:ci` / `npm run build` 通过？
-- [ ] Rust/SQLite 改动的 `cargo check` / 相关测试通过？
-- [ ] Tauri/DSH payload/发布任务的桌面 E2E 与 `npm run tauri build` 通过？
-- [ ] 发布任务的 `verify_project.ps1` 通过？
+- [ ] 选择器选出的行为测试通过，且报告了实际用例数？
+- [ ] 前端改动的改动文件 ESLint 与一次类型检查通过；构建配置/依赖变化时完整 `lint:ci` 与 `build` 通过？
+- [ ] Rust/SQLite 改动的 `cargo check --locked` 与有非零匹配证明的相关测试通过？
+- [ ] 用户交互/写作流程变化对应的真实桌面场景通过（生产界面、隔离 SQLite、固定模型响应）？
+- [ ] Migration/共享持久化/DSH/打包变化扩大到对应完整领域门禁；打包变化通过 `npm run tauri:build`？
+- [ ] 发布或明确完整验收任务的 `verify_project.ps1` 通过？
 - [ ] 是否有 TypeScript 类型错误？
 - [ ] 是否有 ESLint 报错？
 

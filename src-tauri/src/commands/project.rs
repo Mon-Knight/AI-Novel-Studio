@@ -47,3 +47,12 @@ pub fn repair_database() -> Result<crate::domain::project::DatabaseRepairResult,
     let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
     project_service::repair_database(&mut conn)
 }
+
+/// 整本 TXT 导入：作品、卷、章节与导入草稿在同一事务内落库，失败零部分写入。
+#[tauri::command]
+pub fn import_txt_novel(
+    input: crate::services::txt_import_service::ImportTxtNovelInput,
+) -> Result<crate::services::txt_import_service::ImportTxtNovelOutput, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    crate::services::txt_import_service::import_txt_novel(&mut conn, input)
+}

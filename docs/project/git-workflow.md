@@ -38,7 +38,7 @@ git push -u origin codex/vX.Y.Z-short-scope
 
 1. 必须通过 Pull Request 合并；常规情况下至少 1 名非作者审查者批准。
 2. 新提交到来时撤销过期批准，所有 review conversation 必须解决。
-3. 必须通过快速浏览器 CI、Windows 桌面 smoke 和依赖安全门禁；数据库、桌面壳或发布文件变更时运行对应完整门禁。
+3. 必须通过快速浏览器 CI、Windows 桌面质量与桌面 E2E 作业和依赖安全门禁。PR 上这些作业用 `npm run verify:change -- --base <PR base>` 按变更归属选择检查，不适用项注明 `NOT_APPLICABLE`；migration、共享持久化、DSH、打包配置或工作流变更时选择器自动扩大到对应完整门禁。required check 名称保持稳定，缺工具、零匹配和实际失败不能伪装为通过。
 4. 要求分支在合并前与 `main` 保持最新，禁止 force push 和删除 `main`。
 5. 管理员仅在 GitHub 或 CI 故障的紧急场景旁路；旁路原因必须记录在后续 PR / CHANGELOG。
 

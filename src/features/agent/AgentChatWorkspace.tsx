@@ -143,7 +143,7 @@ export function AgentChatWorkspace({
           <span
             data-testid="agent-status-badge"
             style={{
-              fontSize: 11,
+              fontSize: 12,
               padding: '2px 8px',
               borderRadius: 12,
               background: isBusy ? '#dbeafe' : '#f1f5f9',
@@ -234,7 +234,7 @@ export function AgentChatWorkspace({
                   style={{
                     padding: '2px 8px',
                     borderRadius: 4,
-                    fontSize: 11,
+                    fontSize: 12,
                     background: isDone ? '#bbf7d0' : '#ffffff',
                     color: isDone ? '#14532d' : '#475569',
                     border: '1px solid #86efac',
@@ -258,7 +258,7 @@ export function AgentChatWorkspace({
               style={{
                 marginTop: 6,
                 color: '#15803d',
-                fontSize: 11,
+                fontSize: 12,
                 fontStyle: 'italic',
               }}
             >
@@ -339,7 +339,7 @@ export function AgentChatWorkspace({
                   padding: 6,
                   borderRadius: 4,
                   fontFamily: 'monospace',
-                  fontSize: 11,
+                  fontSize: 12,
                   marginBottom: 10,
                 }}
               >
@@ -351,7 +351,7 @@ export function AgentChatWorkspace({
                   className="btn btn-primary btn-sm"
                   data-testid="agent-confirm-btn"
                   onClick={() => handleResolveConfirmation(conf.confirmationId, true)}
-                  style={{ fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}
+                  style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
                 >
                   <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
                   确认执行
@@ -361,7 +361,7 @@ export function AgentChatWorkspace({
                   className="btn btn-secondary btn-sm"
                   data-testid="agent-reject-btn"
                   onClick={() => handleResolveConfirmation(conf.confirmationId, false)}
-                  style={{ fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}
+                  style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
                 >
                   <X aria-hidden="true" size={13} strokeWidth={1.8} />
                   拒绝
@@ -397,7 +397,7 @@ export function AgentChatWorkspace({
               onClick={() => handleSend(chip)}
               disabled={isBusy}
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '3px 8px',
                 borderRadius: 12,
                 border: '1px solid var(--color-border-light, #cbd5e1)',

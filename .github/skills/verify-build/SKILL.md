@@ -1,165 +1,24 @@
-# Skill: verify-build
-
-> **技能名称**：构建验证
-> **触发条件**：用户要求验证项目构建状态、版本发布前检查
-> **技能类型**：多步骤工作流
-
+---
+name: verify-build
+description: 验证 AI Novel Studio 的指定构建目标、当前变更或明确要求的完整发布矩阵；不把普通开发检查自动升级为发布验收。
 ---
 
-## 概述
+# 构建与变更验证
 
-`verify-build` 是 AI Novel Studio 的自动化构建验证技能。它对项目执行完整的构建验证流程，确保代码可以成功编译和打包。
+以 [AGENTS.md](../../../AGENTS.md) 的适用范围为准。读取 package.json 的 engines、scripts 和锁文件；当前 Node 要求 >=22.6.0，后续以清单为准。只检查所需工具；依赖已有且有效时不重复安装，不为诊断升级依赖。
 
----
+| 用户要求       | 入口与证据                                                      |
+| -------------- | --------------------------------------------------------------- |
+| 验证当前修改   | `npm run verify:change -- --dry-run`，随后执行所选检查          |
+| 指定前端构建   | `npm run build`，证明类型检查和 Vite 构建                       |
+| 指定 Rust 编译 | `cargo check --locked --manifest-path src-tauri/Cargo.toml`     |
+| 指定桌面产物   | `npm run tauri:build`，准备固定载体并完成生产构建               |
+| 完整发布验收   | `scripts/agent-workflow/verify_project.ps1`，聚合矩阵只调用一次 |
 
-## 工作流
+没有文件变化但用户要求一般构建检查时，运行前端 build 并说明其证明范围。Tauri 构建已包含前端构建，不为相同产物再提前执行一次。DSH 完整验收前仍须准备固定载体和当前 Gateway，不能复用不明缓存。
 
-### 步骤 1：环境检查
+失败后定位本次引入的问题并定向修复；记录既有失败和环境缺项，继续独立检查。失败的前置构建、Gateway 或隔离环境不能供依赖步骤使用。不隐藏错误，不把缺工具、零匹配、SKIPPED 或 NOT_RUN 写成 PASS。
 
-验证开发环境是否满足构建要求：
+通过的检查仅在所覆盖代码/配置变化或有具体新风险时复测。日常工作树可以保留未提交修改；clean working tree 仅适用于完整发布终态。构建通过不能直接宣称“可以发布”，还需发布任务要求的完整门禁和相应授权。
 
-```powershell
-node --version    # 必须 >= 18
-npm --version
-rustc --version   # 必须已安装
-cargo --version
-```
-
-如果环境不满足要求，报告缺失项并停止。
-
-### 步骤 2：依赖检查
-
-确认依赖已安装：
-
-```powershell
-# 检查 node_modules 是否存在
-Test-Path node_modules
-
-# 如果不存在，安装
-npm install
-```
-
-### 步骤 3：Rust 编译检查
-
-进入 `src-tauri/` 目录执行：
-
-```powershell
-cargo check
-```
-
-记录：
-
-- 编译是否成功
-- 警告数量
-- 错误详情（如有）
-
-如果 `cargo check` 失败，**立即停止并报告**，不继续后续步骤。
-
-### 步骤 4：前端 TypeScript 编译 + 构建
-
-```powershell
-npm run build
-```
-
-记录：
-
-- TypeScript 编译是否通过
-- Vite 打包是否成功
-- 输出文件大小
-- 错误详情（如有）
-
-如果 `npm run build` 失败，**立即停止并报告**。
-
-### 步骤 5：Tauri 完整构建
-
-```powershell
-npm run tauri build
-```
-
-记录：
-
-- 完整构建是否成功
-- 产物路径
-- 安装包大小
-- 错误详情（如有）
-
-### 步骤 6：Git 状态检查
-
-```powershell
-git status
-```
-
-记录：
-
-- Working tree 是否 clean
-- 未跟踪的文件
-- 未提交的修改
-
-### 步骤 7：生成验证报告
-
-汇总所有步骤的结果，输出结构化验证报告：
-
-```markdown
-## 🔍 vX.X.X 构建验证报告
-
-### 环境
-
-| 组件    | 版本 | 状态 |
-| ------- | ---- | ---- |
-| Node.js | vXX  | ✅   |
-| npm     | vXX  | ✅   |
-| Rust    | vXX  | ✅   |
-| Cargo   | vXX  | ✅   |
-
-### 构建结果
-
-| 步骤                | 状态          | 备注 |
-| ------------------- | ------------- | ---- |
-| cargo check         | ✅ / ❌       |      |
-| npm run build       | ✅ / ❌       |      |
-| npm run tauri build | ✅ / ❌       |      |
-| git status          | clean / dirty |      |
-
-### 总体判定
-
-✅ 全部通过 —— 可以发布
-❌ 存在问题 —— 需要修复后重新验证
-
-### 失败详情（如有）
-
-...
-```
-
----
-
-## 输入信息
-
-- 无（自动检测项目状态）
-
-## 禁止事项
-
-- ❌ 不跳过任何步骤（即使某步之前通过过）
-- ❌ 不隐藏错误输出
-- ❌ 不在失败时继续下一步
-
-## 验证方式
-
-- 所有步骤状态为 PASS 或 SKIPPED（无 FAIL）
-
-## 失败处理
-
-- 失败步骤必须输出完整命令和错误摘要
-- 定位失败文件和行号
-- 给出修复建议
-
-## 关联资源
-
-- 关联脚本：`scripts/agent-workflow/verify_project.ps1`（必须调用）
-- 关联 Checklist：`.github/checklists/verification.checklist.md`
-
-## 约束
-
-- 必须按顺序执行，前一步失败不继续
-- 必须如实报告结果
-- 失败时提供完整的错误输出
-- 不跳过任何步骤
+汇报命令、结果、测试数量/耗时（工具实际提供时）、产物及局限。[测试策略](../../../docs/technical/testing.md) 维护环境与证据要求，[验证清单](../../checklists/verification.checklist.md) 按适用项使用。

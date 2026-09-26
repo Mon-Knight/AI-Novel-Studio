@@ -83,14 +83,14 @@ export const ToolTraceCard = memo(function ToolTraceCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <ToolIcon aria-hidden="true" size={14} strokeWidth={1.8} />
           <strong style={{ fontSize: 13 }}>{meta.label}</strong>
-          <span style={{ color: '#94a3b8', fontSize: 11 }}>({record.toolName})</span>
+          <span style={{ color: '#94a3b8', fontSize: 12 }}>({record.toolName})</span>
           <span
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
               color: '#64748b',
-              fontSize: 11,
+              fontSize: 12,
             }}
           >
             {expanded ? (
@@ -103,7 +103,7 @@ export const ToolTraceCard = memo(function ToolTraceCard({
         </div>
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 4,
             background: record.success ? '#dcfce7' : '#fee2e2',
@@ -129,7 +129,7 @@ export const ToolTraceCard = memo(function ToolTraceCard({
           {/* 输入参数 */}
           <div style={{ marginBottom: 6, color: '#64748b' }}>
             <span style={{ fontWeight: 500 }}>输入参数: </span>
-            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
               {JSON.stringify(record.inputArgs)}
             </span>
           </div>
@@ -143,7 +143,7 @@ export const ToolTraceCard = memo(function ToolTraceCard({
               maxHeight: 140,
               overflowY: 'auto',
               fontFamily: 'monospace',
-              fontSize: 11,
+              fontSize: 12,
               whiteSpace: 'pre-wrap',
             }}
           >
@@ -160,7 +160,7 @@ export const ToolTraceCard = memo(function ToolTraceCard({
             className="btn btn-primary btn-sm"
             data-testid="agent-adopt-prose-btn"
             onClick={() => onAdoptProse(proseText)}
-            style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+            style={{ fontSize: 12, padding: '3px 8px', cursor: 'pointer' }}
           >
             采纳为章节正文
           </button>

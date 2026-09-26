@@ -1,13 +1,19 @@
 # AI Novel Studio 第二次全量能力审计：Capability Health
 
-> 历史与当前口径：本文主体保留 2026-08-24 第二次全量审计快照；其中的能力数量、入口和阶段判断不得直接改写为 2026-08-27 的当前事实。v3.6.0 发布候选校正如下，候选状态不代表已经发布。
+> 历史与当前口径：本文主体保留 2026-08-24 第二次全量审计快照；其中的能力数量、入口和阶段判断不得直接改写为后续版本事实。v3.6.0 / v3.7.0 校正见第 0 节与第 0.1 节。当前缺口对照见 [`../feature-gap-analysis-v3.7.0.md`](../feature-gap-analysis-v3.7.0.md)。
 
 ## 0. v3.6.0 发布候选校正
 
 - 生产写作工作台的旧生成类 AI 面板、独立实验面板和草稿历史入口已经移除；底层草稿表、历史草稿、领域服务与 E2E-only 组件仍可作为审计/回归事实存在。因此第 5.4 节与问答中“隐藏面板”“草稿历史可用”只描述审计当日代码或测试证据，不能解释为当前生产入口。
-- 章节候选已经具备 `ReviewAuthorization + adopt_review_authorized_draft` 的单一 Rust/SQLite 原子采用链路；通用结构化 `request_apply` 仍失败关闭且不产生领域写入。
+- 章节候选已经具备 `ReviewAuthorization + adopt_review_authorized_draft` 的单一 Rust/SQLite 原子采用链路；通用结构化 `request_apply` 对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 与精确 `generic_json`+`context_compression` 同事务写入，其余类型失败关闭且不产生领域写入（GAP-10/11 的前端策略收敛与大纲 ownership 校验见 `agent_gap_report.md` 处理记录）。
 - Canonical 1A-A/B/C/D 已完成，但四个只读 identity 仍为 `catalog_only + partial`，模型可见数为 `0`。必须先关闭四项 Facade blocker，再完成独立 exposure；之后才进入 R4 真实 Main Agent Runtime 验证。
 - 本校正不重算 2026-08-24 的 21/37/3/11/3 健康数量，也不授权 exposure、R4、SubAgent、新版本或发布。
+
+## 0.1 v3.7.0 当前校正（不改写下方审计表）
+
+- 第 4 节三个 BROKEN 入口描述的是 2026-08-24 当日代码。v3.7.0 用户级联删除走 `delete_novel_cascade` → `purge_project_in_tx`；桌面「扫描并修复」调用 `repair_database`；资产中心「导入资产」计数来自 `useAssetStatistics`。不得再把这三项写成当前 BROKEN。
+- 第 0 节“四个只读 identity 仍为 `catalog_only`、可见数为 0”是 v3.6.0 发布候选历史。当前四项已是 `stable + working`，`modelVisibleToolIdentities` 长度为 4。
+- Writing SubAgent 已对桌面端 + 真实 API 的 `chapter_write` 默认开放；第 5.3 节“章节写作只走 TypeScript writer”不再是当前生产默认。R4 live 仍 NOT VERIFIED。本校正不重算健康数量，不授权新版本。
 
 ## 1. 结论先行
 
@@ -89,7 +95,7 @@ Settings → DataStorageSettingsCard
 - `aiSettingsStore.getAiSettings()` 在 E2E 环境强制返回默认 `runtimeMode: mock`。
 - DSH Rust 集成测试启动 `scripts/dsh/mock-workbench-upstream.mjs`。
 - `npm run test:dsh:real` 已用真实 `deepseek-official/deepseek-v4-flash` 完成固定 DSH preparation smoke（本次 3 次请求；模型校验修复可能产生 3–4 次请求，工具调用与 Proposal schema 均通过）。
-- 因此“固定 DSH preparation / real provider”可记为受限已验证；章节生成、润色、总结、质量、风格、独立 Writing SubAgent 和完整 DSH Main Agent 仍只保留 PARTIAL/UNKNOWN。
+- 因此“固定 DSH preparation / real provider”可记为受限已验证；独立 Writing SubAgent 于 2026-09-08（v3.7.0）经客户端 Gemini 卡片正向真实验收（E-4a）与六场景故障注入负例/恢复验收（E-4b）放行，桌面端 + 真实 API 模型的 `chapter_write` 默认走 DSH candidate-only 回合（证据见 `docs/architecture/writing-subagent-contract.md` §3.1/§3.2）；润色、总结、质量、风格与完整 DSH Main Agent 仍只保留 PARTIAL/UNKNOWN。
 
 ### 5.2 `generate_*` 名称与真实职责不一致
 
@@ -133,7 +139,7 @@ Settings → DataStorageSettingsCard
 2. 给模型可见的 Tool 契约补齐 permission/scope/sideEffect/confirmation 语义，或在 gateway 层强制一致投影。
 3. 为候选应用、采用、导入、事务写入建立显式确认/版本/CAS facade。
 4. 隔离或移除旧 Outline、Setting Suggestions、Autonomous Planning、Multi-Agent 生产入口。
-5. 为 `chapter_write`/Writing SubAgent 增加真实 Provider smoke（不提交凭据），并把网络失败、超时、预算拒绝与候选落盘分别记录；现有 DSH preparation smoke 证据需保留。
+5. ~~为 `chapter_write`/Writing SubAgent 增加真实 Provider smoke（不提交凭据）~~ 已完成（2026-09-08）：`npm run test:real-profile:writing-subagent` 复用客户端模型卡片与 DPAPI 保管库（密钥不出应用），`npm run test:fault-injection:writing-subagent` 以回环故障注入分别记录越权、跨书、瞬时/持续上游失败、字数越界与进程强杀恢复；现有 DSH preparation smoke 证据保留。
 
 ### P2：能力清理与体验修复
 

@@ -5,7 +5,7 @@ import { resolveSessionModelApiKey } from '../../services/ai/aiSettingsStore';
 import { validateGatewayConfig } from '../../services/ai/realAiClient';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
-import { createProviderAdapter } from '../../services/ai/providerAdapter';
+import { testGatewayConnection } from '../../services/ai/providerAdapter';
 import {
   applySavedGatewayModel,
   createGatewayModelProfile,
@@ -79,34 +79,11 @@ export default function AiGatewaySettingsCard({
     setTesting(true);
     setTestResult(null);
     try {
-      const adapter = createProviderAdapter(
-        { ...settings, gateway: { ...gateway, enabled: true } },
-        'chapter_scene_generate',
-        {
-          selected: {
-            endpointId:
-              'remote.' +
-              (gateway.providerId.trim() || 'ai_gateway') +
-              '.' +
-              gateway.modelName.trim(),
-            providerId: gateway.providerId.trim() || 'ai_gateway',
-            modelId: gateway.modelName.trim(),
-            kind: 'remote',
-          },
-        },
-      );
-      await adapter.execute(
-        {
-          taskType: 'chapter_scene_generate',
-          messages: [{ role: 'user', content: 'ping' }],
-          maxTokens: 5,
-        },
-        { signal: controller.signal },
-      );
+      await testGatewayConnection(settings, gateway, { signal: controller.signal });
       setTestResult({ ok: true, message: '连接成功' });
     } catch (err) {
       setTestResult({
-        ok: controller.signal.aborted || isAiRequestCancelled(err) ? false : false,
+        ok: false,
         message:
           controller.signal.aborted || isAiRequestCancelled(err)
             ? '测试已取消'
@@ -128,11 +105,10 @@ export default function AiGatewaySettingsCard({
         公网必须 https，内网可 http。已保存网关以卡片显示，不展示地址、Token
         或采样参数。调用必须鉴权。
       </p>
-      <label
-        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
-      >
+      <label className="settings-toggle-row settings-toggle-row--plain">
         <input
           type="checkbox"
+          className="settings-checkbox"
           checked={gateway?.enabled === true}
           disabled={!gateway}
           onChange={(event) =>
@@ -142,7 +118,6 @@ export default function AiGatewaySettingsCard({
               remoteWriter: { ...gateway, enabled: event.target.checked },
             })
           }
-          style={{ width: 18, height: 18 }}
         />
         启用外部 AI Model Gateway 接入
       </label>
@@ -249,13 +224,7 @@ export default function AiGatewaySettingsCard({
       {testResult && (
         <div
           role="status"
-          className="settings-help-text"
-          style={{
-            marginTop: 12,
-            padding: '8px 12px',
-            borderRadius: 6,
-            background: testResult.ok ? 'var(--color-success-bg)' : 'var(--color-error-bg)',
-          }}
+          className={`settings-help-text settings-result ${testResult.ok ? 'is-ok' : 'is-error'}`}
         >
           {testResult.message}
         </div>

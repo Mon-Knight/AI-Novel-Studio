@@ -4,13 +4,6 @@ import {
 } from '../../services/styles/styleProfilePromptProjection';
 import type { StyleProfile } from '../../types/style';
 
-function sourceStateColor(state: StyleProfile['sourceState']): string {
-  if (state === 'available') return 'var(--color-success)';
-  if (state === 'outdated') return 'var(--color-warning)';
-  if (state === 'missing') return 'var(--color-error)';
-  return 'var(--color-text-secondary)';
-}
-
 export function StyleSourceTrace({ profile }: { profile: StyleProfile }) {
   const trace = getStyleProfileTrace(profile);
   if (
@@ -23,23 +16,11 @@ export function StyleSourceTrace({ profile }: { profile: StyleProfile }) {
   }
   return (
     <div
+      className="resource-trace"
       aria-label={`${profile.name} 来源追溯`}
       data-source-state={trace.sourceState}
-      style={{
-        marginTop: 10,
-        padding: '8px 10px',
-        borderRadius: 6,
-        border: '1px solid var(--color-border)',
-        background: 'var(--color-bg-hover)',
-        color: 'var(--color-text-secondary)',
-        fontSize: 12,
-        lineHeight: 1.6,
-        overflowWrap: 'anywhere',
-      }}
     >
-      <div style={{ color: sourceStateColor(trace.sourceState), fontWeight: 600 }}>
-        {STYLE_SOURCE_STATE_LABELS[trace.sourceState]}
-      </div>
+      <div className="resource-trace-state">{STYLE_SOURCE_STATE_LABELS[trace.sourceState]}</div>
       {trace.sourceReferenceWorkId && <div>参考作品：{trace.sourceReferenceWorkId}</div>}
       {trace.sourceReferenceImportId && <div>导入版本：{trace.sourceReferenceImportId}</div>}
       {trace.sourceContentHash && (

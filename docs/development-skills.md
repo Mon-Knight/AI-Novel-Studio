@@ -65,7 +65,7 @@ Agent 执行修改 + 分层验证 + 汇报
 
 ### 4.5 verify-build — 构建验证
 
-按变更范围执行文档、前端、Rust/SQLite 或 Tauri/DSH 门禁；发布时运行完整统一验证和 clean-tree 检查。
+日常修改用 `npm run verify:change` 按变更归属选择检查；指定构建目标只运行对应命令；发布或明确完整验收时运行一次完整统一验证和 clean-tree 检查。
 
 ### 4.6 review-ui — UI 审查
 
@@ -85,7 +85,7 @@ Agent 执行修改 + 分层验证 + 汇报
 
 ### 4.10 tauri-desktop-build — 桌面构建
 
-Tauri 构建全流程：环境检查 → dev 验证 → 完整构建 → 产物记录。
+用户明确要求的 Tauri 构建全流程：环境检查 → dev 验证 → 完整构建 → 产物记录；普通局部修改不触发完整安装包构建。
 
 ---
 

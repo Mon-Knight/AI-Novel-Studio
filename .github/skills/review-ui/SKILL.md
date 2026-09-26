@@ -1,3 +1,8 @@
+---
+name: review-ui
+description: 在用户要求审查 UI 或本次任务包含用户可见界面变化时，逐项检查是否符合 Windows 桌面写作软件标准；纯服务/文档修改不触发。
+---
+
 # Skill: review-ui
 
 > **技能名称**：UI 审查

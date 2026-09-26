@@ -163,12 +163,14 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 
 运行器优先使用显式环境变量，其次扫描 `.e2e-tools`，最后搜索 `PATH`。驱动下载和 `npm install` 可能需要网络，但测试运行本身不依赖互联网。
 
+6. 从**非提权（Medium integrity）终端**运行。WebView2 Runtime 150+ 会在宿主进程以管理员（High integrity）运行时丢弃 `WEBVIEW2_*` 环境变量覆盖，msedgedriver 依赖该覆盖注入 `--remote-debugging-port`，因此提权终端中的每个 spec 都会在创建 WebDriver 会话时超时（约 2 分钟）。运行器启动时用 `whoami /groups` 检测 `S-1-16-12288`/`S-1-16-16384` 并立即失败并给出说明；只有当宿主已通过 HKLM 策略等方式允许提权自动化时，才设置 `AI_NOVEL_STUDIO_E2E_ALLOW_ELEVATED=1` 跳过该检查。
+
 ### 3.1 Windows CI
 
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
-- Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行十一个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- Pull Request：质量作业先用 `verify:change --dry-run --github-output` 判定变更归属，以 `--lane native` 运行 Rust、文档与版本归属检查；桌面作业在未涉及桌面行为时输出 `NOT_APPLICABLE`，涉及时以 `--lane desktop` 只运行归属的真实桌面场景（migration、DSH、打包或工作流变更时扩大为完整套件）。
+- `main` 分支 push、`v*` 发布标签、每周定时和手工触发：运行版本/文档同步、Rust check / 完整串行 test 与无安装包的生产 Tauri 构建，再执行全部真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。`main` 推送的前端覆盖率由 Linux `ci.yml` 负责，Windows 不重复运行。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -178,13 +180,13 @@ CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下�
 
 ## 4. 运行命令
 
-### 4.1 启动冒烟测试
+### 4.1 日常冒烟：启动 + 生产界面写作场景
 
 ```powershell
 npm run test:e2e:smoke
 ```
 
-只运行 `app-start.spec.ts`，验证窗口、`app-shell`、首页、前端异常、迁移和 SQLite 诊断。
+运行 `app-start.spec.ts` 与 `workbench-writing-smoke.spec.ts`：前者验证窗口、`app-shell`、前端异常、迁移和 SQLite 诊断；后者经生产界面完成创建作品和章节 → 创建工作台任务 → 生成候选 → 请求修订 → 显式进入审阅 → 编辑保存 → 确认采用 → 真正重启进程 → 核对正文、采用记录和授权状态。只替换模型响应；界面、业务服务、Tauri 与 SQLite 使用真实实现，夹具仅准备前置资产。
 
 ### 4.2 全部桌面流程
 
@@ -192,17 +194,18 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；十一个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；`scripts/e2e/run-e2e.ts` 中 `allSpecs` 列出的全部 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
-### 4.3 定向单场景复测
+### 4.3 定向复测一个或多个场景
 
-单独复测一个场景时可传入清单中的 spec 名称，扩展名可省略：
+传入清单中的 spec 名称，扩展名可省略；`--spec` 可重复多次，运行器统一构建一次并保留逐场景数据库隔离和进程清理：
 
 ```powershell
 npm run test:e2e -- --spec candidate-review-apply
+npm run test:e2e -- --spec chapter-save --spec leave-guard --spec workbench-writing-smoke
 ```
 
-`--spec` 只能出现一次，不能与 `--smoke` 同时使用；未知名称会在启动应用前失败。
+`--spec` 不能与 `--smoke` 同时使用；未知或重复名称会在启动应用前失败（重复名称去重后只运行一次）。默认所有场景使用生产界面；已从生产移除的旧右侧 AI 面板与草稿回滚入口只在 `scripts/e2e/spec-selection.ts` 的 `legacyPanelSpecs` 列出的兼容性用例中，由运行器通过 `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS=1` 与 `wdio.conf.ts` 写入的显式 localStorage 开关启用。
 
 ### 4.4 连续稳定性检查
 
@@ -230,25 +233,27 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 正常使用只需运行 npm 命令。以下变量用于 CI、驱动位置或故障定位：
 
-| 变量                                   | 作用                                                                                   |
-| -------------------------------------- | -------------------------------------------------------------------------------------- |
-| `AI_NOVEL_STUDIO_E2E=1`                | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝                                     |
-| `VITE_AI_NOVEL_STUDIO_E2E=1`           | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置                                    |
-| `AI_NOVEL_STUDIO_E2E_DATA_DIR`         | 单个 spec 已存在的绝对临时目录；由运行器生成                                           |
-| `AI_NOVEL_STUDIO_E2E_RUN_ID`           | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成                      |
-| `AI_NOVEL_STUDIO_E2E_APP`              | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建                                              |
-| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠        |
-| `AI_NOVEL_STUDIO_E2E_DRIVER`           | `tauri-driver` 可执行文件名或路径                                                      |
-| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`    | `msedgedriver.exe` 路径                                                                |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST`      | driver 地址，默认 `127.0.0.1`                                                          |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`      | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000` |
-| `AI_NOVEL_STUDIO_E2E_ARTIFACTS`        | 运行诊断产物根目录，默认 `test-results/e2e`                                            |
-| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1`      | 即使成功也保留临时 SQLite / WebView2 数据                                              |
-| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`     | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE                                                |
-| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT`     | 单个 WDIO 进程总超时，默认 10 分钟                                                     |
-| `AI_NOVEL_STUDIO_E2E_TIMEOUT`          | Mocha 测试超时，默认 120 秒                                                            |
-| `AI_NOVEL_STUDIO_E2E_WAIT`             | WebDriver 显式等待默认值，默认 15 秒                                                   |
-| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL`        | WebdriverIO 日志级别，默认 `warn`                                                      |
+| 变量                                   | 作用                                                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `AI_NOVEL_STUDIO_E2E=1`                | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝                                                                               |
+| `VITE_AI_NOVEL_STUDIO_E2E=1`           | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置                                                                              |
+| `AI_NOVEL_STUDIO_E2E_DATA_DIR`         | 单个 spec 已存在的绝对临时目录；由运行器生成                                                                                     |
+| `AI_NOVEL_STUDIO_E2E_RUN_ID`           | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成                                                                |
+| `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS`    | 运行器按 `spec-selection.ts` 的兼容性清单设为 `1`/`0`；`wdio.conf.ts` 据此写入或清除旧面板的显式 localStorage 开关，默认生产界面 |
+| `AI_NOVEL_STUDIO_E2E_ALLOW_ELEVATED=1` | 跳过提权终端检测；仅在宿主已配置允许提权自动化时使用，否则会话创建必然超时                                                       |
+| `AI_NOVEL_STUDIO_E2E_APP`              | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建                                                                                        |
+| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠                                                  |
+| `AI_NOVEL_STUDIO_E2E_DRIVER`           | `tauri-driver` 可执行文件名或路径                                                                                                |
+| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`    | `msedgedriver.exe` 路径                                                                                                          |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST`      | driver 地址，默认 `127.0.0.1`                                                                                                    |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`      | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000`                                           |
+| `AI_NOVEL_STUDIO_E2E_ARTIFACTS`        | 运行诊断产物根目录，默认 `test-results/e2e`                                                                                      |
+| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1`      | 即使成功也保留临时 SQLite / WebView2 数据                                                                                        |
+| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`     | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE                                                                                          |
+| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT`     | 单个 WDIO 进程总超时，默认 10 分钟                                                                                               |
+| `AI_NOVEL_STUDIO_E2E_TIMEOUT`          | Mocha 测试超时，默认 120 秒                                                                                                      |
+| `AI_NOVEL_STUDIO_E2E_WAIT`             | WebDriver 显式等待默认值，默认 15 秒                                                                                             |
+| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL`        | WebdriverIO 日志级别，默认 `warn`                                                                                                |
 
 不要手工设置 `AI_NOVEL_STUDIO_E2E_DATA_DIR` 或 `AI_NOVEL_STUDIO_E2E_RUN_ID`。Rust 要求数据目录已存在、规范化后是操作系统临时目录的专用子目录、不是文件系统根或正式 `%LOCALAPPDATA%\AI Novel Studio`，并要求 marker 内容与 run-id 完全一致；任一条件不满足都会在数据库初始化前拒绝启动。
 
@@ -435,6 +440,7 @@ v2.1.7 的质量历史场景确认了三类真实一致性缺陷：报告先标�
 
 ### 12.2 `session not created`、`DevToolsActivePort` 或窗口一闪而退
 
+- 确认终端不是以管理员身份运行：WebView2 Runtime 150+ 在提权宿主中忽略 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`，表现为应用正常启动、Rust 日志正常，但 `webview2\EBWebView\DevToolsActivePort` 始终不存在，wdio 依次报 `Chrome instance exited` / `DevToolsActivePort file doesn't exist` / `failed to write prefs file` 后超时。运行器现已在启动前拒绝提权终端；改用普通用户终端重跑即可。
 - 检查 WebView2 Runtime 与 `msedgedriver.exe` 主版本一致。
 - 使用 `msedgedriver.exe --version` 查看驱动版本，并在 Windows“应用”或 WebView2 注册信息中确认 Runtime 版本。
 - 显式设置 `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`，避免扫描到另一个旧驱动。

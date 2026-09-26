@@ -62,7 +62,7 @@ export function CheckPanelResultSections({
           {viewingHistory && (
             <div
               data-testid="quality-history-readonly"
-              style={{ marginTop: 6, fontSize: 11, color: 'var(--color-text-muted)' }}
+              style={{ marginTop: 6, fontSize: 12, color: 'var(--color-text-muted)' }}
             >
               历史快照 · 只读
             </div>
@@ -116,7 +116,7 @@ export function CheckPanelResultSections({
             >
               {activeReport.overallScore ?? '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>/ 100</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>/ 100</div>
           </div>
           {activeReport.summary && (
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
@@ -172,7 +172,7 @@ export function CheckPanelResultSections({
               </>
             )}
           </div>
-          <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+          <div style={{ fontSize: 12, lineHeight: 1.8 }}>
             <div>
               修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}
               ，严重 {fixComparison.beforeSeriousCount}
@@ -191,7 +191,7 @@ export function CheckPanelResultSections({
             </div>
           </div>
           {fixScopeValidation && (
-            <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
               范围校验：
               {fixScopeValidation.passed ? `通过 (${fixScopeValidation.riskLevel})` : `未通过`}
               {fixScopeValidation.warnings.length > 0 && (
@@ -201,13 +201,13 @@ export function CheckPanelResultSections({
           )}
           {fixComparison.isBetter && (
             <div
-              style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4, fontWeight: 500 }}
+              style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4, fontWeight: 500 }}
             >
               已自动采用修复后版本。
             </div>
           )}
           {!fixComparison.isBetter && (
-            <div style={{ fontSize: 11, color: 'var(--color-warning-text)', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--color-warning-text)', marginTop: 4 }}>
               修稿未能显著改善质量，当前正文保持不变。可查看候选版本后手动采用。
             </div>
           )}
@@ -217,7 +217,7 @@ export function CheckPanelResultSections({
               onClick={onRevertFix}
               style={{
                 flex: 1,
-                fontSize: 11,
+                fontSize: 12,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -232,7 +232,7 @@ export function CheckPanelResultSections({
               onClick={onConfirmFix}
               style={{
                 flex: 1,
-                fontSize: 11,
+                fontSize: 12,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -267,7 +267,7 @@ export function CheckPanelResultSections({
                 <span
                   key={severity}
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     padding: '2px 6px',
                     borderRadius: 3,
                     background: QualityIssueSeverityColors[severity] + '20',
@@ -290,7 +290,7 @@ export function CheckPanelResultSections({
                 key={filterOption}
                 className={`btn btn-sm ${filter === filterOption ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => onFilterChange(filterOption)}
-                style={{ fontSize: 11, padding: '3px 8px' }}
+                style={{ fontSize: 12, padding: '3px 8px' }}
               >
                 {QualityIssueFilterLabels[filterOption]}（
                 {filterOption === 'all'
@@ -310,7 +310,7 @@ export function CheckPanelResultSections({
       {locateMessage && (
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-muted)',
             padding: '6px 8px',
             background: 'var(--color-bg-primary)',

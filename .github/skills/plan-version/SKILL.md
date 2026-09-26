@@ -1,3 +1,8 @@
+---
+name: plan-version
+description: 仅在用户要求制定下一版本计划或规划新版本时使用；不因当前任务完成而自动进入下一版本规划。
+---
+
 # Skill: plan-version
 
 > **技能名称**：版本规划
