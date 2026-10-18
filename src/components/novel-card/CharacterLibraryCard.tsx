@@ -3,42 +3,29 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { CheckCircle2, Plus, UsersRound } from 'lucide-react';
-import type { Character, CreateCharacterInput, CharacterRoleType } from '../../types/character';
+import type { Character, CreateCharacterInput } from '../../types/character';
 import { CharacterRoleLabels } from '../../types/character';
 import { characterService } from '../../services/characters/characterService';
+import { characterProfileValues } from '../../services/characters/characterProfile';
+import { useCharacterProfileEditor } from '../../features/characters/useCharacterProfileEditor';
+import { CharacterProfileFields } from './CharacterProfileFields';
+import { CharacterProfileEditor } from './CharacterProfileEditor';
 import '../../styles/novel-detail.css';
 
 interface CharacterLibraryCardProps {
   novelId: string;
 }
 
-type TextField =
-  | 'identity'
-  | 'faction'
-  | 'relationToProtagonist'
-  | 'personality'
-  | 'goal'
-  | 'behaviorLimits'
-  | 'forbiddenBehaviors';
-
-const TEXT_FIELDS: Array<{ key: TextField; label: string; placeholder: string }> = [
-  { key: 'faction', label: '阵营', placeholder: '如：卡塞尔学院' },
-  { key: 'relationToProtagonist', label: '与主角关系', placeholder: '如：导师、战友' },
-  { key: 'personality', label: '性格特征', placeholder: '简洁描述角色性格' },
-  { key: 'goal', label: '目标', placeholder: '角色在故事中的目标' },
-  { key: 'behaviorLimits', label: '行为限制（允许但不限制范围）', placeholder: '角色行为上限' },
-  {
-    key: 'forbiddenBehaviors',
-    label: '禁止行为（绝对不能做的）',
-    placeholder: '角色禁止做出的行为',
-  },
-];
-
 function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<CreateCharacterInput>({ novelId, name: '' });
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const profileEditor = useCharacterProfileEditor(novelId, (saved) => {
+    setCharacters((current) =>
+      current.map((character) => (character.id === saved.id ? saved : character)),
+    );
+  });
 
   const load = useCallback(async () => {
     const list = await characterService.getByNovelId(novelId);
@@ -64,6 +51,7 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
 
   return (
     <div className="detail-card">
+      <CharacterProfileEditor editor={profileEditor} />
       <div className="detail-card-header">
         <div className="detail-card-title">
           <UsersRound aria-hidden="true" size={18} strokeWidth={1.8} />
@@ -84,56 +72,16 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
       {editing && (
         <div className="detail-list-item detail-list-item--inset">
           <div className="detail-form detail-form--compact">
-            <div>
-              <label className="detail-field-label">角色名称 *</label>
-              <input
-                className="input detail-fill"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="输入角色名"
-              />
-            </div>
-            <div className="detail-form-grid detail-form-grid--tight">
-              <div>
-                <label className="detail-field-label">角色类型</label>
-                <select
-                  className="input detail-fill"
-                  value={form.roleType || ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      roleType: (e.target.value || undefined) as CharacterRoleType | undefined,
-                    })
-                  }
-                >
-                  <option value="">未分类</option>
-                  <option value="protagonist">主角</option>
-                  <option value="supporting">配角</option>
-                  <option value="antagonist">反派</option>
-                  <option value="neutral">中立</option>
-                </select>
-              </div>
-              <div>
-                <label className="detail-field-label">身份</label>
-                <input
-                  className="input detail-fill"
-                  value={form.identity || ''}
-                  onChange={(e) => setForm({ ...form, identity: e.target.value })}
-                  placeholder="如：航天工程师"
-                />
-              </div>
-            </div>
-            {TEXT_FIELDS.map((field) => (
-              <div key={field.key}>
-                <label className="detail-field-label">{field.label}</label>
-                <input
-                  className="input detail-fill"
-                  value={form[field.key] || ''}
-                  onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                  placeholder={field.placeholder}
-                />
-              </div>
-            ))}
+            <CharacterProfileFields
+              values={characterProfileValues(form)}
+              onChange={(patch) =>
+                setForm({
+                  ...form,
+                  ...patch,
+                  roleType: patch.roleType === '' ? undefined : (patch.roleType ?? form.roleType),
+                })
+              }
+            />
             <button
               className="btn btn-primary btn-sm"
               onClick={handleCreate}
@@ -170,6 +118,17 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
                     </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  aria-label={`编辑角色 ${char.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    profileEditor.begin(char);
+                  }}
+                >
+                  编辑角色
+                </button>
                 <button
                   className="btn btn-text btn-sm detail-text-error"
                   onClick={(e) => {

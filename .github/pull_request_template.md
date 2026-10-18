@@ -33,7 +33,7 @@ npm run verify:change -- --base origin/main
 cargo fmt --all -- --check --manifest-path src-tauri/Cargo.toml
 cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
 cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
-cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 ```
 
 - [ ] 未映射路径已在 `scripts/quality/verification-scopes.mjs` 补充归属；不适用项写明 NOT_APPLICABLE，NOT_RUN 与失败未被写成通过

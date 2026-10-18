@@ -1,6 +1,7 @@
 const E2E_ALLOWED_COMMANDS = new Set([
   'get_e2e_diagnostics',
   'get_all_novels',
+  'export_project_backup',
   'get_novel_by_id',
   'get_protagonist',
   'get_volumes_by_novel_id',

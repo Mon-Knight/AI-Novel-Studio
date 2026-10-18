@@ -14,6 +14,8 @@ import {
   assertTaskGoalExecutable,
   classifyTaskIntent,
   selectCandidateTool,
+  type CreativePlannedAction,
+  type CreativeWorkflowAction,
 } from './taskGoalRouting';
 import { prepareTaskWritingPreferences } from './taskWritingPreferences';
 import { workbenchChapterWriter } from './workbenchChapterWriter';
@@ -23,6 +25,7 @@ import type { TaskConstraintBriefReceipt } from '../../types/taskConstraintBrief
 import { chapterRequiredError, formatWorkbenchFailure } from './workbenchFailure';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
 import type { ToolInvocationContext, ToolResult } from '../../types/toolRegistry';
+import type { RetryExecutionContract } from '../dsh/taskRetryRecovery';
 
 export interface TaskRuntimeInput {
   conversationId: string;
@@ -34,6 +37,17 @@ export interface TaskRuntimeInput {
   /** Stable per-task worker identity supplied by the DSH session adapter. */
   workerId?: string;
   revisionSource?: ArtifactRevisionSource;
+  /** User clicked retry on this same turn. Automatic repairs must leave it unset. */
+  explicitChapterRetry?: boolean;
+  /** Exact failed stage; native code revalidates its persisted contract on dispatch. */
+  retrySourceRunId?: string;
+  retryExecution?: RetryExecutionContract;
+  /** Renderer-internal workflow selected by a successful model tool, never by prose. */
+  workflowAction?: CreativeWorkflowAction;
+  /** Renderer-only cancellation shared across dialogue and its selected workflow. */
+  cancellationSignal?: AbortSignal;
+  /** Runs existing target/asset gates after the model requests work. Never crosses IPC. */
+  preparePlannedAction?: (action: CreativePlannedAction) => Promise<{ chapterId?: string } | null>;
 }
 
 export interface TaskRuntimeEvent {
@@ -283,10 +297,11 @@ async function execute(
   chapterWriter: ChapterWriterPort,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
-  assertTaskGoalExecutable(input.goal);
   const revision = await verifyArtifactRevisionSource(input);
+  assertTaskGoalExecutable(input.goal, revision?.source);
+  const candidateTool = selectCandidateTool(input.goal, input.chapterId, revision?.source);
   const browserRuleSet =
-    !isTauri() && WRITER_TOOLS.has(selectCandidateTool(input.goal, input.chapterId)?.name ?? '')
+    !isTauri() && WRITER_TOOLS.has(candidateTool?.name ?? '')
       ? await captureBrowserChapterRuleBaseline(input.novelId)
       : undefined;
   const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
@@ -315,7 +330,8 @@ async function execute(
   let publishedChapter = false;
 
   try {
-    if (classifyTaskIntent(input.goal) === 'chapter_write' && !input.chapterId) {
+    const chapterWriting = classifyTaskIntent(input.goal, revision?.source) === 'chapter_write';
+    if (chapterWriting && !input.chapterId) {
       throw chapterRequiredError();
     }
 
@@ -336,7 +352,6 @@ async function execute(
         ...(input.chapterId ? { targetChapterId: input.chapterId } : {}),
       }),
     });
-    const candidateTool = selectCandidateTool(input.goal, input.chapterId);
     const { writerInstruction, taskConstraints, targetWordCount } =
       candidateTool && WRITER_TOOLS.has(candidateTool.name)
         ? await prepareTaskWritingPreferences(input)

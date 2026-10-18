@@ -422,6 +422,10 @@ async function seedRound2PresentationConversation(): Promise<void> {
   await (await $('[data-testid="workbench-task-header"]')).waitForDisplayed();
   await (await $('[data-testid="workbench-completed-read"]')).waitForDisplayed();
   await (await $('[data-testid="workbench-artifact-card"]')).waitForExist();
+  await browser.execute(() => {
+    const list = document.querySelector<HTMLElement>('[data-testid="workbench-message-list"]');
+    if (list) list.scrollTop = 0;
+  });
   const recoveryDialog = await $('[data-testid="conversation-recovery-dialog"]');
   if (await recoveryDialog.isExisting()) {
     await (await recoveryDialog.$('[data-testid="conversation-recovery-dismiss"]')).click();
@@ -618,23 +622,59 @@ describe('creative workbench layout', () => {
     await browser.pause(80);
   });
 
-  it('shows immutable task model information instead of a disabled selector', async () => {
-    const fixed = await $('[data-testid="workbench-model-select"]');
-    await expect(fixed).toHaveAttribute('role', 'group');
-    await expect(fixed).toHaveAttribute('data-model-locked', 'true');
-    await expect(fixed).toHaveAttribute('data-model-value', 'mock:Mock');
-    const reason = await $('[data-testid="workbench-fixed-model-reason"]');
-    // WDIO's attribute matcher stringifies a missing boolean attribute and can
-    // report a null-vs-null mismatch. Read the DOM value directly.
-    expect(await reason.getAttribute('open')).toBe(null);
-    expect(await reason.getText()).toContain('固定原因');
-    await reason.$('summary').click();
-    expect(await reason.getText()).toContain('任务创建时固定');
-    expect(
-      await browser.execute(
-        () => document.querySelector('[data-testid="workbench-model-select"] select') === null,
-      ),
-    ).toBe(true);
+  it('changes an existing task to a loaded next-turn model without rewriting historical runs', async () => {
+    const original = await browser.execute(() => {
+      const state = JSON.parse(
+        window.localStorage.getItem('ai_novel_studio_task_conversations') ?? '{}',
+      );
+      const bundle = state.bundles.find(
+        (item: { conversation: { conversationId: string } }) =>
+          item.conversation.conversationId === 'browser-layout-conversation',
+      );
+      if (!bundle) throw new Error('Browser model-selection fixture missing.');
+      // Browser fallback exposes only Mock. Recover an older, now-missing selection
+      // through the actual selector rather than fabricating a loaded API model.
+      bundle.conversation.defaultModel.modelId = 'Mock-A';
+      window.localStorage.setItem('ai_novel_studio_task_conversations', JSON.stringify(state));
+      return { conversationId: bundle.conversation.conversationId, runs: bundle.runs };
+    });
+    await browser.refresh();
+    await waitForStartupSplashRemoval();
+    await (await $('[data-testid="workbench-task-header"]')).waitForDisplayed();
+    const select = await $('[data-testid="workbench-model-select"]');
+    await select.waitForEnabled();
+    expect(await select.getTagName()).toBe('select');
+    await expect(select).toHaveAttribute('aria-label', '后续回合模型');
+    await expect(select).toHaveAttribute('data-model-locked', 'false');
+    await expect(select).toHaveAttribute('data-model-value', 'mock:Mock-A');
+    expect(await select.getValue()).toBe('mock:Mock-A');
+    await select.selectByAttribute('value', 'mock:Mock');
+    await browser.waitUntil(
+      async () =>
+        (await select.getValue()) === 'mock:Mock' &&
+        (await select.getAttribute('data-model-value')) === 'mock:Mock',
+    );
+    const saved = await browser.execute(() => {
+      const state = JSON.parse(
+        window.localStorage.getItem('ai_novel_studio_task_conversations') ?? '{}',
+      );
+      const bundle = state.bundles.find(
+        (item: { conversation: { conversationId: string } }) =>
+          item.conversation.conversationId === 'browser-layout-conversation',
+      );
+      return {
+        conversationId: bundle.conversation.conversationId,
+        modelId: bundle.conversation.defaultModel.modelId,
+        runs: bundle.runs,
+      };
+    });
+    expect(saved.conversationId).toBe(original.conversationId);
+    expect(saved.modelId).toBe('Mock');
+    expect(saved.runs).toEqual(original.runs);
+    await browser.refresh();
+    await waitForStartupSplashRemoval();
+    await (await $('[data-testid="workbench-task-header"]')).waitForDisplayed();
+    expect(await (await $('[data-testid="workbench-model-select"]')).getValue()).toBe('mock:Mock');
   });
 
   it('keeps overlay, pinned column and collapsed tree aligned within 2px at 1024/1280/1440/2560', async () => {
@@ -1241,7 +1281,7 @@ describe('creative workbench layout', () => {
 
     await browser.saveScreenshot(path.join(screenshotDirectory, 'workbench-new-task-1024x700.png'));
     await expectUnifiedIconLanguage();
-    await (await $('button[aria-label="关闭新建任务"]')).click();
+    await (await $('button[aria-label="关闭新建会话"]')).click();
     await (await $('[data-testid="workbench-task-creator"]')).waitForExist({ reverse: true });
     await browser.waitUntil(async () => createTaskTrigger.isFocused());
     const focusRestored = await createTaskTrigger.isFocused();
@@ -1547,7 +1587,7 @@ describe('creative workbench layout', () => {
         target: '[data-testid="workbench-artifact-target"]',
         model: '[data-testid="workbench-artifact-model"]',
         nextStep: '[data-testid="workbench-artifact-next-step"]',
-        modelReason: '[data-testid="workbench-fixed-model-reason"]',
+        nextTurnModel: '[data-testid="workbench-model-select"]',
       },
       label: 'candidate identity card',
       requireFound: true,
@@ -1584,13 +1624,13 @@ describe('creative workbench layout', () => {
     expect(await $('.workbench-artifact-technical-evidence').isExisting()).toBe(false);
     expect(await $('[data-testid="workbench-artifact-validation"]').isExisting()).toBe(false);
 
-    // The fixed-model reason is a disclosure as well and only expands on demand.
-    const modelReason = await $('[data-testid="workbench-fixed-model-reason"]');
-    expect(await modelReason.getAttribute('open')).toBe(null);
-    expect(await modelReason.getText()).toContain('固定原因');
-    await (await modelReason.$('summary')).click();
-    await browser.waitUntil(async () => (await modelReason.getAttribute('open')) !== null);
-    expect(await modelReason.getText()).toContain('任务创建时固定');
+    // The next-turn selector is separate from the candidate's historical source.
+    // No task-lifetime fixed-model disclosure is part of the current UI.
+    const nextTurnModel = await $('[data-testid="workbench-model-select"]');
+    expect(await nextTurnModel.getTagName()).toBe('select');
+    expect(await nextTurnModel.getValue()).toBe('mock:Mock');
+    await expect(nextTurnModel).toHaveAttribute('aria-label', '后续回合模型');
+    expect(card.nextTurnModel.width).toBeGreaterThan(0);
 
     await takeRound2Screenshot('workbench-candidate-card-1280x820');
     recordRound2Metrics(round2SpecId, 'workbench-candidate-card', { card });

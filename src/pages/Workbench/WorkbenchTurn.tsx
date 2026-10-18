@@ -19,6 +19,7 @@ import {
   describeWorkbenchAutomaticTurn,
 } from '../../services/conversation/workbenchTurnOrigin';
 import { hasUsableDshTaskCredential } from '../../services/dsh/taskRuntimeService';
+import { formatWorkbenchFailure } from '../../services/conversation/workbenchFailure';
 import { ArtifactCard, ToolEventRow } from './WorkbenchComponents';
 import { WorkbenchRunProgressMeter } from './WorkbenchRunProgressMeter';
 import { formatWorkbenchTime, statusLabel } from './workbenchHelpers';
@@ -214,7 +215,9 @@ export function WorkbenchTurn({
         data-run-id={entry.runId}
         role="alert"
       >
-        {entry.error}
+        {/DSH.*未授权工具|DSH_TOOL_NOT_AUTHORIZED/.test(entry.error)
+          ? formatWorkbenchFailure(entry.error)
+          : entry.error}
       </div>
     );
   if (entry.kind === 'artifact')
@@ -234,7 +237,7 @@ export function WorkbenchTurn({
     );
   if (
     entry.kind === 'run_end' &&
-    entry.latestAttempt &&
+    (entry.recoverable ?? entry.latestAttempt) &&
     ['failed', 'cancelled'].includes(entry.run.status)
   ) {
     const reason = resolveWorkbenchRetryDisabledReason(entry.run, retryRunBlockedReason);
@@ -245,10 +248,10 @@ export function WorkbenchTurn({
         data-testid="workbench-retry-turn"
         data-run-id={entry.run.runId}
         disabled={Boolean(reason)}
-        title={reason || '使用原回合与冻结模型重新运行'}
+        title={reason || '从失败阶段恢复，沿用原回合、目标与冻结模型'}
         onClick={() => onRetry(entry.run.runId)}
       >
-        重试此回合
+        重试失败阶段
       </button>
     );
   }

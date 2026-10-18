@@ -77,7 +77,7 @@ pub(super) fn validate(
     input: &CreateResultArtifactInput,
     task: &AiTaskRecord,
 ) -> Result<(), AppError> {
-    if input.artifact_type != "chapter_text"
+    if !super::revision_source::supports_revision(&input.artifact_type)
         || input.schema_version != 1
         || input.derivation_type.as_deref() != Some(DERIVATION_TYPE)
         || input.parent_artifact_id.is_none()
@@ -109,7 +109,8 @@ pub(super) fn validate(
             .clone(),
     )
     .map_err(|_| invalid_source())?;
-    if source != context_source
+    if source.artifact_type != input.artifact_type
+        || source != context_source
         || input.parent_artifact_id.as_deref() != Some(source.artifact_id.as_str())
         || metadata.get("parentArtifactId").and_then(Value::as_str)
             != Some(source.artifact_id.as_str())

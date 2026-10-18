@@ -19,6 +19,7 @@ export type RetryTargetEvidenceSource =
   | 'turn.goal.chapterId'
   | 'turn.goal.chapterTitle'
   | 'turn.goal.chapterNumber'
+  | 'turn.revisionSource.chapterId'
   | 'novel';
 
 export interface RetryRunChapterTarget {
@@ -356,15 +357,13 @@ export async function resolveRetryRunChapterTarget(
   dependencies: RetryTargetDependencies = {},
 ): Promise<RetryRunChapterTarget> {
   const { bundle, sourceRun, sourceGoal } = input;
-  if (
-    sourceRun.conversationId !== bundle.conversation.conversationId ||
-    !bundle.turns.some(
-      (turn) =>
-        turn.turnId === sourceRun.turnId &&
-        turn.conversationId === bundle.conversation.conversationId &&
-        turn.role === 'user',
-    )
-  ) {
+  const sourceTurn = bundle.turns.find(
+    (turn) =>
+      turn.turnId === sourceRun.turnId &&
+      turn.conversationId === bundle.conversation.conversationId &&
+      turn.role === 'user',
+  );
+  if (sourceRun.conversationId !== bundle.conversation.conversationId || !sourceTurn) {
     throw retryTargetError(
       'WORKBENCH_RETRY_TARGET_INVALID',
       '原运行与用户回合的持久化范围不一致，已停止重试。',
@@ -385,6 +384,39 @@ export async function resolveRetryRunChapterTarget(
     )),
   );
   const persisted = resolveEvidence(persistedEvidence, chapters);
+  const revision = sourceTurn.revisionSource;
+  if (revision && ['setting_candidates', 'outline'].includes(revision.artifactType)) {
+    if (
+      revision.novelId !== bundle.conversation.novelId ||
+      revision.conversationId !== bundle.conversation.conversationId ||
+      (persisted && persisted.chapterId !== revision.chapterId)
+    ) {
+      throw retryTargetError(
+        'WORKBENCH_RETRY_TARGET_CONFLICT',
+        '原候选修订来源与运行的作品或章节范围不一致，已停止重试。',
+      );
+    }
+    // Chapter mentions can describe an asset correction; the frozen source owns the scope.
+    // Source content, hash and decision are revalidated by the ordinary revision pipeline.
+    if (revision.chapterId) {
+      return resolveEvidence(
+        [
+          {
+            chapterId: revision.chapterId,
+            source: 'turn.revisionSource.chapterId',
+            evidence: `turn:${sourceTurn.turnId}:revision:${revision.artifactId}`,
+          },
+        ],
+        chapters,
+      )!;
+    }
+    return {
+      source: 'novel',
+      evidence: [
+        `turn:${sourceTurn.turnId}:${revision.artifactType === 'outline' ? 'outlineRevision' : 'settingRevision'}:${revision.artifactId}`,
+      ],
+    };
+  }
   if (persisted) return persisted;
 
   const fromGoal = resolveEvidence(collectGoalEvidence(sourceGoal, chapters), chapters);

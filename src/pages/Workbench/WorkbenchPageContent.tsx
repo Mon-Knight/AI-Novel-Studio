@@ -19,6 +19,7 @@ import {
 } from './WorkbenchPageStates';
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
+import { WorkbenchChapterSummaryStatus } from './WorkbenchChapterSummaryStatus';
 import type { WorkbenchSidePanelState } from './hooks/useWorkbenchSidePanel';
 import type { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 
@@ -62,6 +63,7 @@ interface WorkbenchPageContentProps {
   bundleReady: boolean;
   bundle: TaskConversationBundle | null | undefined;
   conversationsError: string;
+  bundleStaleError?: string;
   onSelectChapter: (chapterId: string) => void;
   onCreateChapter: () => void;
   onCompress: () => void;
@@ -112,6 +114,7 @@ export function WorkbenchPageContent({
   bundleReady,
   bundle,
   conversationsError,
+  bundleStaleError = '',
   onSelectChapter,
   onCreateChapter,
   onCompress,
@@ -201,7 +204,21 @@ export function WorkbenchPageContent({
             />
             <PanelErrorBoundary panelTitle="创作对话">
               {streamProps ? (
-                <WorkbenchMessageStream {...streamProps} />
+                <>
+                  {bundleStaleError ? (
+                    <div
+                      className="workbench-inline-error"
+                      role="alert"
+                      data-testid="workbench-bundle-stale"
+                    >
+                      <span>{bundleStaleError}</span>
+                      <button type="button" onClick={onRetryBundle}>
+                        重新读取
+                      </button>
+                    </div>
+                  ) : null}
+                  <WorkbenchMessageStream {...streamProps} />
+                </>
               ) : conversationsError ? (
                 <WorkbenchFailureState message={conversationsError} onRetry={onRetryBundle} />
               ) : (
@@ -211,6 +228,18 @@ export function WorkbenchPageContent({
                 />
               )}
             </PanelErrorBoundary>
+            {streamProps && (
+              <WorkbenchChapterSummaryStatus
+                state={streamProps.chapterSummaryOrchestration}
+                chapters={chapters}
+                conversationId={selectedConversationId}
+                disabled={
+                  composerProps.selectedConversationRunning ||
+                  composerProps.selectedConversationPreparing
+                }
+                onLocate={onLocateArtifact}
+              />
+            )}
             {composer}
           </>
         )}

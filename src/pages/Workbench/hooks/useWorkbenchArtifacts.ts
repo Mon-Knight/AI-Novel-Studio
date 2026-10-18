@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../../types/conversation';
 import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
+import { buildChapterSummaryRedoHandoff } from '../../../services/conversation/chapterWorkflowService';
 import { appendArtifactRevisionDraft, buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
 import { resolveArtifactDecisionTarget } from '../workbenchHelpers';
 import { captureArtifactRevisionSource } from '../../../services/conversation/artifactRevisionSourceService';
@@ -42,15 +43,16 @@ export function useWorkbenchArtifacts(input: {
     onStructuredArtifactDecision,
   } = input;
   const navigate = useNavigate();
-  const [decisionBusyCardId, setDecisionBusyCardId] = useState('');
-  const decisionInFlightRef = useRef(false);
+  const decisionInFlightRef = useRef(new Map<string, string>());
+  const [busyByConversation, setBusyByConversation] = useState<Record<string, string>>({});
   const [pendingRuleChangeReview, setPendingRuleChangeReview] = useState<{
     artifact: ConversationArtifactCard;
     artifactHash: string;
     preview: WorldRuleChangeImpact;
   } | null>(null);
   const [ruleChangeReviewError, setRuleChangeReviewError] = useState('');
-  const selectedTaskId = selectedConversationRef?.current;
+  const selectedTaskId = selectedConversationRef?.current ?? '';
+  const decisionBusyCardId = selectedTaskId ? (busyByConversation[selectedTaskId] ?? '') : '';
   useEffect(() => {
     if (
       pendingRuleChangeReview &&
@@ -68,10 +70,17 @@ export function useWorkbenchArtifacts(input: {
     revisionNotes?: string,
     ruleGuard?: RuleApplicationGuard,
   ) {
-    if (!selectedNovelId || !artifact.artifactId || decisionInFlightRef.current) return;
-    // Lock before React rerenders so another card cannot unlock a pending review.
-    decisionInFlightRef.current = true;
-    setDecisionBusyCardId(artifact.cardId);
+    const conversationId = artifact.conversationId;
+    if (
+      !selectedNovelId ||
+      !artifact.artifactId ||
+      decisionInFlightRef.current.has(conversationId)
+    ) {
+      return;
+    }
+    // Lock this task before React rerenders. Another task can still decide its own card.
+    decisionInFlightRef.current.set(conversationId, artifact.cardId);
+    setBusyByConversation((current) => ({ ...current, [conversationId]: artifact.cardId }));
     setComposerError('');
     let revisionRecorded = false;
     let decisionRecorded = false;
@@ -122,6 +131,34 @@ export function useWorkbenchArtifacts(input: {
         currentChapterId: chapterId,
         novelId: selectedNovelId,
       });
+      const redoSummary = () => {
+        if (!target.chapterId) throw new Error('总结重做缺少原章节，请重新选择章节。');
+        if (
+          selectedNovelRef.current !== selectedNovelId ||
+          (selectedConversationRef && selectedConversationRef.current !== artifact.conversationId)
+        ) {
+          throw new Error('任务已切换；总结意见仍保留，请返回原任务继续重做。');
+        }
+        navigate('/', {
+          state: buildChapterSummaryRedoHandoff({
+            novelId: selectedNovelId,
+            chapterId: target.chapterId,
+            adoptedDraftId: artifact.artifactEvidence?.sourceDraftId,
+            conversationId: artifact.conversationId,
+            cardId: artifact.cardId,
+            revisionNotes,
+          }),
+        });
+      };
+      if (
+        decision === 'request_revision' &&
+        artifact.artifactType === 'chapter_summary' &&
+        artifact.latestDecision?.decision === 'reject'
+      ) {
+        // Rejection remains an immutable decision; redo creates a fresh user request.
+        redoSummary();
+        return;
+      }
       const payload: RecordDecisionInput = {
         conversationId: artifact.conversationId,
         cardId: artifact.cardId,
@@ -192,16 +229,26 @@ export function useWorkbenchArtifacts(input: {
       }
       if (decision === 'request_revision') {
         revisionRecorded = true;
-        const revisionDraft = buildArtifactRevisionDraft(artifact.artifactType, revisionNotes);
-        useWorkbenchDraftStore
-          .getState()
-          .bindRevisionSource(
-            artifact.conversationId,
-            captureArtifactRevisionSource(artifact, selectedNovelId, result.decision.artifactHash),
-          );
-        // The captured setter belongs to the originating conversation. A functional
-        // update keeps text entered while the decision was pending, even after a switch.
-        setDraft?.((existingDraft) => appendArtifactRevisionDraft(existingDraft, revisionDraft));
+        if (artifact.artifactType === 'chapter_summary') {
+          // A summary redo is grounded in the current adopted draft, not an unsupported
+          // exact-source revision of potentially mistaken summary assertions.
+          redoSummary();
+        } else {
+          const revisionDraft = buildArtifactRevisionDraft(artifact.artifactType, revisionNotes);
+          useWorkbenchDraftStore
+            .getState()
+            .bindRevisionSource(
+              artifact.conversationId,
+              captureArtifactRevisionSource(
+                artifact,
+                selectedNovelId,
+                result.decision.artifactHash,
+              ),
+            );
+          // The captured setter belongs to the originating conversation. A functional
+          // update keeps text entered while the decision was pending, even after a switch.
+          setDraft?.((existingDraft) => appendArtifactRevisionDraft(existingDraft, revisionDraft));
+        }
       }
       try {
         await refreshBundle(artifact.conversationId);
@@ -245,8 +292,13 @@ export function useWorkbenchArtifacts(input: {
             : message,
       );
     } finally {
-      decisionInFlightRef.current = false;
-      setDecisionBusyCardId('');
+      decisionInFlightRef.current.delete(conversationId);
+      setBusyByConversation((current) => {
+        if (current[conversationId] !== artifact.cardId) return current;
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
     }
   }
 
@@ -257,10 +309,10 @@ export function useWorkbenchArtifacts(input: {
     ruleChangeReviewError,
     ruleChangeReviewBusy: Boolean(decisionBusyCardId),
     cancelRuleChangeReview: () => {
-      if (!decisionInFlightRef.current) {
-        setPendingRuleChangeReview(null);
-        setRuleChangeReviewError('');
-      }
+      const pendingId = pendingRuleChangeReview?.artifact.conversationId;
+      if (pendingId && decisionInFlightRef.current.has(pendingId)) return;
+      setPendingRuleChangeReview(null);
+      setRuleChangeReviewError('');
     },
     confirmRuleChangeReview: async (guard: RuleApplicationGuard) => {
       const pending = pendingRuleChangeReview;

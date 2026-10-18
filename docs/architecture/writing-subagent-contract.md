@@ -1,7 +1,7 @@
 # Writing SubAgent 契约（candidate-only）
 
 > 状态：v3.7.0 起正式开放——桌面端 + 真实 API 模型的 `chapter_write` 默认走本契约；mock / 本地模型与浏览器模式走确定性 Writer，`localStorage['ai_novel_studio_writing_subagent_dsh']='0'` 可关闭。对应审计 `docs/audit-v2/agent_gap_report.md` GAP-01 / GAP-09，Gate E。
-> 本文记录当前契约并保留分步接入历史。本批 v3.7.0 精确修订与世界规则修复已落源码、仍在集成，全部修复完成后统一验收；本轮不执行测试、格式检查、构建、桌面/live 或模型，不新增通过结论。§3.1 / §3.2 保留原日期及验证范围，不能作为本批证据；R4 live 云端仍 NOT VERIFIED。
+> 本文保留分步接入历史；§3.1 / §3.2 的日期和范围不回写。本轮 v3.7.0 审计修复的两阶段候选门禁与前章复验见 §3.5，统一测试/桌面结果另记；实现或离线通过不代表 R4 live 云端 VERIFIED，生产持续学习另项实施。
 
 ---
 
@@ -20,10 +20,10 @@
 | 身份     | `agentId = writing-subagent`，独立于 Main Agent 会话；`runId` 仍归属任务对话，产物卡片、运行日志与现有 UI 复用                                                                                                               | GAP-09：不再复用 Main Agent 身份              |
 | 模式     | `mode = candidate_only`，唯一产物 `chapter_text`，`expectedTool ∈ {generate_chapter, polish_chapter}`                                                                                                                        | 与 `ReviewAuthorization` 采用链路衔接         |
 | 工具面   | `allowedTools = requiredReadTools ∪ {expectedTool}`；只读工具固定为 `novel.read_context / chapter.read_outline / get_character_states / search_memory`（legacy 名，与现有候选回合一致；Canonical 名迁移后同步替换）          | 绝不包含其他 `generate_*`、`save/adopt/write` |
-| 模型     | 独立 `TaskModelSnapshot`：复用任务创建时固定快照；当前 UI 仅显示固定模型徽标，更换模型须新建任务，不开放未来回合换模型；`runtimeMode=mock` 时全程确定性                                                                      | GAP-09 独立模型配置                           |
-| 预算     | `maxCandidateAttempts=3`（复用 DSH `MAX_CANDIDATE_TOOL_ATTEMPTS`）、`maxLengthRepairs=2`、`maxIntegrityRepairs=2`、`maxWallClockMs=8 min`、`maxOutputTokens` 由字数区间推导                                                  | 与 Writer 现有修复轮次一致                    |
+| 模型     | 独立 `TaskModelSnapshot`：每回合冻结所选模型，同一任务可在回合间切换；重试沿用原 Run 模型，历史来源不变；`runtimeMode=mock` 时全程确定性                                                                                     | GAP-09 独立模型配置                           |
+| 预算     | `maxCandidateAttempts=3`（复用 DSH `MAX_CANDIDATE_TOOL_ATTEMPTS`）、`maxLengthRepairs=2`、`maxIntegrityRepairs=2`、`maxWallClockMs=8 min`、`maxOutputTokens` 由字数区间推导                                                  | SubAgent 自身的尝试预算，现行见 §3.5          |
 | 字数     | `wordRange = resolveChapterWordRange(targetWordCount, percents)`，目标依次取本回合明确覆盖、任务对话独立设置、章节大纲；写入宿主指令并作为验收条件。百分比来自设置中心「网关与流控」（默认 80%～115%，本机 LocalStorage）    | 复用 Writer 规则                              |
-| 连续性   | `continuity.previousChapterId / sourceHash`：紧邻前章采用稿由只读工具读取，宿主指令要求衔接                                                                                                                                  | 复用 `findPreviousChapterForContinuity`       |
+| 连续性   | `continuity.previousChapterId / sourceHash`：宿主从已采用稿复读并验证，模型不能靠自行检索替代前章门禁                                                                                                                        | 复用 `findPreviousChapterForContinuity`       |
 | 取消     | `dsh cancel(conversationId)`，Worker 级取消；UI 与现有停止按钮一致                                                                                                                                                           | 已有                                          |
 | 错误责任 | 协议错误（未读必需上下文、未调用候选工具、越权工具）由宿主返回稳定错误码并在预算内自动重试；模型内容错误（字数、完整性）由宿主校验后以 `DSH_CHAPTER_CANDIDATE_REJECTED:<code>` 要求模型修正；预算耗尽 → 运行失败，不产生候选 | 失败关闭                                      |
 | 证据     | 对外验收材料仅保留工具名、计数、状态码、内容 hash、字数、修复轮次、模型身份，不包含提示词、正文或凭据；应用内部仍保存受作用域校验的完整执行快照                                                                              | 与 R4 证据口径一致                            |
@@ -36,6 +36,8 @@
 4. 预算为正整数且不超过上限。
 
 ## 3. 分步接入
+
+下表保留 E-0～E-4 的历史接入过程；原 E-2 的事后 advisory 已由 §3.5 的先复核后准入替代，不能把旧表当成当前候选门禁。
 
 | 步骤 | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 验证                                                                                                                        | 状态                        |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
@@ -93,7 +95,7 @@ E-0～E-3 已在仓内落地并通过单测（E-0～E-4 期间开关默认关闭
 - 独立对话设置由已持久化的用户回合派生；本回合明确覆盖优先于任务设置，最后才取章节目标。引用、否定、疑问、模型回复与自动回合不作为任务设置来源；重试旧回合不读取其后的设置。纯设置走 `ans-local`，不触发凭据 / 模型预检或运行完成后的插件探测。
 - 只有宿主完成工具契约与作用域复验后产生的精确 `DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED` 才进入字数恢复。至多两次宿主修正，共享 480 秒截止时间；模型、目标范围和 allowlist 冻结，每次重新读取必需上下文。取消、作用域不符、错误来源不明或预算不足时停止。
 - `maxCandidateAttempts=3` 是跨 Run 的累计**候选验收预算**：回合结束后统计包括失败调用在内的候选工具事件，超过即拒绝 Artifact 并停止恢复。它不是 Gateway 派发前硬门；不服从指令的模型可能已经进行了第四次工具调用，不能宣称第四次派发绝不会发生。每个 Provider 请求仍经过既有请求治理。
-- 输出 Token 预算保持任务模型快照，不随目标字数自动加大；正文完整性复核仍为 advisory。正式正文、草稿采用、审阅授权和数据库 schema 均不变。上节 2026-09-08 的六场景记录为历史证据；当前扩展场景以测试策略和本轮实际运行结果为准。
+- 输出 Token 不超过任务冻结模型上限，并取与字数估算的较小值；当前完整性检查按 §3.5 在候选发布前执行。正式正文、草稿采用、审阅授权和数据库 schema 均不变。上节 2026-09-08 的六场景记录为历史证据；当前扩展场景以测试策略和本轮实际运行结果为准。
 
 ### 3.4 当前精确修订与完整上下文门禁（待统一验收）
 
@@ -110,9 +112,27 @@ E-0～E-3 已在仓内落地并通过单测（E-0～E-4 期间开关默认关闭
 
 桌面/Gateway 共用 `src-tauri/shared/world_rule_fingerprint.rs`；DSH expectedRuleSetFingerprint 从实际读时材料验证而来，AI Task 创建以原生 nativeRuleSet 冻结并计入权威 request_hash，拒客户端自报或读取后的规则漂移。规则变更在同事务中 expire 旧 issued reviews，保留 consumed/已采用历史，签发和最终采用再复验。世界规则字段、作者变更预览及回执详见 [世界规则契约](../design/world-rule-contract.md)。
 
-**公开复核结果的限度。** TS `generationContextCompiler` 将视角角色、已知/未知信息实际编入工程材料，`chapterProviderContext` 将世界/规则与工程等材料交给 Provider 的 required/requireFull 预算，缺失或不完整失败关闭。DSH 候选后将有限文本检查的 error / warning / not_checked 与来源不可读原因公开到对话；advisory 不改写、不删除、不采用候选。`semanticRules` 始终 not_checked，不能把上下文覆盖、结构合规、字数或启发式检查夸为自动语义证明。
+**公开复核结果的限度。** TS `generationContextCompiler` 将视角角色、已知/未知信息实际编入工程材料，`chapterProviderContext` 将世界/规则与工程等材料交给 Provider 的 required/requireFull 预算，缺失或不完整失败关闭。DSH 先按 §3.5 完成有限文本检查再准入候选，公开 error / warning / not_checked 与不可读原因；不把 error 候选先发布后删除，warning 保留作者审阅。`semanticRules` 始终 not_checked，不能把上下文覆盖、结构合规、字数或启发式检查夸为自动语义证明。
 
 本节核对来源：`src/types/artifactRevision.ts`、`workbenchDraftStore`、`useWorkbenchArtifacts` / `useWorkbenchTaskRunner`、`artifactRevisionSourceService` / `artifactRevisionSourceCodec`、两条 Runtime Adapter，以及原生 `chapter_revision_source.rs` / `chapter_revision_artifact.rs` / `artifact_service.rs`。新候选仍须取得自身审阅授权；只读/编辑/保存/采用分离，显式对话采用安全短路保留，不开放模型正式写入。以上均待统一验收，不回写 §3.1 / §3.2 历史证据。
+
+### 3.5 本轮审计修复：宿主复核后才发布候选
+
+- `chapter_write / chapter_polish` 必须带 `chapterHostGate`；缺失在模型预检前失败关闭，不再保留一次直接成卡的旁路。`draft` 在字数合规后仅返回待复核正文/哈希和权威前章材料，Run 保持 `running` 并记录 `DSH_CHAPTER_CANDIDATE_WITHHELD`，没有可用 Artifact/候选卡，也不是完成成功。
+- ANS 的宿主适配器调用与 Writer 相同的有限完整性检查。`error` 进入有界整章修复，`warning` 留给作者；只有干净或 warning-only 才请求 `admit`。原生重读精确运行、工具结果和全文哈希，拒绝改写问题严重度、跨任务/章节、已取消、失效基线或模型快照。发布事实使用持久源运行的模型快照，准入本身不再调用 Provider。已成功的精确候选重放不重复创建卡片。
+- 预算由持久的 `runtime.chapterBudgetEpoch` 分组，一个自动尝试最多 3 次累计候选验收、至多 2 次字数/完整性修复且共享 480 秒；客户端不提交 remaining 值。自动修复绑定旧 Run，不带旧 Run 也不能重新获得预算。只有作者点击重试、最近运行已失败/取消时才创建新的原生尝试纪元，仍归属原 user Turn；重启不能隐式恢复调用预算或自动重新请求。新建准入前再次检查源纪元的时间和次数，第 3 次有效候选允许准入，超限不创建新候选。
+- 前章顺序使用与 Writer 相同的作品/卷/章规则。适配器只声明前章 ID 与哈希，正文由 Rust 从当前采用稿复读；缺少采用稿、空稿、损坏大文本、跨作品或生成期间改采均拒绝。Provider 材料的长前章中段截断会明确标记，来源哈希仍绑定完整原文；结构覆盖和有限检查都不等于语义全检。
+- 请求的有效输出 Token 上限是字数估算与冻结模型上限的较小值，不通过目标字数暗中放大已冻结模型配置。采用阶段同样只让 `error` 阻断，warning 不替作者作决定；现有作用域、revision/hash、审阅授权和原子采用事务不放宽。
+
+本节是实现契约，统一原生/桌面与故障注入结果另记。`semanticRules` 继续为 `not_checked`，不宣称文学质量证明、自学习或 R4 live VERIFIED；§3.1 / §3.2 历史记录不作为本轮通过证据。
+
+### 3.6 2026-10-16 失败恢复与定向长度修正（集成验证中）
+
+失败回合的成功规划不能替代正文成功。重试从已核验的执行事实恢复任务类型、原用户目标、必需读取、候选工具和字数范围；不同任务能力使用独立 DSH 会话，不能扩展创作讨论回合工具目录来处理正文重试。新宿主执行契约复用现有持久事件，未新增 migration；历史回合依据原用户消息、受验证规划和一致的原生范围证据恢复，缺少关键冻结范围时拒绝并提供明确的新请求路径。
+
+旧 DSH 写章或润色回合重试沿用原生宿主路径，当前 SubAgent 关闭开关只影响新请求。原生恢复结果缺少执行契约时停止，不回退到当前目标重新规划或确定性 Writer；原模型、硬区间、读取/候选工具和原生尝试预算继续复验。
+
+长度恢复保存已验证作用域的失败完整稿，选择最接近目标的基稿，反馈实际增删差额、每次字数与保留内容要求。仍提交完整正文并由宿主计数，最多调用次数与冻结硬区间保持；改进修订提示不能保证模型必然收敛。界面区分等待模型、自动修正与候选验证，工具越权失败保留原错误链并说明当前阶段权限。
 
 ## 4. 非目标
 

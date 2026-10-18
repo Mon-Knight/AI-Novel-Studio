@@ -28,6 +28,9 @@ interface Props {
   source?: WorldSetting | RuleSystem;
   world: boolean;
   hidden?: boolean;
+  disabled?: boolean;
+  reviewRevision?: number;
+  onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
   onSave: (data: SettingEditInput) => Promise<void>;
   onPreview: (change: WorldRuleChange) => Promise<WorldRuleChangeImpact>;
@@ -48,6 +51,9 @@ export default function SettingEditForm({
   source,
   world,
   hidden,
+  disabled = false,
+  reviewRevision = 0,
+  onDirtyChange,
   onClose,
   onSave,
   onPreview,
@@ -98,6 +104,15 @@ export default function SettingEditForm({
     if (!hidden)
       form.current?.querySelector<HTMLInputElement>('input[data-testid="setting-title"]')?.focus();
   }, [hidden]);
+  useEffect(() => {
+    // Refresh invalidates review consent without discarding any local field or its baseline.
+    request.current += 1;
+    setImpact(undefined);
+    setPayload(undefined);
+    setConfirmed(false);
+    setBusy(false);
+  }, [reviewRevision]);
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   const invalidate = () => {
     request.current += 1;
     setDirty(true);
@@ -147,6 +162,7 @@ export default function SettingEditForm({
     };
   };
   const preview = async () => {
+    if (disabled) return;
     const token = ++request.current;
     setBusy(true);
     setConfirmed(false);
@@ -169,7 +185,8 @@ export default function SettingEditForm({
     }
   };
   const save = async () => {
-    if (!confirmed || !impact || !payload || busy || impact.blockingConflicts.length) return;
+    if (!confirmed || !impact || !payload || busy || disabled || impact.blockingConflicts.length)
+      return;
     setBusy(true);
     setMessage('');
     try {
@@ -219,7 +236,7 @@ export default function SettingEditForm({
       hidden={hidden}
       data-testid={'setting-editor-' + (world ? 'world-' : 'rule-') + (source?.id ?? 'new')}
     >
-      <fieldset disabled={busy} className="detail-form detail-form--tight">
+      <fieldset disabled={busy || disabled} className="detail-form detail-form--tight">
         <label className="panel-field-label">
           {world ? '设定标题' : '规则名称'}
           <input

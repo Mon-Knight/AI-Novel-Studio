@@ -2,6 +2,8 @@ import { browser, expect } from '@wdio/globals';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { CompleteProjectBackup } from '../../src/services/backup/projectBackupSchema';
+import { inspectChapterCandidateIntegrity } from '../../src/services/generation/chapterCandidateIntegrity';
 import {
   assertCleanDiagnostics,
   bridgeCall,
@@ -20,9 +22,14 @@ import {
 } from './helpers';
 
 interface Bundle {
-  conversation: { status: string; novelId: string };
+  conversation: { status: string; novelId: string; defaultModel: { modelId: string } };
   artifacts: Array<{ artifactId: string; artifactType: string }>;
-  runs: Array<{ runId: string; status: string; turnId: string }>;
+  runs: Array<{
+    runId: string;
+    status: string;
+    turnId: string;
+    modelSnapshot: { modelId: string };
+  }>;
 }
 interface Artifact {
   rawContent: string;
@@ -43,6 +50,61 @@ interface Authorization {
   chapterId: string;
 }
 const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+
+async function verifyBackupCopyThroughUi(
+  sourceNovelId: string,
+  authorizationId: string,
+  expectedHash: string,
+): Promise<void> {
+  const source = await bridgeCall<CompleteProjectBackup>('export_project_backup', {
+    novelId: sourceNovelId,
+  });
+  const before = await bridgeCall<Array<{ id: string }>>('get_all_novels');
+  const sourceIds = new Set(before.map((novel) => novel.id));
+  await navigateHash('#/import-export');
+  await clickTestId('project-import-tab');
+  await clickTestId('project-import-json');
+  await waitForTestId('project-import-dialog');
+  await browser.execute((json) => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="project-import-file"]');
+    if (!input) throw new Error('Project backup file input is missing');
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File([json], 'isolated-adopted-project.json', { type: 'application/json' }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, JSON.stringify(source));
+  const confirm = await waitForTestId('project-import-confirm');
+  await confirm.waitForEnabled({ timeout: 30000 });
+  await confirm.click();
+  await waitForTestId('project-import-result');
+  const after = await bridgeCall<Array<{ id: string }>>('get_all_novels');
+  expect(after).toHaveLength(before.length + 1);
+  const copy = after.find((novel) => !sourceIds.has(novel.id));
+  expect(copy).toBeDefined();
+  const restored = await bridgeCall<CompleteProjectBackup>('export_project_backup', {
+    novelId: copy!.id,
+  });
+  const chapter = restored.tables.chapters[0];
+  const grant = restored.tables.review_authorizations.find((row) => row.status === 'consumed');
+  expect(grant).toBeDefined();
+  expect(grant!.authorization_id).not.toBe(authorizationId);
+  expect(grant!.novel_id).toBe(copy!.id);
+  expect(grant!.chapter_id).toBe(chapter.id);
+  expect(grant!.consumed_by_draft_id).toBe(chapter.adopted_draft_id);
+  const drafts = await bridgeCall<Draft[]>('get_drafts_by_chapter_id', { chapterId: chapter.id });
+  const adopted = drafts.find((draft) => draft.id === grant!.consumed_by_draft_id);
+  expect(adopted?.isAdopted).toBe(true);
+  expect(hash(adopted!.content)).toBe(expectedHash);
+  expect(
+    (await bridgeCall<Authorization>('get_review_authorization', { authorizationId })).status,
+  ).toBe('consumed');
+  // Import completion navigates while its success overlay still awaits acknowledgement.
+  const dismiss = await browser.$('[data-testid="loading-modal-dismiss"]');
+  if (await dismiss.isExisting()) await dismiss.click();
+  await browser.$('.modal-overlay').waitForExist({ reverse: true, timeout: 30000 });
+}
 
 describe('production writing smoke', () => {
   it('creates, revises, reviews, saves and adopts through the production UI, then restores the same text after a process restart', async () => {
@@ -108,6 +170,15 @@ describe('production writing smoke', () => {
       return readBundle();
     };
     const initial = await waitForCandidates(1);
+    expect(initial.runs[0].modelSnapshot.modelId).toBe('Mock');
+    const modelSelect = await waitForTestId('workbench-model-select');
+    await modelSelect.waitForEnabled({ timeout: 30000 });
+    await modelSelect.selectByAttribute('value', 'mock:Mock-Alternate');
+    await browser.waitUntil(
+      async () => (await readBundle()).conversation.defaultModel.modelId === 'Mock-Alternate',
+    );
+    expect(await header.getAttribute('data-conversation-id')).toBe(conversationId);
+    expect((await readBundle()).runs[0].modelSnapshot).toEqual(initial.runs[0].modelSnapshot);
     const firstId = initial.artifacts.find(
       (item) => item.artifactType === 'chapter_text',
     )!.artifactId;
@@ -132,6 +203,10 @@ describe('production writing smoke', () => {
       timeout: 30000,
       timeoutMsg: 'The revision request did not start a second run',
     });
+    expect((await readBundle()).runs.map((run) => run.modelSnapshot.modelId)).toEqual([
+      'Mock',
+      'Mock-Alternate',
+    ]);
     const revised = await waitForCandidates(2);
     const revisedId = revised.artifacts.find(
       (item) => item.artifactType === 'chapter_text' && item.artifactId !== firstId,
@@ -162,7 +237,12 @@ describe('production writing smoke', () => {
     expect(await editor.getAttribute('data-review-locked')).toBe('true');
     expect(await editor.getValue()).toBe(candidate.rawContent);
     await clickTestId('chapter-review-unlock');
-    const content = candidate.rawContent + '\n\n【日常写作验收：用户已审阅并修订】';
+    const content =
+      candidate.rawContent +
+      '\n\n火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。\n【日常写作验收：用户已审阅并修订】';
+    const reviewIssues = inspectChapterCandidateIntegrity({ candidateText: content });
+    expect(reviewIssues.some((issue) => issue.severity === 'warning')).toBe(true);
+    expect(reviewIssues.some((issue) => issue.severity === 'error')).toBe(false);
     await fillTextareaTestId('chapter-editor', content);
     await clickTestId('chapter-save');
     await browser.waitUntil(async () => (await editor.getAttribute('data-dirty')) === 'false', {
@@ -235,6 +315,21 @@ describe('production writing smoke', () => {
       await bridgeCall<Authorization>('get_review_authorization', { authorizationId }),
     ).toEqual(auth);
     expect((await readBundle()).runs).toHaveLength(2);
+    await verifyBackupCopyThroughUi(novelId, authorizationId, hash(content));
+    await navigateHash('#/');
+    await (await findTestIdByAttribute('workbench-project', 'data-novel-id', novelId)).click();
+    await (
+      await findTestIdByAttribute('workbench-task', 'data-conversation-id', conversationId)
+    ).click();
+    await browser.waitUntil(async () =>
+      (await waitForTestId('workbench-model-select'))
+        .getValue()
+        .then((value) => value === 'mock:Mock-Alternate'),
+    );
+    expect((await readBundle()).runs.map((run) => run.modelSnapshot.modelId)).toEqual([
+      'Mock',
+      'Mock-Alternate',
+    ]);
     const artifactRoot = process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS!;
     fs.writeFileSync(
       path.join(artifactRoot, 'writing-smoke-evidence.json'),
@@ -247,6 +342,10 @@ describe('production writing smoke', () => {
           afterPid: after.processId,
           adoptedContentHash: hash(content),
           reviewGrantFingerprint: hash(authorizationId),
+          warningOnlyAdoption: true,
+          sameLibraryBackupCopy: true,
+          sameTaskModelSwitch: ['Mock', 'Mock-Alternate'],
+          selectedModelRestoredAfterRestart: true,
           summary: 'expected pre-Run failure; not success evidence',
         },
         null,

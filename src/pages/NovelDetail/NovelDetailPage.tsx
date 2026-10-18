@@ -42,8 +42,8 @@ const CORE_ASSET_FOCUS_TARGETS: Record<string, string> = {
   world_setting: 'novel-detail-world-setting',
   rule_system: 'novel-detail-rule-system',
   protagonist: 'novel-detail-protagonist',
+  character: 'novel-detail-characters',
   story_plan: 'novel-detail-outline',
-  chapter_outline: 'novel-detail-outline',
 };
 
 function NovelDetailPage() {
@@ -113,6 +113,11 @@ function NovelDetailPage() {
   const focus = searchParams.get('focus') ?? '';
   const focusTargetId = CORE_ASSET_FOCUS_TARGETS[focus];
   const returnToWorkbench = searchParams.get('returnTo') === 'workbench';
+
+  useEffect(() => {
+    if (novelId && focus === 'chapter_outline')
+      navigate(`/novels/${novelId}/outline?type=chapter`, { replace: true });
+  }, [focus, navigate, novelId]);
 
   useEffect(() => {
     if (loading || !novel || !focusTargetId) return;
@@ -376,15 +381,17 @@ function NovelDetailPage() {
         </div>
       </div>
 
-      {/* 紧凑双列无缝网格（无冗余留白） */}
+      {/* 固定尺寸模块；长内容和编辑区在模块内滚动。 */}
       <div className="detail-cards-grid">
-        <PanelErrorBoundary panelTitle="作品基本信息">
-          <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
-        </PanelErrorBoundary>
+        <div className="detail-module">
+          <PanelErrorBoundary panelTitle="作品基本信息">
+            <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
+          </PanelErrorBoundary>
+        </div>
 
         <div
           id="novel-detail-protagonist"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-protagonist' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-protagonist' ? ' is-focused' : ''}`}
           data-testid="novel-detail-protagonist"
           tabIndex={-1}
         >
@@ -419,7 +426,7 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-world-setting"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
           data-testid="novel-detail-world-setting"
           tabIndex={-1}
         >
@@ -436,7 +443,7 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-rule-system"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
           data-testid="novel-detail-rule-system"
           tabIndex={-1}
         >
@@ -454,9 +461,8 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-outline"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-outline' ? ' is-focused' : ''}`}
+          className={`detail-module detail-module--wide detail-focus-target${focusTargetId === 'novel-detail-outline' ? ' is-focused' : ''}`}
           data-testid="novel-detail-outline"
-          style={{ gridColumn: '1 / -1' }}
           tabIndex={-1}
         >
           <PanelErrorBoundary panelTitle="大纲管理">
@@ -464,15 +470,24 @@ function NovelDetailPage() {
           </PanelErrorBoundary>
         </div>
 
-        <PanelErrorBoundary panelTitle="角色库">
-          <CharacterLibraryCard novelId={novel.id} />
-        </PanelErrorBoundary>
+        <div
+          id="novel-detail-characters"
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-characters' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-characters"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="角色库">
+            <CharacterLibraryCard novelId={novel.id} />
+          </PanelErrorBoundary>
+        </div>
 
-        <PanelErrorBoundary panelTitle="上下文概览">
-          <ContextOverviewCard novelId={novel.id} />
-        </PanelErrorBoundary>
+        <div className="detail-module">
+          <PanelErrorBoundary panelTitle="上下文概览">
+            <ContextOverviewCard novelId={novel.id} />
+          </PanelErrorBoundary>
+        </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div className="detail-module detail-module--wide">
           <PanelErrorBoundary panelTitle="导出">
             <ExportCard novelId={novel.id} novelTitle={novel.title} />
           </PanelErrorBoundary>

@@ -19,6 +19,8 @@ export type MockWorkbenchMode =
 
 export interface MockWorkbenchOptions {
   mode?: MockWorkbenchMode;
+  /** Default all; chapter-write preserves creative planning before a writer failure. */
+  upstreamFailureScope?: 'all' | 'chapter-write';
   port?: number;
   novelId?: string;
   chapterId?: string;
@@ -32,6 +34,7 @@ export interface MockWorkbenchOptions {
 
 export interface MockWorkbenchResolvedOptions {
   mode: MockWorkbenchMode;
+  upstreamFailureScope: 'all' | 'chapter-write';
   port: number;
   novelId: string;
   chapterId: string;

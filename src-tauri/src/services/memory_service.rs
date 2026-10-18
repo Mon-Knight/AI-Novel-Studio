@@ -9,8 +9,15 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+#[cfg(test)]
+#[path = "../../shared/memory_comparison_corpus.rs"]
+mod memory_comparison_corpus;
+#[path = "../../shared/memory_lexical_retrieval.rs"]
+mod memory_lexical_retrieval;
+#[path = "memory_retrieval_apply.rs"]
+mod memory_retrieval_apply;
 
 const MAX_DOCUMENT_CHUNKS: usize = 10_000;
 const MAX_CHUNK_BYTES: usize = 128 * 1024;
@@ -1574,24 +1581,19 @@ fn candidate_matches_filters(
     {
         return false;
     }
-    if let Some(temporal) = filters.temporal_chapter {
-        if candidate
-            .chunk
-            .temporal_start_chapter
-            .is_some_and(|start| temporal < start)
-            || candidate
-                .chunk
-                .temporal_end_chapter
-                .is_some_and(|end| temporal > end)
-        {
-            return false;
-        }
-    }
-    true
-}
-
-fn fts_match_query(query: &str) -> String {
-    format!("\"{}\"", query.trim().replace('"', "\"\""))
+    memory_lexical_retrieval::passes_temporal(
+        candidate.chunk.temporal_start_chapter,
+        candidate.chunk.temporal_end_chapter,
+        filters.temporal_chapter,
+    ) && memory_lexical_retrieval::fts_candidate_in_scope(
+        candidate.chunk.chapter_id.as_deref(),
+        candidate.chunk.chapter_order_index,
+        candidate.chunk.importance,
+        filters.chapter_id.as_deref(),
+        filters.chapter_start,
+        filters.chapter_end,
+        filters.min_importance,
+    )
 }
 
 fn cosine_similarity(
@@ -1635,7 +1637,7 @@ pub fn retrieve(
     connection: &mut Connection,
     input: RetrieveMemoryInput,
 ) -> Result<RetrieveMemoryOutput, AppError> {
-    let trace_id = input.trace_id.as_deref();
+    let trace_id = input.trace_id.clone();
     let result = (|| {
         validate_id("requestId", &input.request_id)?;
         validate_id("novelId", &input.novel_id)?;
@@ -1712,74 +1714,17 @@ pub fn retrieve(
             }
         }
 
-        let fts_available = memory_repository::fts_available(&transaction)?;
-        let fetch_limit = (input.candidate_limit * 4).min(MAX_FETCH_CANDIDATES);
-        let structured = memory_repository::fetch_candidates(
+        let query = input.query.trim();
+        let memory_retrieval_apply::LoadedCandidates {
+            candidates,
+            lexical_scores,
+            fts_available,
+        } = memory_retrieval_apply::load_candidates(
             &transaction,
-            &input.novel_id,
-            input.filters.chapter_start,
-            input.filters.chapter_end,
-            input.filters.chapter_id.as_deref(),
-            input.filters.min_importance,
+            &input,
             embedding_provider,
             embedding_model,
-            fetch_limit,
         )?;
-
-        let mut candidates =
-            HashMap::<String, (memory_repository::MemoryCandidate, Vec<String>, Value)>::new();
-        for candidate in structured {
-            let entity_keys = parse_entity_keys(&candidate.chunk.entity_keys_json)?;
-            if candidate_matches_filters(&candidate, &entity_keys, &input.filters) {
-                let metadata = parse_metadata(&candidate.chunk.metadata_json)?;
-                candidates.insert(
-                    candidate.chunk.id.clone(),
-                    (candidate, entity_keys, metadata),
-                );
-                if candidates.len() >= input.candidate_limit as usize {
-                    break;
-                }
-            }
-        }
-
-        let mut lexical_scores = HashMap::<String, f64>::new();
-        let query = input.query.trim();
-        if !query.is_empty() && fts_available {
-            let lexical_ids = memory_repository::lexical_chunk_ids(
-                &transaction,
-                &input.novel_id,
-                &fts_match_query(query),
-                input.candidate_limit,
-            )?;
-            for (index, chunk_id) in lexical_ids.iter().enumerate() {
-                lexical_scores.insert(chunk_id.clone(), 1.0 / (1.0 + index as f64));
-                if !candidates.contains_key(chunk_id) {
-                    if let Some(candidate) = memory_repository::fetch_candidate_by_id(
-                        &transaction,
-                        &input.novel_id,
-                        chunk_id,
-                        embedding_provider,
-                        embedding_model,
-                    )? {
-                        let entity_keys = parse_entity_keys(&candidate.chunk.entity_keys_json)?;
-                        if candidate_matches_filters(&candidate, &entity_keys, &input.filters) {
-                            let metadata = parse_metadata(&candidate.chunk.metadata_json)?;
-                            candidates.insert(chunk_id.clone(), (candidate, entity_keys, metadata));
-                        }
-                    }
-                }
-            }
-        }
-        if !query.is_empty() {
-            let query_lower = query.to_lowercase();
-            for (chunk_id, (candidate, _, _)) in &candidates {
-                if !lexical_scores.contains_key(chunk_id)
-                    && candidate.chunk.text.to_lowercase().contains(&query_lower)
-                {
-                    lexical_scores.insert(chunk_id.clone(), 0.5);
-                }
-            }
-        }
 
         let max_chapter = candidates
             .values()
@@ -1791,11 +1736,10 @@ pub fn retrieve(
         let mut ranked = Vec::with_capacity(candidates.len());
         for (_, (candidate, entity_keys, metadata)) in candidates {
             let importance = candidate.chunk.importance.clamp(0.0, 1.0);
-            let recency = candidate
-                .chunk
-                .chapter_order_index
-                .map(|value| (value.max(0) as f64 / max_chapter as f64).clamp(0.0, 1.0))
-                .unwrap_or(0.5);
+            let recency = memory_lexical_retrieval::recency_score(
+                candidate.chunk.chapter_order_index,
+                max_chapter,
+            );
             let lexical = lexical_scores.get(&candidate.chunk.id).copied();
             let semantic = if let (Some(query_embedding), Some(query_norm), Some(dimension)) = (
                 input.query_embedding.as_ref(),
@@ -1825,14 +1769,8 @@ pub fn retrieve(
             } else {
                 None
             };
-            let final_score = match (semantic, lexical) {
-                (Some(semantic), Some(lexical)) => {
-                    semantic * 0.60 + lexical * 0.20 + importance * 0.10 + recency * 0.10
-                }
-                (Some(semantic), None) => semantic * 0.75 + importance * 0.15 + recency * 0.10,
-                (None, Some(lexical)) => lexical * 0.65 + importance * 0.20 + recency * 0.15,
-                (None, None) => importance * 0.60 + recency * 0.40,
-            };
+            let final_score =
+                memory_lexical_retrieval::combine_score(semantic, lexical, importance, recency);
             let mut matched_by = Vec::new();
             if semantic.is_some() {
                 matched_by.push("semantic".to_string());
@@ -1862,19 +1800,14 @@ pub fn retrieve(
             });
         }
         ranked.sort_by(|left, right| {
-            right
-                .reason
-                .final_score
-                .partial_cmp(&left.reason.final_score)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| {
-                    right
-                        .candidate
-                        .chunk
-                        .chapter_order_index
-                        .cmp(&left.candidate.chunk.chapter_order_index)
-                })
-                .then_with(|| left.candidate.chunk.id.cmp(&right.candidate.chunk.id))
+            memory_lexical_retrieval::cmp_ranked(
+                left.reason.final_score,
+                left.candidate.chunk.chapter_order_index,
+                &left.candidate.chunk.id,
+                right.reason.final_score,
+                right.candidate.chunk.chapter_order_index,
+                &right.candidate.chunk.id,
+            )
         });
 
         let candidate_count = ranked.len();
@@ -1982,7 +1915,7 @@ pub fn retrieve(
             items,
         })
     })();
-    result.map_err(|error| with_trace(error, trace_id))
+    result.map_err(|error| with_trace(error, trace_id.as_deref()))
 }
 
 pub fn list_documents(
@@ -2387,4 +2320,6 @@ mod tests {
         assert_eq!(status.1.as_deref(), Some("adopted_draft_changed"));
         Ok(())
     }
+
+    include!("memory_lexical_retrieval_tests.rs");
 }

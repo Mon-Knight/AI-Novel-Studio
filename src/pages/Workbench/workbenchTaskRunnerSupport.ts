@@ -4,6 +4,7 @@ import type {
 } from '../../services/conversation/chapterAssetReadiness';
 import { WorkbenchModelUnavailableError } from '../../services/conversation/workbenchModelAvailability';
 import { classifyTaskIntent } from '../../services/conversation/taskGoalRouting';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 import {
   resolveWorkbenchChapterTarget,
   shouldResolveWorkbenchChapterTarget,
@@ -73,8 +74,9 @@ export function createChapterTargetResolvers(dependencies: ChapterTargetResolver
     turnId?: string;
     goal: string;
     modelSnapshot: TaskModelSnapshot;
+    revisionSource?: ArtifactRevisionSource;
   }): Promise<boolean> => {
-    if (classifyTaskIntent(request.goal) !== 'chapter_write') return true;
+    if (classifyTaskIntent(request.goal, request.revisionSource) !== 'chapter_write') return true;
     return dependencies.ensureAssetReadiness({
       conversationId: request.conversationId,
       novelId: request.novelId,

@@ -20,6 +20,24 @@ export interface ChapterSummaryValidation {
     message: string;
   }>;
   safeToContext: boolean;
+  semanticValidation?: 'not_checked';
+  authorReviewed?: boolean;
+  evidenceValidation?: 'passed' | 'missing';
+  groundingIssues?: Array<{
+    severity: 'warning' | 'error';
+    code: string;
+    path: string;
+    message: string;
+  }>;
+}
+
+export interface ChapterSummaryGrounding {
+  version: 1;
+  claims: Array<{
+    path: string;
+    status: 'confirmed' | 'inferred' | 'unresolved' | 'planned';
+    quotes: string[];
+  }>;
 }
 
 export interface ChapterCharacterChange {
@@ -109,6 +127,7 @@ export interface CreateChapterSummaryInput {
 }
 
 export interface ChapterSummarizeResult {
+  grounding?: ChapterSummaryGrounding;
   summary: string;
   summaryTitle?: string;
   keyEvents: string[];

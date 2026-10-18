@@ -6,13 +6,11 @@ import { appLogger } from '../observability/appLogger';
  * are represented as `contentState: unavailable`; preview text is never put in
  * `draft.content` and therefore cannot enter the editor or an AI prompt.
  */
-import { dbCall, generateId, lsGet, nowISO } from './db';
+import { dbCall, generateId, nowISO } from './db';
 import { isTauriRuntime } from '../tauri/runtime';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
-import type { DraftContentState } from '../../types/draftContentState';
 import type { LargeTextSaveProgress } from '../../types/largeTextSave';
-import { normalizeAppError } from '../../types/appError';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { countTextWords } from '../../utils/contentHash';
 import {
@@ -21,19 +19,24 @@ import {
   logWorkspaceError,
 } from '../workspace/workspaceErrorService';
 
-const DRAFTS_LIST_KEY_PREFIX = 'ai_novel_studio_drafts_list_';
-
-type DraftRecord = Partial<ChapterDraft> & {
-  novel_id?: string;
-  chapter_id?: string;
-  version_no?: number;
-  word_count?: number;
-  is_adopted?: boolean | number;
-  ai_task_id?: string | null;
-  large_text_ref_id?: string | null;
-  created_at?: string;
-  updated_at?: string;
-};
+import {
+  captureBrowserAdoptionSnapshot,
+  localDraftContentHash,
+  localDraftStoreChanged,
+  normalizeDraft,
+  normalizeDrafts,
+  normalizeReadState,
+  readLocalDraftStore as readBrowserDraftStore,
+  readyState,
+  restoreBrowserAdoptionSnapshot,
+  saveLocalDrafts,
+  updateLocalChapterAdoption,
+  unavailableState,
+  withBrowserDraftLock,
+  writeLocalDraftStore,
+  type BrowserAdoptionSnapshot,
+  type LocalDraftStore,
+} from './draftBrowserPersistence';
 
 type AtomicSaveRecord = {
   operationId?: string;
@@ -54,7 +57,7 @@ type AtomicSaveRecord = {
 
 type UpdateDraftBase = Pick<
   ChapterDraft,
-  'id' | 'novelId' | 'chapterId' | 'title' | 'versionNo' | 'isAdopted' | 'contentState'
+  'id' | 'novelId' | 'chapterId' | 'title' | 'content' | 'versionNo' | 'isAdopted' | 'contentState'
 >;
 
 // A retry of the same business payload must reuse its operationId. Entries are
@@ -78,155 +81,16 @@ function operationIdFor(key: string): string {
   return operationId;
 }
 
-function draftsKey(chapterId: string): string {
-  return `${DRAFTS_LIST_KEY_PREFIX}${chapterId}`;
-}
-
 function toNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function toBoolean(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  return false;
-}
-
-function normalizeDraft(raw: unknown): ChapterDraft | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const item = raw as DraftRecord;
-  const id = typeof item.id === 'string' ? item.id : '';
-  const novelId = typeof item.novelId === 'string' ? item.novelId : item.novel_id;
-  const chapterId = typeof item.chapterId === 'string' ? item.chapterId : item.chapter_id;
-  const content = typeof item.content === 'string' ? item.content : '';
-  if (!id || !novelId || !chapterId) return null;
-
-  const now = nowISO();
-  return {
-    id,
-    novelId,
-    chapterId,
-    title: item.title,
-    content,
-    source: item.source ?? 'manual_placeholder',
-    versionNo: toNumber(item.versionNo ?? item.version_no, 1),
-    wordCount: toNumber(item.wordCount ?? item.word_count, countTextWords(content)),
-    isAdopted: toBoolean(item.isAdopted ?? item.is_adopted),
-    aiTaskId: item.aiTaskId ?? item.ai_task_id ?? undefined,
-    note: item.note,
-    largeTextRefId: item.largeTextRefId ?? item.large_text_ref_id ?? undefined,
-    contentState: item.contentState,
-    createdAt: item.createdAt ?? item.created_at ?? now,
-    updatedAt: item.updatedAt ?? item.updated_at ?? now,
-  };
-}
-
-function normalizeDrafts(items: unknown): ChapterDraft[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map(normalizeDraft)
-    .filter((item): item is ChapterDraft => item !== null)
-    .sort((a, b) => a.versionNo - b.versionNo);
+function readLocalDraftStore(chapterId: string): LocalDraftStore {
+  return readBrowserDraftStore(chapterId, normalizeDrafts);
 }
 
 function getLocalDrafts(chapterId: string): ChapterDraft[] {
-  return normalizeDrafts(lsGet<unknown>(draftsKey(chapterId)));
-}
-
-function saveLocalDrafts(chapterId: string, drafts: ChapterDraft[]): void {
-  localStorage.setItem(draftsKey(chapterId), JSON.stringify(drafts));
-}
-
-async function readyState(content: string, contentHash?: string): Promise<DraftContentState> {
-  return {
-    status: 'ready',
-    content,
-    contentHash: contentHash ?? (await computeContentSha256(content)),
-    contentLength: unicodeScalarLength(content),
-  };
-}
-
-function unavailableState(
-  preview: string,
-  value: unknown,
-  traceId: string,
-): Extract<DraftContentState, { status: 'unavailable' }> {
-  const error = normalizeAppError(value, '完整正文暂时无法读取。', { traceId });
-  const details = error.details;
-  return {
-    status: 'unavailable',
-    preview: preview || undefined,
-    errorCode: error.code === 'UNKNOWN_ERROR' ? 'LARGE_TEXT_CONTENT_UNAVAILABLE' : error.code,
-    retryable: error.retryable || error.code === 'UNKNOWN_ERROR',
-    expectedHash:
-      typeof details?.expectedHash === 'string'
-        ? details.expectedHash
-        : typeof details?.expected_hash === 'string'
-          ? details.expected_hash
-          : undefined,
-    actualHash:
-      typeof details?.actualHash === 'string'
-        ? details.actualHash
-        : typeof details?.actual_hash === 'string'
-          ? details.actual_hash
-          : undefined,
-    error:
-      error.code === 'UNKNOWN_ERROR'
-        ? { ...error, code: 'LARGE_TEXT_CONTENT_UNAVAILABLE', retryable: true }
-        : error,
-  };
-}
-
-function normalizeReadState(raw: unknown, preview: string, traceId: string): DraftContentState {
-  if (!raw || typeof raw !== 'object') return unavailableState(preview, raw, traceId);
-  const wrapper = raw as Record<string, unknown>;
-  const stateRaw = (wrapper.contentState ?? wrapper.content_state ?? wrapper) as Record<
-    string,
-    unknown
-  >;
-  if (!stateRaw || typeof stateRaw !== 'object') return unavailableState(preview, raw, traceId);
-  if (stateRaw.status === 'ready') {
-    const content = typeof stateRaw.content === 'string' ? stateRaw.content : null;
-    const contentHash =
-      typeof stateRaw.contentHash === 'string'
-        ? stateRaw.contentHash
-        : typeof stateRaw.content_hash === 'string'
-          ? stateRaw.content_hash
-          : null;
-    const contentLength = toNumber(stateRaw.contentLength ?? stateRaw.content_length, -1);
-    if (content !== null && contentHash && contentLength === unicodeScalarLength(content)) {
-      return { status: 'ready', content, contentHash, contentLength };
-    }
-    return unavailableState(
-      preview,
-      {
-        code: 'LARGE_TEXT_CONTENT_UNAVAILABLE',
-        message: '正文读取结果缺少完整性字段。',
-        retryable: true,
-        traceId,
-      },
-      traceId,
-    );
-  }
-  return unavailableState(
-    preview,
-    {
-      code:
-        typeof stateRaw.errorCode === 'string'
-          ? stateRaw.errorCode
-          : typeof stateRaw.error_code === 'string'
-            ? stateRaw.error_code
-            : 'LARGE_TEXT_CONTENT_UNAVAILABLE',
-      message: typeof stateRaw.message === 'string' ? stateRaw.message : '完整正文暂时无法读取。',
-      retryable: stateRaw.retryable !== false,
-      traceId,
-      details: {
-        expectedHash: stateRaw.expectedHash ?? stateRaw.expected_hash,
-        actualHash: stateRaw.actualHash ?? stateRaw.actual_hash,
-      },
-    },
-    traceId,
-  );
+  return readLocalDraftStore(chapterId).drafts;
 }
 
 async function hydrateDraftContent(draft: ChapterDraft): Promise<ChapterDraft> {
@@ -448,28 +312,35 @@ export const draftVersionService = {
     onProgress?: (progress: LargeTextSaveProgress) => void,
   ): Promise<ChapterDraft> {
     if (!isTauriRuntime()) {
-      const drafts = getLocalDrafts(input.chapterId);
-      const now = nowISO();
       const contentState = await readyState(input.content);
-      const draft: ChapterDraft = {
-        id: generateId(),
-        novelId: input.novelId,
-        chapterId: input.chapterId,
-        title: input.title,
-        content: input.content,
-        source: input.source,
-        versionNo: drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1,
-        wordCount: countTextWords(input.content),
-        isAdopted: false,
-        aiTaskId: input.aiTaskId,
-        note: input.note,
-        contentState,
-        createdAt: now,
-        updatedAt: now,
-      };
-      drafts.push(draft);
-      saveLocalDrafts(input.chapterId, drafts);
-      return draft;
+      // Compute the content before taking the synchronous localStorage
+      // snapshot. Once the snapshot is read there is no await before the
+      // revisioned write, so two browser tabs cannot overwrite one another's
+      // draft list or reuse the same version number.
+      return withBrowserDraftLock(input.chapterId, async () => {
+        const store = readLocalDraftStore(input.chapterId);
+        const drafts = store.drafts;
+        const now = nowISO();
+        const draft: ChapterDraft = {
+          id: generateId(),
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          title: input.title,
+          content: input.content,
+          source: input.source,
+          versionNo: drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1,
+          wordCount: countTextWords(input.content),
+          isAdopted: false,
+          aiTaskId: input.aiTaskId,
+          note: input.note,
+          contentState,
+          createdAt: now,
+          updatedAt: now,
+        };
+        drafts.push(draft);
+        writeLocalDraftStore(input.chapterId, { revision: store.revision + 1, drafts });
+        return draft;
+      });
     }
 
     const traceId = createTraceId('draft-save');
@@ -543,37 +414,85 @@ export const draftVersionService = {
     baseDraft?: UpdateDraftBase,
   ): Promise<ChapterDraft> {
     if (!isTauriRuntime()) {
-      const drafts = getLocalDrafts(chapterId);
-      const index = drafts.findIndex((draft) => draft.id === id);
-      if (index < 0) {
+      const nextContentState = await readyState(content);
+      const expectedBaseHash = baseDraft ? await localDraftContentHash(baseDraft) : undefined;
+
+      // The browser fallback has no SQLite transaction. Use a small
+      // revisioned optimistic CAS around the localStorage list instead. Hash
+      // computation may yield to another tab, so the store is read again
+      // before the final synchronous write and retried if its revision moved.
+      return withBrowserDraftLock(chapterId, async () => {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const observed = readLocalDraftStore(chapterId);
+          const index = observed.drafts.findIndex((draft) => draft.id === id);
+          if (index < 0) {
+            throw {
+              code: 'TARGET_DRAFT_NOT_FOUND',
+              message: '草稿不存在或不属于当前章节。',
+              retryable: false,
+            };
+          }
+          const current = observed.drafts[index];
+          const currentHash = await localDraftContentHash(current);
+          const latest = readLocalDraftStore(chapterId);
+          if (localDraftStoreChanged(observed, latest)) continue;
+
+          if (baseDraft) {
+            if (
+              baseDraft.id !== current.id ||
+              baseDraft.novelId !== current.novelId ||
+              baseDraft.chapterId !== current.chapterId ||
+              baseDraft.versionNo !== current.versionNo ||
+              baseDraft.isAdopted !== current.isAdopted
+            ) {
+              throw {
+                code: 'DOCUMENT_VERSION_CONFLICT',
+                message: '保存基线与浏览器草稿版本不一致。',
+                retryable: false,
+              };
+            }
+            if (expectedBaseHash !== currentHash) {
+              throw {
+                code: 'DOCUMENT_HASH_MISMATCH',
+                message: '浏览器草稿正文已在保存前发生变化。',
+                retryable: false,
+              };
+            }
+          }
+
+          const timestamp = nowISO();
+          const updated: ChapterDraft = {
+            ...current,
+            id: current.isAdopted ? generateId() : current.id,
+            content,
+            source,
+            versionNo: current.isAdopted
+              ? latest.drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1
+              : current.versionNo,
+            wordCount: countTextWords(content),
+            isAdopted: false,
+            aiTaskId: current.isAdopted ? undefined : current.aiTaskId,
+            note: current.isAdopted ? undefined : current.note,
+            contentState: nextContentState,
+            createdAt: current.isAdopted ? timestamp : current.createdAt,
+            updatedAt: timestamp,
+          };
+          const nextDrafts = [...latest.drafts];
+          if (current.isAdopted) nextDrafts.push(updated);
+          else nextDrafts[index] = updated;
+          writeLocalDraftStore(chapterId, {
+            revision: latest.revision + 1,
+            drafts: nextDrafts,
+          });
+          return updated;
+        }
+
         throw {
-          code: 'TARGET_DRAFT_NOT_FOUND',
-          message: '草稿不存在或不属于当前章节。',
+          code: 'DOCUMENT_VERSION_CONFLICT',
+          message: '浏览器草稿在保存期间发生变化，请重新加载后重试。',
           retryable: false,
         };
-      }
-      const current = drafts[index];
-      const timestamp = nowISO();
-      const updated: ChapterDraft = {
-        ...current,
-        id: current.isAdopted ? generateId() : current.id,
-        content,
-        source,
-        versionNo: current.isAdopted
-          ? drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1
-          : current.versionNo,
-        wordCount: countTextWords(content),
-        isAdopted: false,
-        aiTaskId: current.isAdopted ? undefined : current.aiTaskId,
-        note: current.isAdopted ? undefined : current.note,
-        contentState: await readyState(content),
-        createdAt: current.isAdopted ? timestamp : current.createdAt,
-        updatedAt: timestamp,
-      };
-      if (current.isAdopted) drafts.push(updated);
-      else drafts[index] = updated;
-      saveLocalDrafts(chapterId, drafts);
-      return updated;
+      });
     }
 
     // Refresh the authoritative row even when the editor supplies a base.
@@ -691,7 +610,10 @@ export const draftVersionService = {
   async adopt(
     draftId: string,
     chapterId: string,
-    options: { actor?: 'user' | 'autonomous_full_auto' } = {},
+    options: {
+      actor?: 'user' | 'autonomous_full_auto';
+      afterFormalAdoption?: (draft: ChapterDraft) => Promise<void>;
+    } = {},
   ): Promise<ChapterDraft> {
     const target = await this.getById(chapterId, draftId);
     if (!target) {
@@ -707,32 +629,55 @@ export const draftVersionService = {
       );
     }
     const traceId = createTraceId('draft-adopt');
-    let localDraftSnapshot: string | null = null;
+    const browserSnapshot = !isTauriRuntime() ? captureBrowserAdoptionSnapshot(chapterId) : null;
+    let localAdoptionCommitted = false;
     let localAdoptedDraftChanged = false;
-    const raw = await dbCall<unknown | null>(
-      'adopt_chapter_draft',
-      { draftId, chapterId, traceId },
-      () => {
-        localDraftSnapshot = localStorage.getItem(draftsKey(chapterId));
-        const drafts = getLocalDrafts(chapterId);
-        const localTarget = drafts.find((draft) => draft.id === draftId);
-        if (!localTarget) {
-          throw new Error('draft_adopt_target_mismatch: 草稿不存在或不属于当前章节');
-        }
-        localAdoptedDraftChanged = drafts.find((draft) => draft.isAdopted)?.id !== draftId;
+    let raw: unknown | null;
+    try {
+      raw = await dbCall<unknown | null>(
+        'adopt_chapter_draft',
+        { draftId, chapterId, traceId },
+        () =>
+          withBrowserDraftLock(chapterId, async () => {
+            const drafts = getLocalDrafts(chapterId);
+            const localTarget = drafts.find((draft) => draft.id === draftId);
+            if (!localTarget) {
+              throw new Error('draft_adopt_target_mismatch: 草稿不存在或不属于当前章节');
+            }
+            localAdoptedDraftChanged = drafts.find((draft) => draft.isAdopted)?.id !== draftId;
 
-        let adopted: ChapterDraft | null = null;
-        const updated = drafts.map((draft) => {
-          if (draft.id === draftId) {
-            adopted = { ...draft, isAdopted: true, updatedAt: nowISO() };
+            let adopted: ChapterDraft | null = null;
+            const updated = drafts.map((draft) => {
+              if (draft.id === draftId) {
+                adopted = { ...draft, isAdopted: true, updatedAt: nowISO() };
+                return adopted;
+              }
+              return { ...draft, isAdopted: false };
+            });
+            saveLocalDrafts(chapterId, updated, normalizeDrafts);
+            const adoptedResult = adopted as ChapterDraft | null;
+            if (adoptedResult && browserSnapshot) {
+              // Existing browser profiles may have drafts without a chapter
+              // cache row. Preserve that compatibility while synchronizing
+              // every real chapter row with the formal adoption fact.
+              updateLocalChapterAdoption(chapterId, adoptedResult.novelId, adoptedResult);
+            }
+            localAdoptionCommitted = true;
             return adopted;
-          }
-          return { ...draft, isAdopted: false };
-        });
-        saveLocalDrafts(chapterId, updated);
-        return adopted;
-      },
-    );
+          }),
+      );
+    } catch (error) {
+      if (browserSnapshot && localAdoptionCommitted) {
+        try {
+          restoreBrowserAdoptionSnapshot(browserSnapshot);
+        } catch (rollbackError) {
+          const failure = new Error('浏览器章节采用失败，且本地事实回滚未完整成功。');
+          Object.assign(failure, { cause: error, rollbackError });
+          throw failure;
+        }
+      }
+      throw error;
+    }
     const adopted = normalizeDraft(raw);
     if (
       !adopted ||
@@ -740,6 +685,8 @@ export const draftVersionService = {
       adopted.chapterId !== chapterId ||
       !adopted.isAdopted
     ) {
+      if (browserSnapshot && localAdoptionCommitted)
+        restoreBrowserAdoptionSnapshot(browserSnapshot);
       throw {
         code: 'DOCUMENT_VERSION_CONFLICT',
         message: '正文采用结果无效。',
@@ -753,8 +700,7 @@ export const draftVersionService = {
         await chapterSummaryService.markExpired(chapterId);
       } catch (error) {
         try {
-          if (localDraftSnapshot === null) localStorage.removeItem(draftsKey(chapterId));
-          else localStorage.setItem(draftsKey(chapterId), localDraftSnapshot);
+          if (browserSnapshot) restoreBrowserAdoptionSnapshot(browserSnapshot);
         } catch (rollbackError) {
           const rollbackFailure = new Error(
             '正文采用后的上下文过期失败，且草稿采用状态未能完整回滚。',
@@ -770,6 +716,20 @@ export const draftVersionService = {
       content: target.content,
       contentState: target.contentState,
     };
+    if (!isTauriRuntime() && options.afterFormalAdoption) {
+      try {
+        await options.afterFormalAdoption(adoptedWithContent);
+      } catch (error) {
+        try {
+          if (browserSnapshot) restoreBrowserAdoptionSnapshot(browserSnapshot);
+        } catch (rollbackError) {
+          const failure = new Error('浏览器章节采用后授权消费失败，且本地事实回滚未完整成功。');
+          Object.assign(failure, { cause: error, rollbackError });
+          throw failure;
+        }
+        throw error;
+      }
+    }
     try {
       const { autonomousPostChapterService, runAutonomousPostChapterAnalysis } =
         await import('../autonomous-creation/autonomousPostChapterRuntime');
@@ -785,7 +745,20 @@ export const draftVersionService = {
     if (options.actor !== 'autonomous_full_auto') {
       const { autonomousSchedulerWorker } =
         await import('../autonomous-creation/autonomousSchedulerWorker');
-      await autonomousSchedulerWorker.promoteUserAdoptedDraft(adoptedWithContent);
+      try {
+        await autonomousSchedulerWorker.promoteUserAdoptedDraft(adoptedWithContent);
+      } catch (error) {
+        // The formal chapter adoption above is already committed. Scheduler
+        // projection is a post-commit convenience and must not turn a
+        // successful adoption into a false failure. Startup/plan recovery can
+        // reconcile this projection later from the adopted draft fact.
+        appLogger.warn('[AutonomousCreation] 章节采用后调度投影失败', {
+          novelId: adoptedWithContent.novelId,
+          chapterId: adoptedWithContent.chapterId,
+          draftId: adoptedWithContent.id,
+          error,
+        });
+      }
     }
     const { ingestAdoptedDraftMemorySafe } = await import('../memory/adoptedDraftMemory');
     await ingestAdoptedDraftMemorySafe(adoptedWithContent);
@@ -798,7 +771,18 @@ export const draftVersionService = {
       saveLocalDrafts(
         chapterId,
         getLocalDrafts(chapterId).filter((draft) => draft.id !== id),
+        normalizeDrafts,
       ),
     );
+  },
+
+  captureBrowserAdoptionState(chapterId: string): BrowserAdoptionSnapshot | null {
+    if (isTauriRuntime()) return null;
+    return captureBrowserAdoptionSnapshot(chapterId);
+  },
+
+  restoreBrowserAdoptionState(snapshot: BrowserAdoptionSnapshot): void {
+    if (isTauriRuntime()) throw new Error('桌面端采用回滚必须由 SQLite 事务完成。');
+    restoreBrowserAdoptionSnapshot(snapshot);
   },
 };

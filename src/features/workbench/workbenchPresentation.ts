@@ -7,6 +7,7 @@ import type {
 } from '../../types/conversation';
 import type { ChapterAssetRecovery } from '../../services/conversation/chapterAssetReadiness';
 import { decodeWorkbenchTurnContent } from '../../services/conversation/workbenchTurnOrigin';
+import { recoverableTurnRun } from '../../services/conversation/workbenchRetryRecovery';
 
 export const WORKBENCH_HISTORY_PAGE_SIZE = 8;
 
@@ -39,7 +40,7 @@ export type WorkbenchPublicEvent = PublicEventIdentity &
     | { kind: 'run'; run: TaskRun; attemptCount: number }
     | { kind: 'tool'; event: ToolCallEvent }
     | { kind: 'error'; error: string; eventId?: string }
-    | { kind: 'run_end'; run: TaskRun; latestAttempt: boolean }
+    | { kind: 'run_end'; run: TaskRun; latestAttempt: boolean; recoverable?: boolean }
     | { kind: 'artifact'; artifact: ConversationArtifactCard }
     | { kind: 'compression' }
     | { kind: 'asset_recovery' }
@@ -67,13 +68,15 @@ export interface WorkbenchPresentationContext {
 export function workbenchCandidateNumbers(
   events: readonly WorkbenchPublicEvent[],
 ): Map<string, number> {
-  const numbers = new Map<string, number>();
-  let number = 0;
-  for (const entry of events) {
-    if (entry.kind !== 'artifact') continue;
-    number += 1;
-    numbers.set(entry.artifact.cardId, number);
+  const artifacts = events.flatMap((entry) => (entry.kind === 'artifact' ? [entry.artifact] : []));
+  const stable = new Map<string, number>();
+  for (const card of artifacts) {
+    const ordinal = card.candidateOrdinal;
+    if (Number.isInteger(ordinal) && (ordinal ?? 0) >= 1) stable.set(card.cardId, ordinal!);
   }
+  if (stable.size > 0) return stable;
+  const numbers = new Map<string, number>();
+  artifacts.forEach((card, index) => numbers.set(card.cardId, index + 1));
   return numbers;
 }
 
@@ -169,6 +172,9 @@ export function projectWorkbenchEvents(
     siblings.push(run);
     attempts.set(run.turnId, siblings);
   }
+  const recoverableRuns = new Map(
+    [...attempts.keys()].map((turnId) => [turnId, recoverableTurnRun(bundle, turnId)?.runId]),
+  );
   const base = (
     id: string,
     createdAt: string,
@@ -200,6 +206,12 @@ export function projectWorkbenchEvents(
     (event) => presentationTime(event.finishedAt, presentationTime(event.createdAt)),
   );
   for (const event of events) {
+    if (
+      event.toolName === 'dsh.execution_contract' &&
+      event.status === 'succeeded' &&
+      event.argumentsSummary.source === 'ans-host'
+    )
+      continue;
     result.push({
       ...base('tool:' + event.eventId, event.createdAt, undefined, event.runId, event.sequence),
       kind: 'tool',
@@ -244,6 +256,7 @@ export function projectWorkbenchEvents(
         kind: 'run_end',
         run,
         latestAttempt: siblings[siblings.length - 1]?.runId === run.runId,
+        recoverable: recoverableRuns.get(run.turnId) === run.runId,
       });
   }
   for (const artifact of uniqueFacts(

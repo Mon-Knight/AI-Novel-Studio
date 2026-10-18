@@ -56,6 +56,7 @@ export interface TaskConversation {
   novelId: string;
   title: string;
   status: ConversationStatus;
+  /** Persisted choice for new turns; changing it never rewrites existing runs. */
   defaultModel?: TaskModelSnapshot;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +83,7 @@ export interface TaskRun {
   /** Immutable chapter scope captured when this run is created. */
   chapterId?: string;
   status: TaskRunStatus;
+  /** Frozen for this run, including when the task later selects another model. */
   modelSnapshot: TaskModelSnapshot;
   workerId: string;
   error?: string;
@@ -89,6 +91,12 @@ export interface TaskRun {
   updatedAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+/** One turn and its runs. It is not a full conversation bundle. */
+export interface TaskTurnRunProjection {
+  turn: ConversationTurn;
+  runs: TaskRun[];
 }
 
 export interface ToolCallEvent {
@@ -172,6 +180,8 @@ export interface ConversationArtifactCard {
   contentLoadError?: string;
   status: 'candidate' | 'confirmed' | 'rejected';
   createdAt: string;
+  /** Conversation-wide rank. Never the index inside the loaded page. */
+  candidateOrdinal?: number;
   latestDecision?: ArtifactDecision;
   reviewAuthorization?: ReviewAuthorization;
   artifactEvidence?: ConversationArtifactEvidence;
@@ -190,4 +200,48 @@ export interface TaskConversationBundle {
 export interface InitializedTaskConversation {
   conversation: TaskConversation;
   turn: ConversationTurn;
+}
+
+/** UI page metadata. It never replaces the authoritative full conversation read. */
+export interface ConversationWindowPage {
+  startSequence: number | null;
+  endSequenceExclusive: number | null;
+  oldestUserSequence: number | null;
+  newestUserSequence: number | null;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  userRoundCount: number;
+}
+
+export interface ConversationWindow {
+  bundle: TaskConversationBundle;
+  page: ConversationWindowPage;
+}
+
+/** Session cursor for the loaded user-round window. It is not a database row. */
+export interface ConversationWindowCursor {
+  conversationId: string;
+  oldestUserSequence: number | null;
+  loadedUserRounds: number;
+  hasOlder: boolean;
+  hasNewer: boolean;
+}
+
+export interface ConversationWindowQuery {
+  conversationId: string;
+  limit?: number;
+  beforeUserSequence?: number;
+  minUserSequence?: number;
+  focusTurnId?: string;
+  focusCardId?: string;
+}
+
+/** A non-terminal run and the user turn that started it. Chapter is the run's own scope. */
+export interface RunningTaskTarget {
+  conversationId: string;
+  novelId: string;
+  title: string;
+  runId: string;
+  chapterId?: string;
+  latestGoal?: string;
 }

@@ -1,4 +1,4 @@
-//! Exact chapter-candidate identity shared by DSH startup and the narrow derivation transaction.
+//! Exact candidate identity shared by DSH startup and the narrow derivation transaction.
 //! This is a material reference, never review/adoption authorization.
 use crate::errors::AppError;
 use crate::repositories::{ai_task_repository, artifact_repository, large_text_repository};
@@ -6,6 +6,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const DERIVATION_TYPE: &str = "revision";
+
+pub(crate) fn supports_revision(artifact_type: &str) -> bool {
+    matches!(
+        artifact_type,
+        "chapter_text" | "outline" | "setting_candidates"
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -83,8 +90,8 @@ pub(crate) fn verify_source(
     validate_identity(source)?;
     if source.novel_id != novel_id
         || source.chapter_id.as_deref() != chapter_id
-        || chapter_id.is_none()
-        || source.artifact_type != "chapter_text"
+        || !supports_revision(&source.artifact_type)
+        || (source.artifact_type == "chapter_text" && chapter_id.is_none())
     {
         return Err(invalid_source());
     }
@@ -93,11 +100,12 @@ pub(crate) fn verify_source(
             "SELECT EXISTS(SELECT 1 FROM conversation_artifact_cards card
          JOIN task_conversations conversation ON conversation.conversation_id=card.conversation_id
          JOIN novels novel ON novel.id=conversation.novel_id
-         JOIN chapters chapter ON chapter.id=?7 AND chapter.novel_id=novel.id
          WHERE card.card_id=?1 AND card.conversation_id=?2 AND card.artifact_id=?3
            AND card.artifact_type=?4 AND card.run_id IS ?5 AND card.title=?6
            AND card.status='candidate' AND conversation.novel_id=?8
-           AND novel.deleted_at IS NULL AND chapter.deleted_at IS NULL
+           AND novel.deleted_at IS NULL
+           AND (?7 IS NULL OR EXISTS(SELECT 1 FROM chapters chapter
+                WHERE chapter.id=?7 AND chapter.novel_id=novel.id AND chapter.deleted_at IS NULL))
            AND conversation.archived_at IS NULL
            AND (card.turn_id IS NULL OR EXISTS(SELECT 1 FROM conversation_turns turn
                 WHERE turn.turn_id=card.turn_id AND turn.conversation_id=card.conversation_id))

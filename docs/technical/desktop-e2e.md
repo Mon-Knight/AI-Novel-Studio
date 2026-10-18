@@ -32,6 +32,8 @@
 | `tauri-driver`        | 独立工具                       | `0.1.5`                    |
 | WebView2 / EdgeDriver | 主版本必须一致                 | 验证机均为 `150.0.4078.83` |
 
+> 历史接入表保留当时的 React Router 6.30.3 记录；当前 v3.7.0 工作区已升级到 React Router 7.18.4，桌面 E2E 继续沿用 HashRouter 路由契约。
+
 `package-lock.json` 中的 `@vitest/*` 是 WebdriverIO 断言依赖的传递依赖。项目没有 `vitest` 命令、Vitest 配置或 Vitest 测试套件，不能把这些传递包视为已有 Vitest 覆盖。
 
 ### 1.2 原有测试与构建入口
@@ -170,7 +172,8 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
 - Pull Request：质量作业先用 `verify:change --dry-run --github-output` 判定变更归属，以 `--lane native` 运行 Rust、文档与版本归属检查；桌面作业在未涉及桌面行为时输出 `NOT_APPLICABLE`，涉及时以 `--lane desktop` 只运行归属的真实桌面场景（migration、DSH、打包或工作流变更时扩大为完整套件）。
-- `main` 分支 push、`v*` 发布标签、每周定时和手工触发：运行版本/文档同步、Rust check / 完整串行 test 与无安装包的生产 Tauri 构建，再执行全部真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。`main` 推送的前端覆盖率由 Linux `ci.yml` 负责，Windows 不重复运行。
+- `main` 分支 push、`v*` 发布标签、每周定时和手工触发：运行版本/文档同步、Rust check / 完整串行 workspace test（主应用和 Gateway）与无安装包的生产 Tauri 构建，再执行全部真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。Linux `ci.yml` 执行同一行为矩阵但不套用 Windows 覆盖率阈值；Windows/Node 24 对 main、完整验收和选择器要求 coverage 的 PR 执行校准阈值。
+- DSH、写章契约、生产载体及完整门禁还执行 `npm run test:e2e:writing-faults`：新鲜构建无 E2E feature 的生产载体，在隔离 profile 中运行固定回环模型故障规格，不访问正式配置或云模型。PR 由共享选择器选中，其他完整运行显式执行；失败向上返回非零。默认使用测试 target 缓存而不覆盖用户 release EXE，显式 `--skip-build --app <fresh-exe>` 仅用于复用本轮已构建的确定产物，载体/Gateway 哈希仍必须通过验证。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 

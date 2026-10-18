@@ -60,7 +60,7 @@ describe('Sidebar', () => {
         .map((link) => link.textContent),
     ).toEqual(['会话', '项目', '资源中心']);
 
-    fireEvent.click(screen.getByRole('button', { name: '新建创作任务' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建创作会话' }));
     expect(screen.getByTestId('location').textContent).toBe('/|{"workbenchIntent":"new-task"}');
   });
 
@@ -71,6 +71,14 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('group', { name: '快捷操作' })).toBeNull();
     expect(screen.getByRole('link', { name: '章节审阅' }).getAttribute('aria-current')).toBe(
       'page',
+    );
+  });
+
+  it('carries the current project when starting a conversation from its detail page', () => {
+    renderSidebar('/novels/new-novel/outline');
+    fireEvent.click(screen.getByRole('button', { name: '新建创作会话' }));
+    expect(screen.getByTestId('location').textContent).toBe(
+      '/|{"workbenchIntent":"new-task","workbenchNovelId":"new-novel"}',
     );
   });
 });

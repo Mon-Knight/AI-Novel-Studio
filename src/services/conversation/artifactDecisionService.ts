@@ -117,14 +117,14 @@ async function assertReviewAuthorizedDraftIntegrity(
     previousChapterText = previousDraft.content;
   }
 
-  const issues = inspectChapterCandidateIntegrity({
+  const errors = inspectChapterCandidateIntegrity({
     candidateText: draft.content,
     previousChapterText,
-  });
-  if (issues.length > 0) {
+  }).filter((issue) => issue.severity === 'error');
+  if (errors.length > 0) {
     throw reviewAdoptionError(
       'WORKBENCH_CHAPTER_INTEGRITY_FAILED',
-      `章节正文采用前完整性复核未通过：${issues.map((issue) => issue.code).join(', ')}。请先修复正文。`,
+      `章节正文采用前完整性复核未通过：${errors.map((issue) => issue.code).join(', ')}。请先修复正文。`,
     );
   }
 }
@@ -357,7 +357,30 @@ export const artifactDecisionService = {
       const currentAuthorization = await this.getAuthorization(input.authorizationId);
       if (currentAuthorization?.status !== 'issued')
         throw new Error('世界规则或授权状态已变化，已阻止采用。');
-      const draft = await draftVersionService.adopt(input.draftId, existing.chapterId);
+      let authorizationAfterAdoption: ReviewAuthorization | undefined;
+      const draft = await draftVersionService.adopt(
+        input.draftId,
+        existing.chapterId,
+        !isTauri()
+          ? {
+              afterFormalAdoption: async (adoptedDraft) => {
+                if (
+                  adoptedDraft.id !== input.draftId ||
+                  adoptedDraft.novelId !== existing.novelId ||
+                  adoptedDraft.chapterId !== existing.chapterId ||
+                  !adoptedDraft.isAdopted
+                ) {
+                  throw new Error('章节草稿采用结果与审阅授权不匹配。');
+                }
+                authorizationAfterAdoption =
+                  await taskConversationService.completeBrowserReviewAdoption(
+                    input.authorizationId,
+                    input.draftId,
+                  );
+              },
+            }
+          : undefined,
+      );
       if (
         draft.id !== input.draftId ||
         draft.novelId !== existing.novelId ||
@@ -366,10 +389,12 @@ export const artifactDecisionService = {
       ) {
         throw new Error('章节草稿采用结果与审阅授权不匹配。');
       }
-      const auth = await taskConversationService.completeBrowserReviewAdoption(
-        input.authorizationId,
-        input.draftId,
-      );
+      const auth =
+        authorizationAfterAdoption ??
+        (await taskConversationService.completeBrowserReviewAdoption(
+          input.authorizationId,
+          input.draftId,
+        ));
       return {
         authorization: auth,
         adoptedDraft: draft,

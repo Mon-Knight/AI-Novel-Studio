@@ -186,7 +186,7 @@ describe('structured artifact candidate review semantics', () => {
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it('does not allow local note editing or another revision after an artifact is decided', async () => {
+  it('keeps a decided candidate read-only while allowing return to its revision composer', async () => {
     const user = userEvent.setup();
     const onDecide = decisionCallback();
     const artifact = characterArtifact();
@@ -227,6 +227,14 @@ describe('structured artifact candidate review semantics', () => {
     }
     expect(screen.queryByTestId('workbench-artifact-apply')).toBeNull();
     expect(onDecide).not.toHaveBeenCalled();
+    // Resuming an already requested revision only restores the composer source.
+    // It must not unlock immutable candidate fields or apply any content.
+    await user.click(screen.getByRole('button', { name: '返回修订输入区' }));
+    expect(onDecide.mock.calls).toEqual([['request_revision']]);
+    for (const field of screen.queryAllByRole('textbox')) {
+      expect((field as HTMLInputElement | HTMLTextAreaElement).disabled).toBe(true);
+    }
+    expect(screen.queryByTestId('workbench-artifact-apply')).toBeNull();
   });
 
   it('locks candidate note editing and application when evidence becomes invalid', async () => {

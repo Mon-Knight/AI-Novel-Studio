@@ -69,11 +69,21 @@ export function useWorkbenchPresentationScroll({
   novelId,
   conversationId,
   artifactFocusRequest,
+  historyHasOlder = false,
+  historyHasNewer = false,
+  historyExpandToken = 0,
+  onLoadOlderHistory,
+  onLoadLatestHistory,
 }: {
   events: readonly WorkbenchPublicEvent[];
   novelId: string;
   conversationId: string;
   artifactFocusRequest?: WorkbenchArtifactFocusRequest | null;
+  historyHasOlder?: boolean;
+  historyHasNewer?: boolean;
+  historyExpandToken?: number;
+  onLoadOlderHistory?: () => void;
+  onLoadLatestHistory?: () => void;
 }) {
   const readingKey = workbenchReadingKey(novelId, conversationId);
   const [initialReading] = useState(() => readWorkbenchPresentationReading(readingKey));
@@ -99,6 +109,18 @@ export function useWorkbenchPresentationScroll({
   const [locationNotice, setLocationNotice] = useState('');
   const [locationVersion, requestLocationRender] = useState(0);
   const rounds = useMemo(() => groupWorkbenchRounds(events), [events]);
+  const roundsRef = useRef(rounds);
+  roundsRef.current = rounds;
+  useEffect(() => {
+    if (!historyExpandToken) return;
+    const current = roundsRef.current;
+    followLatestRef.current = false;
+    setShowLatest(true);
+    setHistoryWindow({
+      firstRoundId: current[0]?.id ?? null,
+      visibleRoundCount: Math.max(current.length, WORKBENCH_HISTORY_PAGE_SIZE),
+    });
+  }, [historyExpandToken]);
   const hiddenRoundCount = presentationWindowStart(
     rounds,
     historyWindow.firstRoundId,
@@ -304,6 +326,10 @@ export function useWorkbenchPresentationScroll({
     followLatestRef.current = true;
     setShowLatest(false);
     setLocatedId('');
+    if (historyHasNewer) {
+      setHistoryWindow({ firstRoundId: null, visibleRoundCount: WORKBENCH_HISTORY_PAGE_SIZE });
+      onLoadLatestHistory?.();
+    }
     const behavior = preferredUserScrollBehavior();
     userJumpRef.current =
       behavior === 'smooth'
@@ -319,11 +345,15 @@ export function useWorkbenchPresentationScroll({
       historyRestoreRef.current = { scrollHeight: node.scrollHeight, scrollTop: node.scrollTop };
     followLatestRef.current = false;
     setShowLatest(true);
-    const firstIndex = Math.max(0, hiddenRoundCount - WORKBENCH_HISTORY_PAGE_SIZE);
-    setHistoryWindow({
-      firstRoundId: rounds[firstIndex]?.id ?? null,
-      visibleRoundCount: rounds.length - firstIndex,
-    });
+    if (hiddenRoundCount > 0) {
+      const firstIndex = Math.max(0, hiddenRoundCount - WORKBENCH_HISTORY_PAGE_SIZE);
+      setHistoryWindow({
+        firstRoundId: rounds[firstIndex]?.id ?? null,
+        visibleRoundCount: rounds.length - firstIndex,
+      });
+      return;
+    }
+    if (historyHasOlder) onLoadOlderHistory?.();
   };
   const collapseEarlierTurns = () => {
     followLatestRef.current = true;

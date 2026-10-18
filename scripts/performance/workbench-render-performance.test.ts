@@ -1,112 +1,202 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { performance } from 'node:perf_hooks';
-import type { AgentMessage } from '../../src/types/agentHarness';
-import type { ToolCallEvent } from '../../src/types/conversation';
+import { createElement, Fragment, type ComponentProps } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { TaskConversationBundle, TaskModelSnapshot } from '../../src/types/conversation';
+import {
+  groupWorkbenchDisplaySegments,
+  groupWorkbenchRounds,
+  presentationWindowStart,
+  projectWorkbenchEvents,
+  WORKBENCH_HISTORY_PAGE_SIZE,
+} from '../../src/features/workbench/workbenchPresentation';
+import { WorkbenchTurn } from '../../src/pages/Workbench/WorkbenchTurn';
 
-// 60 FPS 对应的单帧时间预算为 16.67ms
-const FRAME_BUDGET_MS = 16.67;
+// CPU/SSR regression budgets, not browser frame-rate or real desktop latency claims.
+// Browser layout, painting and input latency are measured in desktop/browser scenarios.
+const BUDGETS = { projectionP95Ms: 150, visibleMessageSsrP95Ms: 100 };
+const epoch = Date.UTC(2026, 8, 10);
+const at = (milliseconds: number) => new Date(epoch + milliseconds).toISOString();
+const model: TaskModelSnapshot = {
+  providerId: 'mock',
+  modelId: 'Mock',
+  runtimeMode: 'mock',
+  capabilities: [],
+  options: {},
+  capturedAt: at(0),
+};
 
-test('Performance: 100 轮长对话（200条消息）虚拟视口裁剪与渲染耗时 < 16.6ms (60 FPS)', () => {
-  // 构造 100 轮完整交互（100条 user + 100条 assistant = 200条消息）
-  const messages: AgentMessage[] = [];
-  for (let i = 1; i <= 100; i++) {
-    messages.push({
-      id: `msg-user-${i}`,
-      role: 'user',
-      content: `这是第 ${i} 轮创作指令：推进第三章情节发展，展开宗门大比的激战分镜与心理描写。`,
-      timestamp: new Date().toISOString(),
-    });
-    messages.push({
-      id: `msg-ai-${i}`,
-      role: 'assistant',
-      content: `【第 ${i} 轮生成正文】：剑气纵横三万里，一剑光寒十九洲。擂台之上，林风长剑微鸣，周身灵力翻涌如潮……（此处省略五百字长文内容）。`,
-      timestamp: new Date().toISOString(),
-    });
-  }
-  assert.equal(messages.length, 200);
-
-  // 模拟 VirtualList 的窗口裁剪与索引计算 (假设视口高度 600px, 单项预估 70px, overscan 5)
-  const itemHeightEstimate = 70;
-  const overscan = 5;
-  const containerHeight = 600;
-  const scrollTop = 3500; // 模拟滚动到中间位置
-
-  const startedAt = performance.now();
-  for (let iter = 0; iter < 50; iter++) {
-    const startIndex = Math.max(0, Math.floor(scrollTop / itemHeightEstimate) - overscan);
-    const endIndex = Math.min(
-      messages.length - 1,
-      Math.ceil((scrollTop + containerHeight) / itemHeightEstimate) + overscan,
-    );
-    const visibleSlice = messages.slice(startIndex, endIndex + 1);
-    assert.ok(visibleSlice.length <= 25, '裁剪后视口内可见元素数应维持在常数级');
-  }
-  const durationMs = performance.now() - startedAt;
-  const avgPerFrameMs = durationMs / 50;
-
-  assert.ok(
-    avgPerFrameMs < FRAME_BUDGET_MS,
-    `100轮对话视口裁剪平均每帧耗时 ${avgPerFrameMs.toFixed(3)}ms 超出 60FPS 预算 ${FRAME_BUDGET_MS}ms`,
-  );
-});
-
-test('Performance: 1000 个 Tool Events 折叠摘要渲染与装配耗时 < 16.6ms (60 FPS)', () => {
-  // 构造 1000 条工具事件
-  const toolEvents: ToolCallEvent[] = [];
-  for (let i = 1; i <= 1000; i++) {
-    toolEvents.push({
-      eventId: `event-${i}`,
-      runId: `run-${Math.floor(i / 10)}`,
-      sequence: i,
-      toolName:
-        i % 3 === 0 ? 'novel.read_context' : i % 3 === 1 ? 'generate_chapter' : 'check_quality',
-      argumentsSummary: { novelId: 'novel-perf-01', query: `query-${i}` },
-      status: 'succeeded',
-      durationMs: 15,
-      createdAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-    });
-  }
-  assert.equal(toolEvents.length, 1000);
-
-  const startedAt = performance.now();
-  // 模拟批量折叠摘要提炼与轻量映射
-  const summaries = toolEvents.map((e) => ({
-    key: e.eventId,
-    icon: e.status === 'succeeded' ? '✓' : '·',
-    toolName: e.toolName,
-    durationMs: e.durationMs,
-    collapsed: true, // 默认折叠，不反序列化庞大参数
-  }));
-  const elapsedMs = performance.now() - startedAt;
-
-  assert.equal(summaries.length, 1000);
-  assert.ok(
-    elapsedMs < FRAME_BUDGET_MS,
-    `1000个工具事件摘要装配耗时 ${elapsedMs.toFixed(3)}ms 超出 60FPS 预算 ${FRAME_BUDGET_MS}ms`,
-  );
-});
-
-test('Performance: 连续思考流（100次高频 onThought 推送）局部更新单次耗时 < 5ms', () => {
-  // 模拟高频思考流推送（每秒数十个 token/chunk）
-  let currentThought = '';
-  let listenerCallCount = 0;
-
-  // 模拟 CurrentThinking 内部的局部流式监听器
-  const thoughtListener = (chunk: string) => {
-    currentThought = chunk;
-    listenerCallCount++;
+function history(roundCount: number): TaskConversationBundle {
+  const bundle: TaskConversationBundle = {
+    conversation: {
+      conversationId: 'performance-task',
+      novelId: 'performance-novel',
+      title: '性能夹具',
+      status: 'waiting_user',
+      createdAt: at(0),
+      updatedAt: at(roundCount * 2000),
+    },
+    turns: [],
+    runs: [],
+    toolEvents: [],
+    artifacts: [],
   };
-
-  const startedAt = performance.now();
-  for (let i = 1; i <= 100; i++) {
-    thoughtListener(`正在分析大纲伏笔... Step ${i}/100: 检查主角林风与反派长生教的恩怨线索。`);
+  for (let index = 0; index < roundCount; index++) {
+    const runId = `run-${index}`;
+    const turnId = `user-${index}`;
+    const start = index * 2000;
+    bundle.turns.push(
+      {
+        turnId,
+        conversationId: 'performance-task',
+        role: 'user',
+        sequence: index * 2 + 1,
+        content: `第${index + 1}轮创作要求`,
+        createdAt: at(start),
+      },
+      {
+        turnId: `assistant-${index}`,
+        conversationId: 'performance-task',
+        role: 'assistant',
+        sequence: index * 2 + 2,
+        runId,
+        content: '候选已保留，请检查来源和正文后决定。'.repeat(150),
+        createdAt: at(start + 700),
+      },
+    );
+    bundle.runs.push({
+      runId,
+      turnId,
+      conversationId: 'performance-task',
+      chapterId: `chapter-${index}`,
+      status: 'completed',
+      modelSnapshot: model,
+      workerId: 'fixture-worker',
+      createdAt: at(start + 1),
+      updatedAt: at(start + 800),
+      finishedAt: at(start + 800),
+    });
+    for (let tool = 0; tool < 10; tool++) {
+      bundle.toolEvents.push({
+        eventId: `tool-${index}-${tool}`,
+        runId,
+        sequence: tool + 1,
+        toolName: tool === 9 ? 'generate_chapter' : 'novel.read_context',
+        argumentsSummary: {},
+        status: 'succeeded',
+        result: { ok: true },
+        createdAt: at(start + 10 + tool * 40),
+        finishedAt: at(start + 20 + tool * 40),
+      });
+    }
+    bundle.artifacts.push({
+      cardId: `card-${index}`,
+      conversationId: 'performance-task',
+      turnId,
+      runId,
+      artifactId: `artifact-${index}`,
+      artifactType: 'chapter_text',
+      title: `候选${index + 1}`,
+      summary: '待作者审阅',
+      status: 'candidate',
+      createdAt: at(start + 600),
+    });
   }
-  const totalMs = performance.now() - startedAt;
-  const avgUpdateMs = totalMs / 100;
+  return bundle;
+}
 
-  assert.equal(listenerCallCount, 100);
-  assert.ok(currentThought.includes('Step 100/100'));
-  assert.ok(avgUpdateMs < 5, `单次思考流局部更新耗时 ${avgUpdateMs.toFixed(3)}ms 超出 5ms 阈值`);
+function p95(samples: number[]): number {
+  const ordered = [...samples].sort((left, right) => left - right);
+  return ordered[Math.ceil(ordered.length * 0.95) - 1];
+}
+
+const turnProps: Omit<ComponentProps<typeof WorkbenchTurn>, 'entry'> = {
+  eventsByRunId: new Map(),
+  newlyArrivedArtifacts: new Set(),
+  decisionBusyCardId: '',
+  chapterSummaryOrchestration: { phase: 'none' },
+  retryRunBlockedReason: '',
+  onDecideArtifact: () => undefined,
+  onRetry: () => undefined,
+  onLocateTurn: () => undefined,
+};
+
+test('production projection and grouping handle 100 rounds and 1000 tools within the CPU budget', (context) => {
+  const bundle = history(100);
+  projectWorkbenchEvents(bundle);
+  const durations: number[] = [];
+  for (let iteration = 0; iteration < 10; iteration++) {
+    const start = performance.now();
+    const events = projectWorkbenchEvents(bundle);
+    const rounds = groupWorkbenchRounds(events);
+    const first = presentationWindowStart(rounds, null, WORKBENCH_HISTORY_PAGE_SIZE);
+    const visible = rounds.slice(first);
+    const segments = visible.flatMap((round) => groupWorkbenchDisplaySegments(round.events));
+    durations.push(performance.now() - start);
+    assert.equal(rounds.length, 100);
+    assert.equal(events.filter((event) => event.kind === 'tool').length, 1000);
+    assert.equal(visible.length, 8);
+    assert.equal(visible[0].id, 'turn:user-92');
+    assert.equal(segments.filter((segment) => segment.kind === 'completed-read').length, 8);
+    assert.ok(visible.every((round) => round.events.some((event) => event.kind === 'artifact')));
+  }
+  const measured = p95(durations);
+  context.diagnostic(`Production projection/grouping p95: ${measured.toFixed(2)} ms (not FPS)`);
+  assert.ok(
+    measured < BUDGETS.projectionP95Ms,
+    `projection p95 ${measured.toFixed(2)} ms exceeded ${BUDGETS.projectionP95Ms} ms`,
+  );
+});
+
+test('the visible message window renders actual WorkbenchTurn components within an SSR CPU budget', (context) => {
+  const rounds = groupWorkbenchRounds(projectWorkbenchEvents(history(100)));
+  const visible = rounds.slice(presentationWindowStart(rounds, null, WORKBENCH_HISTORY_PAGE_SIZE));
+  const messages = visible.flatMap((round) =>
+    round.events.filter((event) => event.kind === 'turn'),
+  );
+  const render = () =>
+    renderToStaticMarkup(
+      createElement(
+        Fragment,
+        null,
+        ...messages.map((entry) =>
+          createElement(WorkbenchTurn, { ...turnProps, entry, key: entry.id }),
+        ),
+      ),
+    );
+  render();
+  const samples: number[] = [];
+  for (let iteration = 0; iteration < 10; iteration++) {
+    const start = performance.now();
+    const html = render();
+    samples.push(performance.now() - start);
+    assert.equal((html.match(/data-testid="workbench-turn"/gu) ?? []).length, 16);
+    assert.ok(html.includes('data-turn-id="user-92"'));
+    assert.ok(html.includes('data-turn-id="assistant-99"'));
+    assert.ok(!html.includes('data-turn-id="user-0"'));
+  }
+  const measured = p95(samples);
+  context.diagnostic(
+    `WorkbenchTurn visible-window SSR p95: ${measured.toFixed(2)} ms (not browser layout/paint)`,
+  );
+  assert.ok(
+    measured < BUDGETS.visibleMessageSsrP95Ms,
+    `SSR p95 ${measured.toFixed(2)} ms exceeded ${BUDGETS.visibleMessageSsrP95Ms} ms`,
+  );
+});
+
+test('production read compaction preserves warnings and failed tool facts at long-history scale', () => {
+  const bundle = history(100);
+  bundle.toolEvents[0] = { ...bundle.toolEvents[0], result: { warning: '上下文未命中' } };
+  bundle.toolEvents[1] = { ...bundle.toolEvents[1], status: 'failed', error: '固定故障夹具' };
+  const events = projectWorkbenchEvents(bundle);
+  const segments = groupWorkbenchDisplaySegments(events);
+  const standalone = segments.flatMap((segment) =>
+    segment.kind === 'event' ? [segment.event] : [],
+  );
+  assert.ok(standalone.some((event) => event.id === 'tool:tool-0-0'));
+  assert.ok(standalone.some((event) => event.id === 'tool:tool-0-1'));
+  assert.ok(standalone.some((event) => event.id === 'tool-error:tool-0-1'));
+  assert.equal(events.filter((event) => event.kind === 'tool').length, 1000);
 });

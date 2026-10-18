@@ -10,6 +10,30 @@ use serde_json::{json, Value};
 
 const TURN_PREFIX: &str = "[[ANS_ARTIFACT_REVISION_TURN:v1]]\n";
 
+pub(super) fn validate_contract(input: &StartTaskTurnInput) -> Result<(), AppError> {
+    if let Some(source) = &input.revision_source {
+        validate_identity(source)?;
+        let matching_kind = match source.artifact_type.as_str() {
+            "chapter_text" => super::is_chapter_writing_turn(input),
+            "outline" => matches!(
+                input.task_kind.as_str(),
+                "outline_generate" | "story_plan_generate"
+            ),
+            "setting_candidates" => input.task_kind == "setting_expand",
+            _ => false,
+        };
+        if !matching_kind
+            || input.expected_artifact_type.as_deref() != Some(source.artifact_type.as_str())
+            || source.conversation_id != input.conversation_id
+            || source.novel_id != input.novel_id
+            || source.chapter_id != input.chapter_id
+        {
+            return Err(invalid_source());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn decode_turn(
     content: &str,
 ) -> Result<(String, Option<ArtifactRevisionSource>), AppError> {
@@ -101,12 +125,8 @@ pub(super) fn freeze_turn_revision(
             return Err(invalid_source());
         }
     }
-    if let Some(source) = &source {
-        if !super::is_chapter_writing_turn(input) || source.conversation_id != input.conversation_id
-        {
-            return Err(invalid_source());
-        }
-    }
+    input.revision_source = source.clone();
+    validate_contract(input)?;
     let verified = source
         .as_ref()
         .map(|source| {

@@ -3,12 +3,31 @@ import assert from 'node:assert/strict';
 import {
   assertTaskGoalExecutable,
   buildDshTurnContract,
+  buildCreativeWorkflowContract,
   classifyTaskIntent,
   findTaskTargetConflict,
   isConversationalGoal,
   isChapterOutlineTaskGoal,
   selectCandidateTool,
 } from './taskGoalRouting';
+
+test('model tool workflow contracts map explicit actions without classifying prose', () => {
+  assert.deepEqual(buildCreativeWorkflowContract('prepare_settings'), {
+    taskKind: 'setting_expand',
+    expectedTool: 'expand_settings',
+    expectedArtifactType: 'setting_candidates',
+    requiredReadTools: ['novel.read_context'],
+  });
+  assert.equal(buildCreativeWorkflowContract('generate_outline').taskKind, 'story_plan_generate');
+  assert.equal(
+    buildCreativeWorkflowContract('generate_outline', 'ch-1').taskKind,
+    'outline_generate',
+  );
+  assert.equal(
+    buildCreativeWorkflowContract('polish_chapter', 'ch-1').expectedTool,
+    'polish_chapter',
+  );
+});
 
 test('chapter outline target intent does not grant an executable tool before target resolution', () => {
   assert.equal(isChapterOutlineTaskGoal('生成第十二章大纲'), true);
@@ -51,6 +70,18 @@ test('negated actions and quoted story text cannot authorize generation', () => 
     selectCandidateTool('请生成本章正文，人物说“不要生成下一章”。', 'ch-3')?.name,
     'generate_chapter',
   );
+});
+
+test('setting revisions remain executable alongside negated prose generation', () => {
+  for (const goal of [
+    '请仅修订所选设定候选的时间线；暂不生成人物大纲正文。',
+    '请根据以下要求修改所选设定候选：\n统一时间线，不要生成正文。',
+  ]) {
+    assert.doesNotThrow(() => assertTaskGoalExecutable(goal));
+    assert.equal(selectCandidateTool(goal)?.name, 'expand_settings');
+  }
+  assert.throws(() => assertTaskGoalExecutable('不要修订所选设定候选'));
+  assert.throws(() => assertTaskGoalExecutable('修订设定候选，但不要修订设定候选'));
 });
 
 test('DSH turn contracts freeze the candidate sink and required grounding reads', () => {
@@ -100,6 +131,48 @@ test('DSH turn contracts freeze the candidate sink and required grounding reads'
     taskKind: 'read',
     requiredReadTools: ['novel.read', 'structure.read'],
   });
+});
+
+test('explicit world and rule generation wins over character nouns in the requirements', () => {
+  for (const directive of [
+    '生成世界观和规则系统候选',
+    '请生成世界观与规则体系候选',
+    '扩展世界设定候选',
+    '整理世界规则',
+    '生成规则系统候选',
+  ]) {
+    const goal = `${directive}。第三人称限知，以沈知微为主角、陆砚为搭档，规则包含人物行为和证据边界。`;
+    assert.equal(selectCandidateTool(goal, 'ch-1')?.name, 'expand_settings', goal);
+    assert.equal(buildDshTurnContract(goal, 'ch-1').taskKind, 'setting_expand', goal);
+  }
+  assert.equal(selectCandidateTool('不要生成世界观和规则系统候选，只读取人物资料'), undefined);
+  assert.equal(
+    selectCandidateTool('生成角色候选。角色生活在世界观和规则系统中')?.name,
+    'generate_characters',
+  );
+});
+
+test('planning generation and a prohibition on prose are separate actions', () => {
+  for (const goal of [
+    '生成全书规划候选，不生成全书正文。',
+    '生成《雾港第七声钟》全书规划候选，20章，每章3200字。先生成规划供审阅，不生成全书正文。',
+    '生成整本故事规划候选，不生成正文。',
+  ]) {
+    assert.doesNotThrow(() => assertTaskGoalExecutable(goal), goal);
+    assert.equal(selectCandidateTool(goal)?.name, 'generate_outline', goal);
+    assert.equal(buildDshTurnContract(goal)?.taskKind, 'story_plan_generate', goal);
+  }
+  for (const goal of [
+    '生成全书规划候选，但不要生成全书规划候选。',
+    '生成故事规划候选，但不要生成故事规划候选。',
+    '生成本章正文，但不要生成本章正文。',
+    '生成本章正文并遵循全书规划，但不要生成本章正文。',
+  ]) {
+    assert.throws(() => assertTaskGoalExecutable(goal), {
+      code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED',
+    });
+    assert.equal(selectCandidateTool(goal, 'ch-1'), undefined, goal);
+  }
 });
 
 test('project asset reads are grounded without broadening generic creative advice', () => {
@@ -539,6 +612,63 @@ test('bilingual golden cases keep chapter, structured, audit, read and greeting 
     assert.equal(isConversationalGoal(item.goal), Boolean(item.conversational), item.goal);
     assert.deepEqual(selectCandidateTool(item.goal, 'ch-1'), item.tool, item.goal);
   }
+});
+
+test('setting candidate revisions retain asset scope when their details mention a chapter', () => {
+  const goal =
+    '请仅修订所选设定候选中的创作准备模板条目，生成一项world_setting修正候选，其他五条不重复输出。修正：第2章感谢信仅提出母亲卷款传闻的疑点，不独自证明清白。保留十章每章3200字，暂不生成人物大纲正文。';
+  assert.equal(classifyTaskIntent(goal), 'structured_write');
+  assert.deepEqual(selectCandidateTool(goal), {
+    name: 'expand_settings',
+    artifactType: 'setting_candidates',
+  });
+  assert.equal(buildDshTurnContract(goal).taskKind, 'setting_expand');
+  assert.equal(classifyTaskIntent('修改第2章正文，遵守所选设定候选'), 'chapter_write');
+});
+
+test('bound outline and setting revisions retain scope for chapter details and bare writing edits', () => {
+  for (const [artifactType, expectedTool] of [
+    ['outline', 'generate_outline'],
+    ['setting_candidates', 'expand_settings'],
+  ] as const) {
+    const source = { artifactType };
+    const goal =
+      artifactType === 'outline'
+        ? '请修订所选全书规划候选。第2章写深秋，写深秋的落叶，其他章节时间线保持一致。不生成正文。'
+        : '请仅修订所选设定候选中的创作准备模板条目，生成一项world_setting修正候选，其他五条不重复输出。修正：第2章感谢信仅提出母亲卷款传闻的疑点，不独自证明清白。保留十章每章3200字，暂不生成人物大纲正文。';
+    assert.doesNotThrow(() => assertTaskGoalExecutable(goal, source));
+    assert.equal(classifyTaskIntent(goal, source), 'structured_write');
+    assert.equal(selectCandidateTool(goal, undefined, source)?.name, expectedTool);
+    assert.equal(buildDshTurnContract(goal, undefined, source).expectedTool, expectedTool);
+  }
+  const source = { artifactType: 'outline', chapterId: 'chapter-1' };
+  assert.equal(
+    selectCandidateTool('修订所选大纲，第2章仅为参照，不生成正文。', 'chapter-1', source)?.name,
+    'generate_outline',
+  );
+});
+
+test('bound asset sources do not authorize contradictory or cross-asset actions', () => {
+  for (const goal of [
+    '不要修订所选设定候选',
+    '修订设定候选，但不要修订设定候选',
+    '修订所选设定，同时生成第2章正文',
+    '修订所选设定并生成第2章正文',
+    '不生成正文，但生成第2章正文',
+    '修改大纲还是生成正文',
+    '修改所选设定，然后生成主角候选',
+  ]) {
+    const source = { artifactType: 'setting_candidates' };
+    assert.throws(
+      () => assertTaskGoalExecutable(goal, source),
+      { code: 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED' },
+      goal,
+    );
+    assert.equal(selectCandidateTool(goal, undefined, source), undefined, goal);
+  }
+  assert.throws(() =>
+    assertTaskGoalExecutable('修订所选大纲，同时生成第2章正文', { artifactType: 'outline' }),
+  );
 });
 
 test('write tasks on the same novel warn without blocking concurrency', () => {

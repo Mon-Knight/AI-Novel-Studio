@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CircleAlert, LoaderCircle, NotebookPen, RefreshCw, Square, X } from 'lucide-react';
+import { NotebookPen } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
-import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import RightPanel from '../../components/right-dock/RightPanel';
 import RightToolbar from '../../components/right-dock/RightToolbar';
@@ -21,6 +20,8 @@ import {
 } from '../../types/rightSidebar';
 import { WorkspaceDocumentSkeleton } from './WorkspaceDocumentSkeleton';
 import { WorkspaceFocusToggle } from './WorkspaceFocusToggle';
+import { ChapterSummaryWorkflowNotice } from '../../components/workspace/ChapterSummaryWorkflowNotice';
+import { WorkspaceSummaryDialogs } from './WorkspaceSummaryDialogs';
 
 export default function WritingWorkspaceView({
   novelId,
@@ -172,7 +173,17 @@ export default function WritingWorkspaceView({
         <GlobalAiTaskModal state={aiModal} />
         <div className="workspace-topbar">
           <div className="workspace-topbar-title">
-            <BackButton label="返回创作工作台" to="/" />
+            {activeChapter && reviewAuthorizationId && !e2ePanelsEnabled ? (
+              <ChapterSummaryWorkflowNotice
+                novelId={novelId}
+                chapter={activeChapter}
+                authorizationId={reviewAuthorizationId}
+                returnOnly
+                onBeforeNavigate={actions.confirmEditorLeave}
+              />
+            ) : (
+              <BackButton label="返回创作工作台" to="/" />
+            )}
           </div>
           <div className="workspace-topbar-spacer" aria-hidden="true" />
           <WorkspaceFocusToggle
@@ -250,6 +261,15 @@ export default function WritingWorkspaceView({
               </div>
             )}
             <PanelErrorBoundary panelTitle="正文编辑区">
+              {activeChapter && !e2ePanelsEnabled && (
+                <ChapterSummaryWorkflowNotice
+                  novelId={novelId}
+                  chapter={activeChapter}
+                  authorizationId={reviewAuthorizationId}
+                  compact
+                  onBeforeNavigate={actions.confirmEditorLeave}
+                />
+              )}
               <EditorArea
                 ref={refs.editor}
                 chapter={activeChapter}
@@ -400,87 +420,7 @@ export default function WritingWorkspaceView({
         />
       )}
 
-      {summary.dialogOpen && summary.result && (
-        <ChapterSummaryDialog
-          result={summary.result}
-          chapterTitle={activeChapter?.title || ''}
-          loading={summary.loading}
-          error={summary.error}
-          onClose={() => {
-            summary.setDialogOpen(false);
-            summary.setResult(null);
-            summary.setError('');
-          }}
-          onConfirm={summary.save}
-          onRegenerate={summary.regenerate}
-        />
-      )}
-
-      {summary.loading && !summary.result && (
-        <>
-          <div className="right-panel-overlay" onClick={summary.stop} />
-          <div className="right-panel workspace-summary-panel">
-            <div className="right-panel-header">
-              <span className="right-panel-title">
-                <LoaderCircle
-                  className="workspace-spinning-icon"
-                  aria-hidden="true"
-                  size={16}
-                  strokeWidth={1.8}
-                />
-                <span>生成章节总结</span>
-              </span>
-              <button
-                className="right-panel-close"
-                onClick={summary.stop}
-                aria-label="停止生成"
-                title="停止生成"
-              >
-                <Square aria-hidden="true" size={13} strokeWidth={1.8} />
-              </button>
-            </div>
-            <div className="right-panel-body">
-              <div className="workspace-summary-state">
-                AI 正在分析已采用正文，提取关键信息……
-                <button className="btn btn-secondary workspace-summary-stop" onClick={summary.stop}>
-                  停止总结
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {summary.error && !summary.dialogOpen && (
-        <>
-          <div className="right-panel-overlay" onClick={() => summary.setError('')} />
-          <div className="right-panel workspace-summary-panel">
-            <div className="right-panel-header">
-              <span className="right-panel-title">
-                <CircleAlert aria-hidden="true" size={16} strokeWidth={1.8} />
-                <span>总结失败</span>
-              </span>
-              <button
-                className="right-panel-close"
-                onClick={() => summary.setError('')}
-                aria-label="关闭错误"
-                title="关闭"
-              >
-                <X aria-hidden="true" size={17} strokeWidth={1.8} />
-              </button>
-            </div>
-            <div className="right-panel-body">
-              <div className="workspace-summary-error">{summary.error}</div>
-              <div className="workspace-summary-actions">
-                <button className="btn btn-primary btn-sm" onClick={summary.regenerate}>
-                  <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span>重试</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      <WorkspaceSummaryDialogs summary={summary} chapterTitle={activeChapter?.title || ''} />
 
       {(recoveryPrompt.status === 'available' || recoveryPrompt.status === 'conflict') && (
         <RecoveryDialog

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
+import { isModelLedCreativeTurn } from '../../services/dsh/taskSessionAdapter';
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import { WorkbenchModelSelect } from './WorkbenchModelSelect';
@@ -25,6 +26,10 @@ import type { WorkbenchTaskTemplate } from './workbenchTaskTemplates';
 import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
 import { GrowingGoalTextarea } from './GrowingGoalTextarea';
 import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
+import {
+  useWorkbenchWordPreview,
+  type WorkbenchWordPreviewContext,
+} from '../../features/workbench/useWorkbenchWordPreview';
 
 export type TaskTemplate = WorkbenchTaskTemplate;
 
@@ -44,6 +49,7 @@ function resolveCoreAssetReadyCount(
 }
 
 interface WorkbenchComposerProps {
+  wordPreviewContext?: WorkbenchWordPreviewContext;
   scopeKey?: string;
   revisionSource?: ArtifactRevisionSource | null;
   onClearRevisionSource?: () => void;
@@ -52,6 +58,10 @@ interface WorkbenchComposerProps {
   pluginsLoading: boolean;
   pluginsError: string;
   selectedModel: TaskModelSnapshot;
+  modelChangePending?: boolean;
+  modelSelectionDisabled?: boolean;
+  modelChangeError?: string;
+  onModelChange?: (value: string) => void;
   draft: string;
   composerError: string;
   conflictMessage?: string;
@@ -80,6 +90,7 @@ interface WorkbenchComposerProps {
 }
 
 export function WorkbenchComposer({
+  wordPreviewContext,
   scopeKey = '',
   revisionSource,
   onClearRevisionSource,
@@ -88,6 +99,10 @@ export function WorkbenchComposer({
   pluginsLoading,
   pluginsError,
   selectedModel,
+  modelChangePending = false,
+  modelSelectionDisabled = false,
+  modelChangeError = '',
+  onModelChange,
   draft,
   composerError,
   conflictMessage,
@@ -113,6 +128,7 @@ export function WorkbenchComposer({
   onOpenAssetScopePath,
   onShowPlugins,
 }: WorkbenchComposerProps) {
+  const wordPreview = useWorkbenchWordPreview(wordPreviewContext, draft);
   const {
     composerRef,
     extrasRef,
@@ -136,7 +152,7 @@ export function WorkbenchComposer({
         ? 'archived'
         : 'idle';
   const composerDisabled = composerState === 'archived';
-  const executionLocked = composerState !== 'idle';
+  const executionLocked = composerState !== 'idle' || modelChangePending;
   const templatesDisabled = executionLocked || chaptersLoading;
   const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
   const modelAvailability = getWorkbenchModelAvailability({
@@ -144,21 +160,24 @@ export function WorkbenchComposer({
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
-    selectionLocked: true,
     credentialAvailable,
   });
   const conversationalDraft = isConversationalGoal(draft);
+  const localConversation =
+    conversationalDraft &&
+    !isModelLedCreativeTurn({
+      goal: draft,
+      modelSnapshot: selectedModel,
+      revisionSource: revisionSource ?? undefined,
+    });
   const canSendDraft = Boolean(
     draft.trim() &&
     taskReady &&
-    (!contextPending || conversationalDraft) &&
-    (!contextFailed || conversationalDraft) &&
+    (!contextPending || localConversation) &&
+    (!contextFailed || localConversation) &&
     (modelAvailability.canSend || conversationalDraft),
   );
-  const modelDirectoryMessage =
-    modelAvailability.status === 'available' || !modelAvailability.message
-      ? modelAvailability.message
-      : `${modelAvailability.message} 本地能力问答仍可发送。`;
+  const modelDirectoryMessage = modelAvailability.message;
   const coreAssetReadyCount = resolveCoreAssetReadyCount(assetScope, hasChapter);
   const coreAssetSummary = `核心 ${coreAssetReadyCount ?? '--'}/${CORE_ASSET_TOTAL}`;
 
@@ -256,7 +275,7 @@ export function WorkbenchComposer({
                 strokeWidth={1.8}
               />
               <span className="workbench-readiness-copy">
-                此任务已归档；恢复任务后才能继续发送目标。
+                此会话已归档；恢复会话后可以继续对话。
               </span>
             </div>
           )}
@@ -269,13 +288,13 @@ export function WorkbenchComposer({
             onOpenSettings={onOpenModelSettings}
             onCreateTask={onCreateTaskWithCurrentModel}
           />
-          {composerError && (
+          {(composerError || modelChangeError) && (
             <div
               className="workbench-inline-error"
               data-testid="workbench-composer-error"
               role="alert"
             >
-              {composerError}
+              {modelChangeError || composerError}
             </div>
           )}
           {conflictMessage && (
@@ -335,6 +354,11 @@ export function WorkbenchComposer({
           }}
         />
 
+        {wordPreview && (
+          <p className="text-sm text-muted" role="status" data-testid="workbench-word-preview">
+            {wordPreview}
+          </p>
+        )}
         <GrowingGoalTextarea
           data-testid="workbench-composer-input"
           aria-label="创作目标"
@@ -352,7 +376,7 @@ export function WorkbenchComposer({
               onSend();
             }
           }}
-          placeholder="描述这次要推进的创作目标"
+          placeholder="说说你的想法，我们一起完善故事"
           aria-keyshortcuts="Control+Enter Meta+Enter"
           rows={2}
           disabled={composerDisabled}
@@ -414,12 +438,19 @@ export function WorkbenchComposer({
             selectedModel={selectedModel}
             refreshing={pluginsLoading}
             refreshError={pluginsError}
-            disabled={executionLocked}
-            locked
-            lockedReason={hasTask ? undefined : '新建任务时选择模型；创建后固定。'}
+            disabled={executionLocked || modelSelectionDisabled || !hasTask || !taskReady}
+            onChange={onModelChange}
           />
 
-          {composerState === 'preparing' ? (
+          {modelChangePending ? (
+            <span
+              className="workbench-composer-note"
+              data-testid="workbench-model-saving"
+              role="status"
+            >
+              正在保存模型选择
+            </span>
+          ) : composerState === 'preparing' ? (
             <span
               className="workbench-composer-note"
               data-testid="workbench-task-preparing"
@@ -429,7 +460,7 @@ export function WorkbenchComposer({
             </span>
           ) : !taskReady ? (
             <span className="workbench-composer-note" data-testid="workbench-task-pending">
-              {hasTask ? '任务恢复中，草稿会保留' : '请先新建创作任务'}
+              {hasTask ? '会话恢复中，草稿会保留' : '请先新建创作会话'}
             </span>
           ) : (
             chaptersLoading && <span className="workbench-composer-note">正在读取章节…</span>

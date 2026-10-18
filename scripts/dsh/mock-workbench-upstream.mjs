@@ -27,6 +27,10 @@
  *                        is switched again (fail-closed + explicit retry drill).
  *   hold-generate        the generate_chapter completion never finishes until the client
  *                        disconnects (process restart / cancellation drills).
+ *   upstreamFailureScope defaults to all; chapter-write injects HTTP faults only when the
+ *                        roster advertises generate_chapter, after normal creative planning.
+ * Creative-dialogue rosters read context and request creative.plan_action; they never emit
+ * chapter candidates or consume the scripted candidate sequence.
  * The in-process handle exposes `configure()` so one server can switch modes and ids between
  * scenarios without rebinding its port.
  *
@@ -88,6 +92,7 @@ const CANONICAL_READ_UNDERSCORED = Object.freeze([
   ['memory.search', 'memory_search'],
 ]);
 const GENERATE_TOOL = 'generate_chapter';
+const CREATIVE_PLAN_TOOL = 'creative.plan_action';
 const MODEL_TOOL_ATTESTATION_NAME = 'ans_runtime_attest_tool_call_v1';
 
 const TOOL_MARKERS = new Map([
@@ -99,6 +104,7 @@ const TOOL_MARKERS = new Map([
   ['chapter.read_outline', ['chapter_read_outline', 'get_chapter_context']],
   ['get_character_states', ['get_character_states']],
   ['search_memory', ['search_memory']],
+  [CREATIVE_PLAN_TOOL, ['creative_plan_action']],
   [GENERATE_TOOL, ['generate_chapter']],
 ]);
 
@@ -155,6 +161,10 @@ function resolveCandidateTexts(value) {
 
 function resolveOptions(options = {}) {
   const mode = resolveMode(options.mode ?? process.env.MOCK_WORKBENCH_MODE);
+  const upstreamFailureScope = options.upstreamFailureScope ?? 'all';
+  if (!['all', 'chapter-write'].includes(upstreamFailureScope)) {
+    throw new TypeError('upstreamFailureScope must be all or chapter-write');
+  }
   const defaultDelay = mode === 'cancel' ? 30_000 : mode === 'delay' ? 150 : 0;
   const port = integerOption(
     options.port ?? process.env.MOCK_WORKBENCH_PORT ?? 0,
@@ -166,6 +176,7 @@ function resolveOptions(options = {}) {
   }
   return Object.freeze({
     mode,
+    upstreamFailureScope,
     port,
     novelId: nonEmptyOption(
       options.novelId ?? process.env.MOCK_WORKBENCH_NOVEL_ID,
@@ -397,6 +408,14 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
         query: '章节创作上下文',
         topK: 5,
       };
+    case CREATIVE_PLAN_TOOL:
+      return {
+        novelId: options.novelId,
+        chapterId: options.chapterId,
+        action: GENERATE_TOOL,
+        instruction:
+          '生成本章正文，描写演武场激战与天生异象；沿用任务已确认的字数目标，只提交供人工审阅的章节候选。',
+      };
     case GENERATE_TOOL:
       if (options.mode === 'cross-novel') {
         // The reads stayed in scope; only the candidate submission points at another book.
@@ -521,9 +540,13 @@ function createPlan(body, options, sequence) {
   }
 
   const advertisedCanonicalReads = CANONICAL_READ_TOOLS.filter((name) => byCanonical.has(name));
+  if (byCanonical.has(CREATIVE_PLAN_TOOL) && byCanonical.has(GENERATE_TOOL)) {
+    throw new ContractError('creative dialogue and chapter writing tools must use separate runs');
+  }
   const canonicalOnly =
     advertisedCanonicalReads.length > 0 &&
     !byCanonical.has('novel.read_context') &&
+    !byCanonical.has(CREATIVE_PLAN_TOOL) &&
     !byCanonical.has(GENERATE_TOOL);
   if (canonicalOnly) {
     const missingCanonical = advertisedCanonicalReads.filter((name) => !alreadyCalled.has(name));
@@ -549,6 +572,22 @@ function createPlan(body, options, sequence) {
       kind: 'tools',
       phase: 'context-tools',
       calls: createToolCalls(missingContext, byCanonical, options, sequence),
+      advertisedToolNames: actualNames,
+    };
+  }
+  if (byCanonical.has(CREATIVE_PLAN_TOOL)) {
+    if (!alreadyCalled.has(CREATIVE_PLAN_TOOL)) {
+      return {
+        kind: 'tools',
+        phase: 'creative-plan-action',
+        calls: createToolCalls([CREATIVE_PLAN_TOOL], byCanonical, options, sequence),
+        advertisedToolNames: actualNames,
+      };
+    }
+    return {
+      kind: 'text',
+      phase: 'creative-dialogue-final',
+      text: '已请求本章的候选创作工作流。正文将由章节写作回合生成，等待人工审阅。',
       advertisedToolNames: actualNames,
     };
   }
@@ -810,6 +849,7 @@ async function handleChat(request, response, state, pathname) {
 
     const injectFailure =
       !hasAttestationTool(body) &&
+      (options.upstreamFailureScope === 'all' || wireTools(body).byCanonical.has(GENERATE_TOOL)) &&
       (options.mode === 'upstream-error' ||
         (options.mode === 'upstream-error-once' && state.injectedUpstreamFailures === 0));
     if (injectFailure) {

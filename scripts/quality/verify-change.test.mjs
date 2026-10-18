@@ -191,6 +191,42 @@ test('Git selection includes staged/unstaged/untracked and both sides of renames
     calls.filter((args) => args[0] === 'diff').every((args) => args.includes('--no-renames')),
   );
 });
+test('full native verification executes every workspace member, including the gateway', () => {
+  const plan = createVerificationPlan(['src-tauri/gateway/src/tools.rs'], tests);
+  const full = commands(plan).find(({ id }) => id === 'rust-full');
+  assert.ok(full.args.includes('--workspace'));
+  assert.ok(full.args.includes('--locked'));
+  assert.ok(full.args.includes('--test-threads=1'));
+  assert.equal(full.requiresCases, true);
+});
+
+test('offline writing fault scenarios are selected for DSH and full gates, not ordinary UI changes', () => {
+  for (const file of [
+    'src-tauri/gateway/src/tools.rs',
+    'tests/real-acceptance/writing-subagent-fault-injection.spec.ts',
+    '.github/workflows/ci.yml',
+  ]) {
+    const plan = createVerificationPlan([file], tests);
+    assert.equal(plan.faultInjection, true, file);
+    const step = commands(plan, 'desktop').find(({ id }) => id === 'writing-fault-injection');
+    assert.ok(step.args.includes('test:e2e:writing-faults'), file);
+    assert.equal(step.requiresCases, true);
+    assert.ok(!commands(plan, 'native').some(({ id }) => id === step.id));
+  }
+  const ui = createVerificationPlan(['src/pages/Workbench/example.tsx'], tests);
+  assert.equal(ui.faultInjection, false);
+});
+
+test('unknown Rust modules cannot pass through compilation and size checks alone', () => {
+  for (const file of [
+    'src-tauri/src/services/new_business.rs',
+    'src-tauri/src/repositories/new_domain.rs',
+    'src-tauri/shared/unknown_contract.rs',
+  ]) {
+    assert.throws(() => createVerificationPlan([file], []), /Unmapped change/u, file);
+  }
+});
+
 test('failed checks remain failures, and stale gateway prerequisites block dependent execution', async () => {
   const calls = [];
   const steps = ['behavior-1', 'gateway-build', 'rust-full'].map((id) => ({

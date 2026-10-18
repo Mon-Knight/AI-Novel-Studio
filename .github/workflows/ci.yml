@@ -41,7 +41,8 @@ jobs:
         if: github.event_name != 'pull_request'
       - run: npm run test:rust-file-size
         if: github.event_name != 'pull_request'
-      - run: npm run test:coverage
+      - name: Run full behavior matrix (coverage thresholds are Windows-only)
+        run: npm run test:all
         if: github.event_name != 'pull_request'
       - name: Run real Chromium browser-mode E2E
         if: github.event_name != 'pull_request'

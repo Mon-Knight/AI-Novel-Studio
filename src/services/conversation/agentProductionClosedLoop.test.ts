@@ -39,6 +39,7 @@ import { resolveEditorDraftContent } from '../../components/workspace/editor-are
 import type { AiSettings } from '../../types/ai';
 import type { ReviewCandidateDocument } from '../../types/conversation';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { autonomousSchedulerWorker } from '../autonomous-creation/autonomousSchedulerWorker';
 
 async function saveGuardedWorldSetting(
   novelId: string,
@@ -491,6 +492,30 @@ test('12 & 13 & 14 & 15 & 16. 浏览器审阅协议可保存与采用（不作�
   assert.ok(adoptedInDb);
   assert.equal(adoptedInDb.id, savedDraft.id);
   assert.equal(adoptedInDb.isAdopted, true);
+});
+
+test('正式采用不因后置自主调度投影失败而回滚或误报失败', async () => {
+  const novel = await novelRepository.create({ title: '采用后置投影失败测试作品' });
+  const chapter = await chapterRepository.create({ novelId: novel.id, title: '第1章' });
+  const draft = await draftVersionService.create({
+    novelId: novel.id,
+    chapterId: chapter.id,
+    content: '采用后的正式正文。',
+    source: 'user_edited',
+  });
+
+  const originalPromote = autonomousSchedulerWorker.promoteUserAdoptedDraft;
+  autonomousSchedulerWorker.promoteUserAdoptedDraft = async () => {
+    throw new Error('TEST_POST_ADOPTION_PROJECTION_FAILURE');
+  };
+  try {
+    const adopted = await draftVersionService.adopt(draft.id, chapter.id);
+    assert.equal(adopted.id, draft.id);
+    assert.equal(adopted.isAdopted, true);
+    assert.equal((await draftVersionService.getAdoptedByChapterId(chapter.id))?.id, draft.id);
+  } finally {
+    autonomousSchedulerWorker.promoteUserAdoptedDraft = originalPromote;
+  }
 });
 
 test('17 & 18. 浏览器协议的跨作品数据隔离与连续多轮闭环', async () => {

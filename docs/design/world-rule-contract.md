@@ -112,6 +112,8 @@ Gateway 的 `novel.read_context` 全量投影当前作品所有启用世界设�
 
 ## 8. 事实核对入口
 
+采用稿复核入口通过既有设定编辑表单提交修改。新来源引用使用 `ans-adopted-chapter-v1:<chapterId>:<draftId>:<sha256>`，附于已识别元数据的 `provenance.sourceRefs` 及本次作者确认说明；未知旧元数据保持原样。`world_setting_service` 在既有 IMMEDIATE 事务内复验新引用和本次确认引用的作品/章节/采用指针、完整正文及哈希，失效时返回 `CHAPTER_SOURCE_CHANGED` 并零写入。已有历史元数据引用保留为历史，不因随后改采而阻止无关编辑。浏览器对同一捕获状态做来源校验及写前复验，仍不等于 SQLite 事务。
+
 - 类型与 UI：`src/types/worldRules.ts`、`src/services/worldRules/*`、`WorldSettingCard` / `RuleSystemCard` / `SettingEditForm` / `WorldRuleChangeConfirmation`。
 - 保存与原生治理：`src/services/database/settingRepository.ts`、`src-tauri/src/services/world_rule_schema.rs`、`world_rule_governance.rs`、`world_setting_service.rs`。
 - 采用事实：`setting_suggestion_adoption_service.rs`、`structured_artifact_apply_service.rs`、`structured_rule_apply_receipt.rs`、`conversation_repository.rs`；浏览器为 `settingSuggestionLocalStore.ts`、`browserChapterReviewBaseline.ts`。

@@ -69,6 +69,13 @@ fn save_governed_change(
         previous_json.as_deref(),
         auth.as_ref().map(|a| a.intent.as_str()),
     )?;
+    crate::services::chapter_source_reference::validate_change_source(
+        &transaction,
+        novel_id,
+        change.structured_json.as_deref(),
+        previous_json.as_deref(),
+        auth.as_ref().and_then(|a| a.notes.as_deref()),
+    )?;
     world_rule_governance::authorize_rule_change(
         &transaction,
         novel_id,

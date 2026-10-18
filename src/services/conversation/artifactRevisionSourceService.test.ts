@@ -160,3 +160,28 @@ test('browser wrapper identity differs from the unwrapped prose hash', async () 
   assert.equal(result?.contentHash, await computeContentSha256(f.content));
   assert.notEqual(result?.contentHash, result?.source.artifactHash);
 });
+
+test('desktop project candidate revisions accept a null chapter but reject a real mismatch', async () => {
+  const f = await fixture();
+  delete f.source.chapterId;
+  f.source.artifactType = 'outline';
+  f.bundle.artifacts[0].artifactType = 'outline';
+  f.bundle.decisions![0].targetType = 'asset';
+  f.bundle.decisions![0].targetId = 'novel-a';
+  // Rust Option fields arrive as JSON null; the captured source omits absent fields.
+  f.artifact.artifact = JSON.parse(
+    JSON.stringify({ ...f.artifact.artifact, artifactType: 'outline', sourceChapterId: null }),
+  );
+  const input = { conversationId: 'task-a', novelId: 'novel-a', revisionSource: f.source };
+  const dependencies = {
+    persistent: true,
+    getConversation: async () => f.bundle,
+    getArtifact: async () => f.artifact,
+  };
+  assert.equal((await verifyArtifactRevisionSource(input, dependencies))?.content, f.content);
+  f.artifact.artifact.sourceChapterId = 'unexpected-chapter';
+  await assert.rejects(verifyArtifactRevisionSource(input, dependencies), /修订来源已失效/);
+  f.artifact.artifact.sourceChapterId = undefined;
+  f.source.chapterId = 'unexpected-chapter';
+  await assert.rejects(verifyArtifactRevisionSource(input, dependencies), /修订来源已失效/);
+});

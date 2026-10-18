@@ -72,6 +72,21 @@ describe('workbench conversation selection', () => {
     expect(findFirstActiveConversation(directory, 'missing')).toBeUndefined();
   });
 
+  it('does not replace a saved task model with an older directory read', () => {
+    const saved = task('a1', 'a', {
+      updatedAt: '2026-10-13T00:00:00Z',
+      defaultModel: {
+        providerId: 'mock',
+        modelId: 'B',
+        runtimeMode: 'mock',
+        capabilities: [],
+        options: {},
+        capturedAt: '2026-10-13T00:00:00Z',
+      },
+    });
+    expect(mergeConversationDirectoryItems([saved], [task('a1', 'a')])[0]).toBe(saved);
+  });
+
   it('replaces one conversation and re-sorts the directory by recency only', () => {
     const first = task('a1', 'a', { updatedAt: '2026-09-11T00:00:00Z' });
     const second = task('a2', 'a');

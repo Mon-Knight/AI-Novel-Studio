@@ -22,6 +22,7 @@ import {
 } from '../../../services/conversation/workbenchSelectionStore';
 import { resolveConversationTargetChapter } from '../workbenchHelpers';
 import { useWorkbenchConversationDirectory } from '../../../features/workbench/useWorkbenchConversationDirectory';
+import { useWorkbenchConversationBundle } from './useWorkbenchConversationBundle';
 import {
   findConversationById,
   findFirstActiveConversation,
@@ -43,7 +44,6 @@ export function useWorkbenchConversations() {
   const [conversations, setConversations] = useState<TaskConversation[]>([]);
   const [selectedNovelId, setSelectedNovelId] = useState('');
   const [selectedConversationId, setSelectedConversationId] = useState('');
-  const [bundle, setBundle] = useState<TaskConversationBundle | null>(null);
   const [chapterId, setChapterId] = useState<string | undefined>();
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedModel, setSelectedModel] = useState<TaskModelSnapshot>(() =>
@@ -52,7 +52,6 @@ export function useWorkbenchConversations() {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [initialDirectoryLoading, setInitialDirectoryLoading] = useState(true);
   const [conversationsLoading, setConversationsLoading] = useState(true);
-  const [bundleLoading, setBundleLoading] = useState(false);
   const [chaptersLoading, setChaptersLoading] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
   const [projectsError, setProjectsError] = useState('');
@@ -64,11 +63,9 @@ export function useWorkbenchConversations() {
   const selectedConversationRef = useRef('');
   const novelsRef = useRef<Novel[]>([]);
   const conversationsRef = useRef<TaskConversation[]>([]);
-  const bundleRef = useRef<TaskConversationBundle | null>(null);
   const chaptersNovelRef = useRef('');
   const initialRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
-  const bundleRequestRef = useRef(0);
   const selectionRevisionRef = useRef(0);
   const taskChapterSelectionRef = useRef(new Map<string, string>());
   const recentTaskByProjectRef = useRef(new Map<string, string>());
@@ -105,55 +102,56 @@ export function useWorkbenchConversations() {
     setSelectedConversationId(conversationId);
   }, []);
 
-  const clearBundle = useCallback(() => {
-    bundleRequestRef.current += 1;
-    bundleRef.current = null;
-    setBundle(null);
-    setBundleLoading(false);
-  }, []);
-
-  const refreshBundle = useCallback(async (conversationId: string) => {
-    if (!conversationId || selectedConversationRef.current !== conversationId) return;
-    const requestId = ++bundleRequestRef.current;
-    const replacingConversation = bundleRef.current?.conversation.conversationId !== conversationId;
-    if (replacingConversation) setBundleLoading(true);
-    setConversationsError('');
-
-    try {
-      await startupCoordinator.waitForConversationRecovery();
-      const next = await taskConversationService.get(conversationId);
-      if (!next) throw new Error('创作任务内容不存在或已移除。');
-      if (
-        requestId !== bundleRequestRef.current ||
-        selectedConversationRef.current !== conversationId
-      ) {
-        return;
-      }
-      bundleRef.current = next;
-      setBundle(next);
+  const onBundleLoaded = useCallback(
+    (next: TaskConversationBundle, page: { hasNewer: boolean }) => {
       setSelectedModel(next.conversation.defaultModel ?? captureTaskModelSnapshot());
-      const targetChapterId =
-        taskChapterSelectionRef.current.get(conversationId) ??
-        resolveConversationTargetChapter(next);
-      if (targetChapterId) {
-        taskChapterSelectionRef.current.set(conversationId, targetChapterId);
-        setChapterId(targetChapterId);
+      if (page.hasNewer) return;
+      const conversationId = next.conversation.conversationId;
+      const remembered = taskChapterSelectionRef.current.get(conversationId);
+      const targetChapterId = remembered ?? resolveConversationTargetChapter(next);
+      if (!targetChapterId) return;
+      taskChapterSelectionRef.current.set(conversationId, targetChapterId);
+      setChapterId(targetChapterId);
+    },
+    [],
+  );
+  const {
+    bundle,
+    bundleLoading,
+    bundleStaleError,
+    historyHasOlder,
+    historyHasNewer,
+    historyExpandToken,
+    refreshBundle,
+    loadOlderHistory,
+    loadLatestHistory,
+    ensureArtifactLoaded,
+    clearBundle,
+    invalidate: invalidateBundleRequests,
+    applyConversationUpdate: applyBundleConversationUpdate,
+  } = useWorkbenchConversationBundle({
+    selectedConversationRef,
+    selectedNovelRef,
+    setConversationsError,
+    onLoaded: onBundleLoaded,
+  });
+
+  const applyConversationUpdate = useCallback(
+    (updated: TaskConversation) => {
+      const next = updateConversationInDirectory(
+        conversationsRef.current,
+        updated.conversationId,
+        updated,
+      );
+      conversationsRef.current = next;
+      setConversations(next);
+      if (selectedConversationRef.current === updated.conversationId) {
+        setSelectedModel(updated.defaultModel ?? captureTaskModelSnapshot());
+        applyBundleConversationUpdate(updated);
       }
-    } catch (error) {
-      if (
-        requestId === bundleRequestRef.current &&
-        selectedConversationRef.current === conversationId
-      ) {
-        bundleRef.current = null;
-        setBundle(null);
-        setConversationsError(readableError(error, '创作任务读取失败，请重试。'));
-      }
-    } finally {
-      if (requestId === bundleRequestRef.current && replacingConversation) {
-        setBundleLoading(false);
-      }
-    }
-  }, []);
+    },
+    [applyBundleConversationUpdate],
+  );
 
   const loadChaptersForNovel = useCallback(async (novelId: string) => {
     const requestId = ++chapterRequestRef.current;
@@ -343,9 +341,9 @@ export function useWorkbenchConversations() {
     return () => {
       initialRequestRef.current += 1;
       chapterRequestRef.current += 1;
-      bundleRequestRef.current += 1;
+      invalidateBundleRequests();
     };
-  }, [loadInitialData]);
+  }, [invalidateBundleRequests, loadInitialData]);
 
   const selectProject = useCallback(
     (novelId: string) => {
@@ -530,6 +528,7 @@ export function useWorkbenchConversations() {
     chapters,
     selectedModel,
     setSelectedModel,
+    applyConversationUpdate,
     projectsLoading,
     conversationsLoading,
     bundleLoading,
@@ -548,6 +547,13 @@ export function useWorkbenchConversations() {
     reloadChapters: loadChaptersForNovel,
     loadInitialData,
     refreshBundle,
+    bundleStaleError,
+    historyHasOlder,
+    historyHasNewer,
+    historyExpandToken,
+    loadOlderHistory,
+    loadLatestHistory,
+    ensureArtifactLoaded,
     createTask,
     renameTask,
     setTaskArchived,

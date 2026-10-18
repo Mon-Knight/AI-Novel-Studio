@@ -73,6 +73,11 @@ export interface WorkbenchMessageStreamProps {
   onRefreshAssetReadiness: () => void;
   onResumeChapterGoal: () => void;
   onDismissAssetReadiness: () => void;
+  historyHasOlder?: boolean;
+  historyHasNewer?: boolean;
+  historyExpandToken?: number;
+  onLoadOlderHistory?: () => void;
+  onLoadLatestHistory?: () => void;
 }
 
 export function WorkbenchMessageStream(props: WorkbenchMessageStreamProps) {
@@ -106,6 +111,11 @@ function WorkbenchConversationStream({
   onRefreshAssetReadiness,
   onResumeChapterGoal,
   onDismissAssetReadiness,
+  historyHasOlder = false,
+  historyHasNewer = false,
+  historyExpandToken = 0,
+  onLoadOlderHistory,
+  onLoadLatestHistory,
 }: WorkbenchMessageStreamProps) {
   const { conversationId, novelId } = bundle.conversation;
   const artifactConversationIdRef = useRef<string | null>(null);
@@ -148,7 +158,17 @@ function WorkbenchConversationStream({
     collapseEarlierTurns,
     onScroll,
     onUserScrollIntent,
-  } = useWorkbenchPresentationScroll({ events, novelId, conversationId, artifactFocusRequest });
+  } = useWorkbenchPresentationScroll({
+    events,
+    novelId,
+    conversationId,
+    artifactFocusRequest,
+    historyHasOlder,
+    historyHasNewer,
+    historyExpandToken,
+    onLoadOlderHistory,
+    onLoadLatestHistory,
+  });
   const displaySegments = useMemo(
     () => groupWorkbenchDisplaySegments(visibleEvents),
     [visibleEvents],
@@ -381,9 +401,11 @@ function WorkbenchConversationStream({
         onPointerDown={onUserScrollIntent}
         onKeyDown={onUserScrollIntent}
       >
-        {(hiddenRoundCount > 0 || visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE) && (
+        {(hiddenRoundCount > 0 ||
+          historyHasOlder ||
+          visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE) && (
           <div className="workbench-history-controls" data-testid="workbench-history-controls">
-            {hiddenRoundCount > 0 && (
+            {(hiddenRoundCount > 0 || historyHasOlder) && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -391,7 +413,9 @@ function WorkbenchConversationStream({
                 onClick={loadEarlierTurns}
               >
                 <History aria-hidden="true" size={14} strokeWidth={1.8} />
-                加载更早记录（{Math.min(hiddenRoundCount, WORKBENCH_HISTORY_PAGE_SIZE)} 个完整回合）
+                加载更早记录（
+                {Math.min(hiddenRoundCount || WORKBENCH_HISTORY_PAGE_SIZE, WORKBENCH_HISTORY_PAGE_SIZE)}{' '}
+                个完整回合）
               </button>
             )}
             {visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE && (

@@ -82,9 +82,14 @@ function AppShell({ children }: AppShellProps) {
         revealWorkbenchTree();
         focus.exitFocusMode();
       }
-      navigate('/', { state: { workbenchIntent } satisfies WorkbenchIntentState });
+      navigate('/', {
+        state: {
+          workbenchIntent,
+          ...(context.novelId ? { workbenchNovelId: context.novelId } : {}),
+        } satisfies WorkbenchIntentState,
+      });
     },
-    [focus, navigate, revealWorkbenchTree],
+    [context.novelId, focus, navigate, revealWorkbenchTree],
   );
   useKeyboardShortcuts([
     { key: 'n', ctrlOrMeta: true, allowInInputs: true, action: () => handOff('new-task') },

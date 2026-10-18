@@ -45,6 +45,7 @@ export type WorkbenchIntent = 'new-task' | 'search';
 
 export interface WorkbenchIntentState {
   workbenchIntent?: WorkbenchIntent;
+  workbenchNovelId?: string;
 }
 
 const PROJECT_PAGES: Array<{ suffix: string; label: string; icon: LucideIcon }> = [

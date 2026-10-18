@@ -10,6 +10,7 @@ import {
 } from '../../services/conversation/structuredApplyPolicy';
 import { ArtifactApplyScopeNotice, ArtifactCandidateList } from './ArtifactCandidateList';
 import { ArtifactDecisionActions } from './ArtifactDecisionActions';
+import { SummaryGroundingReview } from './SummaryGroundingReview';
 import { useArtifactCandidateReview } from './hooks/useArtifactCandidateReview';
 import { isStructuredCandidateArtifactType } from './artifactCandidateOptions';
 import {
@@ -330,6 +331,19 @@ export const ArtifactCard = memo(function ArtifactCard({
           disabled={busy || isInvalid}
         />
       ) : null}
+      {artifact.artifactType === 'chapter_summary' &&
+        artifact.content &&
+        !artifact.contentLoadError && (
+          <SummaryGroundingReview
+            artifact={artifact}
+            disabled={busy}
+            onRedo={
+              onDecide && (canAct || decision === 'request_revision' || decision === 'reject')
+                ? (notes) => onDecide('request_revision', notes)
+                : undefined
+            }
+          />
+        )}
       {artifact.contentLoadError && (
         <div
           className="workbench-artifact-load-error"
@@ -367,6 +381,19 @@ export const ArtifactCard = memo(function ArtifactCard({
           busy={busy}
           onDecide={onDecide}
         />
+      )}
+      {decision === 'request_revision' && artifact.artifactId && onDecide && (
+        <div className="workbench-artifact-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            data-testid="workbench-artifact-resume-revision"
+            disabled={busy}
+            title="重新绑定这份候选的修订来源，仅补入输入区，不自动发送或应用"
+            onClick={() => onDecide('request_revision')}
+          >
+            返回修订输入区
+          </button>
+        </div>
       )}
     </article>
   );

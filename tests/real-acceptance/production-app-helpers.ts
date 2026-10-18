@@ -61,6 +61,7 @@ export interface BundleToolEvent {
 
 export interface BundleArtifact {
   cardId: string;
+  runId?: string | null;
   artifactId?: string | null;
   artifactType: string;
   status: string;
@@ -469,6 +470,7 @@ export async function collectConversationEvidence(input: {
   const artifacts: Array<Record<string, unknown>> = [];
   for (const card of bundle.artifacts) {
     const entry: Record<string, unknown> = {
+      runId: card.runId ?? null,
       artifactType: card.artifactType,
       status: card.status,
       hasArtifactId: Boolean(card.artifactId),

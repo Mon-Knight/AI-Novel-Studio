@@ -9,7 +9,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const VALIDATOR_VERSION: &str = "artifact-validator-m1-v2";
+const VALIDATOR_VERSION: &str = "artifact-validator-m1-v3-summary-grounding";
 
 #[path = "chapter_revision_artifact.rs"]
 mod revision_artifact;
@@ -35,8 +35,9 @@ pub struct CreateResultArtifactInput {
 struct ValidationIssue {
     severity: &'static str,
     code: &'static str,
-    message: &'static str,
-    json_path: Option<&'static str>,
+    message: String,
+    json_path: Option<String>,
+    details_json: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,8 +74,9 @@ fn issue(
     ValidationIssue {
         severity,
         code,
-        message,
-        json_path,
+        message: message.to_string(),
+        json_path: json_path.map(str::to_string),
+        details_json: None,
     }
 }
 
@@ -184,7 +186,18 @@ pub(crate) fn create_verified_chapter_revision_artifact(
     connection: &mut Connection,
     input: CreateResultArtifactInput,
 ) -> Result<ResultArtifactBundle, AppError> {
-    if input.artifact_type != "chapter_text"
+    if input.artifact_type != "chapter_text" {
+        return Err(revision_source::invalid_source());
+    }
+    create_verified_revision_artifact(connection, input)
+}
+
+/// DSH plan and chapter revisions retain the same exact-source transaction gate.
+pub(crate) fn create_verified_revision_artifact(
+    connection: &mut Connection,
+    input: CreateResultArtifactInput,
+) -> Result<ResultArtifactBundle, AppError> {
+    if !revision_source::supports_revision(&input.artifact_type)
         || input.schema_version != 1
         || input.parent_artifact_id.is_none()
         || input.derivation_type.as_deref() != Some(revision_source::DERIVATION_TYPE)
@@ -373,6 +386,31 @@ fn create_artifact_internal(
         ));
     }
     validate_structured_target(structured.as_ref(), task.chapter_id.as_deref(), &mut issues);
+    if input.artifact_type == "chapter_summary" {
+        let payload =
+            crate::services::summary_grounding::candidate(&input.raw_content, structured.as_ref());
+        // Every newly created summary uses the current contract. Historical replay
+        // already returned above; a missing producer marker must never downgrade admission.
+        issues.extend(
+            crate::services::summary_grounding_source::validate_candidate(
+                &transaction,
+                &task.novel_id,
+                task.chapter_id.as_deref(),
+                input_snapshot.source_draft_id.as_deref(),
+                input_snapshot.base_content_hash.as_deref(),
+                &payload,
+                true,
+            )?
+            .into_iter()
+            .map(|item| ValidationIssue {
+                severity: item.severity,
+                code: item.code,
+                message: item.message,
+                json_path: Some(item.json_path),
+                details_json: item.details_json,
+            }),
+        );
+    }
     let has_error = issues.iter().any(|item| item.severity == "error");
     let has_warning = issues.iter().any(|item| item.severity == "warning");
     let processing_status = if has_error {
@@ -439,6 +477,11 @@ fn create_artifact_internal(
         },
     )?;
     for (index, validation_issue) in issues.iter().enumerate() {
+        let details_json = validation_issue
+            .details_json
+            .as_ref()
+            .map(canonical_json)
+            .transpose()?;
         artifact_repository::insert_issue(
             &transaction,
             &uuid::Uuid::new_v4().to_string(),
@@ -447,9 +490,9 @@ fn create_artifact_internal(
             index as i64,
             validation_issue.severity,
             validation_issue.code,
-            validation_issue.message,
-            validation_issue.json_path,
-            None,
+            &validation_issue.message,
+            validation_issue.json_path.as_deref(),
+            details_json.as_deref(),
             VALIDATOR_VERSION,
             &now,
         )?;

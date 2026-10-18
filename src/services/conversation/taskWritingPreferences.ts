@@ -6,6 +6,7 @@ import {
   summarizeTaskConstraintBrief,
 } from './taskConstraintBrief';
 import { resolveTaskWordTarget } from './taskWordTarget';
+import { decodeWorkbenchTurnContent } from './workbenchTurnOrigin';
 
 export async function prepareTaskWritingPreferences(input: TaskRuntimeInput) {
   const bundle = await taskConversationService.get(input.conversationId, {
@@ -15,9 +16,11 @@ export async function prepareTaskWritingPreferences(input: TaskRuntimeInput) {
     throw new Error('写章任务对话不存在或不属于当前作品。');
   }
   const brief = deriveTaskConstraintBrief(bundle.turns, input.turnId);
+  const stored = bundle.turns.find((turn) => turn.turnId === input.turnId && turn.role === 'user');
+  const targetGoal = stored ? decodeWorkbenchTurnContent(stored.content).content : input.goal;
   return {
     writerInstruction: composeWorkbenchInstruction(input.goal, brief.constraints),
     taskConstraints: brief.entries.length > 0 ? summarizeTaskConstraintBrief(brief) : undefined,
-    targetWordCount: resolveTaskWordTarget(input.goal, bundle.turns, input.turnId),
+    targetWordCount: resolveTaskWordTarget(targetGoal, bundle.turns, input.turnId),
   };
 }

@@ -102,6 +102,38 @@ pub fn get_task_conversation(
     service::get(&connection, &conversation_id)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRunningTaskTargetsInput {
+    pub novel_id: String,
+}
+
+#[tauri::command]
+pub fn get_task_conversation_window(
+    input: crate::repositories::conversation_repository::ConversationWindowInput,
+) -> Result<
+    Option<crate::repositories::conversation_repository::TaskConversationWindow>,
+    AppError,
+> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::get_conversation_window(&connection, input)
+}
+
+#[tauri::command]
+pub fn list_running_task_targets(
+    input: ListRunningTaskTargetsInput,
+) -> Result<Vec<crate::repositories::conversation_repository::RunningTaskTarget>, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::list_running_task_targets(
+        &connection,
+        &input.novel_id,
+    )
+}
+
 #[tauri::command]
 pub fn get_task_turn_run_projection(
     conversation_id: String,

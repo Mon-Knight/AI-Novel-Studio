@@ -2,6 +2,77 @@ use super::revision_tests::{candidate_source, completed_candidate, decide, fixtu
 use super::*;
 
 #[test]
+fn setting_revision_preserves_exact_source_and_rejects_wrong_type_scope_and_stale_decision() {
+    let (mut connection, mut input) = fixture();
+    input.chapter_id = None;
+    input.chapter_host_gate = None;
+    input.continuity_claim = None;
+    input.task_kind = "setting_expand".to_string();
+    input.expected_tool = Some("expand_settings".to_string());
+    input.expected_artifact_type = Some("setting_candidates".to_string());
+    input.required_read_tools = vec!["novel.read_context".to_string()];
+    input.goal = "生成世界设定候选".to_string();
+    let raw = json!({"settings":[{"name":"旧地址","targetType":"world_setting",
+        "content":"2007年老宅地址。"}]})
+    .to_string();
+    let original = completed_candidate(&mut connection, &input, "setting-source", &raw);
+    let source = candidate_source(&connection, &input, &original);
+    decide(&mut connection, &source, "request_revision");
+    super::revision_tests::append_revision_turn(
+        &mut connection,
+        &mut input,
+        Some(&source),
+        "修订所选设定候选的时间线",
+    );
+    revision_source::freeze_turn_revision(&connection, &mut input).expect("freeze setting source");
+    validate_turn_contract(&input).expect("setting revision contract");
+    assert!(workbench_turn_prompt(&input).contains(&raw));
+    let revised = completed_candidate(
+        &mut connection,
+        &input,
+        "setting-revised",
+        &raw.replace("2007年老宅地址", "2017年寄往2007年老宅地址"),
+    );
+    assert_eq!(
+        revised.artifact.parent_artifact_id.as_deref(),
+        Some(source.artifact_id.as_str())
+    );
+    assert_eq!(
+        revised.artifact.derivation_type.as_deref(),
+        Some("revision")
+    );
+    let mut wrong_type = input.clone();
+    wrong_type.task_kind = "story_plan_generate".to_string();
+    assert!(validate_turn_contract(&wrong_type).is_err());
+    let mut wrong_scope = source.clone();
+    wrong_scope.novel_id = "other-novel".to_string();
+    assert!(
+        crate::services::artifact_service::revision_source::verify_source(
+            &connection,
+            &wrong_scope,
+            &input.novel_id,
+            None,
+        )
+        .is_err()
+    );
+    decide(&mut connection, &source, "reject");
+    assert!(revision_source::revalidate_frozen(&connection, &input).is_err());
+    for table in [
+        "world_settings",
+        "rule_systems",
+        "chapter_drafts",
+        "review_authorizations",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "revision must not apply {table}");
+    }
+}
+
+#[test]
 fn revision_transaction_rejects_unfrozen_mismatched_or_stale_sources_without_artifact_writes() {
     for failure in [
         "input-source",

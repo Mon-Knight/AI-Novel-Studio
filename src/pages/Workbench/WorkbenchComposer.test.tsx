@@ -205,11 +205,10 @@ test('composer exposes preparation without locking or replacing the draft', () =
   assert.doesNotMatch(textarea, /\sdisabled(?:=|\s|>)/u);
   assert.match(html, new RegExp(`>${draft}</textarea>`, 'u'));
   assert.match(openingTag(html, 'button', 'workbench-template-generate-chapter'), /\sdisabled/u);
-  // The composer shows the task-frozen model as an explicit badge, never a live selector.
-  assert.doesNotMatch(html, /<select[^>]*data-testid="workbench-model-select"/u);
-  const modelBadge = openingTag(html, 'div', 'workbench-model-select');
-  assert.match(modelBadge, /data-model-locked="true"/u);
-  assert.match(modelBadge, /role="group"/u);
+  // Preparing freezes this run, not the task's lifetime; the selector remains visible but disabled.
+  const modelSelector = openingTag(html, 'select', 'workbench-model-select');
+  assert.match(modelSelector, /data-model-locked="true"/u);
+  assert.match(modelSelector, /\sdisabled/u);
   assert.match(openingTag(html, 'button', 'workbench-send-task'), /\sdisabled/u);
   assert.doesNotMatch(html, /data-testid="workbench-stop-task"/u);
 });

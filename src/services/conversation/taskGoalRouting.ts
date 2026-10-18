@@ -1,9 +1,10 @@
 import { stripTaskCourtesy, taskGoalDirective } from './taskGoalDirective';
 import { isTaskWordTargetSetting, parseTaskWordTarget } from './taskWordTarget';
+import { boundArtifactRevision, type RevisionRoutingSource } from './artifactRevisionRouting';
 
-export function assertTaskGoalExecutable(goal: string): void {
+export function assertTaskGoalExecutable(goal: string, source?: RevisionRoutingSource): void {
   parseTaskWordTarget(goal);
-  if (!taskGoalDirective(goal).needsClarification) return;
+  if (!taskGoalDirective(goal, boundArtifactRevision(source)?.identity).needsClarification) return;
   throw Object.assign(
     new Error(
       '请明确本回合要执行的一个动作：生成、润色、检查或只读分析；被否定或尚未选择的动作不会执行。',
@@ -33,6 +34,7 @@ export type CanonicalReadToolName =
 export type ContextReadToolName = LegacyContextReadToolName | CanonicalReadToolName;
 
 export type DshTaskKind =
+  | 'creative_dialogue'
   | 'read'
   | 'story_plan_generate'
   | 'outline_generate'
@@ -56,6 +58,12 @@ export interface DshTurnContract {
   expectedArtifactType?: string;
   requiredReadTools: ContextReadToolName[];
 }
+
+export {
+  buildCreativeWorkflowContract,
+  type CreativeWorkflowAction,
+  type CreativePlannedAction,
+} from './creativeDialogueContract';
 
 export type TaskIntent = 'chapter_write' | 'structured_write' | 'audit' | 'read';
 
@@ -122,7 +130,7 @@ const VOLUME_OUTLINE_SCOPE_GOAL =
 const CHAPTER_OUTLINE_ACTION_GOAL =
   /^(?:(?:请|帮我|我想|我要)\s*)*(?:生成|完善|扩展|补全|细化|整理|制定)(?:一下)?\s*(?:(?:一份|一个|新的?)\s*)*(?:(?:本章|当前章(?:节)?|第\s*[\d一二三四五六七八九十百千万]+\s*章)(?:的)?(?:章节)?|章节)\s*(?:大纲|规划)/i;
 const RULE_SETTING_ACTION_GOAL =
-  /^(?:(?:请|帮我|我想|我要|为本作品|为这个作品)\s*)*(?:生成|扩展|整理)(?:一下)?\s*(?:(?:当前|现有|已有|本作品|全书|新的?|更多|一批|一组)\s*)*(?:世界观?规则|规则)(?:候选|体系|设定)?/i;
+  /^(?:(?:请|帮我|我想|我要|为本作品|为这个作品)\s*)*(?:生成|扩展|整理)(?:一下)?\s*(?:(?:当前|现有|已有|本作品|全书|新的?|更多|一批|一组)\s*)*(?:世界观(?:\s*(?:和|与|及|、)?\s*规则(?:系统|体系|设定)?)?|世界(?:规则|设定|背景|与规则设定)|规则(?:系统|体系|设定)?)(?:候选|体系|设定)?/i;
 const FORMAL_NOVEL_ASSET_SCOPE_GOAL =
   /当前|现有|已有|本(?:作品|书|小说|项目)|这(?:个作品|本书|部小说|本小说)|该(?:作品|书|小说|项目)|所选(?:作品|小说)|全书|整本|整部|项目/i;
 const NOVEL_ASSET_READ_GOAL =
@@ -217,9 +225,14 @@ export function isConversationalGoal(goal: string): boolean {
   return CONVERSATIONAL_GOAL.test(text);
 }
 
-function matchCandidateTool(goal: string): CandidateToolChoice | undefined {
-  const parsedDirective = taskGoalDirective(goal);
+function matchCandidateTool(
+  goal: string,
+  source?: RevisionRoutingSource,
+): CandidateToolChoice | undefined {
+  const bound = boundArtifactRevision(source);
+  const parsedDirective = taskGoalDirective(goal, bound?.identity);
   if (parsedDirective.needsClarification) return undefined;
+  if (bound) return bound.tool;
   const text = parsedDirective.text.toLowerCase();
   const directive = routingDirectiveText(text);
   const primaryDirective = text.split(/[\r\n。！？!?]/, 1)[0]?.trim() ?? '';
@@ -278,6 +291,14 @@ function matchCandidateTool(goal: string): CandidateToolChoice | undefined {
     return { name: 'generate_chapter', artifactType: 'chapter_text' };
   }
   if (RULE_SETTING_ACTION_GOAL.test(primaryDirective)) {
+    return { name: 'expand_settings', artifactType: 'setting_candidates' };
+  }
+  // A chapter mentioned inside a setting correction is context, not a prose request.
+  if (
+    /^(?:修订|修改|改写|重写)\s*(?:所选|这份|当前)?\s*(?:世界与规则设定|世界设定|规则设定|设定)候选/iu.test(
+      stripTaskCourtesy(primaryDirective),
+    )
+  ) {
     return { name: 'expand_settings', artifactType: 'setting_candidates' };
   }
   const generating = /生成|候选|扩展|建议|generate|expand|suggest/.test(text);
@@ -341,9 +362,11 @@ export function isChapterOutlineTaskGoal(goal: string): boolean {
 export function selectCandidateTool(
   goal: string,
   chapterId?: string,
+  source?: RevisionRoutingSource,
 ): CandidateToolChoice | undefined {
   if (isConversationalGoal(goal)) return undefined;
-  const selected = matchCandidateTool(goal);
+  const selected = matchCandidateTool(goal, source);
+  if (boundArtifactRevision(source)) return selected;
   const primaryDirective =
     taskGoalDirective(goal)
       .text.toLowerCase()
@@ -386,8 +409,12 @@ const CHARACTER_CONTEXT_TOOLS = new Set<CandidateToolName>([
 
 const CONTINUITY_CONTEXT_TOOLS = new Set<CandidateToolName>(['suggest_events', 'check_quality']);
 
-export function buildDshTurnContract(goal: string, chapterId?: string): DshTurnContract {
-  const selected = selectCandidateTool(goal, chapterId);
+export function buildDshTurnContract(
+  goal: string,
+  chapterId?: string,
+  source?: RevisionRoutingSource,
+): DshTurnContract {
+  const selected = selectCandidateTool(goal, chapterId, source);
   if (!selected || selected.name === 'generate_chapter' || selected.name === 'polish_chapter') {
     return {
       taskKind: 'read',
@@ -417,11 +444,11 @@ export function buildDshTurnContract(goal: string, chapterId?: string): DshTurnC
   };
 }
 
-export function classifyTaskIntent(goal: string): TaskIntent {
+export function classifyTaskIntent(goal: string, source?: RevisionRoutingSource): TaskIntent {
   if (isConversationalGoal(goal)) return 'read';
-  const directive = taskGoalDirective(goal);
+  const directive = taskGoalDirective(goal, boundArtifactRevision(source)?.identity);
   if (directive.needsClarification) return 'read';
-  const tool = matchCandidateTool(goal);
+  const tool = matchCandidateTool(goal, source);
   if (!tool) {
     if (READ_OR_SEARCH_GOAL.test(directive.text) || !WRITE_OR_GENERATE_GOAL.test(directive.text)) {
       return 'read';

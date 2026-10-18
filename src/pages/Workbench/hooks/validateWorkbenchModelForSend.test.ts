@@ -7,7 +7,6 @@ import {
   resetSessionModelCredentialsForTests,
   saveAiSettings,
 } from '../../../services/ai/aiSettingsStore';
-import { WorkbenchModelCredentialUnavailableError } from '../../../services/conversation/workbenchModelAvailability';
 import { validateWorkbenchModelForSend } from './validateWorkbenchModelForSend';
 
 const values = new Map<string, string>();
@@ -60,7 +59,7 @@ function modelPlugin(model: TaskModelSnapshot): CurrentPluginProjection {
   };
 }
 
-test('send validation hydrates then refreshes the Runtime directory in the background', async () => {
+test('sending hydrates the exact model without probing the Runtime directory', async () => {
   saveAiSettings(settings);
   const probes: Array<{
     allowProbe?: boolean;
@@ -76,28 +75,23 @@ test('send validation hydrates then refreshes the Runtime directory in the backg
   );
   assert.equal(resolved.providerId, snapshot.providerId);
   assert.equal(resolved.modelId, snapshot.modelId);
-  assert.deepEqual(probes, [{ allowProbe: true, modelId: 'deepseek-chat', source: 'background' }]);
+  assert.deepEqual(probes, []);
 });
 
-test('send validation fails closed before probing when the remote session credential is missing', async () => {
+test('missing credentials do not block submission before the runtime can persist its failure', async () => {
   resetSessionModelCredentialsForTests();
   saveAiSettings({ ...settings, apiKey: '' });
   let probed = false;
-  await assert.rejects(
-    () =>
-      validateWorkbenchModelForSend(snapshot, async () => {
-        probed = true;
-        return [modelPlugin(snapshot)];
-      }),
-    (error: unknown) => {
-      assert.equal(error instanceof WorkbenchModelCredentialUnavailableError, true);
-      return true;
-    },
-  );
+  const resolved = await validateWorkbenchModelForSend(snapshot, async () => {
+    probed = true;
+    return [modelPlugin(snapshot)];
+  });
+  assert.equal(resolved.modelId, snapshot.modelId);
+  assert.equal(resolved.baseUrl, snapshot.baseUrl);
   assert.equal(probed, false);
 });
 
-test('loopback models may send without a session key after a background directory refresh', async () => {
+test('loopback models retain their identity without a directory refresh or fallback', async () => {
   resetSessionModelCredentialsForTests();
   const loopback: TaskModelSnapshot = {
     ...snapshot,
@@ -114,5 +108,5 @@ test('loopback models may send without a session key after a background director
     },
   );
   assert.equal(resolved.baseUrl, loopback.baseUrl);
-  assert.deepEqual(probes, ['background:local-writer']);
+  assert.deepEqual(probes, []);
 });

@@ -88,7 +88,9 @@ describe('writingSubAgentContract', () => {
   });
 
   it('plans a candidate-only chapter turn bound to one chapter with read tools plus one candidate tool', () => {
-    const contract = plan({ previousChapter: { chapterId: 'chapter-0', sourceHash: 'abc' } });
+    const contract = plan({
+      previousChapter: { chapterId: 'chapter-0', sourceHash: 'a'.repeat(64) },
+    });
     expect(contract.mode).toBe('candidate_only');
     expect(contract.formalWrites).toBe('forbidden');
     expect(contract.adoptionPath).toBe('review_authorization');
@@ -98,7 +100,14 @@ describe('writingSubAgentContract', () => {
     expect(contract.requiredReadTools).toEqual([...WRITING_SUBAGENT_READ_TOOLS]);
     expect(contract.allowedTools).toEqual([...WRITING_SUBAGENT_READ_TOOLS, 'generate_chapter']);
     expect(contract.wordRange).toEqual({ target: 3000, minimum: 2400, maximum: 3450 });
-    expect(contract.continuity).toEqual({ previousChapterId: 'chapter-0', sourceHash: 'abc' });
+    expect(contract.continuity).toEqual({
+      previousChapterId: 'chapter-0',
+      sourceHash: 'a'.repeat(64),
+    });
+    expect(toDshTaskStartContract(contract).continuityClaim).toEqual({
+      previousChapterId: 'chapter-0',
+      sourceHash: 'a'.repeat(64),
+    });
     expect(contract.budget.maxOutputTokens).toBe(outputTokenBudgetFor(contract.wordRange));
     expect(contract.modelSnapshot).toBe(snapshot);
   });
@@ -146,6 +155,16 @@ describe('writingSubAgentContract', () => {
     expect(outputTokenBudgetFor({ maximum: 100_000 })).toBe(
       WRITING_SUBAGENT_BUDGET_LIMITS.maxOutputTokens,
     );
+    expect(outputTokenBudgetFor({ maximum: 3450 }, 1000)).toBe(1000);
+    const capped = plan({
+      modelSnapshot: { ...snapshot, options: { maxTokens: 1000 } },
+      budget: { maxIntegrityRepairs: 3, maxOutputTokens: 20_000 },
+    });
+    expect(capped.budget.maxOutputTokens).toBe(1000);
+    expect(capped.budget.maxIntegrityRepairs).toBe(2);
+    expect(() =>
+      plan({ previousChapter: { chapterId: 'chapter-0', sourceHash: 'abc' } }),
+    ).toThrow(/全文哈希/u);
   });
 
   it('rejects any attempt to widen the tool surface or escape candidate-only mode', () => {

@@ -558,6 +558,54 @@ test('grouping never folds activity, failure, generation, unknown receipt, cover
   assert.ok(ids.includes('tool:other-run'));
 });
 
+test('empty or truncated memory reads stay visible instead of folding into a completed read', () => {
+  const bundle = replayBundle();
+  const read = (
+    eventId: string,
+    sequence: number,
+    toolName: string,
+    result?: Record<string, unknown>,
+  ) => ({
+    eventId,
+    runId: 'r2',
+    sequence,
+    toolName,
+    argumentsSummary: {},
+    status: 'succeeded' as const,
+    createdAt: at(12 + sequence / 10),
+    finishedAt: at(12.05 + sequence / 10),
+    ...(result ? { result } : {}),
+  });
+  bundle.toolEvents = [
+    read('context-ok', 1, 'novel.read_context'),
+    read('memory-empty', 2, 'search_memory', {
+      ok: true,
+      data: { hit: false, noHit: true, matchedChunks: 0, chunks: [] },
+    }),
+    read('memory-cut', 3, 'search_memory', {
+      ok: true,
+      data: { hit: true, noHit: false, truncatedChunks: 1, chunks: [{ textTruncated: true }] },
+    }),
+    read('memory-omitted', 4, 'memory.search', {
+      data: { hit: true, omittedCandidates: 3, warnings: ['只返回了部分片段'] },
+    }),
+    read('context-after', 5, 'context.read'),
+  ];
+  const segments = groupWorkbenchDisplaySegments(projectWorkbenchEvents(bundle));
+  const compactIds = segments.flatMap((segment) =>
+    segment.kind === 'completed-read' ? segment.events.map((entry) => entry.id) : [],
+  );
+  assert.equal(compactIds.includes('tool:memory-empty'), false);
+  assert.equal(compactIds.includes('tool:memory-cut'), false);
+  assert.equal(compactIds.includes('tool:memory-omitted'), false);
+  for (const id of ['tool:memory-empty', 'tool:memory-cut', 'tool:memory-omitted']) {
+    assert.equal(
+      segments.some((segment) => segment.kind === 'event' && segment.event.id === id),
+      true,
+    );
+  }
+});
+
 test('candidate numbers stay stable across shuffled replay of the complete set', () => {
   const bundle = replayBundle();
   const expected = [...workbenchCandidateNumbers(projectWorkbenchEvents(bundle)).entries()];

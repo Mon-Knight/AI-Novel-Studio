@@ -122,7 +122,14 @@ function renderArtifacts(
           await overrides.loadConversations?.(id);
         },
       });
-      return { ...artifacts, draft, setDraft, error, route: location.pathname + location.search };
+      return {
+        ...artifacts,
+        draft,
+        setDraft,
+        error,
+        route: location.pathname + location.search,
+        routeState: location.state,
+      };
     },
     {
       initialProps: { conversationId: ARTIFACT.conversationId, novelId: 'novel-review-1' },
@@ -215,6 +222,100 @@ test('revision records only artifact identity and appends the complete notes to 
     appendArtifactRevisionDraft(existing, buildArtifactRevisionDraft(ARTIFACT.artifactType, notes)),
   );
   assert.deepEqual(refreshed, [ARTIFACT.conversationId]);
+});
+
+test('summary redo targets its adopted source without binding unsupported exact revision', async () => {
+  const artifact: ConversationArtifactCard = {
+    ...ARTIFACT,
+    artifactType: 'chapter_summary',
+    artifactEvidence: {
+      ...ARTIFACT.artifactEvidence!,
+      sourceChapterId: 'source-summary-chapter',
+      sourceDraftId: 'source-adopted-draft',
+    },
+  };
+  const { result } = renderArtifacts();
+  await act(async () => {
+    await result.current.decideArtifact(artifact, 'request_revision', '计划尚未执行，请保留待查。');
+  });
+  assert.equal(
+    useWorkbenchDraftStore.getState().drafts[artifact.conversationId]?.revisionSource ?? null,
+    null,
+  );
+  assert.equal(result.current.routeState.chapterWorkflow.chapterId, 'source-summary-chapter');
+  assert.equal(result.current.routeState.chapterWorkflow.adoptedDraftId, 'source-adopted-draft');
+  assert.equal(result.current.routeState.chapterWorkflow.summaryCardId, artifact.cardId);
+  assert.match(result.current.routeState.chapterWorkflow.draft, /计划尚未执行/);
+  assert.equal(result.current.draft, '');
+});
+
+test('summary redo preserves an existing same-candidate source and unsent notes for explicit handling', async () => {
+  const artifact: ConversationArtifactCard = {
+    ...ARTIFACT,
+    artifactType: 'chapter_summary',
+    artifactEvidence: {
+      ...ARTIFACT.artifactEvidence!,
+      sourceChapterId: 'source-summary-chapter',
+      sourceDraftId: 'source-adopted-draft',
+    },
+  };
+  const source = {
+    conversationId: artifact.conversationId,
+    novelId: 'novel-review-1',
+    chapterId: 'source-summary-chapter',
+    cardId: artifact.cardId,
+    artifactId: artifact.artifactId!,
+    artifactHash: 'old-summary-hash',
+    artifactType: 'chapter_summary',
+    title: '已有总结意见',
+  };
+  const { result } = renderArtifacts();
+  useWorkbenchDraftStore.getState().bindRevisionSource(artifact.conversationId, source);
+  await act(async () => result.current.setDraft('尚未发送的审阅说明'));
+  await act(async () => {
+    await result.current.decideArtifact(artifact, 'request_revision', '这条需要保留计划状态。');
+  });
+  assert.equal(result.current.draft, '尚未发送的审阅说明');
+  assert.equal(
+    useWorkbenchDraftStore.getState().drafts[artifact.conversationId]?.revisionSource,
+    source,
+  );
+  assert.match(result.current.routeState.chapterWorkflow.draft, /这条需要保留计划状态/);
+});
+
+test('rejected summary can be redone without overwriting its rejection decision', async () => {
+  let recorded = false;
+  artifactDecisionService.record = async () => {
+    recorded = true;
+    throw new Error('must not replace rejection');
+  };
+  const artifact: ConversationArtifactCard = {
+    ...ARTIFACT,
+    artifactType: 'chapter_summary',
+    latestDecision: {
+      ...decision({
+        conversationId: ARTIFACT.conversationId,
+        cardId: ARTIFACT.cardId,
+        artifactId: ARTIFACT.artifactId!,
+        decision: 'reject',
+        novelId: 'novel-review-1',
+        targetType: 'chapter',
+        targetId: 'source-summary-chapter',
+      }),
+    },
+    artifactEvidence: {
+      ...ARTIFACT.artifactEvidence!,
+      sourceChapterId: 'source-summary-chapter',
+      sourceDraftId: 'source-adopted-draft',
+    },
+  };
+  const { result } = renderArtifacts();
+  await act(async () => {
+    await result.current.decideArtifact(artifact, 'request_revision', '未知去向被擅自补写。');
+  });
+  assert.equal(recorded, false);
+  assert.match(result.current.routeState.chapterWorkflow.draft, /未知去向/);
+  assert.equal(artifact.latestDecision?.decision, 'reject');
 });
 
 test('a successful revision preserves text entered while the decision is pending', async () => {
@@ -551,6 +652,38 @@ test('revision selection retains the clicked artifact identity without machine i
   assert.doesNotMatch(result.current.draft, /artifact-review-1|artifact-hash-review-1/);
 });
 
+test('resuming a persisted revision rebinds its exact source after session state loss', async () => {
+  const recordedDecision = decision({
+    conversationId: ARTIFACT.conversationId,
+    cardId: ARTIFACT.cardId,
+    artifactId: ARTIFACT.artifactId!,
+    novelId: 'novel-review-1',
+    targetType: 'asset',
+    targetId: 'novel-review-1',
+    decision: 'request_revision',
+  });
+  const calls: RecordDecisionInput[] = [];
+  artifactDecisionService.record = async (input) => {
+    calls.push(input);
+    return { decision: recordedDecision };
+  };
+  const { result } = renderArtifacts();
+  await act(async () =>
+    result.current.decideArtifact(
+      { ...ARTIFACT, latestDecision: recordedDecision },
+      'request_revision',
+    ),
+  );
+  const source = useWorkbenchDraftStore.getState().drafts[ARTIFACT.conversationId].revisionSource;
+  assert.equal(source?.cardId, ARTIFACT.cardId);
+  assert.equal(source?.artifactId, ARTIFACT.artifactId);
+  assert.equal(source?.artifactHash, recordedDecision.artifactHash);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].decision, 'request_revision');
+  assert.match(result.current.draft, /所选人物候选/);
+  assert.equal(result.current.route, '/');
+});
+
 const RULE_PREVIEW = {
   novelId: 'novel-review-1',
   ruleSetFingerprint: 'rule-set-a',
@@ -625,4 +758,57 @@ test('changed rule preview fails closed and changing task dismisses pending conf
   assert.equal(view.result.current.pendingRuleChangeReview, null);
   await act(async () => view.result.current.confirmRuleChangeReview(RULE_GUARD));
   assert.equal(writes, 0);
+});
+
+test('a decision on another task proceeds while this task is busy and stays on its own draft', async () => {
+  const first = deferred<void>();
+  const second = deferred<void>();
+  const calls: string[] = [];
+  artifactDecisionService.record = async (input) => {
+    calls.push(input.conversationId);
+    await (input.conversationId === ARTIFACT.conversationId ? first.promise : second.promise);
+    return { decision: decision(input) };
+  };
+  const other = {
+    ...ARTIFACT,
+    cardId: 'card-other-task',
+    artifactId: 'artifact-other-task',
+    conversationId: 'conversation-other-task',
+  };
+  const view = renderArtifacts();
+  let firstOperation: Promise<void> = Promise.resolve();
+  await act(async () => {
+    firstOperation = view.result.current.decideArtifact(
+      ARTIFACT,
+      'request_revision',
+      '任务甲的修订。',
+    );
+  });
+  assert.equal(view.result.current.decisionBusyCardId, ARTIFACT.cardId);
+  view.rerender({ conversationId: other.conversationId, novelId: 'novel-review-1' });
+  assert.equal(view.result.current.decisionBusyCardId, '');
+  let secondOperation: Promise<void> = Promise.resolve();
+  await act(async () => {
+    secondOperation = view.result.current.decideArtifact(
+      other,
+      'request_revision',
+      '任务乙的修订。',
+    );
+  });
+  assert.deepEqual(calls, [ARTIFACT.conversationId, other.conversationId]);
+  assert.equal(view.result.current.decisionBusyCardId, other.cardId);
+  await act(async () => {
+    first.resolve();
+    await firstOperation;
+  });
+  view.rerender({ conversationId: ARTIFACT.conversationId, novelId: 'novel-review-1' });
+  assert.match(view.result.current.draft, /任务甲的修订/);
+  assert.doesNotMatch(view.result.current.draft, /任务乙/);
+  view.rerender({ conversationId: other.conversationId, novelId: 'novel-review-1' });
+  await act(async () => {
+    second.resolve();
+    await secondOperation;
+  });
+  assert.match(view.result.current.draft, /任务乙的修订/);
+  assert.doesNotMatch(view.result.current.draft, /任务甲/);
 });

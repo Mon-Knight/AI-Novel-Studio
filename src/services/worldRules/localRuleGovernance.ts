@@ -8,6 +8,7 @@ import { canonicalHash, stableCanonicalJson } from '../ai/compilation/canonical'
 import { lsGet } from '../database/db';
 import { parseWorldRuleDocument } from './worldRuleSchema';
 import { validateWorldRuleMutation } from './worldRuleMutation';
+import { validateLocalChapterSource } from './chapterSourceReference';
 
 type ChapterIdentity = {
   id: string;
@@ -15,6 +16,7 @@ type ChapterIdentity = {
   title: string;
   adoptedDraftId?: string;
   updatedAt?: string;
+  deletedAt?: string;
 };
 function captureLocalRuleAssets(novelId: string) {
   const worlds = (lsGet<WorldSetting[]>('ai_novel_studio_world_settings') ?? []).filter(
@@ -53,7 +55,7 @@ export async function readLocalRuleSetSnapshot(
 export function captureLocalRuleState(novelId: string) {
   const { worlds, rules } = captureLocalRuleAssets(novelId);
   const chapters = (lsGet<ChapterIdentity[]>('ai_novel_studio_chapters') ?? []).filter(
-    (r) => r.novelId === novelId && r.adoptedDraftId,
+    (r) => r.novelId === novelId && r.adoptedDraftId && !r.deletedAt,
   );
   const drafts = chapters.map((c) => ({
     chapterId: c.id,
@@ -206,6 +208,13 @@ export async function authorizeLocalRuleChange(
       change.structuredJson ?? previous?.structuredJson,
       previous?.structuredJson,
       auth.intent,
+    );
+    await validateLocalChapterSource(
+      novelId,
+      state,
+      change.structuredJson ?? previous?.structuredJson,
+      previous?.structuredJson,
+      auth.notes,
     );
   }
   const baseline = stableCanonicalJson(state);

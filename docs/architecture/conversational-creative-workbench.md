@@ -18,6 +18,14 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 
 ## 1. 决策摘要
 
+### 2026-10-15 会话入口修复
+
+桌面真实 API 的日常自然语言回合使用 `creative_dialogue`，由真实 DSH 模型讨论、追问和请求工具执行。只暴露既有上下文读取及 `creative.plan_action`；后者是小说级无写入请求，可选择本作品真实章节，每轮只接受一个成功请求。宿主从持久化工具结果的大文本引用与哈希复核动作、作品及章节归属，再进入既有结构化候选或 Writing SubAgent 工作流。助手文本不能触发写入；正式候选审阅、采用授权和 CAS 保持原契约。精确候选修订、显式本地设置、浏览器与 Mock 路径保留。
+
+创作准备模板位于 `prompts/workspace/creative_dialogue.md`，通过已有世界设定候选和显式采用显示到概览。准备顺序为背景/规则 → 人物 → 大纲 → 正文；请求人物、大纲或正文时由只读 Gateway 检查所需正式准备资料。新回合不发送模型能力探针，冻结模型后直接执行，实际错误保留为 Run 与对话事实；历史 attestation 仅供历史记录/显式诊断，不能写入新 Run 冒充本次验证。概览模块统一固定高度与内部滚动。
+
+本节是本次实现契约；真实桌面、真实云模型与 6 万字成品的验收进度分别记录，不将定向测试当作整体验收完成。
+
 AI Novel Studio 的主界面已从“作品管理首页 + 章节编辑器中的多个 AI 面板”演进为**以对话驱动任务、以作品承载事实、以产物确认控制写入**的创作工作台。下文保留分阶段设计；当前状态与剩余验收门禁以第 13～14 节为准。
 
 ```text
@@ -45,11 +53,21 @@ AI Novel Studio 的主界面已从“作品管理首页 + 章节编辑器中的�
 10. **提供“当前插件”只读视图。** 用户可以按功能插件、模型插件和其他插件查看运行时实际加载的插件、版本、状态与所提供能力，但不能在该视图安装、卸载、启停、更新或配置插件。
 11. **首阶段实现只覆盖 v3.3.0 最小闭环，不修改旧工作台的既有能力边界。**
 
-当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。无任务快照的插件探测只用于当前插件只读投影，可以合成目录用 DeepSeek 身份，但不是用户任务，也不得填补缺失的冻结 `baseUrl`。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
+当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。2026-10-15 修复后，发送和选模型不再依赖目录重验或 nonce 探测，实际请求先持久化 Run 并在对话中记录失败。无任务快照的插件读取只用于当前插件只读投影，不得填补用户任务缺失的冻结 `baseUrl`。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
 
 结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。Canonical Catalog/Manifest 已将 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 放行为 `stable`，`modelVisibleToolIdentities` 长度为 4。DSH `read` 回合已在 start 契约、Worker 环境和宿主授权三处使用 Canonical-only allowlist，Gateway 的 `tools/list` 据此列出无版本号的四项只读名；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 R4 live 云端 Provider 仍 NOT VERIFIED，不能把四项 exposure 或 Mock 通过等同于 R4 VERIFIED。Writing SubAgent 已于 v3.7.0 对桌面端 + 真实 API 模型的 `chapter_write` 默认开放；mock / 本地模型与浏览器模式继续走确定性 Writer。
 
 ---
+
+### 2026-10-16 真实使用流程收口（集成验证中）
+
+- 新任务遍历同作品持久任务目录的全部分页，按模型快照 `capturedAt` 继承最近选择并显示来源，不以后台活动会更新的会话 `updatedAt` 排序。旧快照缺少有效选择时间时，以原会话 `createdAt` 保守固定并明确提示；继承不刷新时间，分页读取失败不使用部分结果或静默退到另一模型。已有运行与重试继续使用冻结模型。
+- 编辑器与总结入口通过持久审阅授权、作品/章节/采用稿及候选来源定位任务。手动总结在首次候选工具调用前失败时，使用宿主执行契约保存的总结阶段、作品/章节/采用稿与哈希定位原任务及冻结模型；旧记录只有来源或采用时间可核对时才兼容，不把旧采用稿的失败指向新稿。单条断言重做保留所选总结卡片的精确定位，不随同章其他会话的新候选切换；输入框已有文字或修订来源时保留，作者处理后显式发送。路由提示不授予写入权限。各采用章的总结可独立推进，缺失与拒绝状态仍可见。
+- 失败重试区分规划和候选执行阶段。宿主保存执行契约，新尝试复验原用户回合、章节、模型、工具/读取集合及字数范围。历史回合只有持久来源足够完整时才恢复；缺失关键冻结事实明确拒绝，不用当前配置填补历史。
+- 输入区预览本次要求、任务设置或所选章的有效目标和候选范围。长度修订保留最接近目标的失败完整稿及实测差额，保持原范围、预算和候选准入；长度通过不等于内容质量通过。
+- 新章节总结要求 `grounding.version=1`，每个进入总结/上下文/人物状态的内容字段绑定 JSON Pointer、认知状态与原文摘录。宿主复读当前采用稿和完整工具回执，复验哈希、摘录及字段覆盖。缺失依据的新候选拒绝，历史旧记录仅兼容读取并提示；原文摘录与附近句子供作者判断，不宣称自动语义证明。确认应用仍复验来源并使用原事务。
+
+实测基线与本批结果分别保留于 [三万字实测](../../reports/desktop-real-novel-30000-2026-10-15.md) 和 [流程修复记录](../../reports/real-use-flow-repairs-2026-10-16.md)。本段不将编译或定向测试等同于真实桌面验收。
 
 ## 2. 设计目标与非目标
 
@@ -134,7 +152,7 @@ AI Novel Studio 的主界面已从“作品管理首页 + 章节编辑器中的�
 
 当前实现把 Codex 式“紧凑任务树 + 居中对话 + 底部常驻 Composer”与 Harness 式“按回合投影运行、工具、错误与产物”组合：应用导航使用 56px 图标轨，任务树保持稳定宽度，正文流设阅读宽度上限，2K 下不把文字拉成超长行。加载骨架、流式点和状态过渡使用 120–180ms 的克制动效，`prefers-reduced-motion` 下关闭非必要运动。
 
-启动与恢复不得再把整个工作台变成等待面。项目/任务恢复、旧上下文整理和模型目录刷新都显示为局部准备状态：任务树和输入框先可见，草稿始终可编辑，弹窗可取消；只精确禁用依赖未就绪上下文/模型的提交动作。本地问候、能力问答与独立的任务目标字数设置不受这两项准备门禁影响，但必须显示和持久化为 `ans-local` 来源。独立设置（如「本任务目标字数设为 3200 字」）从本任务的用户回合恢复，不创建模型 Run、不修改章节目标或正文；写章回合的显式字数只覆盖当前回合。生成时先取本回合覆盖，再取任务设置，最后回退章节目标，并与本机验收比例一起传入 Writing SubAgent / 确定性 Writer。
+启动与恢复不得再把整个工作台变成等待面。项目/任务恢复、旧上下文整理和模型目录刷新显示为局部准备状态，草稿可编辑、弹窗可取消。实际模型回合可能读取正式材料，须等待旧上下文迁移；普通创作背景/人物尚缺不属于迁移失败，应由模型交流解决。模型目录刷新不阻止发送。独立的任务目标字数设置仍使用 `ans-local` 本地回执，从本任务的用户回合恢复，不创建模型 Run、不修改章节目标或正文；写章回合的显式字数只覆盖当前回合。生成时先取本回合覆盖，再取任务设置，最后回退章节目标，并与本机验收比例一起传入 Writing SubAgent / 确定性 Writer。
 
 ### 4.2 左侧项目与任务树
 
@@ -165,8 +183,8 @@ AI Novel Studio 的主界面已从“作品管理首页 + 章节编辑器中的�
 
 ### 4.4 输入区与模型选择
 
-- 创建任务时从当前 Runtime 目录选择模型并冻结；已有任务的输入区显示固定模型徽标与原因，不开放后续回合更换。更换模型须新建任务。
-- 每次运行继承任务的冻结 Provider/模型与参数、价格等快照；重试保留原 Run/用户回合来源，不借目录刷新改写历史身份。
+- 创建任务时选择初始模型；已有任务的输入区保留模型下拉，可在回合之间更换，持久化为该任务下一回合的默认选择，不必新建任务。下拉合并已加载 Runtime 条目与本机 Provider API 配置，配置条目标为“待验证”；不把 Gateway/Local 专用配置当作 Provider 凭据来源。选中并不表示能发送，仍须刷新该模型的精确 Runtime 目录并通过凭据和能力准入。
+- 每次运行独立冻结本回合 Provider/模型与参数、价格等快照；重试继续使用原 Run/用户回合的模型，不借选择切换或目录刷新改写历史身份。准备发送、活动运行、模型保存中及归档状态不可更换；保存失败保留原选择与草稿。
 - 创建任务时可使用默认设置初始化选择，但已有任务不会随应用默认模型变化而迁移。
 - 若模型不支持任务所需能力，发送前给出明确兼容性提示，不静默切换。
 
@@ -473,7 +491,7 @@ Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说�
 
 工具、模型、上下文组装和压缩应遵循“能力定义 → Provider 实现 → Runtime 消费”的稳定接口。插件可以提供或替换实现，任务运行必须冻结实际使用的能力 ID、Provider、版本和配置摘要。
 
-模型目录不是 tool-calling 能力证明。桌面 DSH 启动模型任务时，ANS 必须先在同一 Worker 和 governed proxy 上对精确 `provider/model` 执行一次无副作用 nonce 工具 schema 探针。只接受唯一原生 `tool-call`、参数精确回显 nonce 且 finish kind 为 `tool-calls` 的正证据；失败不缓存、不创建 TaskRun/Turn/Tool/Artifact/Session 领域事实，取消必须终止 Worker 并结算请求治理租约。成功证据可在同 Worker 内缓存 10 分钟，Worker 重启后必须重新探测；Rust 严格验证后只把协议、身份、时间、缓存与 finish/调用计数证据冻结进 `modelSnapshot.runtime.toolCallingAttestation`，不持久化 nonce、usage、原始错误或凭据。探针仍使用 `ai_request_reservations` 执行必需的请求预留与结算审计；这项治理事实不得冒充任务运行事实。
+模型目录不是 tool-calling 能力证明，也不是发送准入门槛。2026-10-15 起，日常 DSH 模型回合取消 nonce 能力探针，先持久化 Run，再使用冻结身份直接执行真实请求；实际错误与取消保留在该 Run 和对话中。新 Run 不沿用旧 `modelSnapshot.runtime.toolCallingAttestation`，结果中的历史诊断字段为可选；没有探测不制造 verified 证据。实际请求仍通过 governed proxy 的预留、限流、预算与结算，取消仍终止本任务 Worker。显式诊断及历史记录与日常会话分开。
 
 首批领域工具仍是 `novel.read_context`、`chapter.read_outline`、`search_memory` 与 `generate_chapter`。只读工具可以受限并发；候选生成形成 Result Artifact；正式写入保持排他并经过 Decision、revision CAS 与 Safe Apply。工具结果及其产物引用来自结构化结果，不从 AI 回复正文中解析。
 
@@ -573,6 +591,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 - 五类领域产物及精确 `generic_json / context_compression` 已具备领域写入与 append-only 决定同事务；质量/风格报告、其他 `generic_json`、未知类型及浏览器结构化应用仍失败关闭；
 - 短口令单章路径已能读取世界、规则、主角、全书/分卷/章节大纲、风格、输出、研究资料和紧邻前章采用稿；空白项目会进入有序资产恢复，依次生成候选并等待用户显式应用世界与规则、主角和全书规划，规划应用后原子建卷建章并恢复最初正文目标，后续“继续写”在章节审阅、采用和自动总结闭环后推进到下一章。桌面端 + 真实 API 的 `chapter_write` 默认走 Writing SubAgent；mock / 本地 / 浏览器仍是 ANS 确定性 Writer。两者都不是已验收的 Main Agent 自主运行，也不能代替 R4 live；
+- 手动 `chapter_summary` 复验持久化 user Turn 所属会话/作品及当前章节采用稿（含大文本与哈希），据此建立独立候选会话。`summary-generation-` 自动采用总结仍必须匹配已消费审阅授权与采用指针；仅该自动路径使用有界协议恢复。两条路径的候选应用仍由原事务与基线校验约束。正文显式重试检查最近正文结果时，只跳过有成功 `creative.plan_action`、无候选工具及产物的已完成规划 Run；规划 Run 仍参与原有预算计算，活动或未知成功 Run 仍拒绝重试。
 - Canonical Catalog/Manifest 已将四个只读 identity 放行为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4；不得再把 `catalog_only` 或可见数为 0 写成当前状态；
 - 宿主 `mainAgentRuntimeService` 只读脚手架存在（默认启发式选工具），未接入生产发送路径，也不能代替 DSH Agent Loop；
 - 宿主对 `read` 回合已在三处一致注入 Canonical-only allowlist（DSH start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS`、宿主侧工具授权与必需读取），Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；候选生成与审计回合继续注入 legacy `ALLOWED_TOOLS`；
@@ -583,7 +602,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 ### 13.1 当前 v3.7.0 修复实现（集成中，待统一验收）
 
-1. **交互与布局**：`AppShell` 按布局作用域保存侧栏偏好，并提供会话内 focus context（`components/layout/workbenchFocus.tsx` 的 React Context，不落 LocalStorage，隔离测试仅用本地 fallback）；树/参考面板四态分别布局，focus 走 collapsed 语义。Composer 插入与上下文互斥并有关闭、回焦和 IME 保护，辅助内容共用有界滚动区，整体预算 min(55vh, 440px)。`WorkbenchSidePanel` 默认 transient，只有明确 pin（`useWorkbenchSidePanel` 默认 `presentation='transient'`）且 >1180px 才占参考列；其余 overlay 不挤正文、不遮任务头，上边界由 `useWorkbenchOverlayInset` 按任务头与页面实测差值写入 `--workbench-panel-top`（无硬编码 64/88），临时态按作用域收口，pinned 宽窗外点不自动关闭。`WorkbenchModelSelect` 对已有任务渲染固定模型短名，原因在可键盘打开的 details，不开放换模型；终态运行的模型身份折叠为“来源模型”紧凑标签，完整 `provider · model` 在可访问 title 中。
+1. **交互与布局**：`AppShell` 按布局作用域保存侧栏偏好，并提供会话内 focus context（`components/layout/workbenchFocus.tsx` 的 React Context，不落 LocalStorage，隔离测试仅用本地 fallback）；树/参考面板四态分别布局，focus 走 collapsed 语义。Composer 插入与上下文互斥并有关闭、回焦和 IME 保护，辅助内容共用有界滚动区，整体预算 min(55vh, 440px)。`WorkbenchSidePanel` 默认 transient，只有明确 pin（`useWorkbenchSidePanel` 默认 `presentation='transient'`）且 >1180px 才占参考列；其余 overlay 不挤正文、不遮任务头，上边界由 `useWorkbenchOverlayInset` 按任务头与页面实测差值写入 `--workbench-panel-top`（无硬编码 64/88），临时态按作用域收口，pinned 宽窗外点不自动关闭。`WorkbenchModelSelect` 对已有任务提供回合间模型下拉，保存成功后下一回合生效；终态运行的模型身份折叠为“来源模型”紧凑标签，完整 `provider · model` 在可访问 title 中，不随任务的新选择改变。
 2. **公开时序与阅读**：`workbenchPresentation` 合并持久 Turn、Run、ToolCallEvent、Artifact 与本任务准备/压缩投影；同毫秒用明确稳定 tie-break，不使用读取到达顺序，不声称新增全局单调序号。`WorkbenchMessageStream` / `WorkbenchTurn` 扁平渲染这些公开事件。`workbenchPresentationGrouping` 只把同一 run/turn 内连续成功、无公开 warning 且回执证据完整的只读读取合并为可展开的“已读取创作材料 · N 项”；运行中、失败、含 warning 或证据不完整的读取保持单条。产物卡首屏常显可识别的作品/章节名称（`resolveWorkbenchArtifactTargetLabels`，ID 不作标题）、按公开事件稳定生成的候选序号（`workbenchCandidateNumbers`，不随分页窗口变化）、来源模型短名、基线、修订来源与下一步，校验错误、读取失败与冲突外显。默认 8 个完整用户轮次分页，自动回合和助手说明不单独消耗用户轮次；`workbenchPresentationReading` / scroll hook 在当前应用会话内按作品/任务保存锚点、窗口、展开项与跟随状态，不持久化正文或决定。
 3. **精确导航与压缩**：侧栏和待处理导航只按 cardId 定位；准备候选还匹配存储的 candidateArtifactId / preparationRunId / preparationTurnId，缺失或歧义不给“最新同类”替代。`useWorkbenchCompression` 用独立 actionId/createdAt 维持临时位置，有效候选持久发布后移除临时卡；发布后刷新失败不重建第二份候选，异步结果不串任务。
 4. **修订来源与重试**：`ArtifactRevisionSource` 将 conversation / novel / chapter、card / artifact / hash / type、run 与可选草稿版本和标题固定；`workbenchDraftStore` 分离文本与来源，当前应用会话内切换任务/路由保留。`useWorkbenchArtifacts` 记录 request_revision 后追加意见与 source chip，另一来源不会静默覆盖；发送把来源冻结进用户 Turn envelope，重试解码原 Turn 并复验。`taskRuntimeAdapter` / `taskSessionAdapter` 重读精确来源正文，不凭文本指代或最新候选补齐。章节派生最终为 `derivationType=revision`，只有窄 `create_chapter_revision_artifact` 在权威来源、最新精确用户 request_revision、input/context 来源与真实请求材料匹配时可用；通用 create_result_artifact 仍拒绝派生。
@@ -637,9 +656,10 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 - R4 仓内只读闭环已证明：单测固定 allowlist 选择与提示词暴露，Rust loopback E2E 经真实 Worker 启动链证明模型自主调用四个 Canonical 只读工具、零候选产物、零正式写入、零凭据泄漏；`mainAgentRuntimeService` 启发式脚手架不是 R4 证据；
 - live 云端 Provider 仍 NOT VERIFIED，不得宣称 R4 VERIFIED。live 验收判定标准：
   1. 前置：使用者在当前应用会话内为真实远程模型填入有效凭据；验收通过 opt-in 环境变量开启，默认 CI 与 `npm test` 不运行、不需要任何 Key；
-  2. 执行：设置 `DSH_E2E_BASE_URL` 为真实 Provider endpoint 并显式开启 cloud profile 后运行 `npm run test:agent-runtime:real`（当前脚本对非回环地址失败关闭，cloud profile 执行路径待单独实现；实现并完成真实运行前，本标准不产生 VERIFIED 结论）；
-  3. 通过条件：真实模型只读回合自主调用 `novel.read / structure.read / context.read / memory.search` 完成作品与章节上下文读取，不调用 `generate_chapter` 与 legacy 只读别名，零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变；
-  4. 证据：只留存工具名、计数、状态码与内容 hash 等脱敏标量；不保存提示词、正文、完整路径与任何形式的凭据；
+  2. 执行：显式设置 `DSH_E2E_CLOUD_PROFILE=1`、非回环 HTTPS 的 `DSH_E2E_BASE_URL`、精确 `DSH_E2E_PROVIDER` / `DSH_E2E_MODEL` 后运行 `npm run test:agent-runtime:real`。载体运行完整名为 `services::dsh::tests::canonical_read_turn_cloud_profile` 的 opt-in Rust 测试，经固定 DSH、当前 Gateway 与隔离 SQLite 执行 Canonical-only 回合，不是直接 HTTP 聊天。无配置仍为 NOT_RUN，零执行用例或缺证据不能通过，不能退回 mock 冒充 cloud。读凭据前校验载体矩阵的固定提交、jsonrpc bin 哈希和 Gateway 哈希；凭据仅来自显式环境/文件，使用保存的 DPAPI 还须 `USE_SAVED_CREDENTIAL=1`，且只能选择唯一匹配的 provider 作用域记录。
+  3. 通过条件：真实模型只读回合自主调用 `novel.read / structure.read / context.read / memory.search` 完成作品与章节上下文读取，不调用 `generate_chapter` 与 legacy 只读别名，零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变；工具名按精确持久事实比较，不把模糊别名洗成 Canonical。
+  4. 预算与取消：一次 opt-in 回合最多 6 次实际上游发送（含重试），在代理 `fetch` 前持久计数，第 7 次发送前拒绝，禁止重定向。分钟速率与超时只是附加保护，不能代替总次数。输出 Token、总 Token 与取消时限均有显式上界；失败不自动重跑云端验收。
+  5. 证据：只留存工具名、计数、状态码与内容 hash 等脱敏标量；不保存提示词、正文、完整路径与任何形式的凭据。APPDATA/LOCALAPPDATA、数据库和运行目录隔离，不能用正式用户库作验收。入口实现及离线负例通过不等于 R4 live VERIFIED。
 - Writing SubAgent 与 `chapter_write` 走 DSH 已于 v3.7.0 开放（桌面端 + 真实 API 模型默认启用，`localStorage` 置 `0` 关闭）；candidate-only 契约见 [`writing-subagent-contract.md`](writing-subagent-contract.md)。E-4a 已于 2026-09-08 用客户端 `gemini-3.7-flash-high` 卡片在生产 EXE 真实配置上通过正向链路，E-4b 六个负例/恢复场景同日经生产 EXE + 隔离配置 + 回环故障注入上游全部通过；验收发现的 GAP-18 / GAP-19 已同日收口（migration 038 持久化运行章节目标；重试提示显式要求本回合重读）。mock / 本地模型与浏览器模式继续走确定性 Writer。
 
 各版本必须独立提交、验证和发布。下一版本不能以“最终形态”为理由同时实现后续阶段。

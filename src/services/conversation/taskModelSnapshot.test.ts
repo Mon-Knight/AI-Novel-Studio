@@ -37,7 +37,8 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: storage,
 });
 
-const { saveAiSettings } = await import('../ai/aiSettingsStore');
+const { saveAiSettings, getDefaultLocalChapterModelSettings, resolveSessionModelApiKey } =
+  await import('../ai/aiSettingsStore');
 const { captureTaskModelSnapshot, hydrateTaskModelSnapshotRuntime } =
   await import('./taskModelSnapshot');
 const { findAvailableWorkbenchModel } = await import('./workbenchModelAvailability');
@@ -107,6 +108,114 @@ test('openai_compatible provider identity remains unchanged', () => {
 
   assert.equal(snapshot.providerId, 'openai_compatible');
   assert.equal(snapshot.runtime?.adapterProvider, snapshot.providerId);
+});
+
+test('switching captures the selected saved model configuration without changing global settings', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    savedApiModels: [
+      {
+        id: 'other-model',
+        label: 'Other',
+        provider: 'openai_compatible',
+        baseUrl: 'https://other-provider.invalid/v1',
+        modelName: 'other-model',
+        temperature: 0.25,
+        maxTokens: 1234,
+        timeoutSeconds: 45,
+        inputPricePerMillionTokens: 2,
+        outputPricePerMillionTokens: 4,
+      },
+    ],
+  });
+  const selected = captureTaskModelSnapshot('openai_compatible', 'other-model');
+  assert.equal(selected.baseUrl, 'https://other-provider.invalid/v1');
+  assert.equal(selected.options.temperature, 0.25);
+  assert.equal(selected.options.maxTokens, 1234);
+  assert.equal(selected.pricing?.inputPricePerMillionTokens, 2);
+  assert.doesNotMatch(JSON.stringify(selected), /session-only-key|apiKey/);
+  assert.equal(captureTaskModelSnapshot().modelId, 'deepseek-chat');
+});
+
+test('new selections cannot borrow an unrelated endpoint or resolve ambiguous saved profiles', () => {
+  saveAiSettings(deepseekSettings);
+  assert.throws(() => captureTaskModelSnapshot('openai_compatible', 'not-configured'), /尚未配置/);
+  saveAiSettings({
+    ...deepseekSettings,
+    savedApiModels: ['one', 'two'].map((id) => ({
+      id,
+      label: id,
+      provider: 'openai_compatible',
+      modelName: 'same-model',
+      baseUrl: `https://${id}.invalid/v1`,
+    })),
+  });
+  assert.throws(() => captureTaskModelSnapshot('openai_compatible', 'same-model'), /地址不唯一/);
+});
+
+test('dedicated gateway/local profiles cannot supply a Workbench provider snapshot', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    inputPricePerMillionTokens: 9,
+    gateway: {
+      enabled: true,
+      providerId: 'gateway-test',
+      modelName: 'gateway-model',
+      baseUrl: 'https://gateway.invalid/v1',
+      apiKey: 'gateway-only-test-key',
+      timeoutSeconds: 70,
+      maxTokens: 2048,
+    },
+    localChapterModel: { ...getDefaultLocalChapterModelSettings(), enabled: true },
+  });
+  const identity = {
+    providerId: 'gateway-test',
+    baseUrl: 'https://gateway.invalid/v1',
+    modelId: 'gateway-model',
+  };
+  assert.equal(
+    resolveSessionModelApiKey({ ...identity, scope: 'gateway' }),
+    'gateway-only-test-key',
+  );
+  assert.equal(resolveSessionModelApiKey({ ...identity, scope: 'provider' }), '');
+  assert.throws(() => captureTaskModelSnapshot('gateway-test', 'gateway-model'), /尚未配置/);
+  const local = getDefaultLocalChapterModelSettings();
+  assert.throws(() => captureTaskModelSnapshot(local.providerId, local.modelName), /尚未配置/);
+});
+
+test('same provider/model in a gateway cannot override its saved provider API configuration', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    gateway: {
+      enabled: true,
+      providerId: 'openai_compatible',
+      modelName: 'same-model',
+      baseUrl: 'https://gateway-only.invalid/v1',
+      apiKey: '',
+      timeoutSeconds: 70,
+      maxTokens: 2048,
+      temperature: 1.5,
+    },
+    savedApiModels: [
+      {
+        id: 'provider-model',
+        label: 'Provider Model',
+        provider: 'openai_compatible',
+        modelName: 'same-model',
+        baseUrl: 'https://provider-only.invalid/v1',
+        timeoutSeconds: 45,
+        maxTokens: 1234,
+        temperature: 0.25,
+        inputPricePerMillionTokens: 2,
+      },
+    ],
+  });
+  const selected = captureTaskModelSnapshot('openai_compatible', 'same-model');
+  assert.equal(selected.baseUrl, 'https://provider-only.invalid/v1');
+  assert.equal(selected.options.temperature, 0.25);
+  assert.equal(selected.options.timeoutSeconds, 45);
+  assert.equal(selected.options.maxTokens, 1234);
+  assert.equal(selected.pricing?.inputPricePerMillionTokens, 2);
 });
 
 test('legacy API snapshots receive current settings baseUrl and DSH runtime defaults', () => {

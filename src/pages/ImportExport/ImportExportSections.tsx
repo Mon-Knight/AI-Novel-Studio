@@ -5,25 +5,32 @@ import { BookOpenText, FileCode, FileText, HardDriveDownload, Library, Save } fr
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import { NovelImportSection } from './NovelImportSection';
+import {
+  hasFormalChapter,
+  type ManuscriptExportOptions,
+} from '../../services/export/manuscriptExport';
+import { formatChapterHeading } from '../../utils/chapterHeading';
 
 export { NovelImportSection };
 
 interface ExportPanelProps {
+  busy?: boolean;
   novels: Novel[];
   selectedNovelId: string;
   onSelectNovelId: (id: string) => void;
   chapters: Chapter[];
   selectedChapterId: string;
   onSelectChapterId: (id: string) => void;
-  onExport: (fn: () => Promise<string | void>) => void;
-  exportNovelToTxt: (id: string) => Promise<string | void>;
-  exportNovelToMarkdown: (id: string) => Promise<string | void>;
+  onExport: (fn: (options: ManuscriptExportOptions) => Promise<string | void>) => void;
+  exportNovelToTxt: (id: string, options?: ManuscriptExportOptions) => Promise<string | void>;
+  exportNovelToMarkdown: (id: string, options?: ManuscriptExportOptions) => Promise<string | void>;
   exportNovelBackupJson: (id: string) => Promise<string | void>;
   exportChapterToTxt: (id: string) => Promise<string | void>;
   exportChapterToMarkdown: (id: string) => Promise<string | void>;
 }
 
 export function NovelExportSection({
+  busy = false,
   novels,
   selectedNovelId,
   onSelectNovelId,
@@ -38,9 +45,7 @@ export function NovelExportSection({
   exportChapterToMarkdown,
 }: ExportPanelProps) {
   const selectedNovel = novels.find((n) => n.id === selectedNovelId);
-  const adoptedChapters = chapters.filter(
-    (c) => c.status === 'adopted' || c.status === 'summarized',
-  );
+  const adoptedChapters = chapters.filter(hasFormalChapter);
   const chapterExportDisabled =
     !selectedChapterId || !adoptedChapters.some((c) => c.id === selectedChapterId);
 
@@ -66,6 +71,7 @@ export function NovelExportSection({
           <div className="resource-empty">暂无作品，请先在作品管理或工作台中创建小说。</div>
         ) : (
           <select
+            disabled={busy}
             className="panel-select resource-fill"
             value={selectedNovelId}
             onChange={(e) => onSelectNovelId(e.target.value)}
@@ -99,8 +105,8 @@ export function NovelExportSection({
             <button
               type="button"
               className="btn btn-primary btn-sm resource-grow"
-              disabled={adoptedChapters.length === 0}
-              onClick={() => onExport(() => exportNovelToTxt(selectedNovelId))}
+              disabled={busy || adoptedChapters.length === 0}
+              onClick={() => onExport((options) => exportNovelToTxt(selectedNovelId, options))}
             >
               <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
               导出 TXT
@@ -108,8 +114,8 @@ export function NovelExportSection({
             <button
               type="button"
               className="btn btn-secondary btn-sm resource-grow"
-              disabled={adoptedChapters.length === 0}
-              onClick={() => onExport(() => exportNovelToMarkdown(selectedNovelId))}
+              disabled={busy || adoptedChapters.length === 0}
+              onClick={() => onExport((options) => exportNovelToMarkdown(selectedNovelId, options))}
             >
               <FileCode aria-hidden="true" size={14} strokeWidth={1.8} />
               导出 Markdown
@@ -136,7 +142,7 @@ export function NovelExportSection({
             <button
               type="button"
               className="btn btn-secondary btn-sm resource-fill"
-              disabled={!selectedNovelId}
+              disabled={busy || !selectedNovelId}
               onClick={() => onExport(() => exportNovelBackupJson(selectedNovelId))}
             >
               <HardDriveDownload aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -161,20 +167,21 @@ export function NovelExportSection({
                 <div className="resource-meta">暂无章节数据</div>
               ) : (
                 <select
+                  disabled={busy}
                   className="panel-select resource-fill"
                   value={selectedChapterId}
                   onChange={(e) => onSelectChapterId(e.target.value)}
                 >
                   {adoptedChapters.map((c) => (
                     <option key={c.id} value={c.id}>
-                      第{c.chapterNumber}章 {c.title}（已采用）
+                      {formatChapterHeading(c)}（已采用）
                     </option>
                   ))}
                   {chapters
                     .filter((c) => !adoptedChapters.includes(c))
                     .map((c) => (
                       <option key={c.id} value={c.id} disabled>
-                        第{c.chapterNumber}章 {c.title}（未采用，无法导出）
+                        {formatChapterHeading(c)}（未采用，无法导出）
                       </option>
                     ))}
                 </select>
@@ -186,7 +193,7 @@ export function NovelExportSection({
             <button
               type="button"
               className="btn btn-secondary btn-sm resource-grow"
-              disabled={chapterExportDisabled}
+              disabled={busy || chapterExportDisabled}
               onClick={() => onExport(() => exportChapterToTxt(selectedChapterId))}
             >
               <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -195,7 +202,7 @@ export function NovelExportSection({
             <button
               type="button"
               className="btn btn-secondary btn-sm resource-grow"
-              disabled={chapterExportDisabled}
+              disabled={busy || chapterExportDisabled}
               onClick={() => onExport(() => exportChapterToMarkdown(selectedChapterId))}
             >
               <FileCode aria-hidden="true" size={14} strokeWidth={1.8} />

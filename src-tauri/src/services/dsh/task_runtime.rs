@@ -36,6 +36,17 @@ use std::time::Duration;
 #[path = "task_runtime_chapter_recovery.rs"]
 mod chapter_recovery;
 use chapter_recovery::{execute, validate_chapter_candidate_length, ChapterLengthRecovery};
+#[path = "task_runtime_model_health.rs"]
+mod model_health;
+pub use model_health::runtime_health_with_probe;
+#[cfg(test)]
+use model_health::task_worker_health_matches_model;
+#[path = "task_runtime_chapter_budget.rs"]
+mod chapter_budget;
+#[path = "task_runtime_chapter_continuity.rs"]
+pub mod chapter_continuity;
+#[path = "task_runtime_chapter_gate.rs"]
+pub mod chapter_gate;
 #[path = "task_runtime_revision_source.rs"]
 mod revision_source;
 use crate::services::artifact_service::revision_source::{
@@ -43,12 +54,23 @@ use crate::services::artifact_service::revision_source::{
 };
 #[path = "task_runtime_context_coverage.rs"]
 mod context_coverage;
+#[path = "task_runtime_creative_dialogue.rs"]
+mod creative_dialogue;
+#[path = "task_runtime_length_revision.rs"]
+mod length_revision;
+#[path = "task_runtime_length_sources.rs"]
+mod length_sources;
+#[path = "task_runtime_retry.rs"]
+pub mod retry;
+#[path = "task_runtime_summary_scope.rs"]
+mod summary_scope;
+#[path = "task_runtime_word_target.rs"]
+mod word_target;
 
 pub const DSH_SOURCE_COMMIT: &str = "47f943859bef60e4160492346772ded9b24f765a";
 pub const DSH_PROTOCOL: &str = "ans_task_session_v2";
 pub const DSH_TASK_PROJECTION_EVENT: &str = "ans://task-runtime-projection";
 const MODEL_TOOL_ATTESTATION_PROTOCOL: &str = "ans_model_tool_attestation_v1";
-const MODEL_TOOL_ATTESTATION_METHOD: &str = "runtime/attest-model-tools";
 const MODEL_TOOL_ATTESTATION_TTL_MS: i64 = 10 * 60 * 1_000;
 pub(super) const DSH_WORKER_FRAME_CHANNEL_DISCONNECTED: &str =
     "DSH_WORKER_FRAME_CHANNEL_DISCONNECTED";
@@ -107,6 +129,7 @@ pub const PLUGIN_PROBE_CONVERSATION_ID: &str = "__ans_plugin_probe__";
 
 fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
     match input.task_kind.as_str() {
+        "creative_dialogue" => "先理解用户本次意思，结合既有对话自然回应或追问；已明确要执行时，可调用一次 creative.plan_action 请求既有工作流。不直接生成候选，不宣称已保存或采用。".to_string(),
         "read" => concat!(
             "本轮禁止候选工具；只可调用 novel.read、structure.read、context.read、memory.search；",
             "宿主列出的必需读取必须成功完成后才能答复；",
@@ -174,10 +197,9 @@ fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
         )
         .to_string(),
         "chapter_summary" => concat!(
-            "由你生成 candidateText JSON 字符串，至少包含 summary，并从采用正文提取 keyEvents 与 factsMustRemember；",
-            "存在变化时补充 characterChanges 与 contextRecords。没有采用正文时停止且不提交候选。"
-        )
-        .to_string(),
+            "candidateText JSON 须含 summary、keyEvents、factsMustRemember；按候选工具 schema 的 grounding v1 契约逐条提供当前完整采用稿的原文依据与确定性分类。",
+            "采用稿缺失或 truncated=true 时停止。保留推测、待查和计划，不补写去向、原因、罪名或永久安排；重做以当前采用稿复核作者指出的问题。"
+        ).to_string(),
         "chapter_write" | "chapter_polish" => {
             let mut instruction = if input.task_kind == "chapter_write" {
                 concat!(
@@ -273,10 +295,16 @@ fn workbench_turn_prompt_for_attempt(
             "\n\n协议自动恢复：这是第 {protocol_recovery_retry}/{MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES} 次有限重试。上一 Run 已保留为失败事实，且没有创建候选 Artifact。请保持原用户意图与自动总结语义不变。第一阶段必须在同一模型响应中并行重新调用本轮全部必需读取工具，严禁调用候选工具；等待全部 Tool Result 返回后，第二阶段只调用且必须调用唯一候选工具。"
         )
     };
-    let retry_instruction = user_retry_instruction(previous_terminal_runs, protocol_recovery_retry);
+    let retry_instruction = if input.task_kind == "creative_dialogue" {
+        creative_dialogue::retry_instruction(previous_terminal_runs)
+    } else {
+        user_retry_instruction(previous_terminal_runs, protocol_recovery_retry)
+    };
     let revision_material = revision_source::material_prompt(input);
+    let continuity_material = chapter_continuity::material_prompt(input);
+    let integrity_repair = chapter_gate::repair_prompt(input);
     format!(
-        "小说 ID：{novel}\n章节 ID：{chapter}\n用户意图：{goal}\n\n宿主契约：\n- taskKind：{task_kind}\n- 唯一候选工具：{expected_tool}\n- 预期产物：{expected_artifact}\n- 必需读取：{required_reads}\n{execution_rule}\n宿主将校验工具、读取顺序、调用次数、作用域和产物。\n\n本轮最小要求：{task_instruction}{recovery_instruction}{retry_instruction}{revision_material}",
+        "小说 ID：{novel}\n章节 ID：{chapter}\n用户意图：{goal}\n\n宿主契约：\n- taskKind：{task_kind}\n- 唯一候选工具：{expected_tool}\n- 预期产物：{expected_artifact}\n- 必需读取：{required_reads}\n{execution_rule}\n宿主将校验工具、读取顺序、调用次数、作用域和产物。\n\n本轮最小要求：{task_instruction}{recovery_instruction}{retry_instruction}{revision_material}{continuity_material}{integrity_repair}",
         novel = input.novel_id,
         chapter = chapter,
         goal = input.goal,
@@ -289,6 +317,8 @@ fn workbench_turn_prompt_for_attempt(
         recovery_instruction = recovery_instruction,
         retry_instruction = retry_instruction,
         revision_material = revision_material,
+        continuity_material = continuity_material,
+        integrity_repair = integrity_repair,
     )
 }
 
@@ -334,9 +364,19 @@ pub struct StartTaskTurnInput {
     pub request_policy: TaskRequestPolicyInput,
     #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub continuity_claim: Option<chapter_gate::ContinuityClaim>,
+    #[serde(skip)]
+    pub(crate) verified_continuity: Option<chapter_continuity::VerifiedContinuity>,
+    #[serde(skip)]
+    pub(crate) continuity_checked: bool,
+    #[serde(default)]
+    pub chapter_host_gate: Option<chapter_gate::ChapterHostGate>,
+    #[serde(default)]
+    pub retry_source_run_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChapterWordRangeInput {
     pub target: i64,
@@ -360,7 +400,9 @@ fn is_canonical_only_turn(input: &StartTaskTurnInput) -> bool {
 }
 
 fn turn_allowed_tools(input: &StartTaskTurnInput) -> &'static str {
-    if is_canonical_only_turn(input) {
+    if input.task_kind == "creative_dialogue" {
+        creative_dialogue::ALLOWED
+    } else if is_canonical_only_turn(input) {
         CANONICAL_ALLOWED_TOOLS
     } else if input.task_kind == "chapter_write" {
         CHAPTER_WRITE_ALLOWED_TOOLS
@@ -380,7 +422,9 @@ fn turn_context_read_tools(input: &StartTaskTurnInput) -> &'static str {
 }
 
 fn workbench_system_prompt(input: &StartTaskTurnInput) -> &'static str {
-    if is_canonical_only_turn(input) {
+    if input.task_kind == "creative_dialogue" {
+        creative_dialogue::PROMPT
+    } else if is_canonical_only_turn(input) {
         CANONICAL_WORKBENCH_SYSTEM_PROMPT
     } else {
         WORKBENCH_SYSTEM_PROMPT
@@ -391,7 +435,7 @@ fn expected_contract_for_task_kind(
     task_kind: &str,
 ) -> Result<Option<(&'static str, &'static str)>, String> {
     match task_kind {
-        "read" => Ok(None),
+        "read" | "creative_dialogue" => Ok(None),
         "story_plan_generate" | "outline_generate" => Ok(Some(("generate_outline", "outline"))),
         "setting_expand" => Ok(Some(("expand_settings", "setting_candidates"))),
         "character_generate" => Ok(Some(("generate_characters", "character_candidates"))),
@@ -464,18 +508,7 @@ fn validate_turn_contract(input: &StartTaskTurnInput) -> Result<(), String> {
         }
     }
 
-    if let Some(source) = &input.revision_source {
-        crate::services::artifact_service::revision_source::validate_identity(source)
-            .map_err(|error| error.to_string())?;
-        if !is_chapter_writing_turn(input)
-            || source.artifact_type != "chapter_text"
-            || source.conversation_id != input.conversation_id
-            || source.novel_id != input.novel_id
-            || source.chapter_id != input.chapter_id
-        {
-            return Err("CHAPTER_REVISION_SOURCE_INVALID: 修订来源与章节任务不一致".to_string());
-        }
-    }
+    revision_source::validate_contract(input).map_err(|error| error.to_string())?;
     let context_read_tools = turn_context_read_tools(input);
     let mut seen = HashSet::new();
     for tool in &input.required_read_tools {
@@ -502,7 +535,7 @@ fn validate_turn_contract(input: &StartTaskTurnInput) -> Result<(), String> {
             ));
         }
     }
-    Ok(())
+    chapter_gate::validate_host_gate(input)
 }
 
 fn allowlisted_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
@@ -579,7 +612,7 @@ fn runtime_error_for_persistence(error: &str) -> String {
 }
 
 fn is_automatic_protocol_recovery_candidate(input: &StartTaskTurnInput, error: &str) -> bool {
-    input.task_kind == "chapter_summary"
+    summary_scope::is_automatic_summary(input)
         && input.expected_tool.as_deref() == Some("summarize_chapter")
         && input.expected_artifact_type.as_deref() == Some("chapter_summary")
         && raw_automatic_protocol_recovery_error_code(error).is_some()
@@ -607,7 +640,13 @@ fn task_session_id(
             scope.adopted_draft_id,
             run_id,
         )),
-        None => large_text_repository::sha256(&input.conversation_id),
+        None => large_text_repository::sha256(&format!(
+            "execution-v2\0{}\0{}\0{}\0{}",
+            input.conversation_id,
+            input.task_kind,
+            input.chapter_id.as_deref().unwrap_or(""),
+            turn_allowed_tools(input)
+        )),
     };
     if summary_scope.is_some() {
         format!("session-summary-{}", &identity[..32])
@@ -825,8 +864,13 @@ pub struct TaskRuntimeResult {
     pub runtime: String,
     pub assistant_text: Option<String>,
     pub artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_action: Option<creative_dialogue::PlannedAction>,
     pub session_lifecycle: Option<String>,
-    pub model_tool_attestation: ModelToolAttestation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_tool_attestation: Option<ModelToolAttestation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_chapter_candidate: Option<chapter_gate::PendingChapterCandidate>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -874,6 +918,7 @@ struct WorkerProcess {
     runtime: Arc<RuntimeHandle>,
     identity_hash: String,
     model_route: SelectedModelRoute,
+    credential_hash: String,
     _proxy_guard: ProxyGuard,
     _policy_guard: GovernedProxyPolicyGuard,
 }
@@ -1234,6 +1279,12 @@ fn normalize_tool_name(name: &str) -> String {
         .or_else(|| name.strip_prefix("novel__"))
         .unwrap_or(name);
     let name = strip_tool_version(name);
+    if name == "creative.plan_action"
+        || name == "creative_plan_action"
+        || name.starts_with("creative_plan_action_")
+    {
+        return "creative.plan_action".to_string();
+    }
     if let Some(canonical) = canonical_read_tool_name(name) {
         return canonical.to_string();
     }
@@ -1282,6 +1333,7 @@ fn tool_projection_metadata(
     name: &str,
 ) -> (&'static str, &'static str, &'static str, &'static str) {
     match name {
+        "creative.plan_action" => ("1", "novel", "none", "never"),
         "novel.read"
         | "novel.read_context"
         | "memory.search"
@@ -2692,6 +2744,14 @@ fn create_artifact_projection(
             content_hash: None,
         }
     };
+    if artifact_type == "chapter_summary" {
+        crate::services::summary_grounding_source::validate_runtime_receipt(
+            connection,
+            run_id,
+            base.draft_id.as_deref(),
+            base.content_hash.as_deref(),
+        )?;
+    }
     let rule_read_event: String = connection.query_row(
         "SELECT event_id FROM tool_call_events WHERE run_id=?1 AND tool_name='novel.read_context'
          AND status='succeeded' ORDER BY sequence LIMIT 1",
@@ -2716,6 +2776,10 @@ fn create_artifact_projection(
     let (mut context_manifest, compiled_context, context_budget, _generation_context) =
         build_context_evidence(connection, run_id)?;
     let mut payload_json = json!({"goal": input.goal, "conversationId": input.conversation_id});
+    if artifact_type == "chapter_summary" {
+        payload_json["summaryGroundingVersion"] =
+            json!(crate::services::summary_grounding::VERSION);
+    }
     revision_source::freeze_snapshot_metadata(input, &mut payload_json, &mut context_manifest)?;
     let create = CreateAiTaskInput {
         operation_id,
@@ -2825,7 +2889,7 @@ fn create_artifact_projection(
         ),
     )?;
     let create_artifact = if input.revision_source.is_some() {
-        artifact_service::create_verified_chapter_revision_artifact
+        artifact_service::create_verified_revision_artifact
     } else {
         artifact_service::create_artifact
     };
@@ -2859,6 +2923,25 @@ fn create_artifact_projection(
         .iter()
         .filter(|issue| issue.severity == "error")
         .count();
+    if artifact_type == "chapter_summary" && error_count > 0 {
+        let first = artifact
+            .issues
+            .iter()
+            .find(|issue| issue.severity == "error")
+            .unwrap();
+        return Err(AppError::new(
+            "SUMMARY_GROUNDING_REVIEW_REQUIRED",
+            format!(
+                "总结依据校验未通过（{}）：{} 请基于当前采用稿重新总结；原始响应与全部问题已保留。",
+                first.json_path.as_deref().unwrap_or("总结"),
+                first.message
+            ),
+            true,
+        )
+        .with_details(
+            json!({"artifactId": artifact.artifact.artifact_id, "issues": artifact.issues}),
+        ));
+    }
     let summary = artifact_projection_summary(
         &artifact.artifact.processing_status,
         warning_count,
@@ -3188,6 +3271,7 @@ fn spawn_worker_process(
         runtime,
         identity_hash,
         model_route: model_route.clone(),
+        credential_hash: large_text_repository::sha256(upstream_key),
         _proxy_guard: proxy_guard,
         _policy_guard: policy_guard,
     }))
@@ -3373,6 +3457,7 @@ pub(super) fn validate_model_tool_attestation(
     Ok(attestation)
 }
 
+#[cfg(test)]
 fn model_snapshot_with_tool_attestation(
     snapshot: &Value,
     attestation: &ModelToolAttestation,
@@ -3401,74 +3486,6 @@ fn model_snapshot_with_tool_attestation(
         }),
     );
     Ok(frozen)
-}
-
-fn preflight_model_tool_attestation(
-    input: &StartTaskTurnInput,
-    worker_id: &str,
-    process_holder: &Arc<Mutex<Option<Arc<WorkerProcess>>>>,
-    projection: Arc<Mutex<Option<ProjectionTarget>>>,
-    cancel: &AtomicBool,
-) -> Result<(Arc<WorkerProcess>, ModelToolAttestation), String> {
-    if cancel.load(Ordering::SeqCst) {
-        return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
-    }
-    let process = ensure_worker_process(input, worker_id, process_holder, projection)?;
-    if cancel.load(Ordering::SeqCst) {
-        process.runtime.kill();
-        return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
-    }
-    ensure_runtime_initialized(input, &process.runtime).map_err(|error| {
-        if cancel.load(Ordering::SeqCst) {
-            "MODEL_TOOL_ATTESTATION_CANCELLED".to_string()
-        } else {
-            error
-        }
-    })?;
-    if cancel.load(Ordering::SeqCst) {
-        process.runtime.kill();
-        return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
-    }
-    let route = selected_model_route(input)?;
-    let evidence = process
-        .runtime
-        .request(
-            MODEL_TOOL_ATTESTATION_METHOD,
-            Some(json!({
-                "provider": route.harness_provider,
-                "model": route.model,
-                "nonce": uuid::Uuid::new_v4().simple().to_string(),
-            })),
-            Duration::from_secs(40),
-        )
-        .map_err(|error| {
-            if cancel.load(Ordering::SeqCst) {
-                "MODEL_TOOL_ATTESTATION_CANCELLED".to_string()
-            } else if error.is_frame_channel_disconnected() {
-                safe_supervisor_error(
-                    &process.runtime,
-                    "MODEL_TOOL_ATTESTATION_TRANSPORT_FAILED",
-                    &error,
-                )
-            } else {
-                "MODEL_TOOL_CALLING_NOT_VERIFIED: PROBE_TRANSPORT_FAILED".to_string()
-            }
-        })?;
-    if cancel.load(Ordering::SeqCst) {
-        return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
-    }
-    let mut attestation =
-        validate_model_tool_attestation(evidence, &route.harness_provider, &route.model).map_err(
-            |error| {
-                process
-                    ._proxy_guard
-                    .last_policy_error_code()
-                    .map(|policy_code| format!("{} [{}]", error, policy_code))
-                    .unwrap_or(error)
-            },
-        )?;
-    attestation.provider = route.logical_provider;
-    Ok((process, attestation))
 }
 
 pub fn start(input: StartTaskTurnInput) -> Result<TaskRuntimeResult, String> {
@@ -3501,8 +3518,11 @@ pub fn start_with_observer(
             input.chapter_id.as_deref(),
         )
         .map_err(|error| error.to_string())?;
+        retry::validate_retry(&connection, &input)?;
         revision_source::freeze_turn_revision(&connection, &mut input)
             .map_err(|error| error.to_string())?;
+        word_target::validate(&connection, &input)?;
+        chapter_continuity::freeze_continuity(&connection, &mut input)?;
         let book_word_goal = if input.task_kind == "story_plan_generate" {
             ai_task_service::authoritative_book_word_goal(&connection, &input.conversation_id)
                 .map_err(|error| error.to_string())?
@@ -3513,11 +3533,32 @@ pub fn start_with_observer(
     };
     input.book_word_goal = book_word_goal;
     validate_turn_contract(&input)?;
+    if chapter_gate::is_admit(&input) {
+        return chapter_gate::admit(input, notifier);
+    }
+    if let Some(runtime) = input
+        .model_snapshot
+        .get_mut("runtime")
+        .and_then(Value::as_object_mut)
+    {
+        runtime.remove("toolCallingAttestation");
+    }
+    {
+        let mut connection = crate::db::get_connection()
+            .lock()
+            .map_err(|_| "数据库锁失败".to_string())?;
+        chapter_gate::fail_abandoned_withheld(&mut connection, &input.conversation_id)?;
+    }
+    let gated_budget = if is_chapter_writing_turn(&input) {
+        Some(chapter_budget::bind_draft_attempt(&mut input)?)
+    } else {
+        None
+    };
     let summary_session_scope = if input.task_kind == "chapter_summary" {
         let connection = crate::db::get_connection()
             .lock()
             .map_err(|_| "数据库锁失败".to_string())?;
-        Some(chapter_summary_recovery_scope(&connection, &input)?)
+        Some(summary_scope::resolve_session_scope(&connection, &input)?)
     } else {
         None
     };
@@ -3533,13 +3574,13 @@ pub fn start_with_observer(
         if let Some(worker) = workers.get_mut(&input.conversation_id) {
             if matches!(
                 worker.status.as_str(),
-                "attesting" | "running" | "cancel_requested"
+                "attesting" | "queued" | "running" | "cancel_requested"
             ) {
                 return Err("当前任务已有活动运行".to_string());
             }
             worker.run_id = run_id.clone();
             worker.cancel = cancel.clone();
-            worker.status = "attesting".to_string();
+            worker.status = "queued".to_string();
             worker.error = None;
             worker.notifier = notifier.clone();
             worker.session_id = initial_session_id.clone();
@@ -3561,39 +3602,33 @@ pub fn start_with_observer(
                     process: process.clone(),
                     projection: projection.clone(),
                     notifier: notifier.clone(),
-                    status: "attesting".to_string(),
+                    status: "queued".to_string(),
                     error: None,
                 },
             );
             (stable_worker_id, process, projection)
         }
     };
-    let (attested_process, model_tool_attestation) = match preflight_model_tool_attestation(
-        &input,
-        &worker_id,
-        &process,
-        projection.clone(),
-        &cancel,
-    ) {
-        Ok(evidence) => evidence,
-        Err(raw_error) => {
-            let error = safe_runtime_error(&raw_error);
-            update_active(&input.conversation_id, "idle", Some(error.clone()));
-            return Err(error);
-        }
-    };
-    input.model_snapshot = match model_snapshot_with_tool_attestation(
-        &input.model_snapshot,
-        &model_tool_attestation,
-    ) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            update_active(&input.conversation_id, "idle", Some(error.clone()));
-            return Err(error);
-        }
-    };
+    // No capability or connectivity probe. The actual request owns the model
+    // outcome, after its Run exists and can retain an actionable dialogue error.
     let mut protocol_recovery_retry = 0usize;
-    let mut chapter_recovery = ChapterLengthRecovery::new(&input);
+    let mut chapter_recovery = if let Some(usage) = gated_budget {
+        let mut recovery = ChapterLengthRecovery::new_with_remaining(&input, usage.remaining);
+        recovery.seed(usage.calls, usage.length_repairs);
+        recovery
+    } else {
+        ChapterLengthRecovery::new(&input)
+    };
+    let history_restored = (|| {
+        let connection = crate::db::get_connection()
+            .lock()
+            .map_err(|_| "数据库锁失败".to_string())?;
+        chapter_recovery.restore_history(&connection, &input)
+    })();
+    if let Err(error) = history_restored {
+        update_active(&input.conversation_id, "idle", Some(error.clone()));
+        return Err(error);
+    }
     loop {
         let run_session_id = task_session_id(&input, &run_id, summary_session_scope.as_ref());
         let run_created = (|| {
@@ -3605,8 +3640,8 @@ pub fn start_with_observer(
                 .ok_or_else(|| "当前任务没有活动运行".to_string())?;
             if cancel.load(Ordering::SeqCst) || worker.status == "cancel_requested" {
                 worker.status = "idle".to_string();
-                worker.error = Some("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
-                return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
+                worker.error = Some("DSH_TASK_CANCELLED".to_string());
+                return Err("DSH_TASK_CANCELLED".to_string());
             }
             worker.run_id = run_id.clone();
             worker.session_id = run_session_id.clone();
@@ -3616,6 +3651,7 @@ pub fn start_with_observer(
                 .map_err(|_| "数据库锁失败".to_string())?;
             revision_source::freeze_turn_revision(&connection, &mut input)
                 .map_err(|error| error.to_string())?;
+            chapter_continuity::freeze_continuity(&connection, &mut input)?;
             let previous_terminal_runs =
                 previous_terminal_run_count(&connection, &input.conversation_id, &input.turn_id)?;
             conversation_service::create_run(
@@ -3643,6 +3679,8 @@ pub fn start_with_observer(
                 },
             )
             .map_err(|error| error.to_string())?;
+            retry::record_contract(&mut connection, &input, &run_id)?;
+            chapter_recovery.record_history_notice(&mut connection, &input, &run_id)?;
             worker.status = "running".to_string();
             Ok::<usize, String>(previous_terminal_runs)
         })();
@@ -3654,20 +3692,23 @@ pub fn start_with_observer(
             }
         };
         notify_projection(notifier.as_ref(), &input.conversation_id, &run_id, "run")?;
-        let result = execute(
-            input.clone(),
-            run_id.clone(),
-            worker_id.clone(),
-            run_session_id,
-            attested_process.clone(),
-            projection.clone(),
-            cancel.clone(),
-            notifier.clone(),
-            model_tool_attestation.clone(),
-            protocol_recovery_retry,
-            previous_terminal_runs,
-            &mut chapter_recovery,
-        );
+        let result = ensure_worker_process(&input, &worker_id, &process, projection.clone())
+            .and_then(|worker_process| {
+                execute(
+                    input.clone(),
+                    run_id.clone(),
+                    worker_id.clone(),
+                    run_session_id,
+                    worker_process,
+                    projection.clone(),
+                    cancel.clone(),
+                    notifier.clone(),
+                    None,
+                    protocol_recovery_retry,
+                    previous_terminal_runs,
+                    &mut chapter_recovery,
+                )
+            });
         let raw_error = match result {
             Ok(outcome) => {
                 update_active(&input.conversation_id, "idle", None);
@@ -3679,7 +3720,11 @@ pub fn start_with_observer(
             .remaining_at(std::time::Instant::now())
             .is_zero()
         {
-            attested_process.runtime.kill();
+            if let Ok(holder) = process.lock() {
+                if let Some(worker_process) = holder.as_ref() {
+                    worker_process.runtime.kill();
+                }
+            }
         }
         let error = runtime_error_for_persistence(&raw_error);
         let cancelled = active()
@@ -3819,10 +3864,10 @@ pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
     let worker = workers
         .get_mut(conversation_id)
         .ok_or_else(|| "当前任务没有活动运行".to_string())?;
-    if !matches!(worker.status.as_str(), "attesting" | "running") {
+    if !matches!(worker.status.as_str(), "attesting" | "queued" | "running") {
         return Err("当前任务没有活动运行".to_string());
     }
-    let attesting = worker.status == "attesting";
+    let initializing = matches!(worker.status.as_str(), "attesting" | "queued");
     worker.cancel.store(true, Ordering::SeqCst);
     let run_id = worker.run_id.clone();
     let session_id = worker.session_id.clone();
@@ -3831,7 +3876,7 @@ pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
     let process = worker.process.clone();
     worker.status = "cancel_requested".to_string();
     drop(workers);
-    if attesting {
+    if initializing {
         if let Ok(mut holder) = process.lock() {
             if let Some(process) = holder.take() {
                 process.runtime.kill();
@@ -4105,6 +4150,11 @@ fn probe_input(
             timeout_seconds: 30,
         },
         api_key: api_key.unwrap_or_default().to_string(),
+        continuity_claim: None,
+        verified_continuity: None,
+        continuity_checked: false,
+        chapter_host_gate: None,
+        retry_source_run_id: None,
     };
     selected_model_route(&input)?;
     Ok(input)
@@ -4208,48 +4258,6 @@ fn read_matching_plugin_probe_health(
                 return Ok(Some(health));
             }
         }
-    }
-    Ok(None)
-}
-
-/// Reads the public health projection from an idle task worker, or a dedicated
-/// plugin-probe worker when the user has not started a task yet.
-///
-/// A running/cancelling worker is never probed. Callers must treat `None` as
-/// "not initialized", not as healthy. Probe spawn failures stay `None` so the
-/// plugin view can remain unavailable instead of guessing loaded.
-pub fn runtime_health_with_probe(
-    conversation_id: Option<&str>,
-    allow_probe: bool,
-    model_snapshot: Option<&Value>,
-    api_key: Option<&str>,
-) -> Result<Option<Value>, String> {
-    if let Some(conversation_id) = conversation_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != PLUGIN_PROBE_CONVERSATION_ID)
-    {
-        let workers = active()
-            .lock()
-            .map_err(|_| "Worker 状态锁失败".to_string())?;
-        if let Some(worker) = workers.get(conversation_id) {
-            if worker.status == "idle" {
-                let process = worker
-                    .process
-                    .lock()
-                    .map_err(|_| "Worker 进程锁失败".to_string())?
-                    .clone();
-                drop(workers);
-                if let Some(process) = process {
-                    return Ok(Some(read_process_health(&process)?));
-                }
-            }
-        }
-    }
-    if let Some(health) = read_matching_plugin_probe_health(model_snapshot, api_key)? {
-        return Ok(Some(health));
-    }
-    if allow_probe {
-        return ensure_plugin_probe_health(model_snapshot, api_key);
     }
     Ok(None)
 }

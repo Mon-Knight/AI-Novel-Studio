@@ -55,7 +55,7 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 | --------- | -------------------------------------------------------------- |
 | 桌面壳    | Tauri 1.x + Rust                                               |
 | 前端      | React 18 + TypeScript 5 + Vite 5                               |
-| 路由/状态 | React Router 6（HashRouter）+ Zustand                          |
+| 路由/状态 | React Router 7（HashRouter）+ Zustand                          |
 | 持久化    | 桌面 SQLite；浏览器开发由 Service 提供 LocalStorage 回退       |
 | AI/运行时 | 统一服务层、受治理的 Provider 请求、固定版本 DSH Headless 载体 |
 | 提示词    | 独立 Markdown 模板与既有模板注册/编译服务                      |
@@ -126,7 +126,7 @@ git status --short
 Rust 测试保留 `--locked`；共享 DSH 状态的测试及完整 Rust 验收使用串行参数：
 
 ```powershell
-cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 ```
 
 涉及 DSH 的完整验收应先按测试文档准备固定载体并重建当前 Gateway，不能复用不明来源缓存。发布统一入口：

@@ -64,10 +64,10 @@ function deterministicE2eModelEnabled(): boolean {
   }
 }
 
-function deterministicE2eModelProjection(): CurrentPluginProjection {
+function deterministicE2eModelProjection(modelId = 'Mock'): CurrentPluginProjection {
   return {
-    id: 'model:mock:Mock',
-    name: 'Mock',
+    id: `model:mock:${modelId}`,
+    name: modelId,
     category: 'model',
     version: 'e2e-deterministic',
     description: 'Deterministic Workbench model exposed only by an explicitly enabled E2E test.',
@@ -341,6 +341,7 @@ export async function getCurrentPluginProjection(
   }
   if (deterministicE2eModelEnabled()) {
     runtimeRows.push(deterministicE2eModelProjection());
+    runtimeRows.push(deterministicE2eModelProjection('Mock-Alternate'));
   }
   return buildCurrentPluginProjection({
     desktop,

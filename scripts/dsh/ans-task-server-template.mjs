@@ -93,6 +93,13 @@ const CANONICAL_MCP_TOOL_IDENTITIES = [
   { canonical: 'context.read', dottedSuffix: 'context.read', underscored: 'context_read' },
   { canonical: 'memory.search', dottedSuffix: 'memory.search', underscored: 'memory_search' },
 ];
+const CREATIVE_DIALOGUE_MCP_TOOL_IDENTITIES = [
+  { dottedSuffix: 'novel.read_context', underscored: 'novel_read_context' },
+  { dottedSuffix: 'chapter.read_outline', underscored: 'chapter_read_outline' },
+  { dottedSuffix: 'get_character_states', underscored: 'get_character_states' },
+  { dottedSuffix: 'search_memory', underscored: 'search_memory' },
+  { dottedSuffix: 'creative.plan_action', underscored: 'creative_plan_action' },
+];
 
 function registeredToolMatchesCanonical(tool, identity) {
   if (typeof tool !== 'string') return false;
@@ -572,7 +579,11 @@ class AnsTaskServer {
     ).map((identity) => identity.canonical);
     const mcpNovelLoaded =
       toolDirectory.available &&
-      (missingNovelTools.length === 0 || hasCanonicalNovelTools(registeredTools));
+      (missingNovelTools.length === 0 ||
+        hasCanonicalNovelTools(registeredTools) ||
+        CREATIVE_DIALOGUE_MCP_TOOL_IDENTITIES.every((identity) =>
+          registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+        ));
     return [
       {
         id: 'sdk-jsonrpc-server',

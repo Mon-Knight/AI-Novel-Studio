@@ -10,6 +10,7 @@ import {
   hasUsableDshTaskCredentialAsync,
   resolveDshTaskApiKey,
   resolveDshTaskApiKeyAsync,
+  dshTaskRuntimeService,
 } from './taskRuntimeService';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 
@@ -225,4 +226,67 @@ test('structured-write DSH start contracts keep the legacy allowlist unset', () 
   const audit = buildDshTaskStartContract('审计人物一致性', 'ch-1');
   assert.equal(audit.taskKind, 'quality_check');
   assert.equal(audit.allowedTools, undefined);
+});
+
+test('cancelling while exact credentials load prevents native model dispatch and strips renderer signals from IPC', async () => {
+  saveAiSettings(settings);
+  resetSessionModelCredentialsForTests();
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let releaseCredential!: (credential: string) => void;
+  let entered!: () => void;
+  const credentialEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let nativeStarts = 0;
+  let nativeInput: Record<string, unknown> | undefined;
+  const bridgeWindow: Record<string, unknown> = { crypto: globalThis.crypto };
+  bridgeWindow.__TAURI_IPC__ = (message: {
+    cmd: string;
+    callback: number;
+    input?: Record<string, unknown>;
+  }) => {
+    const finish = (value: unknown) =>
+      (bridgeWindow[`_${message.callback}`] as (value: unknown) => void)(value);
+    if (message.cmd === 'resolve_session_model_credential') {
+      releaseCredential = (credential) => finish(credential);
+      entered();
+    } else if (message.cmd === 'dsh_start_task_turn') {
+      nativeStarts++;
+      nativeInput = message.input;
+      finish({ run: { status: 'completed' } });
+    } else throw new Error(`unexpected native test command ${message.cmd}`);
+  };
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: bridgeWindow });
+  const controller = new AbortController();
+  const input = {
+    conversationId: 'cancel-credential-loading',
+    novelId: 'novel',
+    turnId: 'turn',
+    goal: '你好',
+    modelSnapshot: snapshot,
+    taskKind: 'creative_dialogue' as const,
+    requiredReadTools: [],
+    cancellationSignal: controller.signal,
+  };
+  try {
+    const pending = dshTaskRuntimeService.start(input);
+    await credentialEntered;
+    controller.abort();
+    releaseCredential('test-session-credential');
+    await assert.rejects(pending, { name: 'AbortError' });
+    assert.equal(nativeStarts, 0);
+    assert.equal(dshTaskRuntimeService.isRunning(input.conversationId), false);
+    await dshTaskRuntimeService.start({
+      ...input,
+      modelSnapshot: { ...snapshot, options: { ...snapshot.options, timeoutSeconds: 77 } },
+      cancellationSignal: new AbortController().signal,
+    });
+    assert.equal(nativeStarts, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(nativeInput, 'cancellationSignal'), false);
+    assert.equal((nativeInput?.requestPolicy as { timeoutSeconds: number }).timeoutSeconds, 77);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+    resetSessionModelCredentialsForTests();
+  }
 });

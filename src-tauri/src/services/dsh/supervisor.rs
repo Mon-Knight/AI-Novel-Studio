@@ -587,7 +587,7 @@ impl RuntimeHandle {
         loop {
             if let Some(error) = self.observer_error.lock().unwrap().clone() {
                 return Err(SupervisorError(format!(
-                    "session.event persistence failed: {}",
+                    "session.event rejected: {}",
                     error
                 )));
             }
@@ -641,7 +641,7 @@ impl RuntimeHandle {
         loop {
             if let Some(error) = self.observer_error.lock().unwrap().clone() {
                 return Err(SupervisorError(format!(
-                    "session.event persistence failed: {}",
+                    "session.event rejected: {}",
                     error
                 )));
             }

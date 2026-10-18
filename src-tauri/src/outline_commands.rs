@@ -2,6 +2,9 @@ use crate::db::get_connection;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+#[path = "outline_commands/chapter_source.rs"]
+mod chapter_source;
+
 // ==================== Data Structures ====================
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -469,48 +472,7 @@ pub fn set_active_volume_outline(input: SetActiveVolumeOutlineInput) -> Result<(
 #[tauri::command]
 pub fn save_chapter_outline(input: SaveChapterOutlineInput) -> Result<ChapterOutlineDto, String> {
     let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let transaction = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
-    ensure_project_exists(&transaction, &input.project_id)?;
-    ensure_chapter_in_project(&transaction, &input.project_id, &input.chapter_id)?;
-    ensure_volume_outline_in_project(&transaction, &input.project_id, &input.volume_outline_id)?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
-    let save_as_new = input.save_as_new_version.unwrap_or(false);
-    let chapter_index = input.chapter_index.unwrap_or(1);
-
-    let existing = if save_as_new {
-        None
-    } else {
-        get_active_chapter_outline_by_chapter_internal(
-            &transaction,
-            &input.project_id,
-            &input.chapter_id,
-        )
-        .ok()
-    };
-    let saved = if let Some(current) = existing {
-        transaction.execute(
-            "UPDATE chapter_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6 AND project_id = ?7",
-            params![&input.title, &input.content, &source_type, &input.context_snapshot, &now, &current.id, &input.project_id],
-        ).map_err(|e| e.to_string())?;
-        get_chapter_outline_by_id_internal(&transaction, &current.id)?
-    } else {
-        let version = next_version(
-            &transaction,
-            "SELECT COALESCE(MAX(version), 0) FROM chapter_outlines WHERE project_id = ?1 AND chapter_id IS ?2",
-            &[&input.project_id, &input.chapter_id],
-        )?;
-        let id = uuid::Uuid::new_v4().to_string();
-        transaction.execute(
-            "INSERT INTO chapter_outlines (id, project_id, volume_outline_id, chapter_id, chapter_index, title, content, status, version, is_active, source_type, context_snapshot, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,0,?9,?10,?11,?11)",
-            params![&id, &input.project_id, &input.volume_outline_id, &input.chapter_id, chapter_index, &input.title, &input.content, version, &source_type, &input.context_snapshot, &now],
-        ).map_err(|e| e.to_string())?;
-        get_chapter_outline_by_id_internal(&transaction, &id)?
-    };
-    transaction.commit().map_err(|e| e.to_string())?;
-    Ok(saved)
+    chapter_source::save(&mut conn, input)
 }
 
 #[tauri::command]
@@ -545,29 +507,7 @@ pub fn get_chapter_outline_versions(
 #[tauri::command]
 pub fn set_active_chapter_outline(input: SetActiveChapterOutlineInput) -> Result<(), String> {
     let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let transaction = conn.transaction().map_err(|e| e.to_string())?;
-    let chapter_id: Option<String> = transaction
-        .query_row(
-            "SELECT chapter_id FROM chapter_outlines WHERE id = ?1 AND project_id = ?2",
-            params![&input.id, &input.project_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "章节纲要版本不存在或不属于当前作品".to_string())?;
-    transaction
-        .execute(
-            "UPDATE chapter_outlines SET is_active = 0 WHERE project_id = ?1 AND chapter_id IS ?2",
-            params![&input.project_id, &chapter_id],
-        )
-        .map_err(|e| e.to_string())?;
-    transaction
-        .execute(
-            "UPDATE chapter_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3 AND chapter_id IS ?4",
-            params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id, &chapter_id],
-        )
-        .map_err(|e| e.to_string())?;
-    transaction.commit().map_err(|e| e.to_string())
+    chapter_source::set_active(&mut conn, input)
 }
 
 // ==================== Context Builder Command ====================

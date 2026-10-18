@@ -22,13 +22,14 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const { MemoryRouter } = await import('react-router-dom');
-
 const vite = await createServer({
   appType: 'custom',
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true, hmr: false, watch: null },
 });
+const { MemoryRouter } = (await vite.ssrLoadModule(
+  '/src/test/routerExports.ts',
+)) as typeof import('react-router-dom');
 const styleServiceModule = (await vite.ssrLoadModule(
   '/src/services/styles/styleProfileService.ts',
 )) as typeof import('../../services/styles/styleProfileService');
@@ -98,7 +99,6 @@ function renderPage() {
       MemoryRouter,
       {
         initialEntries: ['/styles'],
-        future: { v7_startTransition: true, v7_relativeSplatPath: true },
       },
       React.createElement(StyleProfilesPage),
     ),

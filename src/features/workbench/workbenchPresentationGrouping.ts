@@ -57,6 +57,7 @@ function hasReadPresentationWarning(event: ToolCallEvent): boolean {
   if (result.coverageIncomplete === true || result.complete === false) return true;
   if (hasUnknownStatus(result.status)) return true;
   if (result.warning || (Array.isArray(result.warnings) && result.warnings.length > 0)) return true;
+  if (hasMemoryRetrievalGap(result)) return true;
 
   const data = isRecord(result.data) ? result.data : undefined;
   const contexts = [result.generationContext, data?.generationContext].filter(isRecord);
@@ -101,6 +102,22 @@ function hasReadPresentationWarning(event: ToolCallEvent): boolean {
       return true;
   }
   return false;
+}
+
+/** Gateway search_memory reports these under data; a successful call is not a complete read. */
+function hasMemoryRetrievalGap(result: Record<string, unknown>): boolean {
+  const payloads = [result, isRecord(result.data) ? result.data : undefined].filter(isRecord);
+  return payloads.some((payload) => {
+    if (payload.noHit === true || payload.hit === false) return true;
+    if (payload.truncated === true || payload.textTruncated === true) return true;
+    if (Number(payload.truncatedChunks) > 0 || Number(payload.omittedCandidates) > 0) return true;
+    if (payload.warning || (Array.isArray(payload.warnings) && payload.warnings.length > 0))
+      return true;
+    return (
+      Array.isArray(payload.chunks) &&
+      payload.chunks.some((chunk) => isRecord(chunk) && chunk.textTruncated === true)
+    );
+  });
 }
 
 function canCompactReadEvent(

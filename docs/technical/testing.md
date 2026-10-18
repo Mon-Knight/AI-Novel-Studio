@@ -55,6 +55,8 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 同一批代码/配置未变化且已通过的检查不重复运行；失败修复或出现具体新风险时只复测受影响项。功能开发脚本 `run_feature_workflow.ps1` 默认只做开工检查，`-Phase Verify` 才调用选择器；完整发布脚本保持独立。
 
+本轮审计修复补充：完整原生门禁以 `cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1` 同时覆盖主应用与 Gateway；未知 Rust 模块必须补充行为归属，源码体积不能代替行为测试。DSH、写章契约、载体与完整门禁额外选择 `test:e2e:writing-faults`，通过无 E2E feature 的生产 EXE、隔离 profile 和固定回环上游执行故障规格，不使用真实云凭据。实际云端 R4 仍是独立 opt-in，不能由回环故障结果替代。Windows CI 在 Node 24 上对 main、完整门禁及要求 coverage 的 PR 执行阈值；Linux 的相同测试矩阵不套用 Windows 阈值。
+
 ---
 
 ## 2. 动态测试入口（v2.2.x～v3.7.0）

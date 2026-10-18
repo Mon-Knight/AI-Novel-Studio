@@ -41,6 +41,7 @@ test('Domain Facade E2E requires exactly the four approved canonical identities 
 test('closed-loop E2E additions expose queries but not adoption mutations', () => {
   for (const command of [
     'get_review_authorization',
+    'export_project_backup',
     'get_e2e_agent_closed_loop_state',
     'get_task_conversation',
     'get_task_turn_run_projection',
@@ -55,6 +56,8 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
 
   for (const command of [
     'adopt_review_authorized_draft',
+    'import_project_backup',
+    'delete_novel_cascade',
     'consume_review_authorization',
     'create_task_conversation',
     'delete_chapter_draft',

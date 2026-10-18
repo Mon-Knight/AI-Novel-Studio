@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { browser, expect } from '@wdio/globals';
+import { ensureIsolatedDesktopViewport } from './production-carrier-viewport';
 import {
+  canonicalToolName,
   startMockWorkbenchUpstream,
   type MockWorkbenchRequestSummary,
   type MockWorkbenchUpstream,
@@ -38,12 +40,15 @@ import {
   WRITING_SUBAGENT_CANDIDATE_TOOL,
   WRITING_SUBAGENT_READ_TOOLS,
 } from './real-profile-env';
+import { inspectWritingFaultRuns } from './writing-subagent-fault-evidence';
 
 /**
  * Writing SubAgent gate E-4b: negative and recovery drills for `chapter_write` through the
  * production stack (desktop binary, DSH runtime carrier, gateway, Rust host, workbench UI)
  * with a deterministic loopback upstream standing in for the model. Each scenario keeps the
  * same invariant as E-4a: a candidate-only turn never writes formal chapter facts.
+ * API writing starts through creative dialogue and one successful creative.plan_action;
+ * HTTP faults target only the subsequent writer. Retries must not repeat that planner.
  *
  *   S1 forbidden tool     the model calls `expand_settings`, which the chapter_write allowlist
  *                         never exposes → rejected, no candidate, no writes.
@@ -112,6 +117,7 @@ interface ScenarioRecord {
       | 'phase'
       | 'outcome'
       | 'requestedToolNames'
+      | 'advertisedToolNames'
       | 'userRetryNotice'
       | 'candidateCallNumber'
       | 'candidateTextLength'
@@ -308,6 +314,15 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
   let foreignNovelId = '';
   let foreignChapterId = '';
   const chapters: ChapterDto[] = [];
+  const chapterNovelIds = new Map<string, string>();
+  function selectFixtureChapter(index: number): string {
+    const chapter = chapters[index];
+    const owner = chapter && chapterNovelIds.get(chapter.id);
+    if (!chapter || !owner) throw new Error('Fault scenario chapter scope is missing.');
+    novelId = owner;
+    mock!.configure({ novelId });
+    return chapter.id;
+  }
   const knownConversationIds = new Set<string>();
   const EXPECTED_SCENARIOS = 8;
 
@@ -332,12 +347,24 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         phase: request.phase,
         outcome: request.outcome,
         requestedToolNames: request.requestedToolNames,
+        advertisedToolNames: request.advertisedToolNames,
         userRetryNotice: request.userRetryNotice,
         candidateCallNumber: request.candidateCallNumber,
         candidateTextLength: request.candidateTextLength,
       }));
 
   const record = (scenario: ScenarioRecord) => {
+    for (const request of scenario.mockRequests ?? []) {
+      const advertised = request.advertisedToolNames.map(canonicalToolName);
+      if (
+        advertised.includes(WRITING_SUBAGENT_CANDIDATE_TOOL) &&
+        (advertised.length !== WRITING_SUBAGENT_ALLOWLIST.size ||
+          new Set(advertised).size !== WRITING_SUBAGENT_ALLOWLIST.size ||
+          advertised.some((name) => !name || !WRITING_SUBAGENT_ALLOWLIST.has(name)))
+      ) {
+        scenario.failures.push('a writing request broadened or changed its frozen tool roster');
+      }
+    }
     scenario.verdict = scenario.failures.length === 0 ? 'PASS' : 'FAIL';
     scenarios.push(scenario);
     persistEvidence();
@@ -348,6 +375,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     if (!artifactRoot) throw new Error(`${FAULT_INJECTION_ENV.artifacts} is required.`);
     mock = await startMockWorkbenchUpstream({
       mode: 'normal',
+      upstreamFailureScope: 'chapter-write',
       candidateText: CANDIDATE_TEXT,
     });
     evidence.mockUpstream = {
@@ -380,30 +408,32 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     await browser.execute(() => window.location.reload());
     await waitForTestId('app-shell');
 
-    const novel = await invoke<NovelDto>('create_novel', {
-      input: {
-        title: 'Writing SubAgent E-4b 故障注入',
-        genre: '玄幻',
-        description: '隔离配置内的固定作品，仅用于 Writing SubAgent 负例与恢复验收。',
-        targetWordCount: 60000,
-      },
-    });
-    novelId = novel.id;
-    await seedCoreAssets(novelId);
-    const volume = await invoke<{ id: string }>('create_volume', {
-      input: { novelId, title: '第一卷 试炼', orderIndex: 0 },
-    });
+    // Every fault targets the first chapter of its own project. No scenario relies on an
+    // unadopted preceding fixture chapter, and zero-formal-write assertions remain unchanged.
     for (const [index, title] of FIXTURE_CHAPTER_TITLES.entries()) {
-      chapters.push(
-        await createFixtureChapter({
-          novelId,
-          volumeId: volume.id,
-          title,
-          orderIndex: index,
-          targetWordCount: index === 7 ? REPAIR_TARGET_WORD_COUNT : TARGET_WORD_COUNT,
-        }),
-      );
+      const novel = await invoke<NovelDto>('create_novel', {
+        input: {
+          title: `Writing SubAgent E-4b ${index + 1} · ${title}`,
+          genre: '玄幻',
+          description: '隔离配置内的固定作品，仅用于 Writing SubAgent 负例与恢复验收。',
+          targetWordCount: 60000,
+        },
+      });
+      await seedCoreAssets(novel.id);
+      const volume = await invoke<{ id: string }>('create_volume', {
+        input: { novelId: novel.id, title: '第一卷 试炼', orderIndex: 0 },
+      });
+      const chapter = await createFixtureChapter({
+        novelId: novel.id,
+        volumeId: volume.id,
+        title,
+        orderIndex: 0,
+        targetWordCount: index === 7 ? REPAIR_TARGET_WORD_COUNT : TARGET_WORD_COUNT,
+      });
+      chapters.push(chapter);
+      chapterNovelIds.set(chapter.id, novel.id);
     }
+    novelId = chapterNovelIds.get(chapters[0].id)!;
     const foreign = await invoke<NovelDto>('create_novel', {
       input: {
         title: 'Writing SubAgent E-4b 另一部作品',
@@ -429,6 +459,10 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     evidence.fixture = {
       novelId,
       chapterIds: chapters.map((chapter) => chapter.id),
+      chapterScopes: chapters.map((chapter) => ({
+        chapterId: chapter.id,
+        novelId: chapterNovelIds.get(chapter.id),
+      })),
       foreignNovelId,
       foreignChapterId,
       targetWordCount: TARGET_WORD_COUNT,
@@ -469,6 +503,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     scenario: ScenarioRecord;
     chapterId: string;
     goal?: string;
+    localOnly?: boolean;
     waitForRuntimeIdle?: boolean;
   }): Promise<{
     conversationId: string;
@@ -490,6 +525,14 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       modelCatalog: started.catalog,
       selectedModelKey: started.selectedModelKey,
     };
+    if (!input.localOnly) {
+      // A completed planner is an intermediate stage, never the writing result.
+      await browser.waitUntil(async () => (await countRuns(started.conversationId)) >= 2, {
+        timeout: turnTimeoutMs,
+        interval: 500,
+        timeoutMsg: `${input.scenario.name}: planning did not hand off to a writing run`,
+      });
+    }
     if (input.waitForRuntimeIdle) {
       // Failed intermediate runs are evidence, not the end of an automatic length repair.
       await browser.waitUntil(
@@ -565,7 +608,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[0].id;
+    const chapterId = selectFixtureChapter(0);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'forbidden-tool', chapterId });
@@ -589,17 +632,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     );
     if (forbiddenSucceeded)
       scenario.failures.push('expand_settings succeeded inside a chapter_write turn');
-    const outside = conversation.toolEvents.filter(
-      (event) =>
-        !isRuntimeProjection(event.toolName) &&
-        !WRITING_SUBAGENT_ALLOWLIST.has(event.toolName) &&
-        event.status === 'succeeded',
-    );
-    if (outside.length > 0) {
-      scenario.failures.push(
-        `tools outside the allowlist succeeded: ${outside.map((event) => event.toolName).join(',')}`,
-      );
-    }
+    assertWritingRuns(scenario, conversation, 1);
     if (!scenario.mockRequests.some((request) => request.phase === 'forbidden-tool')) {
       scenario.failures.push('the mock never emitted the forbidden tool call');
     }
@@ -613,7 +646,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
 
   it('S2 rejects a candidate that targets another book and leaves that book untouched', async () => {
     const scenario: ScenarioRecord = { name: 'cross-novel', verdict: 'INCOMPLETE', failures: [] };
-    const chapterId = chapters[1].id;
+    const chapterId = selectFixtureChapter(1);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'cross-novel', chapterId });
@@ -626,6 +659,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     scenario.mockRequests = mockRequestsSince(before);
     scenario.conversation = conversation;
     scenario.invariants = { ...invariants, foreign: foreignInvariants };
+    assertWritingRuns(scenario, conversation, 1);
 
     if (!scenario.mockRequests.some((request) => request.phase === 'generate-chapter')) {
       scenario.failures.push('the mock never submitted the cross-novel candidate');
@@ -648,6 +682,24 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     assertNoFormalWrites(scenario, invariants);
     record(scenario);
   });
+
+  function assertWritingRuns(
+    scenario: ScenarioRecord,
+    conversation: SanitizedConversationEvidence,
+    expectedCount: number,
+    localRunIds: string[] = [],
+  ) {
+    const result = inspectWritingFaultRuns(conversation, expectedCount, localRunIds);
+    scenario.failures.push(...result.failures);
+    if (
+      [...result.planningRuns, ...result.writingRuns].some(
+        (run) => run.runtimeMode !== 'api' || run.modelId !== MODEL_NAME,
+      )
+    ) {
+      scenario.failures.push('planning or writing changed the frozen API model');
+    }
+    return result.writingRuns;
+  }
 
   /** GAP-18: every run of the conversation carries the frozen chapter id. */
   function assertRunsBoundToChapter(
@@ -710,13 +762,23 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     if (candidates.length !== 1) {
       scenario.failures.push(`expected exactly one candidate, found ${candidates.length}`);
     }
-    if (candidates.some((artifact) => artifact.boundToFixtureChapter === false)) {
-      scenario.failures.push('the candidate is bound to a different chapter');
+    if (
+      candidates.some(
+        (artifact) =>
+          artifact.boundToFixtureChapter !== true ||
+          artifact.boundToFixtureNovel !== true ||
+          artifact.runId !== lastRun?.runId,
+      )
+    ) {
+      scenario.failures.push('the candidate is not bound to the final run and fixture chapter');
     }
     if (
       !WRITING_SUBAGENT_READ_TOOLS.every((tool) =>
         conversation.toolEvents.some(
-          (event) => event.toolName === tool && event.status === 'succeeded',
+          (event) =>
+            event.runId === lastRun?.runId &&
+            event.toolName === tool &&
+            event.status === 'succeeded',
         ),
       )
     ) {
@@ -730,7 +792,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[2].id;
+    const chapterId = selectFixtureChapter(2);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'upstream-error-once', chapterId });
@@ -746,11 +808,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     if (!scenario.mockRequests.some((request) => request.outcome === 'injected_failure')) {
       scenario.failures.push('no request hit the injected failure');
     }
-    if (conversation.runs.length !== 1) {
-      scenario.failures.push(
-        `expected the transport retry to stay inside one run, found ${conversation.runs.length}`,
-      );
-    }
+    assertWritingRuns(scenario, conversation, 1);
     assertSingleReviewOnlyCandidate(scenario, conversation);
     assertNoFormalWrites(scenario, invariants);
     record(scenario);
@@ -762,7 +820,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[3].id;
+    const chapterId = selectFixtureChapter(3);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'upstream-error', chapterId });
@@ -787,9 +845,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     assertNoFormalWrites(scenario, failed.invariants);
     notes.originalFailure = failed.conversation;
     notes.originalInvariants = failed.invariants;
-    if (failed.conversation.runs.length !== 1) {
-      scenario.failures.push('the initial failed request created more than one run');
-    }
+    const originalWritingRuns = assertWritingRuns(scenario, failed.conversation, 1);
 
     // A click must not turn a still-broken connection into a success or silently fall back.
     // Leave the upstream in persistent-error mode for this first explicit retry.
@@ -808,10 +864,12 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     const stillBrokenRequests = mockRequestsSince(retryStartSequence);
     notes.stillBrokenConversation = stillBroken.evidence;
     notes.stillBrokenInvariants = stillBrokenInvariants;
-    if (stillBroken.evidence.runs.length !== 2) {
-      scenario.failures.push(
-        `expected 2 failed runs before upstream recovery, found ${stillBroken.evidence.runs.length}`,
-      );
+    const brokenWritingRuns = assertWritingRuns(scenario, stillBroken.evidence, 2);
+    if (
+      brokenWritingRuns.some((run) => run.status !== 'failed') ||
+      brokenWritingRuns[0]?.runId !== originalWritingRuns[0]?.runId
+    ) {
+      scenario.failures.push('the still-broken retry did not preserve the original writer failure');
     }
     if (!stillBrokenRequests.some((request) => request.outcome === 'injected_failure')) {
       scenario.failures.push('the still-broken retry never reached the failing upstream');
@@ -840,12 +898,14 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     scenario.conversation = recovered.evidence;
     scenario.invariants = { ...invariants };
 
-    if (recovered.evidence.runs.length !== 3) {
-      scenario.failures.push(
-        `expected 3 runs (failed + failed retry + recovered retry), found ${recovered.evidence.runs.length}`,
-      );
-    }
-    if (recovered.evidence.runs.slice(0, 2).some((run) => run.status !== 'failed')) {
+    const recoveredWritingRuns = assertWritingRuns(scenario, recovered.evidence, 3);
+    if (
+      recoveredWritingRuns
+        .slice(0, 2)
+        .some(
+          (run, index) => run.status !== 'failed' || run.runId !== brokenWritingRuns[index]?.runId,
+        )
+    ) {
       scenario.failures.push('upstream recovery rewrote a previously failed run as successful');
     }
     assertRunsBoundToChapter(scenario, recovered.evidence, chapterId);
@@ -860,7 +920,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[4].id;
+    const chapterId = selectFixtureChapter(4);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'normal', chapterId, candidateText: SHORT_CANDIDATE_TEXT });
@@ -897,9 +957,10 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
           `expected exactly 3 candidate attempts, got ${candidateRequests.length} requests and ${candidateEvents.length} tool events`,
         );
       }
-      if (conversation.runs.length !== 3 || lengthRejectedRuns.length !== 3) {
+      const writingRuns = assertWritingRuns(scenario, conversation, 3);
+      if (lengthRejectedRuns.length !== 3) {
         scenario.failures.push(
-          `expected 3 length-rejected runs (initial + 2 repairs), got ${conversation.runs.length} runs and ${lengthRejectedRuns.length} length rejections`,
+          `expected 3 length-rejected runs (initial + 2 repairs), got ${writingRuns.length} writing runs and ${lengthRejectedRuns.length} length rejections`,
         );
       }
       if (
@@ -932,14 +993,19 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[6].id;
+    const chapterId = selectFixtureChapter(6);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     const settingGoal = '本任务目标字数设为3200字';
     const candidateText = buildCandidateText(CONVERSATION_TARGET_WORD_COUNT);
     mock!.configure({ mode: 'normal', chapterId, candidateText });
     try {
-      const setting = await runScenarioTurn({ scenario, chapterId, goal: settingGoal });
+      const setting = await runScenarioTurn({
+        scenario,
+        chapterId,
+        goal: settingGoal,
+        localOnly: true,
+      });
       const settingRequests = mockRequestsSince(before);
       // Opening the task creator can refresh the model catalog before the local command.
       // Keep those attestation probes visible; only chapter/tool completions must be zero.
@@ -1012,8 +1078,12 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       await send.waitForEnabled({ timeout: 30_000 });
       await clickTestId('workbench-send-task');
       await browser.waitUntil(
-        async () => (await countRuns(setting.conversationId)) > runsBeforeWrite,
-        { timeout: 60_000, interval: 500, timeoutMsg: 'the follow-up write did not create a run' },
+        async () => (await countRuns(setting.conversationId)) >= runsBeforeWrite + 2,
+        {
+          timeout: turnTimeoutMs,
+          interval: 500,
+          timeoutMsg: 'the follow-up planning did not hand off to a writing run',
+        },
       );
       await waitForTerminalConversationStatus({
         timeoutMs: turnTimeoutMs,
@@ -1029,9 +1099,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       scenario.mockRequests = mockRequestsSince(before);
       scenario.conversation = written.evidence;
       scenario.invariants = { ...invariants };
-      if (written.evidence.runs.length !== 2) {
-        scenario.failures.push('expected exactly one local setting run and one API write run');
-      }
+      assertWritingRuns(scenario, written.evidence, 1, settingRun ? [settingRun.runId] : []);
       const writeRun = written.evidence.runs[written.evidence.runs.length - 1];
       if (writeRun?.runtimeMode !== 'api' || writeRun.modelId !== MODEL_NAME) {
         scenario.failures.push('the follow-up write did not use the configured API model');
@@ -1064,7 +1132,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[7].id;
+    const chapterId = selectFixtureChapter(7);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     const oversized = buildCandidateText(3586);
@@ -1108,10 +1176,11 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       if (candidateRequests.some((request, index) => request.candidateCallNumber !== index + 1)) {
         scenario.failures.push('the deterministic candidate sequence was not consumed in order');
       }
-      const firstRun = conversation.runs[0];
-      const finalRun = conversation.runs[conversation.runs.length - 1];
+      const writingRuns = assertWritingRuns(scenario, conversation, 2);
+      const firstRun = writingRuns[0];
+      const finalRun = writingRuns[writingRuns.length - 1];
       if (
-        conversation.runs.length !== 2 ||
+        writingRuns.length !== 2 ||
         firstRun?.status !== 'failed' ||
         !/DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/u.test(firstRun?.error ?? '') ||
         finalRun?.status !== 'completed'
@@ -1121,7 +1190,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         );
       }
       if (
-        conversation.runs.some(
+        writingRuns.some(
           (run) =>
             run.runtimeMode !== 'api' ||
             run.modelId !== MODEL_NAME ||
@@ -1169,7 +1238,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       verdict: 'INCOMPLETE',
       failures: [],
     };
-    const chapterId = chapters[5].id;
+    const chapterId = selectFixtureChapter(5);
     scenario.chapterId = chapterId;
     const before = mock!.snapshot().requestCount;
     mock!.configure({ mode: 'hold-generate', chapterId });
@@ -1237,6 +1306,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
 
     await browser.reloadSession();
     await waitForTestId('app-shell');
+    await ensureIsolatedDesktopViewport(browser);
     // The restarted host reconciles orphaned runs on startup and announces them once.
     const recoveryDialog = await browser.$('[data-testid="conversation-recovery-dialog"]');
     try {
@@ -1267,6 +1337,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       fixtureChapterId: chapterId,
     });
     const interruptedRun = interrupted.evidence.runs[interrupted.evidence.runs.length - 1];
+    assertWritingRuns(scenario, interrupted.evidence, 1);
     notes.interruptedRun = interruptedRun ?? null;
     if (interruptedRun?.status !== 'failed') {
       scenario.failures.push(
@@ -1309,10 +1380,13 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         `retried run status ${lastRun?.status ?? '<none>'}, expected completed`,
       );
     }
-    if (recovered.evidence.runs.length !== 2) {
-      scenario.failures.push(
-        `expected 2 runs (interrupted + retry), found ${recovered.evidence.runs.length}`,
-      );
+    const writingRuns = assertWritingRuns(scenario, recovered.evidence, 2);
+    if (
+      writingRuns[0]?.runId !== interruptedRun?.runId ||
+      writingRuns[0]?.status !== 'failed' ||
+      !/中断|interrupt/u.test(writingRuns[0]?.error ?? '')
+    ) {
+      scenario.failures.push('the recovered retry did not preserve the interrupted writer');
     }
     const candidates = recovered.evidence.artifacts.filter(
       (artifact) => artifact.artifactType === 'chapter_text' && artifact.status === 'candidate',
@@ -1324,6 +1398,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     }
     assertRunsBoundToChapter(scenario, recovered.evidence, chapterId);
     assertRetryNoticeOnlyOnRetriedRun(scenario, scenario.mockRequests, retryStartSequence);
+    assertSingleReviewOnlyCandidate(scenario, recovered.evidence);
     assertNoFormalWrites(scenario, invariants);
     record(scenario);
   });

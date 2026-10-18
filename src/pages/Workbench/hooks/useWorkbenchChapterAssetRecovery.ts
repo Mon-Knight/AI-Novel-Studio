@@ -90,11 +90,16 @@ export function useWorkbenchChapterAssetRecovery(
     (
       conversationId: string,
       update: (orchestration: ChapterAssetOrchestration) => ChapterAssetOrchestration,
+      modelSnapshot?: TaskModelSnapshot,
     ): ChapterAssetRecovery | null => {
       const current =
         recoveriesRef.current.get(conversationId) ?? chapterAssetRecoveryStore.get(conversationId);
       if (!current) return null;
-      const next = { ...current, orchestration: update(current.orchestration) };
+      const next = {
+        ...current,
+        orchestration: update(current.orchestration),
+        ...(modelSnapshot ? { modelSnapshot } : {}),
+      };
       persistRecovery(next);
       return next;
     },
