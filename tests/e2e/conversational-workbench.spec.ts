@@ -66,7 +66,7 @@ describe('conversational creative workbench', () => {
     expect(await createAndStart.isEnabled()).toBe(false);
     expect(await testIdCount('workbench-task')).toBe(0);
 
-    const closeCreator = await creator.$('button[aria-label="关闭新建任务"]');
+    const closeCreator = await creator.$('button[aria-label="关闭新建会话"]');
     await closeCreator.click();
     await waitForTestIdMissing('workbench-task-creator');
     await waitForTestId('workbench-create-empty-task');

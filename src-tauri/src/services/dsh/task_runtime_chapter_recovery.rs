@@ -5,9 +5,9 @@ use std::time::Instant;
 
 const CHAPTER_LENGTH_REJECTED: &str = "DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED";
 const MAX_CHAPTER_LENGTH_REPAIRS: usize = 2;
-const CHAPTER_WALL_BUDGET_EXHAUSTED: &str =
+pub(crate) const CHAPTER_WALL_BUDGET_EXHAUSTED: &str =
     "DSH_CHAPTER_WALL_BUDGET_EXHAUSTED: 章节候选与字数修复的 480 秒总预算已耗尽";
-const CHAPTER_CALL_BUDGET_EXHAUSTED: &str =
+pub(crate) const CHAPTER_CALL_BUDGET_EXHAUSTED: &str =
     "DSH_CHAPTER_CANDIDATE_ATTEMPTS_EXHAUSTED: 章节候选调用总数不得超过 3 次";
 
 fn frozen_contract(input: &StartTaskTurnInput) -> Value {
@@ -27,6 +27,7 @@ pub(super) struct ChapterLengthRecovery {
     candidate_calls: usize,
     repair_number: usize,
     rejection: Option<String>,
+    revision: super::length_revision::LengthRevision,
 }
 
 impl ChapterLengthRecovery {
@@ -41,7 +42,42 @@ impl ChapterLengthRecovery {
             candidate_calls: 0,
             repair_number: 0,
             rejection: None,
+            revision: Default::default(),
         }
+    }
+
+    pub(super) fn new_with_remaining(input: &StartTaskTurnInput, remaining: Duration) -> Self {
+        Self {
+            deadline: is_chapter_writing_turn(input).then_some(Instant::now() + remaining),
+            contract: frozen_contract(input),
+            candidate_calls: 0,
+            repair_number: 0,
+            rejection: None,
+            revision: Default::default(),
+        }
+    }
+
+    pub(super) fn seed(&mut self, calls: usize, length_repairs: usize) {
+        self.candidate_calls = calls;
+        self.repair_number = length_repairs;
+    }
+
+    pub(super) fn restore_history(
+        &mut self,
+        connection: &rusqlite::Connection,
+        input: &StartTaskTurnInput,
+    ) -> Result<(), String> {
+        self.revision.restore_history(connection, input)
+    }
+
+    pub(super) fn record_history_notice(
+        &mut self,
+        connection: &mut rusqlite::Connection,
+        input: &StartTaskTurnInput,
+        run_id: &str,
+    ) -> Result<(), String> {
+        self.revision
+            .record_history_notice(connection, input, run_id)
     }
 
     pub(super) fn remaining_at(&self, instant: Instant) -> Duration {
@@ -100,6 +136,21 @@ impl ChapterLengthRecovery {
                 let message = error.to_string();
                 if self.deadline.is_some() && error.code == CHAPTER_LENGTH_REJECTED {
                     self.rejection = Some(message.clone());
+                    // This branch follows the full host scope/read/hash contract. Read the exact
+                    // rejected text only as revision material; it never becomes a candidate card.
+                    let mut source = input.clone();
+                    source.chapter_word_range = None;
+                    if let (Some(range), Ok(Some(generated))) = (
+                        input.chapter_word_range.as_ref(),
+                        read_generated_chapter_result(
+                            connection,
+                            &source,
+                            run_id,
+                            event_id.as_deref(),
+                        ),
+                    ) {
+                        self.revision.observe(generated.text, range);
+                    }
                 }
                 message
             },
@@ -155,6 +206,9 @@ impl ChapterLengthRecovery {
                 MAX_CANDIDATE_TOOL_ATTEMPTS.saturating_sub(self.candidate_calls)
             ));
         }
+        if let Some(range) = input.chapter_word_range.as_ref() {
+            prompt.push_str(&self.revision.prompt(range));
+        }
         prompt
     }
 
@@ -180,7 +234,7 @@ impl ChapterLengthRecovery {
         } else {
             "未满足安全恢复条件，已停止自动字数修复".to_string()
         };
-        Some(format!("任务运行失败：{}。{}。失败 Run 与工具事实已保留；未创建候选 Artifact，未写入正式正文。", error, status))
+        Some(format!("任务运行失败：{}。{}。字数轨迹：{}。失败 Run 与工具事实已保留；未创建候选 Artifact，未写入正式正文。", error, status, self.revision.progress()))
     }
 }
 
@@ -224,7 +278,7 @@ pub(super) fn execute(
     projection: Arc<Mutex<Option<ProjectionTarget>>>,
     cancel: Arc<AtomicBool>,
     notifier: Option<TaskProjectionObserver>,
-    model_tool_attestation: ModelToolAttestation,
+    model_tool_attestation: Option<ModelToolAttestation>,
     protocol_recovery_retry: usize,
     previous_terminal_runs: usize,
     chapter_recovery: &mut ChapterLengthRecovery,
@@ -245,18 +299,30 @@ pub(super) fn execute(
         chapter_recovery.timeout(cap, &cancel)
     })?;
     let route = selected_model_route(&input)?;
-    let max_tokens = input
-        .model_snapshot
-        .pointer("/options/maxTokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(8000);
+    let max_tokens = if is_chapter_writing_turn(&input) {
+        super::chapter_gate::capped_output_tokens(&input)
+    } else {
+        input
+            .model_snapshot
+            .pointer("/options/maxTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(8000)
+    };
     let before = runtime.snapshot(&session_id).unwrap_or_default();
+    let mut turn_prompt =
+        chapter_recovery.prompt(&input, protocol_recovery_retry, previous_terminal_runs);
+    if input.task_kind == "creative_dialogue" {
+        let connection = crate::db::get_connection()
+            .lock()
+            .map_err(|_| "数据库锁失败".to_string())?;
+        turn_prompt.push_str(&super::creative_dialogue::history(&connection, &input)?);
+    }
     let prompt_result = runtime
         .request(
             "session/prompt",
             Some(json!({
                 "sessionId":session_id,
-                "contentBlocks":[{"type":"text","text":chapter_recovery.prompt(&input, protocol_recovery_retry, previous_terminal_runs)}],
+                "contentBlocks":[{"type":"text","text":turn_prompt}],
                 "route":{
                     "provider":route.harness_provider,
                     "model":route.model,
@@ -323,24 +389,38 @@ pub(super) fn execute(
     }
     chapter_recovery.timeout(Duration::from_secs(480), &cancel)?;
     let generated = chapter_recovery.read_candidate(&connection, &input, &run_id)?;
+    let planned_action = super::creative_dialogue::read_action(&connection, &input, &run_id)?;
     chapter_recovery.timeout(Duration::from_secs(480), &cancel)?;
-    let artifact_id = generated
+    super::chapter_continuity::revalidate_now(&connection, &input)?;
+    let withhold = super::chapter_gate::withholds_artifact(&input);
+    if withhold && generated.is_none() {
+        return Err("DSH_EXPECTED_CANDIDATE_RESULT_MISSING".to_string());
+    }
+    let pending = generated
         .as_ref()
-        .map(|generated| {
-            create_artifact_projection(
-                &mut connection,
-                &input,
-                &run_id,
-                generated,
-                snapshot.prompt_tokens.saturating_sub(before.prompt_tokens),
-                snapshot
-                    .completion_tokens
-                    .saturating_sub(before.completion_tokens),
-            )
-        })
-        .transpose()
-        .map_err(|error| error.to_string())?
-        .flatten();
+        .filter(|_| withhold)
+        .map(|item| super::chapter_gate::pending_candidate(&input, &run_id, &item.text));
+    let artifact_id = if withhold {
+        None
+    } else {
+        generated
+            .as_ref()
+            .map(|generated| {
+                create_artifact_projection(
+                    &mut connection,
+                    &input,
+                    &run_id,
+                    generated,
+                    snapshot.prompt_tokens.saturating_sub(before.prompt_tokens),
+                    snapshot
+                        .completion_tokens
+                        .saturating_sub(before.completion_tokens),
+                )
+            })
+            .transpose()
+            .map_err(|error| error.to_string())?
+            .flatten()
+    };
     if artifact_id.is_some() {
         notify_projection(
             notifier.as_ref(),
@@ -349,16 +429,21 @@ pub(super) fn execute(
             "artifact",
         )?;
     }
+    let withheld = pending.is_some();
     let finished_at = now();
     let run = conversation_service::update_run(
         &mut connection,
         UpdateRunInput {
             run_id: run_id.clone(),
-            status: "completed".to_string(),
-            error: None,
+            status: if withheld {
+                "running".to_string()
+            } else {
+                "completed".to_string()
+            },
+            error: withheld.then(|| super::chapter_gate::WITHHELD_ERROR.to_string()),
             updated_at: finished_at.clone(),
             started_at: None,
-            finished_at: Some(finished_at),
+            finished_at: (!withheld).then_some(finished_at),
         },
     )
     .map_err(|error| error.to_string())?;
@@ -367,7 +452,7 @@ pub(super) fn execute(
         notifier.as_ref(),
         &input.conversation_id,
         &run_id,
-        "terminal",
+        if withheld { "run" } else { "terminal" },
     )?;
     *projection
         .lock()
@@ -381,7 +466,9 @@ pub(super) fn execute(
         runtime: "dsh-headless-persistent".to_string(),
         assistant_text: (!assistant_text.trim().is_empty()).then_some(assistant_text),
         artifact_id,
+        planned_action,
         session_lifecycle,
         model_tool_attestation,
+        pending_chapter_candidate: pending,
     })
 }

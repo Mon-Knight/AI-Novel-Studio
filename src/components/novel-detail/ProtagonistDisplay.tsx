@@ -53,6 +53,12 @@ export default function ProtagonistDisplay({ novel }: ProtagonistDisplayProps) {
               </div>
             )}
           </div>
+          {profile.notes && (
+            <div className="detail-gap-top detail-text-sm">
+              <span className="text-muted">备注：</span>
+              {profile.notes}
+            </div>
+          )}
         </div>
       ))}
       {novel?.dualProtagonistRelation?.description && (

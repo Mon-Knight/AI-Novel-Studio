@@ -47,6 +47,14 @@ export const WorkbenchRunProgressMeter = memo(function WorkbenchRunProgressMeter
       <span className="workbench-run-progress-metric">
         已用时 {formatRunDuration(progress.elapsedMs)}
       </span>
+      {progress.active && progress.requestLimit && (
+        <span className="workbench-run-progress-metric">{progress.requestLimit}</span>
+      )}
+      {progress.providerRetryCount > 0 && (
+        <span className="workbench-run-progress-metric">
+          模型请求已重试 {progress.providerRetryCount} 次
+        </span>
+      )}
       <span className="workbench-run-progress-metric">
         最后活动{' '}
         {progress.active

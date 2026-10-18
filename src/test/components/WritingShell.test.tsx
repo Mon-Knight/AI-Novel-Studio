@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HubLayout } from '../../components/layout/HubLayout';
@@ -13,11 +13,29 @@ vi.mock('../../components/sidebar/Sidebar', () => ({
   ),
 }));
 
+function ShortcutLocation() {
+  const location = useLocation();
+  return <output data-testid="shortcut-location">{JSON.stringify(location.state)}</output>;
+}
+
 describe('application shell', () => {
   beforeEach(() => {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('ai_novel_studio_sidebar_collapsed')) localStorage.removeItem(key);
     }
+  });
+  it('preserves the project for Ctrl+N from a project page', () => {
+    render(
+      <MemoryRouter initialEntries={['/novels/new-project/outline']}>
+        <AppShell>
+          <ShortcutLocation />
+        </AppShell>
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
+    expect(screen.getByTestId('shortcut-location').textContent).toBe(
+      '{"workbenchIntent":"new-task","workbenchNovelId":"new-project"}',
+    );
   });
   it.each([
     ['/novels/fixture/workspace', 'writing', 'true'],

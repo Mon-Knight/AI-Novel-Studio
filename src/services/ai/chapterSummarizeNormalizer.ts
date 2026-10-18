@@ -1,5 +1,6 @@
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
 import type { ContextRecordType } from '../../types/context';
+import { preserveSummaryGrounding } from './chapterSummaryGrounding';
 
 function normalizeImportance(value: unknown): 1 | 2 | 3 | 4 | 5 {
   const number = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 3;
@@ -34,6 +35,7 @@ export function normalizeChapterSummarizeResult(
   fallbackText: string,
 ): ChapterSummarizeResult {
   return {
+    grounding: preserveSummaryGrounding(result.grounding),
     summary: result.summary?.trim() || fallbackText.slice(0, 800) || '模型返回了空总结。',
     summaryTitle: result.summaryTitle?.trim() || undefined,
     keyEvents: stringArray(result.keyEvents),
@@ -86,7 +88,7 @@ export function normalizeChapterSummarizeResult(
       ? result.contextRecords
           .map((item) => ({
             contextType: normalizeContextType(item.contextType),
-            title: String(item.title || '上下文记录'),
+            title: String(item.title || ''),
             content: String(item.content || ''),
             importance: normalizeImportance(item.importance),
           }))

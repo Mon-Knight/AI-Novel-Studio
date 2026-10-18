@@ -56,7 +56,7 @@ test('workspace suites execute listed Rust cases exactly instead of the whole cr
 test('release matrix discovers required Rust regressions without executing them early', () => {
   const source = read('verify_project.ps1');
   const discovery = source.indexOf('run-cargo-tests.mjs", "--list-only"');
-  const fullRust = source.indexOf('@("test", "--locked", "--", "--test-threads=1")');
+  const fullRust = source.indexOf('@("test", "--locked", "--workspace", "--", "--test-threads=1")');
   assert.ok(discovery > 0 && fullRust > discovery, 'discovery precedes the single full cargo test');
   assert.ok(!source.includes('test:ai-tasks-delete'), 'aggregator must not rerun delete cases');
   assert.ok(!source.includes('test:project-backup'), 'aggregator must not rerun backup cases');

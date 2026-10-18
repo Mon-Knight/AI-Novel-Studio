@@ -18,7 +18,7 @@ fn incomplete(reason: &str) -> AppError {
     )
 }
 
-fn verified_payload(connection: &Connection, event_id: &str, tool: &str) -> Result<Value, AppError> {
+pub(super) fn verified_payload(connection: &Connection, event_id: &str, tool: &str) -> Result<Value, AppError> {
     let raw = connection.query_row(
         "SELECT result_json FROM tool_call_events WHERE event_id=?1 AND tool_name=?2 AND status='succeeded'",
         params![event_id, tool],

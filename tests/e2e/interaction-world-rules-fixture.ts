@@ -534,6 +534,8 @@ function rectsClose(left: Rect | null, right: Rect | null, tolerance = 1): boole
 
 export function geometryIsStable(left: WorkbenchGeometry, right: WorkbenchGeometry): boolean {
   return (
+    layoutAnimationTargets(left).length === 0 &&
+    layoutAnimationTargets(right).length === 0 &&
     left.innerWidth === right.innerWidth &&
     left.panelIntent === right.panelIntent &&
     left.panelView === right.panelView &&

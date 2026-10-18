@@ -2966,9 +2966,10 @@ chapter_event_locations   章节事件—地点关系
 - schema 8 在 schema 7 的 Memory 基线上加入四张 scheduler 表。恢复时废弃中断 owner/epoch，重算 policy/request/decision/payload hash，并保证没有 active lease 残留。
 - schema 9 加入九张势力、地点及关系表；地点按父子拓扑恢复，随后恢复关系和章节关联。
 - schema 10 加入任务对话、回合、运行、工具事件、产物卡片、AI Task 快照和 ResultArtifact 工作台事实。
-- schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。
+- schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。恢复为副本时，`authorization_id` 与 `consumed_by_draft_id` 分别按身份和引用重映射；`issued / consumed / expired`、签发与消费时间原样保留，不因恢复重新授权。写库前复验授权、未删除章节、正文产物、作者 confirm 决定、卡片/会话、消费草稿的整条同作品同章节关系及哈希；未知状态、备份外引用和同书换章篡改均拒绝。
+- `ai_task_attempts.provider_request_id` 若本来是 attempt/run 身份别名，使用相同新身份；真实 DSH 治理请求号则为副本分配新值并同步结构化引用，避免与原作品的唯一索引冲突。原作品记录不变，不复制应用级预算/费用账本，不把恢复视为一次实际 Provider 请求。
 - content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
-- 项目清理覆盖 scheduler 和正式资产。清理期间只临时移除 checkpoint 的 no-delete trigger，事务完成后原样重建；失败回滚不能留下缺失 trigger。
+- 项目清理覆盖 scheduler、正式资产和作品所属的设定建议、落位提案/应用/链接、Agent 计划依赖/尝试/租约/检查点、内容事务及目标、DSH 准备运行。清理范围不能由备份表集合替代。相关 no-delete 守卫仅在同一维护事务中临时移除并在提交前恢复；失败回滚同时恢复行和守卫，不删除其他作品。触及当前作品却连接到另一作品的损坏落位链会整体拒绝，不借清理修复跨作品引用。
 - schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权。未来或非整数 schema 版本拒绝进入完整恢复链路。
 
 # 39. migration 029：桌面端全局 AI 请求治理
@@ -3025,6 +3026,8 @@ Workbench（UI 聚合，不是领域父实体）
 
 任务目录按 `updated_at DESC, conversation_id DESC` 的稳定游标分页；作品、归档及标题/作品名搜索在 `LIMIT` 前过滤，不增加表或 migration。浏览器开发回退使用相同游标和筛选规则。最近选中任务按 ID 单独复核所属作品和归档状态，不能因为不在第一页就判为不存在；分页/搜索返回的视图不是新的领域事实源。
 
+对话正文另用只读 `get_task_conversation_window` 按完整用户轮次读取，默认 8 轮；更早页、指定回合/产物定位和已加载范围刷新有独立有界参数。返回所选区间的回合、运行、工具、卡片及相关决定/授权，候选全文按需加载。通用 `get_task_conversation` 保持全量供决定、重试、恢复和安全复验使用，不能因 UI 分页漏掉未决事实。`list_running_task_targets` 从实际活动 Run 的章节与原回合目标生成并发提示，不复制当前界面的章节选择。两项均无 schema 变化。
+
 至少表达：
 
 - 稳定任务 ID 与所属小说 ID；
@@ -3063,7 +3066,7 @@ Workbench（UI 聚合，不是领域父实体）
 - 全局 AI reservation/settlement 引用；
 - 最终错误分类和用户可见安全摘要。
 
-任务模型在创建时固定，当前不开放同一任务后续回合更换；新 Run/重试继承冻结模型，不能借目录刷新或新默认设置改写来源。更换模型须新建任务。
+`TaskConversation.defaultModel` 是可持久更新的下一回合默认模型，不是任务生命周期锁。已有任务可在回合间切换；归档或有 `queued / running / cancel_requested` Run 时拒绝修改。每个新 Run 独立冻结所选模型，历史 Run 与候选不被改写；重试仍取原 Run 快照，不因任务选择已变更而拒绝或改用新模型。缺配置、地址歧义、凭据不匹配及能力未通过仍失败关闭。复用既有字段和命令，无 schema/migration 变化。
 
 ## 40.5 `ToolCallEvent`
 
@@ -3190,6 +3193,8 @@ task_runs             + chapter_id TEXT NULL
 
 ## 43.1 世界规则复用 structured_json
 
+2026-10-16 源设定复核复用 `provenance.sourceRefs` 与作者确认说明记录采用稿引用，格式为 `ans-adopted-chapter-v1:<chapterId>:<draftId>:<sha256>`。只在本次新增引用或确认说明声明该来源时，保存事务要求来源仍为本作品当前完整采用稿；已有引用作为历史保留。没有新字段、migration 或备份版本。
+
 `WorldRuleDocument` 在 `world_settings` / `rule_systems` 的既有 `structured_json` 存储，contract 为 `world_rules_v1`、schemaVersion 为 1。六类 kind 为 world_fact / causal_rule / social_norm / character_belief / author_constraint / narrative_preference；authority（draft/candidate/confirmed/superseded）、epistemic.status（established/uncertain/disputed/belief）与 strength（hard/soft/descriptive）独立，`is_active` 仍是记录层启用标记。
 
 结构还包含 identity.id/revision/supersedesRevision、statement、conditions、scope、chronology（故事生效时间与 revealAt 分离）、epistemic（knownBy/learnedAt/evidence）、boundaries（limitations/cost/ceiling）、exceptions（proposed/author_approved）、provenance（origin/sourceRefs）、dependencies 和 worldParameters。八类世界参数按需填写，未知/N/A 仅作自由文本而非非法 enum；旧 JSON 不被自动升级、抹掉或视为已确认规则。完整字段见 [世界规则契约](design/world-rule-contract.md)。
@@ -3211,6 +3216,8 @@ task_runs             + chapter_id TEXT NULL
 
 新章节派生 ResultArtifact 保留 `parent_artifact_id`，`derivation_type=revision`。窄 IPC `create_chapter_revision_artifact` 在现有 Artifact 事务中校验权威 card/source/hash、最新精确用户 request_revision、来源 raw_content 大文本归属/长度、冻结 input/context 的同一来源及实际请求正文；通用 create_result_artifact 仍拒绝派生，也不能用无 parent 的入口绕过修订来源。没有新的授权表或模型正式写入工具。
 
+2026-10-14 真实桌面试用修复：DSH 全书规划及章节大纲修订也进入上述精确来源候选事务，来源与新产物必须同为 `outline`；小说级规划的 chapterId 为缺省，章节级大纲则严格匹配现存章节。同一作品、会话、卡片、Run、用户修改决定、完整原文及哈希继续复验，派生保留 parent 与 revision，不写正式资产。正文 IPC 保持仅接受 `chapter_text`；不新增 migration 或备份 schema。桌面验收进度按实际试用记录，不据此宣称整本创作或 R4 已通过。
+
 ReviewAuthorization 的 issued / consumed / expired 分别代表可继续审阅、已消费的正式采用历史、不可再消费。规则变更同事务仅 expire 依赖旧规则集的 issued，consumed 和采用稿/决定历史不动；签发/首次消费/正式采用复验候选 Task.nativeRuleSet。打开、编辑、保存和采用不是同一动作。显式对话采用未修改候选只缩短 UI 路径，仍经权威候选、确认/授权、持久草稿、版本/hash 与原子采用。
 
 报告“已阅”按类型使用 confirm 决定，不代表 request_apply 领域写入；阅读定位、展开项或本地勾选不是 ReviewAuthorization。
@@ -3229,6 +3236,18 @@ ReviewAuthorization 的 issued / consumed / expired 分别代表可继续审阅�
 浏览器世界/规则变更用本机前后基线/hash 守卫、同步失效与补偿回滚；旧建议采用用本机 journal 确保恢复仍指向原请求/原目标。本机保存守卫严格失败关闭：`expectedRuleSetFingerprint`、`changeAuthorization.previewHash` 与 `intent` 缺任一项即拒绝，不按本机状态自动补签或复用旧预览；章节审阅的浏览器基线同样要求 mode / novelId / fingerprint 齐全，缺任一项拒绝。章节授权消费仅在本机采用成功后收敛，工作台结构化应用仍失败关闭。这不是 SQLite 事务或跨存储 ACID，不能作为真实 Tauri、DSH 或 live 验收证据。
 
 ---
+
+## 43.6 人工章纲保存与采用投影
+
+2026-10-16 实测复核发现，正式 `chapter_outlines.content` 与 `chapters.outline` 可在人工采用后仍保留不同材料，而 Gateway 会读取两者。桌面 `save_chapter_outline` 保存当前 active 版本、或 `set_active_chapter_outline` 显式切换采用版本时，在同一 IMMEDIATE 事务中复验作品与关联章节的存活和归属，并将完整内容同步到该章节的 `outline`；同步失败同时回滚章纲正文或采用标记。保存未采用新版本不改章节材料，未关联章节的章纲也不更新其他章节。
+
+此联动仅从正式章纲指向关联章节材料，不改变章节标题、目标、目标字数、正文状态或采用稿指针；`goal` 仍由作者独立维护，不从章纲文本推断。浏览器大纲保存本就不支持，采用入口也明确拒绝，不能空回调报告成功。本项不新增字段、migration 或备份版本，定向 SQLite 与服务边界检查及桌面进度见 [流程修复记录](../reports/real-use-flow-repairs-2026-10-16.md)。
+
+### 人工资料保存守卫
+
+角色库的显式编辑调用 `save_character_profile`，在 IMMEDIATE 事务内复验作品、角色归属、启用状态、来源及 `updated_at`，更新表单字段后读回验证，失败整体回滚。角色类型与 `is_protagonist` 一致；已有 `protagonist_key`、标签或主角设定来源的绑定角色不允许从此入口降为配角。能力、背景、状态、章节关系、来源和主角绑定不由该表单改写。
+
+章节资料调用 `save_chapter_details`，输入为章节元数据基线与字段差量。事务内同时比较作品/章节身份、`updated_at`、标题、分卷、目标、字数目标、顺序、状态、字数、采用稿指针和章纲投影，拒绝已删作品/章节及跨作品分卷；只修改标题、分卷、目标、字数目标、状态，读回不一致则回滚。空分卷和零字数目标明确清除原值。章纲不在此接口允许字段中，统一从版本化章纲采用链写入，避免详情表单用旧章纲覆盖新采用版。界面冲突保留本地输入，显式核对并更新基线后才重试；未改字段随新基线更新。浏览器仅为开发回退，不构成上述 SQLite 事务证据。
 
 # 44. migration 039：跨任务修订血缘兼容（用户授权的兼容迁移）
 

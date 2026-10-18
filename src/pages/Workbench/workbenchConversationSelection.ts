@@ -23,7 +23,10 @@ export function mergeConversationDirectoryItems(
   items: readonly TaskConversation[],
 ): TaskConversation[] {
   const merged = new Map(known.map((item) => [item.conversationId, item]));
-  for (const item of items) merged.set(item.conversationId, item);
+  for (const item of items) {
+    const current = merged.get(item.conversationId);
+    if (!current || item.updatedAt >= current.updatedAt) merged.set(item.conversationId, item);
+  }
   return [...merged.values()].sort(compareConversations);
 }
 

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Stethoscope } from 'lucide-react';
-import { save } from '@tauri-apps/api/dialog';
-import { writeTextFile } from '@tauri-apps/api/fs';
 import { appLogger } from '../../services/observability/appLogger';
 import { aiPerformanceMonitor } from '../../services/observability/aiPerformanceMonitor';
 import { nativeCrashReportService } from '../../services/observability/nativeCrashReportService';
@@ -16,14 +14,16 @@ function fileName(): string {
 
 async function saveReport(content: string): Promise<boolean> {
   if (isTauriRuntime()) {
-    const target = await save({
-      title: '导出本地诊断报告',
-      defaultPath: fileName(),
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    });
-    if (!target) return false;
-    await writeTextFile(target, content);
-    return true;
+    const { writeTextFromSaveDialog } = await import('../../services/tauri/scopedDesktopFs');
+    const target = await writeTextFromSaveDialog(
+      {
+        title: '导出本地诊断报告',
+        defaultPath: fileName(),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      },
+      content,
+    );
+    return target !== null;
   }
   const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
   try {

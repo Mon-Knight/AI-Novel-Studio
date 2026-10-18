@@ -59,7 +59,7 @@ npm run test:bundle-size
 ```powershell
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 node scripts/quality/run-cargo-tests.mjs --filter services::draft_service::
-cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 ```
 
 相关领域测试通过 `run-cargo-tests.mjs` 以 `--filter` 或 `--exact` 选择，零匹配、名称歧义或零通过都失败关闭，并保留 `--locked` 与串行参数。专项脚本（`test:workspace-recovery`、`test:large-text-integrity`、`test:migrations`）按列出的完整测试名精确执行，不再运行全部 Rust 测试。AI Task 删除与项目备份用例由完整 `cargo test` 覆盖，发布聚合器只以 `--list-only` 校验它们存在；`test:ai-tasks-delete` 与 `test:project-backup` 仍可单独运行真实 Rust 行为。事务回滚、归属校验、稳定 ID、迁移幂等和故障注入必须由临时 SQLite 动态测试证明。

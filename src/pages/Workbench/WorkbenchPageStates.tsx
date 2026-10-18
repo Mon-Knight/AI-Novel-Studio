@@ -110,7 +110,7 @@ export function WorkbenchEmptyTasks({
           disabled={creatingTask || conversationsLoading}
           onClick={onCreateTask}
         >
-          新建创作任务
+          新建创作会话
         </button>
         <button
           type="button"

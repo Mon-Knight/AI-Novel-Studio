@@ -94,7 +94,7 @@ export async function verifyArtifactRevisionSource(
       artifact.artifactId !== source.artifactId ||
       artifact.artifactType !== source.artifactType ||
       artifact.sourceNovelId !== input.novelId ||
-      artifact.sourceChapterId !== source.chapterId ||
+      (artifact.sourceChapterId ?? undefined) !== source.chapterId ||
       !['valid', 'valid_with_warnings'].includes(artifact.processingStatus) ||
       artifact.contentHash !== source.artifactHash ||
       !rawContent.trim() ||

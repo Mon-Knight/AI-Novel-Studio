@@ -45,12 +45,13 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       FULL_MATRIX: ${{ github.event_name == 'schedule' || inputs.suite == 'full' || inputs.suite == 'full-three' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-      FRONTEND_OWNER: ${{ github.event_name != 'pull_request' && !(github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.suite) }}
+      FRONTEND_OWNER: ${{ github.event_name != 'pull_request' }}
       VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
     outputs:
       verified_sha: ${{ steps.verified.outputs.sha }}
       desktop: ${{ steps.scope.outputs.desktop }}
       desktop_full: ${{ steps.scope.outputs.desktop_full }}
+      fault_injection: ${{ steps.scope.outputs.fault_injection }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -60,7 +61,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install Node dependencies
@@ -109,6 +110,10 @@ jobs:
       - name: Check documentation synchronization
         if: env.FULL_MATRIX == 'true'
         run: npm run test:docs-sync
+
+      - name: Run scoped PR coverage on the calibrated Windows toolchain
+        if: github.event_name == 'pull_request' && steps.scope.outputs.coverage == 'true'
+        run: npm run test:coverage
 
       - name: Run frontend tests with coverage gate
         if: env.FULL_MATRIX == 'true' && env.FRONTEND_OWNER == 'true'
@@ -172,7 +177,7 @@ jobs:
 
       - name: Run Rust tests
         if: env.FULL_MATRIX == 'true'
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+        run: cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 
       - name: Verify required Rust regressions exist
         if: env.FULL_MATRIX == 'true'
@@ -219,6 +224,7 @@ jobs:
       MSEDGEDRIVER_TELEMETRY_OPTOUT: '1'
       RUN_DESKTOP: ${{ needs.quality.outputs.desktop == 'true' || inputs.suite == 'smoke' }}
       DESKTOP_FULL: ${{ needs.quality.outputs.desktop_full }}
+      RUN_FAULT_INJECTION: ${{ needs.quality.outputs.fault_injection == 'true' }}
       VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Explain inapplicable desktop verification
@@ -235,7 +241,7 @@ jobs:
         if: env.RUN_DESKTOP == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Select stable Rust
@@ -442,11 +448,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Run isolated production writing fault scenarios
+        if: env.RUN_DESKTOP == 'true' && env.RUN_FAULT_INJECTION == 'true' && !env.VERIFY_BASE
+        shell: pwsh
+        run: |
+          npm run test:e2e:writing-faults
+          exit $LASTEXITCODE
+
       - name: Upload E2E failure diagnostics
         if: failure() && env.RUN_DESKTOP == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows-desktop-e2e-${{ github.run_id }}-${{ github.run_attempt }}
-          path: test-results/e2e
+          path: |
+            test-results/e2e
+            test-results/fault-injection
           if-no-files-found: warn
           retention-days: 7

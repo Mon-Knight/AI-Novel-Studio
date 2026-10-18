@@ -247,7 +247,7 @@ Store 不是数据库，也不是业务事务边界。当前状态所有权如�
 - v2.5.0：固定持久 Planner、lease、Attempt 与 Checkpoint
 - v3.0.0：全书创作 Agent、六专家评审、用户显式启动且可暂停 / 继续的进程内逐章候选队列、采用推进、章节收束与持久恢复
 - 当前工作树增量：参考资料与分层风格、SQLite 混合语义 Memory、migration 029 全局请求 owner/TTL reservation、成本硬预算与跨进程速率 / 并发限制
-- Canonical catalog/manifest exposure 已完成：4 项只读 Tool 为 `stable`。R4 真实路径是 Canonical-only DSH 只读回合（Gateway 可按 Canonical allowlist 列出 `novel.read` 等）；宿主启动仍注入 legacy `ALLOWED_TOOLS`，R4 未 VERIFIED。`mainAgentRuntimeService` 只是宿主脚手架。Writing SubAgent 与 `chapter_write` 走 DSH 后置；不把已落地的 Scheduler、Memory、多目标事务或势力/地点资产写成预留
+- Canonical catalog/manifest exposure 已完成：4 项只读 Tool 为 `stable`。`read` 回合从启动契约、Worker 环境到宿主授权均采用 Canonical-only allowlist，候选/审计链按各自受限契约保留 legacy 工具。R4 live 云端仍未 VERIFIED，`mainAgentRuntimeService` 的宿主脚手架不替代该证据。v3.7.0 起桌面 + 真实 API 的 `chapter_write` 默认走 Writing SubAgent，mock / 本地 / 浏览器及显式关闭开关继续走确定性 Writer；两条路径均为 candidate-only，正式采用仍由作者授权与原生事务负责。生产持续学习不在本次缺陷修复范围；不把已落地的 Scheduler、Memory、多目标事务或势力/地点资产写成预留。
 
 全书规划与逐章编排属于 `src/services/autonomous-creation/`，六专家编排属于 `src/services/multi-agent/`；Prompt 构建属于 `src/services/prompt/` 和根目录 `prompts/`。UI 只调用运行时服务，不直接调用 Provider 或 SQL。
 

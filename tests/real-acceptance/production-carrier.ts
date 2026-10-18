@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { browser } from '@wdio/globals';
 import { assertUnelevatedWindowsHost } from '../../scripts/e2e/host-integrity.ts';
+import { ensureIsolatedDesktopViewport } from './production-carrier-viewport';
 
 /**
  * Shared WebdriverIO configuration for carriers that drive the *production* desktop
@@ -182,6 +183,11 @@ export function createProductionCarrierConfig(options: ProductionCarrierOptions)
     async before() {
       await browser.setTimeout({ script: 90_000 });
       await browser.$('[data-testid="app-shell"]').waitForDisplayed({ timeout: 90_000 });
+      if (options.isolatedProfile) await ensureIsolatedDesktopViewport(browser);
+    },
+
+    async beforeTest() {
+      if (options.isolatedProfile) await ensureIsolatedDesktopViewport(browser);
     },
 
     async onComplete() {

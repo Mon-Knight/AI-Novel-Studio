@@ -249,3 +249,139 @@ test('pre-run summary failure exposes a distinct manual recovery label', () => {
     '章节总结未完成，请使用回合中的重试操作',
   );
 });
+
+test('a rejected earlier summary stays visible while another adopted chapter can generate', () => {
+  const state = bundle();
+  const secondChapter = {
+    ...chapter,
+    id: 'chapter-2',
+    chapterNumber: 2,
+    adoptedDraftId: 'draft-2',
+  };
+  state.authorizations!.push({
+    ...authorization,
+    authorizationId: 'auth-2',
+    chapterId: 'chapter-2',
+    consumedByDraftId: 'draft-2',
+  });
+  const turnId = chapterSummaryTurnId(authorization.authorizationId);
+  state.turns.push({
+    turnId,
+    conversationId: 'conversation-1',
+    sequence: 1,
+    role: 'user',
+    content: '总结本章',
+    createdAt: '2026-08-28T00:11:00Z',
+  });
+  state.runs.push(run('completed'));
+  state.artifacts.push({
+    cardId: 'summary-card',
+    conversationId: 'conversation-1',
+    runId: 'summary-run-1',
+    turnId,
+    artifactId: 'summary-artifact',
+    artifactType: 'chapter_summary',
+    title: '总结',
+    summary: '',
+    status: 'rejected',
+    createdAt: '2026-08-28T00:12:00Z',
+    artifactEvidence: {
+      sourceNovelId: 'novel-1',
+      sourceChapterId: 'chapter-1',
+      sourceDraftId: 'draft-1',
+      processingStatus: 'valid',
+      validationIssues: [],
+    },
+    latestDecision: {
+      decisionId: 'reject',
+      artifactId: 'summary-artifact',
+      artifactHash: 'h',
+      cardId: 'summary-card',
+      conversationId: 'conversation-1',
+      decision: 'reject',
+      idempotencyKey: 'reject',
+      actor: 'user',
+      targetType: 'chapter',
+      targetId: 'chapter-1',
+      createdAt: '2026-08-28T00:13:00Z',
+    },
+  });
+  const result = resolveChapterSummaryOrchestration({
+    bundle: state,
+    chapters: [chapter, secondChapter],
+    summaries: [],
+  });
+  assert.equal(result.chapterId, 'chapter-2');
+  assert.equal(result.phase, 'ensure_turn');
+  assert.deepEqual(
+    result.pendingChapters?.find((item) => item.chapterId === 'chapter-1'),
+    { chapterId: 'chapter-1', phase: 'rejected', cardId: 'summary-card' },
+  );
+  assert.equal(state.artifacts[0].latestDecision?.decision, 'reject');
+});
+
+test('a newer manual summary candidate prevents duplicate automatic generation for the same adopted draft', () => {
+  const state = bundle();
+  state.artifacts.push({
+    cardId: 'manual-card',
+    conversationId: 'conversation-1',
+    runId: 'manual-run',
+    turnId: 'manual-turn',
+    artifactId: 'manual-summary',
+    artifactType: 'chapter_summary',
+    title: '重新总结',
+    summary: '',
+    status: 'candidate',
+    createdAt: '2026-08-28T00:12:00Z',
+    artifactEvidence: {
+      sourceNovelId: 'novel-1',
+      sourceChapterId: 'chapter-1',
+      sourceDraftId: 'draft-1',
+      processingStatus: 'valid',
+      validationIssues: [],
+    },
+  });
+  const result = resolveChapterSummaryOrchestration({
+    bundle: state,
+    chapters: [chapter],
+    summaries: [],
+  });
+  assert.equal(result.phase, 'awaiting_apply');
+  assert.equal(result.turnId, 'manual-turn');
+  assert.equal(result.cardId, 'manual-card');
+  state.artifacts[0].artifactEvidence!.sourceDraftId = 'old-draft';
+  assert.equal(
+    resolveChapterSummaryOrchestration({ bundle: state, chapters: [chapter], summaries: [] }).phase,
+    'ensure_turn',
+  );
+});
+
+test('disabled or expired summaries remain explicit and never trigger automatic replacement', () => {
+  const summary: ChapterSummary = {
+    id: 'summary',
+    novelId: chapter.novelId,
+    chapterId: chapter.id,
+    adoptedDraftId: chapter.adoptedDraftId!,
+    summary: '已保存的总结',
+    enabled: false,
+    isExpired: false,
+    createdAt: '',
+    updatedAt: '',
+  };
+  assert.equal(
+    resolveChapterSummaryOrchestration({
+      bundle: bundle(),
+      chapters: [chapter],
+      summaries: [summary],
+    }).phase,
+    'disabled',
+  );
+  assert.equal(
+    resolveChapterSummaryOrchestration({
+      bundle: bundle(),
+      chapters: [chapter],
+      summaries: [{ ...summary, enabled: true, isExpired: true }],
+    }).phase,
+    'expired',
+  );
+});

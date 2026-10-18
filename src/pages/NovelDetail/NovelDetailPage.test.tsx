@@ -35,12 +35,14 @@ Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollIntoView', {
   },
 });
 
-const { MemoryRouter, Route, Routes } = await import('react-router-dom');
 const vite = await createServer({
   appType: 'custom',
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true, hmr: false, watch: null },
 });
+const { MemoryRouter, Route, Routes } = (await vite.ssrLoadModule(
+  '/src/test/routerExports.ts',
+)) as typeof import('react-router-dom');
 const novelServiceModule = (await vite.ssrLoadModule(
   '/src/services/novels/novelService.ts',
 )) as typeof import('../../services/novels/novelService');
@@ -58,6 +60,12 @@ const { novelService } = novelServiceModule;
 const { settingRepository } = settingRepositoryModule;
 const { protagonistRepository } = protagonistRepositoryModule;
 const NovelDetailPage = pageModule.default;
+const { default: ProtagonistCard } = (await vite.ssrLoadModule(
+  '/src/components/novel-detail/ProtagonistCard.tsx',
+)) as typeof import('../../components/novel-detail/ProtagonistCard');
+const { getDefaultProtagonistProfile } = (await vite.ssrLoadModule(
+  '/src/features/novels/novelNormalizer.ts',
+)) as typeof import('../../features/novels/novelNormalizer');
 
 const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react');
 
@@ -101,11 +109,18 @@ function renderFocusedPage(focus: string) {
       MemoryRouter,
       {
         initialEntries: [`/novels/${novel.id}?focus=${focus}&returnTo=workbench`],
-        future: { v7_startTransition: true, v7_relativeSplatPath: true },
       },
       React.createElement(
         Routes,
         null,
+        React.createElement(Route, {
+          path: '/novels/:novelId/outline',
+          element: React.createElement(
+            'div',
+            { 'data-testid': 'adopted-outline-route' },
+            '采用章纲编辑器',
+          ),
+        }),
         React.createElement(Route, {
           path: '/novels/:novelId',
           element: React.createElement(NovelDetailPage),
@@ -148,8 +163,8 @@ test('core asset edit links focus the requested detail section', async () => {
     ['world_setting', 'novel-detail-world-setting'],
     ['rule_system', 'novel-detail-rule-system'],
     ['protagonist', 'novel-detail-protagonist'],
+    ['character', 'novel-detail-characters'],
     ['story_plan', 'novel-detail-outline'],
-    ['chapter_outline', 'novel-detail-outline'],
   ] as const;
 
   for (const [focus, targetId] of cases) {
@@ -165,6 +180,12 @@ test('core asset edit links focus the requested detail section', async () => {
   }
 });
 
+test('chapter outline focus enters the versioned adopted outline editor', async () => {
+  renderFocusedPage('chapter_outline');
+  assert.ok(await screen.findByTestId('adopted-outline-route'));
+  assert.equal(screen.queryByTestId('novel-detail-outline'), null);
+});
+
 test('focused detail view returns to the creative workbench', async () => {
   renderFocusedPage('world_setting');
 
@@ -174,13 +195,83 @@ test('focused detail view returns to the creative workbench', async () => {
   assert.ok(await screen.findByTestId('workbench-route'));
 });
 
+test('every detail section uses the same bounded module including empty and outline sections', async () => {
+  renderFocusedPage('world_setting');
+  await screen.findByTestId('novel-detail-world-setting');
+  const grid = document.querySelector('.detail-cards-grid');
+  assert.ok(grid);
+  assert.equal(grid.children.length, 8);
+  for (const section of grid.children) assert.ok(section.classList.contains('detail-module'));
+  assert.ok(screen.getByTestId('novel-detail-outline').classList.contains('detail-module--wide'));
+});
+
+test('long preparation and rule content can be fully reviewed inside their detail modules', async () => {
+  const content = '背景与人物已经商定。\n'.repeat(80) + '完整模板末尾：等待用户确认。';
+  const source = {
+    novelId: novel.id,
+    content,
+    isActive: true,
+    createdAt: novel.createdAt,
+    updatedAt: novel.updatedAt,
+  };
+  settingRepository.getWorldSettings = async () => [
+    { ...source, id: 'preparation-template', title: '创作准备模板' },
+  ];
+  settingRepository.getRuleSystems = async () => [
+    { ...source, id: 'long-rule', title: '叙事限制' },
+  ];
+  renderFocusedPage('world_setting');
+  await screen.findByText('创作准备模板');
+  for (const label of ['查看完整背景内容', '查看完整规则内容']) {
+    const summary = screen.getByText(label);
+    const disclosure = summary.closest('details');
+    assert.ok(disclosure);
+    assert.equal(disclosure.open, false);
+    fireEvent.click(summary);
+    assert.equal(disclosure.open, true);
+    assert.ok(disclosure.textContent?.includes('完整模板末尾：等待用户确认。'));
+    assert.ok(disclosure.closest('.detail-module'));
+  }
+});
+
+test('persisted protagonist notes can be reviewed and corrected without changing other fields', async () => {
+  const profile = {
+    ...getDefaultProtagonistProfile('primary'),
+    name: '沈知微',
+    identity: '档案修复师',
+    notes: '全书第一人称视角叙事核心。',
+  };
+  const saved: Array<Parameters<React.ComponentProps<typeof ProtagonistCard>['onSave']>[0]> = [];
+  render(
+    React.createElement(ProtagonistCard, {
+      novelId: novel.id,
+      novel: { ...novel, protagonists: [profile] },
+      protagonist: null,
+      onSave: async (data) => {
+        saved.push(data);
+      },
+    }),
+  );
+  assert.ok(screen.getByText(profile.notes));
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+  const notes = screen.getByPlaceholderText('补充人物设定或叙事要求...');
+  assert.equal((notes as HTMLTextAreaElement).value, profile.notes);
+  const corrected = '全书第三人称限知视角。\n遵守正式世界规则，不提前揭示真凶。';
+  fireEvent.change(notes, { target: { value: corrected } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => assert.equal(saved.length, 1));
+  assert.equal(saved[0].protagonists[0].notes, corrected);
+  assert.equal(saved[0].protagonists[0].identity, profile.identity);
+  assert.equal(saved[0].protagonists[0].name, profile.name);
+  assert.equal(saved[0].protagonistMode, 'single');
+});
+
 test('default detail view shows back to novels list and empty state placeholders', async () => {
   render(
     React.createElement(
       MemoryRouter,
       {
         initialEntries: [`/novels/${novel.id}`],
-        future: { v7_startTransition: true, v7_relativeSplatPath: true },
       },
       React.createElement(
         Routes,

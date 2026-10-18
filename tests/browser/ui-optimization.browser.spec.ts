@@ -534,7 +534,7 @@ describe('UI optimization browser acceptance', () => {
     });
     await expect($('[data-testid="workbench-task-creator"]')).toBeDisplayed();
     await screenshot('new-task-input-protection-1024');
-    await (await $('button[aria-label="关闭新建任务"]')).click();
+    await (await $('button[aria-label="关闭新建会话"]')).click();
     await trigger.waitUntil(async () => trigger.isFocused());
     await expect(composer).toHaveValue('你能做什么？');
     await assertNoExecution();

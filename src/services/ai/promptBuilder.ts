@@ -4,6 +4,7 @@
  */
 import type { AiGenerateRequest, AiChatMessage } from '../../types/ai';
 import { CONNECTION_TEST_MAX_OUTPUT_TOKENS } from './providerRequestPolicy';
+import { chapterSummarizeJsonContract } from './chapterSummaryPromptContract';
 
 // ==================== 类型定义 ====================
 
@@ -572,43 +573,6 @@ export function buildChapterPolishPrompt(ctx: PolishPromptContext): AiGenerateRe
     messages: [systemPrompt(system), userPrompt('请对以上正文进行润色。')],
     maxTokens: 8000,
   };
-}
-
-function chapterSummarizeJsonContract(): string[] {
-  return [
-    '请严格返回 JSON，不要输出解释文字：',
-    '```json',
-    '{',
-    '  "summaryTitle": "本章上下文标题",',
-    '  "summary": "本章摘要，一段话",',
-    '  "keyEvents": ["关键事件1", "关键事件2"],',
-    '  "coreEvents": ["改变后续剧情状态的核心事件"],',
-    '  "protagonistStateChange": "主角相对上一章的实际变化",',
-    '  "importantCharacterChanges": [{ "name": "角色名", "change": "本章确认发生的变化" }],',
-    '  "characterChanges": [',
-    '    { "characterName": "角色名", "stateSummary": "状态变化", "relationshipChanges": "关系变化", "goalChanges": "目标变化", "location": "位置", "healthState": "健康状态", "knowledgeState": "掌握的信息" }',
-    '  ],',
-    '  "relationshipChanges": [',
-    '    { "fromCharacterName": "角色A", "toCharacterName": "角色B", "change": "关系变化" }',
-    '  ],',
-    '  "settingChanges": ["本章确认新增或改变的世界规则与势力事实"],',
-    '  "newLocations": ["正文中首次实际出现的新地点"],',
-    '  "newItemsOrAbilities": ["正文中首次实际出现的新物品或能力"],',
-    '  "newForeshadows": ["新伏笔"],',
-    '  "resolvedForeshadows": ["已回收伏笔"],',
-    '  "foreshadowing": ["仍在生效的伏笔"],',
-    '  "unresolvedQuestions": ["正文尚未回答的问题"],',
-    '  "factsMustRemember": ["后续写作不得违背的已确认事实"],',
-    '  "nextChapterHints": "下一章承接建议",',
-    '  "nextChapterHook": "正文结尾形成的具体钩子",',
-    '  "contextRecords": [',
-    '    { "contextType": "chapter_summary", "title": "记录标题", "content": "需要长期记住的内容", "importance": 4 }',
-    '  ]',
-    '}',
-    '```',
-    '只能记录正文中已经发生或明确出现的内容；不得把大纲计划、推测或下一章建议写成既成事实。',
-    '没有对应变化时返回空数组或空字符串，不得为了填满字段而编造。',
-  ];
 }
 
 /** 构建章节总结请求 */

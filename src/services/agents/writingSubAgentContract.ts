@@ -92,11 +92,19 @@ export interface PlanWritingSubAgentTurnInput {
   budget?: Partial<WritingSubAgentBudget>;
 }
 
-/** 由字数区间推导输出预算：中文约 1 字 ≈ 1.3 token，再留 30% 余量，落在允许上限内。 */
-export function outputTokenBudgetFor(wordRange: { maximum: number } | undefined): number {
-  if (!wordRange) return DEFAULT_WRITING_SUBAGENT_BUDGET.maxOutputTokens;
-  const estimate = Math.ceil(wordRange.maximum * 1.3 * 1.3);
-  return Math.min(WRITING_SUBAGENT_BUDGET_LIMITS.maxOutputTokens, Math.max(1_000, estimate));
+/** 由字数区间推导输出预算，且不得超过冻结模型的 maxTokens。 */
+export function outputTokenBudgetFor(
+  wordRange: { maximum: number } | undefined,
+  frozenMaxTokens?: number,
+): number {
+  const estimate = wordRange
+    ? Math.min(
+        WRITING_SUBAGENT_BUDGET_LIMITS.maxOutputTokens,
+        Math.max(1_000, Math.ceil(wordRange.maximum * 1.3 * 1.3)),
+      )
+    : DEFAULT_WRITING_SUBAGENT_BUDGET.maxOutputTokens;
+  if (!Number.isInteger(frozenMaxTokens) || (frozenMaxTokens ?? 0) <= 0) return estimate;
+  return Math.min(estimate, frozenMaxTokens as number);
 }
 
 export function planWritingSubAgentTurn(
@@ -108,10 +116,21 @@ export function planWritingSubAgentTurn(
     : undefined;
   const expectedTool: WritingSubAgentCandidateTool =
     input.mode === 'polish' ? 'polish_chapter' : 'generate_chapter';
-  const budget: WritingSubAgentBudget = {
+  const frozenMaxTokens = input.modelSnapshot.options?.maxTokens;
+  const requested: WritingSubAgentBudget = {
     ...DEFAULT_WRITING_SUBAGENT_BUDGET,
-    maxOutputTokens: outputTokenBudgetFor(wordRange),
     ...input.budget,
+  };
+  const budget: WritingSubAgentBudget = {
+    ...requested,
+    maxCandidateAttempts: Math.min(3, requested.maxCandidateAttempts),
+    maxLengthRepairs: Math.min(2, requested.maxLengthRepairs),
+    maxIntegrityRepairs: Math.min(2, requested.maxIntegrityRepairs),
+    maxWallClockMs: Math.min(8 * 60_000, requested.maxWallClockMs),
+    maxOutputTokens: outputTokenBudgetFor(
+      wordRange,
+      typeof frozenMaxTokens === 'number' ? frozenMaxTokens : undefined,
+    ),
   };
   const contract: WritingSubAgentContract = {
     contractVersion: WRITING_SUBAGENT_CONTRACT_VERSION,
@@ -223,6 +242,16 @@ export function assertWritingSubAgentContract(contract: WritingSubAgentContract)
   if (contract.wordRange && contract.wordRange.minimum > contract.wordRange.maximum) {
     throw new WritingSubAgentContractViolation('字数区间下限不能大于上限');
   }
+  if (
+    contract.continuity &&
+    (!contract.continuity.previousChapterId.trim() ||
+      !/^[0-9a-f]{64}$/iu.test(contract.continuity.sourceHash ?? ''))
+  ) {
+    throw new WritingSubAgentContractViolation('前章连续性必须是精确章节与全文哈希');
+  }
+  if (contract.budget.maxIntegrityRepairs > 2 || contract.budget.maxLengthRepairs > 2) {
+    throw new WritingSubAgentContractViolation('字数与完整性修复都不能超过宿主回合上限');
+  }
 }
 
 /** 契约在 DSH start 契约里的投影；Rust `validate_turn_contract` 会逐项复验。 */
@@ -234,6 +263,7 @@ export function toDshTaskStartContract(contract: WritingSubAgentContract): {
   allowedTools: string[];
   chapterWordRange?: { target: number; minimum: number; maximum: number };
   revisionSource?: ArtifactRevisionSource;
+  continuityClaim?: { previousChapterId: string; sourceHash: string };
 } {
   assertWritingSubAgentContract(contract);
   return {
@@ -244,6 +274,14 @@ export function toDshTaskStartContract(contract: WritingSubAgentContract): {
     allowedTools: [...contract.allowedTools],
     chapterWordRange: contract.wordRange ? { ...contract.wordRange } : undefined,
     ...(contract.revisionSource ? { revisionSource: { ...contract.revisionSource } } : {}),
+    ...(contract.continuity?.sourceHash
+      ? {
+          continuityClaim: {
+            previousChapterId: contract.continuity.previousChapterId,
+            sourceHash: contract.continuity.sourceHash,
+          },
+        }
+      : {}),
   };
 }
 

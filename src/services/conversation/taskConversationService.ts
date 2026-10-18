@@ -11,9 +11,7 @@ import {
 } from './conversationDecisionState';
 import {
   assertClientWritableModelSnapshot,
-  isLocalConversationalSnapshot,
   modelSnapshotFrom,
-  sameModelSnapshot,
 } from './conversationModelSnapshotValidation';
 import { isContextCompressionCandidate } from '../context/novelContextCompressionProvider';
 import {
@@ -32,6 +30,7 @@ import type {
   InitializedTaskConversation,
   ReviewAuthorization,
   TaskConversation,
+  RunningTaskTarget,
   TaskConversationBundle,
   TaskModelSnapshot,
   TaskRun,
@@ -87,6 +86,33 @@ function clone<T>(value: T): T {
 
 function localBundle(id: string): TaskConversationBundle | undefined {
   return localState().bundles.find((bundle) => bundle.conversation.conversationId === id);
+}
+
+export function readStoredConversationBundle(
+  conversationId: string,
+): TaskConversationBundle | null {
+  const bundle = localBundle(conversationId);
+  return bundle ? clone(bundle) : null;
+}
+
+export function readStoredRunningTargets(novelId: string): RunningTaskTarget[] {
+  if (!novelId) return [];
+  return localState().bundles.flatMap((bundle) => {
+    if (bundle.conversation.novelId !== novelId) return [];
+    return bundle.runs
+      .filter((run) => ['queued', 'running', 'cancel_requested'].includes(run.status))
+      .map((run) => {
+        const latestGoal = bundle.turns.find((turn) => turn.turnId === run.turnId)?.content;
+        return {
+          conversationId: bundle.conversation.conversationId,
+          novelId,
+          title: bundle.conversation.title,
+          runId: run.runId,
+          ...(run.chapterId ? { chapterId: run.chapterId } : {}),
+          ...(latestGoal ? { latestGoal } : {}),
+        };
+      });
+  });
 }
 
 function upsertLocal(bundle: TaskConversationBundle): TaskConversationBundle {
@@ -464,13 +490,14 @@ export const taskConversationService = {
     const raw = await dbCall<unknown>('update_task_conversation_model', { input }, () => {
       const bundle = localBundle(conversationId);
       if (!bundle) throw new Error('任务对话不存在');
-      const current = bundle.conversation.defaultModel;
-      if (current) {
-        if (sameModelSnapshot(current, input.defaultModel)) return bundle.conversation;
-        throw new Error('任务模型已在创建时固定，当前会话结束前不能更换');
+      if (bundle.conversation.archivedAt || bundle.conversation.status === 'archived') {
+        throw new Error('归档任务不能更换模型，请先恢复任务');
       }
-      if (bundle.turns.length > 0 || bundle.runs.length > 0) {
-        throw new Error('任务模型必须在首个回合前固定');
+      if (
+        bundle.conversation.status === 'running' ||
+        bundle.runs.some((run) => ['queued', 'running', 'cancel_requested'].includes(run.status))
+      ) {
+        throw new Error('运行中的任务不能更换模型，请等待完成或停止任务');
       }
       bundle.conversation.defaultModel = input.defaultModel;
       bundle.conversation.updatedAt = input.updatedAt;
@@ -579,14 +606,6 @@ export const taskConversationService = {
     const raw = await dbCall<unknown>('create_task_run', { input }, () => {
       const bundle = localBundle(conversationId);
       if (!bundle) throw new Error('任务对话不存在');
-      const lockedModel = bundle.conversation.defaultModel;
-      if (
-        lockedModel &&
-        !isLocalConversationalSnapshot(input.modelSnapshot) &&
-        !sameModelSnapshot(lockedModel, input.modelSnapshot)
-      ) {
-        throw new Error('运行模型与任务创建时固定的模型不一致');
-      }
       const turn = bundle.turns.find((item) => item.turnId === turnId);
       if (!turn || turn.conversationId !== conversationId || turn.role !== 'user') {
         throw new Error('任务运行必须绑定同一任务中的用户回合');

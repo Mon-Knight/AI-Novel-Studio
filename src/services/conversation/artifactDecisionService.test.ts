@@ -9,6 +9,7 @@ import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
 import { volumeRepository } from '../database/volumeRepository';
+import { inspectChapterCandidateIntegrity } from '../generation/chapterCandidateIntegrity';
 import { artifactDecisionService } from './artifactDecisionService';
 import { taskConversationService } from './taskConversationService';
 
@@ -403,6 +404,69 @@ test('AI review adoption accepts a clean final editor draft and consumes authori
     },
   );
 });
+
+for (const runtime of ['browser', 'desktop'] as const) {
+  test(`${runtime} review adoption permits a warning-only draft after explicit authorization`, async () => {
+    const text = `火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。\n${'甲'.repeat(2950)}。`;
+    const issues = inspectChapterCandidateIntegrity({ candidateText: text, previousChapterText });
+    assert.ok(issues.length > 0 && issues.every((issue) => issue.severity === 'warning'));
+    await withBrowserReviewAdoptionFixture(text, async ({ input, authorization, calls }) => {
+      let nativeCalls = 0;
+      if (runtime === 'desktop') {
+        setDesktopRuntime();
+        mockIPC((command, args) => {
+          assert.equal(command, 'adopt_review_authorized_draft');
+          assert.deepEqual((args as { input: typeof input }).input, input);
+          nativeCalls += 1;
+          return {
+            authorization: {
+              ...authorization,
+              status: 'consumed',
+              consumedByDraftId: input.draftId,
+            },
+            adoptedDraft: draft({
+              id: input.draftId,
+              chapterId: authorization.chapterId,
+              content: text,
+              isAdopted: true,
+            }),
+          };
+        });
+      }
+      const result = await artifactDecisionService.adoptReviewAuthorizedDraft(input);
+      assert.equal(result.adoptedDraft.isAdopted, true);
+      assert.equal(result.authorization.status, 'consumed');
+      assert.equal(nativeCalls, runtime === 'desktop' ? 1 : 0);
+      assert.deepEqual(
+        calls,
+        runtime === 'desktop' ? { adopt: 0, consume: 0 } : { adopt: 1, consume: 1 },
+      );
+    });
+  });
+
+  test(`${runtime} review adoption keeps hard errors blocking when a warning is also present`, async () => {
+    const text = `火灾发生在凌晨，嫌疑人的死亡时间则被记录为23:20。\n${'甲'.repeat(2950)}。\n<analysis>内部推理</analysis>`;
+    const issues = inspectChapterCandidateIntegrity({ candidateText: text, previousChapterText });
+    assert.ok(issues.some((issue) => issue.severity === 'warning'));
+    assert.ok(issues.some((issue) => issue.severity === 'error'));
+    await withBrowserReviewAdoptionFixture(text, async ({ input, authorization, calls }) => {
+      let nativeCalls = 0;
+      if (runtime === 'desktop') {
+        setDesktopRuntime();
+        mockIPC(() => {
+          nativeCalls += 1;
+          throw new Error('hard integrity errors must stop before IPC');
+        });
+      }
+      await assert.rejects(artifactDecisionService.adoptReviewAuthorizedDraft(input), {
+        code: 'WORKBENCH_CHAPTER_INTEGRITY_FAILED',
+      });
+      assert.equal(authorization.status, 'issued');
+      assert.equal(nativeCalls, 0);
+      assert.deepEqual(calls, { adopt: 0, consume: 0 });
+    });
+  });
+}
 
 test('AI review adoption fails closed on a polluted tail before adopting or consuming authorization', async () => {
   await withBrowserReviewAdoptionFixture(

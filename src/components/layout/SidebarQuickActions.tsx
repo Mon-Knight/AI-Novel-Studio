@@ -20,7 +20,12 @@ export function SidebarQuickActions({
   const location = useLocation();
   const novelId = resolveNovelId(location.pathname);
   const handOff = (workbenchIntent: WorkbenchIntentState['workbenchIntent']) =>
-    navigate('/', { state: { workbenchIntent } satisfies WorkbenchIntentState });
+    navigate('/', {
+      state: {
+        workbenchIntent,
+        ...(novelId ? { workbenchNovelId: novelId } : {}),
+      } satisfies WorkbenchIntentState,
+    });
 
   return (
     <div className="shell-quick-actions" role="group" aria-label="快捷操作">
@@ -28,14 +33,14 @@ export function SidebarQuickActions({
         type="button"
         className="shell-quick-action"
         data-testid={onNewTask ? 'workbench-create-task' : 'shell-new-task'}
-        aria-label="新建创作任务"
+        aria-label="新建创作会话"
         aria-busy={newTaskBusy}
-        title="新建创作任务 (Ctrl+N)"
+        title="新建创作会话 (Ctrl+N)"
         disabled={newTaskDisabled}
         onClick={onNewTask ?? (() => handOff('new-task'))}
       >
         <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
-        <span className="shell-quick-action-label">新建任务</span>
+        <span className="shell-quick-action-label">新建会话</span>
         <kbd className="shell-kbd">Ctrl+N</kbd>
       </button>
       <button

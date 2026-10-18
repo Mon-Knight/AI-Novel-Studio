@@ -115,7 +115,9 @@ export const chapterOutlineService = {
   },
 
   async setActive(id: string, projectId: string): Promise<void> {
-    return dbCall<void>('set_active_chapter_outline', { input: { id, projectId } }, () => {});
+    return dbCall<void>('set_active_chapter_outline', { input: { id, projectId } }, () => {
+      throw new Error('浏览器模式暂不支持大纲持久化，请在桌面端采用章节大纲');
+    });
   },
 };
 

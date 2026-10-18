@@ -2542,6 +2542,34 @@ fn apply_summary(
         ));
     }
     let value = candidate_value(bundle).unwrap_or_else(|| json!({}));
+    let summary_snapshot = crate::repositories::ai_task_repository::find_input_snapshot(
+        connection,
+        &bundle.artifact.task_id,
+    )?;
+    let grounding_required = summary_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.payload_json.get("summaryGroundingVersion"))
+        .and_then(Value::as_i64)
+        == Some(1)
+        || bundle
+            .issues
+            .iter()
+            .any(|issue| issue.validator_version == "artifact-validator-m1-v3-summary-grounding");
+    let grounding_issues = crate::services::summary_grounding_source::validate_candidate(
+        connection,
+        &input.novel_id,
+        Some(chapter_id),
+        Some(&adopted_draft_id),
+        bundle.artifact.source_base_content_hash.as_deref(),
+        &value,
+        grounding_required,
+    )?;
+    if grounding_issues
+        .iter()
+        .any(|issue| issue.severity == "error")
+    {
+        return Ok(DomainOutcome::Conflict("SUMMARY_GROUNDING_REVIEW_REQUIRED"));
+    }
     let object = value.as_object();
     let summary = object
         .and_then(|object| trimmed_text(object.get("summary"), MAX_FIELD_CHARS))
@@ -2575,8 +2603,18 @@ fn apply_summary(
         unresolved_questions: object.and_then(|value| stored_field(value, "unresolvedQuestions")),
         facts_must_remember: object.and_then(|value| stored_field(value, "factsMustRemember")),
         next_chapter_hook: object.and_then(|value| stored_field(value, "nextChapterHook")),
-        validation_status: Some("passed".to_string()),
-        validation_result: None,
+        validation_status: Some("pending".to_string()),
+        validation_result: Some(json!({
+            "passed": false, "safeToContext": true, "score": 0,
+            "semanticValidation": "not_checked", "authorReviewed": true,
+            "evidenceValidation": if value.get("grounding").is_some() { "passed" } else { "missing" },
+            "grounding": value.get("grounding"),
+            "groundingIssues": grounding_issues.iter().map(|issue| json!({
+                "severity": issue.severity, "code": issue.code,
+                "path": issue.json_path, "message": issue.message,
+            })).collect::<Vec<_>>(),
+            "problems": [{"type": "speculation", "message": "作者已审阅应用；原文依据核对不等于语义证明。"}]
+        }).to_string()),
         enabled: Some(true),
         content_hash: bundle.artifact.source_base_content_hash.clone(),
         draft_version,
@@ -2784,7 +2822,7 @@ mod tests {
     const SUMMARY_CHARACTER_ID: &str = "00000000-0000-4000-8000-000000000010";
     const NOW: &str = "2026-08-28T00:00:00Z";
     const CHAPTER_REVISION: &str = "2026-08-28T00:00:00Z";
-    const DRAFT_CONTENT: &str = "第一章采用稿正文";
+    const DRAFT_CONTENT: &str = "林夏发现了被隐藏的航线。航线只能在双月重合时显现。她掌握了隐藏航线的位置，知道双月重合是开启条件。林夏已取得航线坐标。";
 
     fn empty_connection() -> Connection {
         let mut connection = Connection::open_in_memory().expect("connection");
@@ -3056,15 +3094,12 @@ mod tests {
         publish_simple_in_conversation(connection, conversation_id, "outline", None, payload)
     }
 
-    fn publish_draft_based(
+    fn publish_draft_artifact(
         connection: &mut Connection,
         suffix: &str,
         artifact_type: &str,
         payload: Value,
-    ) -> (
-        conversation_service::ConversationArtifactCardRecord,
-        artifact_service::ResultArtifactBundle,
-    ) {
+    ) -> (String, artifact_service::ResultArtifactBundle) {
         let conversation_id = create_conversation(connection, suffix);
         let raw = serde_json::to_string(&payload).expect("payload json");
         let mut task_input =
@@ -3132,6 +3167,20 @@ mod tests {
             },
         )
         .expect("artifact");
+        (conversation_id, bundle)
+    }
+
+    fn publish_draft_based(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+    ) -> (
+        conversation_service::ConversationArtifactCardRecord,
+        artifact_service::ResultArtifactBundle,
+    ) {
+        let (conversation_id, bundle) =
+            publish_draft_artifact(connection, suffix, artifact_type, payload);
         let card = conversation_service::create_artifact_card(
             connection,
             conversation_service::CreateArtifactCardInput {
@@ -3187,6 +3236,7 @@ mod tests {
 
     include!("structured_artifact_rule_governance_tests.rs");
     include!("structured_setting_apply_tests.rs");
+    include!("structured_summary_grounding_tests.rs");
 
     fn count(connection: &Connection, table: &str) -> i64 {
         connection
@@ -4192,7 +4242,7 @@ mod tests {
                 &mut connection,
                 "summary",
                 "chapter_summary",
-                json!({
+                grounded_summary_fixture(json!({
                     "summary":"林夏发现了被隐藏的航线。",
                     "keyEvents":["发现航线"],
                     "factsMustRemember":["航线只能在双月重合时显现"],
@@ -4207,7 +4257,7 @@ mod tests {
                         "content":"林夏已取得航线坐标。",
                         "importance":5
                     }]
-                }),
+                })),
             ),
         ];
 
@@ -4723,13 +4773,13 @@ mod tests {
             &mut connection,
             "historical-summary-backfill",
             "chapter_summary",
-            json!({
+            grounded_summary_fixture(json!({
                 "summary":"回填第一章总结。",
                 "characterChanges":[{
                     "characterName":"林夏",
                     "stateSummary":"第一章后的历史状态"
                 }]
-            }),
+            })),
         );
 
         let decision = apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
@@ -4781,7 +4831,7 @@ mod tests {
             &mut connection,
             "summary-rollback",
             "chapter_summary",
-            json!({
+            grounded_summary_fixture(json!({
                 "summary":"不应残留的章节总结。",
                 "factsMustRemember":["不应残留的事实"],
                 "characterChanges":[{
@@ -4795,7 +4845,7 @@ mod tests {
                     "content":"事务失败后必须消失。",
                     "importance":5
                 }]
-            }),
+            })),
         );
         connection
             .execute_batch(

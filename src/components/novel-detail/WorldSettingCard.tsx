@@ -65,10 +65,17 @@ function WorldSettingCard({ settings, onSave, onPreview }: WorldSettingCardProps
       {!editing &&
         (active ? (
           <div>
+            <div className="detail-list-item-title">{active.title}</div>
             <div className="detail-fact-text detail-fact-text--pre">
               {active.content.slice(0, 160)}
               {active.content.length > 160 ? '…' : ''}
             </div>
+            {active.content.length > 160 && (
+              <details className="detail-content-disclosure">
+                <summary>查看完整背景内容</summary>
+                <div className="detail-fact-text detail-fact-text--pre">{active.content}</div>
+              </details>
+            )}
             <WorldRuleSummary structuredJson={active.structuredJson} />
             <p className="text-sm text-muted">最后更新：{formatDate(active.updatedAt)}</p>
           </div>

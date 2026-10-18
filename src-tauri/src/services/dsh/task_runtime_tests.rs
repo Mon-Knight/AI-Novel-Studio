@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "task_runtime_chapter_gate_tests.rs"]
+mod chapter_gate_tests;
 #[path = "task_runtime_test_fixtures.rs"]
 mod contract_fixtures;
 #[path = "task_runtime_coverage_integration_tests.rs"]
@@ -44,6 +46,11 @@ fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput 
             timeout_seconds: 30,
         },
         api_key: "fixture-key".to_string(),
+        continuity_claim: None,
+        verified_continuity: None,
+        continuity_checked: false,
+        chapter_host_gate: None,
+        retry_source_run_id: None,
     }
 }
 
@@ -470,6 +477,11 @@ fn greeting_turn_prompt_forbids_empty_generate_chapter() {
             timeout_seconds: 30,
         },
         api_key: String::new(),
+        continuity_claim: None,
+        verified_continuity: None,
+        continuity_checked: false,
+        chapter_host_gate: None,
+        retry_source_run_id: None,
     };
     let prompt = workbench_turn_prompt(&input);
     assert!(prompt.contains("用户意图：你好"));
@@ -505,6 +517,16 @@ fn chapter_write_input() -> StartTaskTurnInput {
         target: 3000,
         minimum: 2400,
         maximum: 3450,
+    });
+    input.chapter_host_gate = Some(chapter_gate::ChapterHostGate {
+        phase: "draft".to_string(),
+        source_run_id: None,
+        content_hash: None,
+        issue_codes: Vec::new(),
+        issue_severities: Vec::new(),
+        max_integrity_repairs: Some(2),
+        continues_run_id: None,
+        explicit_retry: false,
     });
     input
 }
@@ -639,16 +661,26 @@ fn chapter_length_tool(
     payload: Option<Value>,
 ) {
     let event_id = format!("{run}-{call}");
-    conversation_service::append_tool_event(connection, AppendToolEventInput {
-        event_id: event_id.clone(), run_id: run.to_string(), tool_name: tool.to_string(),
-        arguments_summary: json!({"callId":call,"dshTurn":1,"dshStep":step,
+    conversation_service::append_tool_event(
+        connection,
+        AppendToolEventInput {
+            event_id: event_id.clone(),
+            run_id: run.to_string(),
+            tool_name: tool.to_string(),
+            arguments_summary: json!({"callId":call,"dshTurn":1,"dshStep":step,
             "dshResponseId":format!("turn:1:step:{step}"),
             // Every candidate is a distinct governed provider request; repeating one identity
             // would collide with the attempt uniqueness constraint instead of proving the flow.
             "governedProviderRequestId":format!("fixture-request-{run}-{call}")}),
-        status: "running".to_string(), duration_ms: None, error: None, result: None,
-        created_at: now(), finished_at: None,
-    }).expect("append tool fact");
+            status: "running".to_string(),
+            duration_ms: None,
+            error: None,
+            result: None,
+            created_at: now(),
+            finished_at: None,
+        },
+    )
+    .expect("append tool fact");
     let result = payload.map(|payload| {
         let content = payload.to_string();
         let hash = large_text_repository::sha256(&content);
@@ -718,7 +750,7 @@ fn chapter_length_run(
     .expect("start candidate run");
     if fresh_reads {
         for (index, tool) in input.required_read_tools.iter().enumerate() {
-            let payload = contract_fixtures::empty_read_payload(connection, input, tool);
+            let payload = length_history_tests::source_read_payload(connection, input, tool);
             chapter_length_tool(
                 connection,
                 run,
@@ -2305,6 +2337,100 @@ fn provider_transport_rejects_empty_remote_credentials_but_allows_loopback() {
 }
 
 #[test]
+fn idle_task_worker_health_requires_exact_selected_model_and_credential() {
+    let input = api_input(
+        OPENAI_COMPATIBLE_PROVIDER,
+        "model-alpha",
+        "http://127.0.0.1:12074/v1/",
+    );
+    let worker = provider_transport(&input).expect("original worker transport");
+    let credential_hash = large_text_repository::sha256(&worker.upstream_key);
+    let normalized = provider_transport(&api_input(
+        OPENAI_COMPATIBLE_PROVIDER,
+        "model-alpha",
+        "http://127.0.0.1:12074/v1",
+    ))
+    .expect("normalized selected endpoint");
+    assert!(task_worker_health_matches_model(
+        &worker.route,
+        &credential_hash,
+        Some(&normalized),
+    ));
+    assert!(task_worker_health_matches_model(
+        &worker.route,
+        &credential_hash,
+        None,
+    ));
+
+    let mut changed_key = input.clone();
+    changed_key.api_key = "rotated-fixture-key".to_string();
+    let changed_inputs = [
+        api_input(
+            OPENAI_COMPATIBLE_PROVIDER,
+            "model-beta",
+            "http://127.0.0.1:12074/v1",
+        ),
+        api_input(
+            DEEPSEEK_HARNESS_PROVIDER,
+            "model-alpha",
+            "http://127.0.0.1:12074/v1",
+        ),
+        api_input(
+            OPENAI_COMPATIBLE_PROVIDER,
+            "model-alpha",
+            "http://127.0.0.1:12075/v1",
+        ),
+        changed_key,
+    ];
+    for changed in changed_inputs {
+        let desired = provider_transport(&changed).expect("changed selected transport");
+        assert!(!task_worker_health_matches_model(
+            &worker.route,
+            &credential_hash,
+            Some(&desired),
+        ));
+    }
+}
+
+#[test]
+fn runtime_health_rejects_unknown_model_identity_before_reusing_any_worker() {
+    let snapshot = api_input(
+        OPENAI_COMPATIBLE_PROVIDER,
+        "model-beta",
+        "https://api.example.com/v1",
+    )
+    .model_snapshot;
+    let mut missing_endpoint = snapshot.clone();
+    missing_endpoint.as_object_mut().unwrap().remove("baseUrl");
+    assert!(runtime_health_with_probe(
+        Some("conversation-invalid-selection"),
+        false,
+        Some(&missing_endpoint),
+        Some("fixture-key"),
+    )
+    .expect_err("missing identity must not reuse another model's health")
+    .contains("baseUrl"));
+    assert!(runtime_health_with_probe(
+        Some("conversation-invalid-selection"),
+        false,
+        Some(&snapshot),
+        None,
+    )
+    .expect_err("remote credentials must be present even before cache lookup")
+    .contains("远程模型不得使用空凭据"));
+    let mut secret_snapshot = snapshot;
+    secret_snapshot["apiKey"] = json!("fixture-only");
+    assert!(runtime_health_with_probe(
+        Some("conversation-invalid-selection"),
+        false,
+        Some(&secret_snapshot),
+        Some("fixture-key"),
+    )
+    .expect_err("snapshot credentials must fail closed")
+    .contains("凭据字段"));
+}
+
+#[test]
 fn snapshot_provider_model_and_base_url_mismatches_fail_closed() {
     let mut provider_mismatch = api_input(
         OPENAI_COMPATIBLE_PROVIDER,
@@ -3045,3 +3171,13 @@ fn legacy_tool_name_is_rejected_on_canonical_only_turn() {
         .expect_err("Canonical names stay off the legacy candidate allowlist");
     assert!(canonical_on_legacy.contains("未授权"));
 }
+#[path = "task_runtime_chapter_retry_budget_tests.rs"]
+mod chapter_retry_budget_tests;
+#[path = "task_runtime_length_history_tests.rs"]
+mod length_history_tests;
+#[path = "task_runtime_retry_tests.rs"]
+mod retry_tests;
+#[path = "task_runtime_summary_scope_tests.rs"]
+mod summary_scope_tests;
+#[path = "task_runtime_word_target_tests.rs"]
+mod word_target_tests;

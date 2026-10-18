@@ -1,5 +1,6 @@
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
+import { listSelectableWorkbenchModels } from '../../services/conversation/workbenchSelectableModels';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import { Bot } from 'lucide-react';
 
@@ -10,10 +11,8 @@ interface WorkbenchModelSelectProps {
   refreshing: boolean;
   refreshError: string;
   disabled?: boolean;
-  locked?: boolean;
   testId?: string;
   onChange?: (value: string) => void;
-  lockedReason?: string;
 }
 
 export function WorkbenchModelSelect({
@@ -23,10 +22,8 @@ export function WorkbenchModelSelect({
   refreshing,
   refreshError,
   disabled = false,
-  locked = false,
   testId,
   onChange,
-  lockedReason = '任务创建时固定；更换模型请新建任务。',
 }: WorkbenchModelSelectProps) {
   const selectedValue = `${selectedModel.providerId}:${selectedModel.modelId}`;
   const availability = getWorkbenchModelAvailability({
@@ -34,50 +31,21 @@ export function WorkbenchModelSelect({
     selectedModel,
     refreshing,
     refreshError,
-    selectionLocked: locked,
   });
-  const selectedMissing = !availability.selectedOption;
+  const choices = listSelectableWorkbenchModels(plugins);
+  const selectedMissing = !choices.some((option) => option.key === selectedValue);
   const statusTitle =
     availability.status === 'available'
-      ? '模型可用'
+      ? '模型已加载；实际可用性以调用结果为准'
       : availability.status === 'refreshing'
         ? '正在刷新模型目录'
         : availability.message || '模型不可用';
 
-  if (locked) {
-    return (
-      <div
-        id={id}
-        className={`workbench-model-control workbench-fixed-model is-${availability.status}`}
-        role="group"
-        aria-label="当前任务固定模型"
-        aria-describedby={`${id}-fixed-reason`}
-        data-testid={testId}
-        data-model-locked="true"
-        data-model-value={selectedValue}
-        data-model-status={availability.status}
-      >
-        <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
-        <span className="workbench-model-status-dot" aria-hidden="true" />
-        <span className="workbench-fixed-model-name" title={`${selectedValue} · ${statusTitle}`}>
-          {availability.selectedOption?.name || selectedModel.modelId}
-        </span>
-        <details
-          className="workbench-fixed-model-details"
-          data-testid="workbench-fixed-model-reason"
-        >
-          <summary title={lockedReason}>固定原因</summary>
-          <p id={`${id}-fixed-reason`}>{lockedReason}</p>
-        </details>
-      </div>
-    );
-  }
-
   return (
     <label
-      className={`workbench-model-control${locked ? ' is-locked' : ''} is-${availability.status}`}
+      className={`workbench-model-control is-${availability.status}`}
       htmlFor={id}
-      title={locked ? `模型已在任务创建时固定 · ${statusTitle}` : statusTitle}
+      title={`选择后续回合使用的模型；历史运行与重试保留原来源 · ${statusTitle}`}
       data-model-status={availability.status}
     >
       <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -86,29 +54,16 @@ export function WorkbenchModelSelect({
       <select
         id={id}
         data-testid={testId}
-        data-model-locked={locked ? 'true' : 'false'}
+        aria-label="后续回合模型"
+        data-model-locked={disabled ? 'true' : 'false'}
+        data-model-value={selectedValue}
+        data-model-status={availability.status}
         value={selectedValue}
-        disabled={
-          locked ||
-          disabled ||
-          refreshing ||
-          Boolean(refreshError) ||
-          availability.options.length === 0
-        }
+        disabled={disabled}
         onChange={(event) => onChange?.(event.target.value)}
       >
-        {selectedMissing && (
-          <option value={selectedValue} disabled>
-            {refreshing
-              ? '正在刷新模型目录…'
-              : availability.options.length === 0
-                ? '模型目录不可用'
-                : locked
-                  ? '任务固定模型不可用'
-                  : '所选模型未进入 Runtime 目录'}
-          </option>
-        )}
-        {availability.options.map((option) => (
+        {selectedMissing && <option value={selectedValue}>{selectedModel.modelId}</option>}
+        {choices.map((option) => (
           <option key={option.pluginId} value={option.key}>
             {option.name}
           </option>

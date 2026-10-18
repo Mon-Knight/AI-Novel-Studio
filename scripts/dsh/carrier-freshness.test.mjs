@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,7 +21,11 @@ function makeFixture({ gatewayBytes = 'current-gateway', sourceCommit = PINNED_C
   mkdirSync(temporaryParent, { recursive: true });
   writeFileSync(carrierGateway, gatewayBytes);
   writeFileSync(currentGateway, gatewayBytes);
-  writeFileSync(path.join(carrierRoot, 'VERSION_MATRIX.json'), JSON.stringify({ sourceCommit }));
+  const gatewaySha256 = createHash('sha256').update(gatewayBytes).digest('hex');
+  writeFileSync(
+    path.join(carrierRoot, 'VERSION_MATRIX.json'),
+    JSON.stringify({ sourceCommit, gatewaySha256 }),
+  );
   const archive = spawnSync('tar', ['-c', '-f', 'carrier.zip', '-C', 'fixture', 'dsh-runtime'], {
     encoding: 'utf8',
     cwd: root,

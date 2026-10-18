@@ -60,6 +60,7 @@ export function createVerificationPlan(
     rustSize: full,
     rustFilters: [],
     desktopFull: full,
+    faultInjection: full,
     production: full,
     docs: full,
     version: full,
@@ -136,9 +137,9 @@ export function createVerificationPlan(
       !selected.length &&
       !rule.coverage &&
       !rule.rustFull &&
-      !rule.rustSize &&
       !rule.rustFilters?.length &&
       !rule.desktopFull &&
+      !rule.faultInjection &&
       !rule.e2e?.length &&
       !rule.browser &&
       !rule.metadataOnly
@@ -156,6 +157,7 @@ export function createVerificationPlan(
       'rustFull',
       'rustSize',
       'desktopFull',
+      'faultInjection',
       'production',
       'docs',
       'version',
@@ -177,6 +179,7 @@ export function createVerificationPlan(
   if (plan.coverage) plan.tests = [];
   if (plan.rustFull) plan.rustFilters = [];
   if (plan.desktopFull) plan.e2e = [];
+  plan.faultInjection ||= plan.desktopFull || plan.production;
   return plan;
 }
 
@@ -295,6 +298,7 @@ export function verificationCommands(
       args: [
         'test',
         '--locked',
+        '--workspace',
         '--manifest-path',
         'src-tauri/Cargo.toml',
         '--',
@@ -322,6 +326,10 @@ export function verificationCommands(
       ]),
       { requiresCases: true },
     );
+  if (plan.faultInjection)
+    add('writing-fault-injection', 'desktop', npmCommand('test:e2e:writing-faults'), {
+      requiresCases: true,
+    });
   if (plan.production) add('production-build', 'native', npmCommand('tauri:build'));
   return steps;
 }
@@ -425,8 +433,9 @@ async function main() {
       coverage: plan.coverage,
       rust: plan.rustCheck || plan.rustFull || plan.rustFilters.length > 0 || plan.production,
       rust_full: plan.rustFull,
-      desktop: plan.desktopFull || plan.e2e.length > 0,
+      desktop: plan.desktopFull || plan.e2e.length > 0 || plan.faultInjection,
       desktop_full: plan.desktopFull,
+      fault_injection: plan.faultInjection,
       production: plan.production,
       docs: plan.docs,
       version: plan.version,

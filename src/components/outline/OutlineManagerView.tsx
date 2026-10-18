@@ -48,8 +48,9 @@ interface OutlineManagerViewProps {
   handleUpdateVolume: (id: string, input: UpdateVolumeInput) => Promise<void>;
   handleDeleteVolume: (id: string) => Promise<void>;
   handleCreateChapter: (input: CreateChapterInput) => Promise<void>;
-  handleUpdateChapter: (id: string, input: UpdateChapterInput) => Promise<void>;
+  handleUpdateChapter: (id: string, input: UpdateChapterInput, baseline: Chapter) => Promise<void>;
   handleDeleteChapter: (id: string) => Promise<void>;
+  refreshChapter: (id: string) => Promise<Chapter | null>;
 }
 
 export function OutlineManagerView({
@@ -90,6 +91,7 @@ export function OutlineManagerView({
   handleCreateChapter,
   handleUpdateChapter,
   handleDeleteChapter,
+  refreshChapter,
 }: OutlineManagerViewProps) {
   return (
     <div>
@@ -375,10 +377,14 @@ export function OutlineManagerView({
           novelId={novelId}
           volumeId={editingChapter?.volumeId || targetVolumeId}
           volumes={volumes}
-          onSave={(input) => {
-            if (editingChapter) handleUpdateChapter(editingChapter.id, input as UpdateChapterInput);
-            else handleCreateChapter({ ...input, novelId } as CreateChapterInput);
+          onSave={(input, baseline) => {
+            if (editingChapter) {
+              if (!baseline) return Promise.reject(new Error('章节编辑基线缺失，请重新打开。'));
+              return handleUpdateChapter(editingChapter.id, input as UpdateChapterInput, baseline);
+            }
+            return handleCreateChapter({ ...input, novelId } as CreateChapterInput);
           }}
+          onRefresh={editingChapter ? () => refreshChapter(editingChapter.id) : undefined}
           onClose={() => {
             setShowChapterForm(false);
             setEditingChapter(null);

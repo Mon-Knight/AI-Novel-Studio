@@ -65,12 +65,12 @@ export function WorkbenchModelRecoveryNotice({
               type="button"
               className="workbench-recovery-action is-primary"
               data-testid={`${testId}-create-task`}
-              aria-label="使用当前模型新建任务"
-              title="使用当前设置的模型新建一个任务，草稿会带过去"
+              aria-label="使用当前模型新建会话"
+              title="使用当前设置的模型新建会话，草稿会带过去"
               onClick={onCreateTask}
             >
               <Plus aria-hidden="true" size={13} strokeWidth={1.8} />
-              <span>新建任务</span>
+              <span>新建会话</span>
             </button>
           )}
           <button

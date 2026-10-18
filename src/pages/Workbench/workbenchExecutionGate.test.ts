@@ -70,6 +70,37 @@ test('local conversational replies bypass the context migration gate', async () 
   assert.equal(executeCalls, 1);
 });
 
+test('real-model greetings require safe context because the model may choose read tools', async () => {
+  const migration = createDeferred();
+  let executed = false;
+  const pending = executeWorkbenchTurnAfterContextReady({
+    goal: '你好',
+    requireContext: true,
+    coordinator: { waitForContextMigration: () => migration.promise },
+    execute: async () => {
+      executed = true;
+      return 'model reply';
+    },
+  });
+  await Promise.resolve();
+  assert.equal(executed, false);
+  migration.resolve();
+  assert.equal(await pending, 'model reply');
+  await assert.rejects(
+    executeWorkbenchTurnAfterContextReady({
+      goal: '你好',
+      requireContext: true,
+      coordinator: {
+        waitForContextMigration: async () => {
+          throw new Error('迁移失败');
+        },
+      },
+      execute: async () => 'unexpected',
+    }),
+    /迁移失败/,
+  );
+});
+
 test('context migration failure blocks creative execution instead of using stale context', async () => {
   let executeCalls = 0;
   await assert.rejects(

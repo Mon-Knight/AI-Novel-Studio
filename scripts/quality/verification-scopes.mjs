@@ -57,6 +57,140 @@ export function packageScope(before, after) {
 
 export const verificationScopes = [
   {
+    name: 'guarded character profile editing',
+    match:
+      /^(?:src-tauri\/src\/services\/character_profile_service|src\/(?:services\/characters\/character(?:Profile|Service)|features\/characters\/|components\/novel-card\/Character(?:LibraryCard|ProfileEditor|ProfileFields)|test\/components\/CharacterLibraryCard))/u,
+    tests: [
+      'src/services/characters/characterProfile.test.ts',
+      'src/test/components/CharacterLibraryCard.test.tsx',
+    ],
+    rustFilters: ['services::character_profile_service::'],
+    e2e: ['interaction-world-rules-repair'],
+  },
+  {
+    name: 'guarded chapter details and adopted outline routing',
+    match:
+      /^(?:src-tauri\/src\/services\/chapter_details_service|src\/(?:services\/(?:chapters\/chapterDetails|database\/chapterRepository)|components\/outline\/(?:ChapterFormModal|OutlineManager(?:View)?)|pages\/OutlineEditor\/OutlineEditorPage|test\/components\/(?:ChapterFormModal|OutlineEditorRoute)))/u,
+    tests: [
+      'src/services/chapters/chapterDetails.test.ts',
+      'src/test/components/ChapterFormModal.test.tsx',
+      'src/test/components/OutlineEditorRoute.test.tsx',
+      'src/components/outline/OutlineEditor.test.tsx',
+      'src/test/components/ChapterSourceReview.test.tsx',
+      'src/pages/NovelDetail/NovelDetailPage.test.tsx',
+    ],
+    rustFilters: ['services::chapter_details_service::', 'outline_commands::chapter_source::'],
+    e2e: ['interaction-world-rules-repair', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'project task model inheritance',
+    match:
+      /^src\/(?:services\/conversation\/projectTaskModel|pages\/Workbench\/(?:WorkbenchTaskCreator|hooks\/useWorkbenchTaskCreator))/u,
+    tests: [
+      'src/services/conversation/projectTaskModel.test.ts',
+      'src/pages/Workbench/hooks/useWorkbenchTaskCreator.test.tsx',
+    ],
+    safety: ['src/pages/Workbench/hooks/useWorkbenchTaskCreator.test.tsx'],
+    e2e: ['workbench-task-directory', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'chapter summary source and editor handoff',
+    match:
+      /^src\/(?:services\/conversation\/chapter(?:WorkflowService|SummaryAttempt|SummaryOrchestration)|features\/(?:workbench\/useWorkbenchChapterHandoff|workspace\/useChapterSummaryWorkflow)|components\/(?:workspace\/ChapterSummary(?:WorkflowNotice|Details)|right-dock\/panels\/ChapterSummaryPanel)|pages\/(?:Workbench\/WorkbenchChapterSummaryStatus|WritingWorkspace\/WorkspaceSummaryDialogs)|test\/components\/ChapterSummaryWorkflowNotice)/u,
+    tests: [
+      'src/services/conversation/chapterWorkflowService.test.ts',
+      'src/services/conversation/chapterSummaryAttempt.test.ts',
+      'src/services/conversation/chapterSummaryOrchestration.test.ts',
+      'src/features/workbench/useWorkbenchChapterHandoff.test.tsx',
+      'src/test/components/ChapterSummaryWorkflowNotice.test.tsx',
+      'src/test/critical-components/WritingWorkspaceViewBehavior.test.tsx',
+    ],
+    safety: [
+      'src/services/conversation/chapterWorkflowService.test.ts',
+      'src/features/workbench/useWorkbenchChapterHandoff.test.tsx',
+    ],
+    e2e: ['chapter-context-persistence', 'workbench-writing-smoke', 'candidate-review-apply'],
+  },
+  {
+    name: 'bound artifact revision routing',
+    match:
+      /^src\/(?:services\/conversation\/(?:artifactRevisionRouting|taskGoalDirective|taskGoalRouting)|features\/workbench\/prepareLegacyWorkbenchSend|pages\/Workbench\/workbenchTaskRunnerSupport)/u,
+    tests: [
+      'src/services/conversation/taskGoalRouting.test.ts',
+      'src/pages/Workbench/hooks/useWorkbenchTaskRunner.test.tsx',
+    ],
+    safety: [
+      'src/services/conversation/artifactRevisionSourceService.test.ts',
+      'src/services/dsh/taskSessionAdapter.test.ts',
+      'src/services/conversation/workbenchRetryTarget.test.ts',
+    ],
+    e2e: ['interaction-world-rules-repair', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'persisted workbench retry recovery',
+    match:
+      /^src\/(?:features\/workbench\/prepareWorkbenchRetry|services\/conversation\/workbenchRetry(?:Recovery|Target))/u,
+    tests: [
+      'src/services/conversation/workbenchRetryRecovery.test.ts',
+      'src/services/conversation/workbenchRetryTarget.test.ts',
+      'src/pages/Workbench/hooks/useWorkbenchTaskRunner.test.tsx',
+    ],
+    safety: ['src/services/dsh/taskRetryRecovery.test.ts'],
+    e2e: ['workbench-writing-smoke', 'generation-job-cancel'],
+  },
+  {
+    name: 'chapter writing preference and target integration',
+    match:
+      /^src\/services\/conversation\/(?:taskWritingPreferences|taskWordTarget|chapterWordRangePolicy)/u,
+    tests: [
+      'src/services/conversation/chapterWordRangePolicy.test.ts',
+      'src/test/components/WorkbenchWordPreview.test.tsx',
+    ],
+    safety: ['src/services/dsh/taskSessionAdapter.test.ts'],
+    e2e: ['workbench-writing-smoke'],
+  },
+  {
+    name: 'chapter source reconciliation',
+    match:
+      /^(?:src-tauri\/src\/services\/chapter_source_reference|src\/(?:services\/worldRules\/chapterSource|features\/workspace\/useChapterSourceReview|components\/workspace\/(?:ChapterSourceReview|chapter-source-review)|test\/components\/ChapterSourceReview))/u,
+    tests: ['src/services/worldRules/', 'src/test/components/ChapterSourceReview.test.tsx'],
+    rustFilters: [
+      'services::chapter_source_reference::',
+      'services::world_setting_service::',
+      'services::world_rule_governance::',
+    ],
+    e2e: ['interaction-world-rules-repair', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'grounded chapter summaries',
+    match:
+      /^(?:src-tauri\/src\/services\/(?:summary_grounding|structured_summary_grounding)|prompts\/chapter_summary_grounding\.md|tests\/fixtures\/chapter-summary-grounding\.json|src\/(?:services\/ai\/chapterSummary(?:Grounding|PromptContract)|pages\/Workbench\/SummaryGroundingReview|test\/components\/SummaryGroundingReview))/u,
+    tests: [
+      'src/services/ai/chapterSummaryGrounding.test.ts',
+      'src/test/components/SummaryGroundingReview.test.tsx',
+    ],
+    rustFilters: ['services::summary_grounding::', 'services::structured_artifact_apply_service::'],
+    e2e: ['chapter-context-persistence', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'verified manuscript export',
+    match:
+      /^src\/(?:services\/export\/|utils\/chapterHeading|components\/novel-card\/ExportCard|pages\/ImportExport\/|test\/export\/)/u,
+    tests: ['src/test/export/'],
+    e2e: ['project-backup-boundary'],
+  },
+  {
+    name: 'chapter word range preview',
+    match:
+      /^src\/(?:features\/workbench\/useWorkbenchWordPreview|test\/components\/WorkbenchWordPreview)/u,
+    tests: [
+      'src/test/components/WorkbenchWordPreview.test.tsx',
+      'src/services/conversation/chapterWordRangePolicy.test.ts',
+      'src/pages/Workbench/WorkbenchComposer.test.tsx',
+    ],
+    e2e: ['workbench-writing-smoke'],
+  },
+  {
     name: 'verification infrastructure',
     match:
       /^(?:scripts\/quality\/(?:verify-change|verification-scopes|test-ownership|run-coverage)|vitest.*config|scripts\/check-critical-component-coverage)/u,
@@ -106,6 +240,23 @@ export const verificationScopes = [
     e2e: ['workbench-writing-smoke', 'candidate-review-apply'],
   },
   {
+    name: 'isolated writing fault carrier',
+    match:
+      /^(?:scripts\/e2e\/run-writing-fault-injection|tests\/real-acceptance\/(?:wdio\.fault-injection|writing-subagent-fault|production-carrier|production-app-helpers|real-profile-env))/u,
+    tests: [
+      'scripts/e2e/run-writing-fault-injection.test.',
+      'tests/real-acceptance/writing-subagent-fault-evidence.test.',
+      'scripts/dsh/mock-workbench-upstream.test.',
+    ],
+    safety: [
+      'scripts/e2e/run-writing-fault-injection.test.mjs',
+      'tests/real-acceptance/writing-subagent-fault-evidence.test.ts',
+      'scripts/dsh/mock-workbench-upstream.test.mjs',
+    ],
+    faultInjection: true,
+    reason: 'Production desktop with isolated profile and loopback model; no cloud credentials.',
+  },
+  {
     name: 'desktop harness',
     match: /^(?:scripts\/e2e\/|tests\/e2e\/|src\/services\/tauri\/e2e)/u,
     tests: [
@@ -117,6 +268,13 @@ export const verificationScopes = [
     desktopFull: true,
   },
   { name: 'browser harness', match: /^tests\/browser\//u, browser: true },
+  {
+    name: 'R4 opt-in canonical carrier',
+    match: /^tests\/real-acceptance\/r4-canonical-read-carrier\.mjs$/u,
+    tests: ['scripts/dsh/test-agent-runtime-real.test.'],
+    reason:
+      'Exercise credential, identity, real send budget and evidence boundaries offline; cloud execution stays explicit opt-in.',
+  },
   {
     name: 'opt-in live harness',
     match: /^tests\/real-acceptance\//u,
@@ -130,7 +288,7 @@ export const verificationScopes = [
   {
     name: 'DSH and Canonical',
     match:
-      /^(?:scripts\/dsh\/|contracts\/|src-tauri\/gateway\/|src-tauri\/src\/(?:task_runtime|services\/dsh\/)|src\/services\/(?:dsh|capabilities|agent-tools)\/)/u,
+      /^(?:scripts\/dsh\/|contracts\/|src-tauri\/gateway\/|src-tauri\/shared\/memory_(?:lexical_retrieval|lexical_scope|comparison_corpus)\.rs$|src-tauri\/src\/services\/memory_(?:lexical_retrieval_tests|retrieval_apply)\.rs$|src-tauri\/src\/(?:task_runtime|services\/dsh\/)|src\/services\/(?:dsh|capabilities|agent-tools)\/)/u,
     tests: [
       'scripts/dsh/',
       'src/services/dsh/',
@@ -138,12 +296,13 @@ export const verificationScopes = [
       'src/services/agent-tools/',
     ],
     rustFull: true,
+    faultInjection: true,
     e2e: ['conversational-workbench', 'workbench-writing-smoke', 'domain-facade-sqlite'],
   },
   {
     name: 'world rule and revision native authority',
     match:
-      /^src-tauri\/(?:shared\/world_rule_fingerprint\.rs$|src\/services\/(?:world_rule[^/]*|world_setting_service|setting_suggestion[^/]*|structured_rule_apply_receipt|chapter_revision[^/]*)\.rs$|src\/commands\/(?:world|setting_suggestions)\.rs$)/u,
+      /^src-tauri\/(?:shared\/world_rule_fingerprint\.rs$|src\/services\/(?:world_rule[^/]*|world_setting_service|setting_suggestion[^/]*|structured_rule_apply_receipt|structured_artifact_rule_governance_tests|chapter_revision[^/]*)\.rs$|src\/commands\/(?:world|setting_suggestions)\.rs$)/u,
     rustFull: true,
     e2e: [
       'interaction-world-rules-repair',
@@ -192,6 +351,7 @@ export const verificationScopes = [
     name: 'writing subagent contract',
     match: /^src\/services\/agents\//u,
     tests: ['src/services/agents/'],
+    faultInjection: true,
   },
   {
     name: 'TXT import transaction',
@@ -212,6 +372,12 @@ export const verificationScopes = [
       'commands::tests::',
     ],
     e2e: ['workbench-writing-smoke', 'large-text-save'],
+  },
+  {
+    name: 'native conversation projections',
+    match: /^src-tauri\/src\/(?:repositories\/conversation_[^/]+|commands\/conversations)\.rs$/u,
+    rustFilters: ['repositories::conversation_repository::', 'services::conversation_service::'],
+    e2e: ['workbench-task-directory', 'candidate-review-apply'],
   },
   ...nativeServiceOwners.map((name) => ({
     name: `native ${name}`,
@@ -246,11 +412,29 @@ export const verificationScopes = [
     e2e: ['app-start'],
   },
   {
-    // Fallback owner for any Rust source not matched above. The native lane runs
-    // the Rust size budget gate for every `src-tauri/**/*.rs` change.
-    name: 'native source size',
-    match: /^src-tauri\/.*\.rs$/u,
-    rustSize: true,
+    name: 'native project repository',
+    match: /^src-tauri\/src\/repositories\/novel_repository\.rs$/u,
+    rustFilters: ['services::project_service::'],
+    e2e: ['project-create-open', 'project-backup-boundary'],
+  },
+  {
+    name: 'native legacy context migration',
+    match:
+      /^src-tauri\/src\/(?:services\/legacy_migration_service|repositories\/character_state_repository)\.rs$/u,
+    rustFilters: ['commands::tests::legacy_', 'services::chapter_summary_service::'],
+    e2e: ['chapter-context-persistence'],
+  },
+  {
+    name: 'native task fact helpers',
+    match: /^src-tauri\/src\/services\/ai_task_(?:creation|rule_snapshot_tests)\.rs$/u,
+    rustFilters: ['services::ai_task_service::'],
+    e2e: ['generation-job-cancel', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'native structured setting application',
+    match: /^src-tauri\/src\/services\/structured_setting_apply(?:_tests)?\.rs$/u,
+    rustFull: true,
+    e2e: ['story-assets-transaction', 'interaction-world-rules-repair'],
   },
   {
     name: 'world rule schema and persistence',
@@ -323,6 +507,7 @@ export const verificationScopes = [
       'src/services/memory/',
       'src/services/context/',
       'src/services/prompt/',
+      'src/services/outlines/',
       'src/test/story-assets/',
     ],
     e2e: ['chapter-context-persistence', 'story-assets-transaction'],
@@ -351,6 +536,12 @@ export const verificationScopes = [
       /^src\/pages\/(?:AiTasks|Assets|AutonomousPlanning|ComingSoon|Home|ImportExport|NotFound|NovelDetail|OutlineEditor|ReferenceLibrary|Settings|SettingSuggestions|StoryAssets|StyleProfiles|Templates)\//u,
     tests: ['src/test/critical-components/', 'src/test/story-assets/'],
     e2e: ['project-create-open', 'story-assets-transaction', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'outline version editor',
+    match: /^src\/components\/outline\/OutlineEditor(?:View)?(?:\.test)?\.tsx$/u,
+    tests: ['src/components/outline/OutlineEditor.test.tsx'],
+    e2e: ['story-assets-transaction'],
   },
   {
     name: 'shared UI',

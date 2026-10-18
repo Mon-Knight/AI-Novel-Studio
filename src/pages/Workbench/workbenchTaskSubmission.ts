@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
+import { isModelLedCreativeTurn } from '../../services/dsh/taskSessionAdapter';
 import { WorkbenchModelUnavailableError } from '../../services/conversation/workbenchModelAvailability';
 import type { Chapter } from '../../types/chapter';
 import type { TaskModelSnapshot } from '../../types/conversation';
@@ -39,18 +40,19 @@ export interface WorkbenchTaskSubmissionInput {
 }
 
 /**
- * Creates and starts a workbench task from the creator dialog. Context readiness, chapter
- * ownership and frozen-model validation fail closed before any task is persisted.
+ * Creates the conversation and its first turn atomically. Context migration and chapter
+ * ownership remain gates; real API model failures belong to the actual conversation run.
  */
 export async function submitWorkbenchTask(input: WorkbenchTaskSubmissionInput): Promise<void> {
   const goal = input.goal.trim();
   if (!goal || input.creatingTask || !input.selectedNovelId || input.submissionRef.current) return;
   const conversationalGoal = isConversationalGoal(goal);
-  if (input.contextPending && !conversationalGoal) {
+  const modelLed = isModelLedCreativeTurn({ goal, modelSnapshot: input.taskModel });
+  if (input.contextPending && (modelLed || !conversationalGoal)) {
     input.onError('正在整理已有章节上下文；创作目标已保留，完成后即可创建任务。');
     return;
   }
-  if (input.contextFailed && !conversationalGoal) {
+  if (input.contextFailed && (modelLed || !conversationalGoal)) {
     input.onError('旧版上下文未能安全整理；创作目标已保留，请重新启动应用后重试。');
     return;
   }
@@ -69,7 +71,7 @@ export async function submitWorkbenchTask(input: WorkbenchTaskSubmissionInput): 
   input.onError('');
   let taskModel = input.taskModel;
   try {
-    if (!conversationalGoal) {
+    if (!conversationalGoal && !modelLed) {
       try {
         taskModel = await input.validateModelForSend(taskModel, { allowLocalFallback: true });
       } catch (error) {

@@ -465,7 +465,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       outputPricePerMillionTokens: snapshotModel.pricing?.outputPricePerMillionTokens,
     };
 
-    // A Workbench task freezes one model for every chapter-generation role.
+    // A Workbench run freezes one model for every chapter-generation role.
     // Optional specialist endpoints from later global settings must not re-enter
     // Scene/Beat routing for this run.
     delete settings.localChapterModel;

@@ -57,3 +57,44 @@ for (const [status, label, action] of [
     },
   );
 }
+
+test('a requested revision can resume after session draft loss without exposing adoption actions', () => {
+  for (const artifactType of ['outline', 'chapter_text'] as const) {
+    const artifact: ConversationArtifactCard = {
+      cardId: 'card-revision',
+      artifactId: 'artifact-revision',
+      conversationId: 'task-revision',
+      artifactType,
+      title: '待修订候选',
+      summary: '',
+      status: 'candidate',
+      createdAt: '',
+      latestDecision: {
+        decisionId: 'decision-revision',
+        artifactId: 'artifact-revision',
+        artifactHash: 'hash',
+        cardId: 'card-revision',
+        conversationId: 'task-revision',
+        decision: 'request_revision',
+        idempotencyKey: 'card-revision:request_revision',
+        actor: 'user',
+        targetType: artifactType === 'chapter_text' ? 'chapter' : 'asset',
+        targetId: 'target-revision',
+        createdAt: '',
+      },
+    };
+    for (const busy of [false, true]) {
+      const html = renderToStaticMarkup(
+        createElement(ArtifactCard, { artifact, busy, onDecide: () => undefined }),
+      );
+      assert.match(html, /workbench-artifact-resume-revision/);
+      assert.match(html, /继续填写修订意见/);
+      assert.doesNotMatch(
+        html,
+        /data-testid="(?:workbench-artifact-apply|workbench-artifact-confirm-review)"/,
+      );
+      assert.doesNotMatch(html, /workbench-artifact-reject/);
+      if (busy) assert.match(html, /disabled=""/);
+    }
+  }
+});

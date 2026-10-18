@@ -101,6 +101,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     <EditorAreaView
       chapter={props.chapter}
       currentDraft={props.currentDraft}
+      originalCandidateContent={props.reviewCandidate?.content}
       documentState={documentState}
       document={document}
       outline={outline}

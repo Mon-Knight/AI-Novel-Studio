@@ -18,7 +18,7 @@ export function verificationEnvironment(env = process.env) {
 export function npmCommand(script) {
   const bin = path.dirname(process.execPath);
   const entry = [
-    process.env.npm_execpath,
+    process.env.npm_execpath?.endsWith('npm-cli.js') ? process.env.npm_execpath : undefined,
     path.join(bin, 'node_modules/npm/bin/npm-cli.js'),
     path.resolve(bin, '../lib/node_modules/npm/bin/npm-cli.js'),
     '/usr/share/nodejs/npm/bin/npm-cli.js',

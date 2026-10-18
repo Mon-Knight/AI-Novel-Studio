@@ -7,10 +7,13 @@ import type { EditorAreaProps, EditorDocumentState } from './editorAreaTypes';
 import type { EditorDocumentController } from './useEditorDocumentController';
 import type { ChapterOutlineEditor } from './useChapterOutlineEditor';
 import { EditorChapterContext } from './EditorChapterContext';
+import { ChapterSourceReview } from '../ChapterSourceReview';
+import { formatChapterHeading } from '../../../utils/chapterHeading';
 
 interface EditorAreaViewProps {
   chapter?: Chapter;
   currentDraft?: ChapterDraft | null;
+  originalCandidateContent?: string;
   documentState: EditorDocumentState;
   document: EditorDocumentController;
   outline: ChapterOutlineEditor;
@@ -34,6 +37,7 @@ const DRAFT_SOURCE_LABELS: Record<string, string> = {
 export default function EditorAreaView({
   chapter,
   currentDraft,
+  originalCandidateContent,
   documentState,
   document,
   outline,
@@ -59,9 +63,7 @@ export default function EditorAreaView({
   const busy = document.saving || document.adopting;
   return (
     <div className="editor-content" data-document-state={documentState}>
-      <h1 className="editor-chapter-title">
-        第{chapter.chapterNumber}章：{chapter.title}
-      </h1>
+      <h1 className="editor-chapter-title">{formatChapterHeading(chapter)}</h1>
 
       {ready && currentDraft && (
         <details className="editor-document-metadata" key={`${chapter.id}:${currentDraft.id}`}>
@@ -126,6 +128,16 @@ export default function EditorAreaView({
             </div>
           )}
         </div>
+      )}
+
+      {ready && currentDraft && (
+        <ChapterSourceReview
+          key={`${chapter.id}:${currentDraft.id}`}
+          chapter={chapter}
+          draft={currentDraft}
+          original={originalCandidateContent}
+          disabled={busy || document.isDirty}
+        />
       )}
 
       {ready ? (

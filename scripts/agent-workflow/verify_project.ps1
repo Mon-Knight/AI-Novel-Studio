@@ -127,10 +127,11 @@ Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $Projec
 Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")
 Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")
 Invoke-VerificationStep -Name "required Rust regression discovery" -WorkingDirectory $ProjectRoot -Executable "node" -Arguments @("scripts/quality/run-cargo-tests.mjs", "--list-only", "--filter", "ai_task_delete", "--filter", "project_backup_")
-Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")
+Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--workspace", "--", "--test-threads=1")
 
 # The complete desktop suite is a release gate, not a substitute for Node or Rust tests.
 Invoke-VerificationStep -Name "npm run test:e2e" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e")
+Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults")
 Invoke-VerificationStep -Name "npm run tauri:build" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "tauri:build")
 
 Write-Host "[verify_project] Checking required checklists..." -ForegroundColor Yellow

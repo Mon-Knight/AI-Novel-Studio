@@ -1,10 +1,19 @@
 #[path = "conversation_review_authorization.rs"]
 mod review_authorization;
+#[path = "conversation_window.rs"]
+mod conversation_window;
+pub use conversation_window::{
+    get_conversation_window, list_running_task_targets, ConversationWindowInput, RunningTaskTarget,
+    TaskConversationWindow,
+};
 use review_authorization::validate_review_rule_baseline;
 pub use review_authorization::{issue_review_authorization, consume_review_authorization, get_review_authorization};
 #[cfg(test)]
 #[path = "conversation_lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[cfg(test)]
+#[path = "conversation_model_selection_tests.rs"]
+mod model_selection_tests;
 
 use crate::errors::AppError;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -87,6 +96,8 @@ pub struct ConversationArtifactCardRecord {
     pub content: String,
     pub status: String,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_ordinal: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -395,7 +406,7 @@ fn model_lock_matches(locked: &Value, candidate: &Value) -> bool {
 
 fn upgrade_legacy_model_lock_endpoint(locked: &Value, candidate: &Value) -> Option<Value> {
     let locked_projection = model_lock_projection(locked);
-    if locked_projection.get("baseUrl").is_some() {
+    if locked_projection.get("baseUrl").is_some() || !model_lock_matches(locked, candidate) {
         return None;
     }
     let candidate_base_url = model_lock_projection(candidate)
@@ -662,6 +673,7 @@ fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationAr
         content: row.get(8)?,
         status: row.get(9)?,
         created_at: row.get(10)?,
+        candidate_ordinal: None,
     })
 }
 
@@ -864,38 +876,36 @@ pub fn update_conversation_model(
     connection: &mut Connection,
     input: UpdateConversationModelInput,
 ) -> Result<TaskConversationRecord, AppError> {
-    let current = get_conversation(connection, &input.conversation_id)?
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let current = get_conversation(&transaction, &input.conversation_id)?
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?;
-    if let Some(current_model) = current.default_model.as_ref() {
-        if current_model == &input.default_model {
-            return Ok(current);
-        }
+    if current.archived_at.is_some() || current.status == "archived" {
         return Err(AppError::new(
-            "CONVERSATION_MODEL_LOCKED",
-            "任务模型已在创建时固定，当前会话结束前不能更换",
+            "CONVERSATION_ARCHIVED",
+            "归档任务不能更换模型，请先恢复任务",
             false,
         ));
     }
-    let has_facts: bool = connection
+    let has_active_run: bool = transaction
         .query_row(
             "SELECT EXISTS(
-                SELECT 1 FROM conversation_turns WHERE conversation_id=?1
-                UNION ALL
                 SELECT 1 FROM task_runs WHERE conversation_id=?1
+                AND status IN ('queued', 'running', 'cancel_requested')
             )",
             params![input.conversation_id],
             |row| row.get(0),
         )
         .map_err(AppError::database)?;
-    if has_facts {
+    if current.status == "running" || has_active_run {
         return Err(AppError::new(
-            "CONVERSATION_MODEL_LOCKED",
-            "任务模型必须在首个回合前固定",
+            "CONVERSATION_RUNNING",
+            "运行中的任务不能更换模型，请等待完成或停止任务",
             false,
         ));
     }
     let model = json_text(&input.default_model)?;
-    let changed = connection
+    let changed = transaction
         .execute(
             "UPDATE task_conversations SET default_model_json=?2, updated_at=?3 WHERE conversation_id=?1",
             params![input.conversation_id, model, input.updated_at],
@@ -908,8 +918,10 @@ pub fn update_conversation_model(
             false,
         ));
     }
-    get_conversation(connection, &input.conversation_id)?
-        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话更新后无法读取", false))
+    let updated = get_conversation(&transaction, &input.conversation_id)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话更新后无法读取", false))?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(updated)
 }
 
 pub fn rename_conversation(
@@ -1126,7 +1138,7 @@ pub fn create_run(
     }
     let snapshot = json_text(&input.model_snapshot)?;
     let transaction = connection.transaction().map_err(AppError::database)?;
-    let locked_model = transaction
+    let current_model = transaction
         .query_row(
             "SELECT default_model_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
@@ -1136,37 +1148,18 @@ pub fn create_run(
         .map_err(AppError::database)?
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
-    let local_conversational_model = input
-        .model_snapshot
-        .get("providerId")
-        .and_then(Value::as_str)
-        == Some("ans-local")
-        && input
-            .model_snapshot
-            .get("runtime")
-            .and_then(|runtime| runtime.get("adapterProtocol"))
-            .and_then(Value::as_str)
-            == Some("ans_local_conversation_v1");
-    if let Some(locked_model) = locked_model {
-        if !local_conversational_model && !model_lock_matches(&locked_model, &input.model_snapshot)
+    if let Some(current_model) = current_model {
+        // Only hydrate a legacy selection for this same identity. A retry's frozen
+        // model must never replace a different selection made for later turns.
+        if let Some(upgraded) =
+            upgrade_legacy_model_lock_endpoint(&current_model, &input.model_snapshot)
         {
-            return Err(AppError::new(
-                "TASK_RUN_MODEL_MISMATCH",
-                "运行模型与任务创建时固定的模型不一致",
-                false,
-            ));
-        }
-        if !local_conversational_model {
-            if let Some(upgraded) =
-                upgrade_legacy_model_lock_endpoint(&locked_model, &input.model_snapshot)
-            {
-                transaction
-                    .execute(
-                        "UPDATE task_conversations SET default_model_json=?2 WHERE conversation_id=?1",
-                        params![input.conversation_id, json_text(&upgraded)?],
-                    )
-                    .map_err(AppError::database)?;
-            }
+            transaction
+                .execute(
+                    "UPDATE task_conversations SET default_model_json=?2 WHERE conversation_id=?1",
+                    params![input.conversation_id, json_text(&upgraded)?],
+                )
+                .map_err(AppError::database)?;
         }
     }
     let scoped_turn: bool = transaction
@@ -2357,7 +2350,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_model_lock_accepts_hydrated_endpoint_but_new_locks_remain_strict() {
+    fn legacy_model_selection_hydrates_only_a_matching_endpoint_identity() {
         let legacy = json!({
             "providerId": "deepseek",
             "modelId": "deepseek-chat",
@@ -2454,31 +2447,6 @@ mod tests {
                 .and_then(Value::as_str),
             Some("https://api.deepseek.com/v1")
         );
-        let second_turn = append_turn(
-            &mut connection,
-            AppendTurnInput {
-                turn_id: "legacy-turn-2".to_string(),
-                conversation_id: conversation.conversation_id.clone(),
-                role: "user".to_string(),
-                content: "再继续".to_string(),
-                created_at: "2026-08-20T00:00:04Z".to_string(),
-            },
-        )
-        .expect("second legacy turn");
-        let mismatch = create_run(
-            &mut connection,
-            CreateRunInput {
-                run_id: "legacy-run-2".to_string(),
-                conversation_id: conversation.conversation_id,
-                turn_id: second_turn.turn_id,
-                model_snapshot: different_endpoint,
-                worker_id: "legacy-worker-2".to_string(),
-                chapter_id: None,
-                created_at: "2026-08-20T00:00:05Z".to_string(),
-            },
-        )
-        .expect_err("upgraded legacy endpoint must remain locked");
-        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
     }
 
     pub(super) fn insert_valid_chapter_artifact(
@@ -2849,16 +2817,6 @@ mod tests {
                 .and_then(Value::as_str),
             Some("deepseek-chat")
         );
-        let locked_error = update_conversation_model(
-            &mut connection,
-            UpdateConversationModelInput {
-                conversation_id: conversation.conversation_id.clone(),
-                default_model: json!({"providerId":"mock","modelId":"Mock"}),
-                updated_at: "2026-08-20T00:00:01Z".to_string(),
-            },
-        )
-        .expect_err("frozen model replacement must fail");
-        assert_eq!(locked_error.code, "CONVERSATION_MODEL_LOCKED");
         let turn = append_turn(
             &mut connection,
             AppendTurnInput {
@@ -2870,27 +2828,13 @@ mod tests {
             },
         )
         .expect("turn");
-        let mismatch = create_run(
-            &mut connection,
-            CreateRunInput {
-                run_id: "run-model-mismatch".to_string(),
-                conversation_id: conversation.conversation_id.clone(),
-                turn_id: turn.turn_id.clone(),
-                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
-                worker_id: "worker-model-mismatch".to_string(),
-                chapter_id: None,
-                created_at: "2026-08-20T00:00:03Z".to_string(),
-            },
-        )
-        .expect_err("mismatched run model must fail");
-        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
         let run = create_run(
             &mut connection,
             CreateRunInput {
                 run_id: "run-1".to_string(),
                 conversation_id: conversation.conversation_id.clone(),
                 turn_id: turn.turn_id,
-                model_snapshot: conversation.default_model.clone().expect("locked model"),
+                model_snapshot: conversation.default_model.clone().expect("selected model"),
                 worker_id: "worker-1".to_string(),
                 chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),

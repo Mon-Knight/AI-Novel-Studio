@@ -54,7 +54,7 @@ pub(super) fn completed_candidate(
         "candidate",
         "succeeded",
         Some(
-            json!({"ok":true,"candidateOnly":true,"artifactType":"chapter_text",
+            json!({"ok":true,"candidateOnly":true,"artifactType":input.expected_artifact_type,
             "data":{"novelId":input.novel_id,"chapterId":input.chapter_id,"text":raw}}),
         ),
     );
@@ -101,7 +101,7 @@ pub(super) fn candidate_source(
         card_id: card.card_id.clone(),
         artifact_id: artifact.artifact.artifact_id.clone(),
         artifact_hash: artifact.artifact.content_hash.clone(),
-        artifact_type: "chapter_text".to_string(),
+        artifact_type: artifact.artifact.artifact_type.clone(),
         run_id: card.run_id.clone(),
         title: card.title.clone(),
         source_draft_version: artifact.artifact.source_draft_version,
@@ -124,8 +124,16 @@ pub(super) fn decide(
             decision: decision.to_string(),
             idempotency_key: uuid::Uuid::new_v4().to_string(),
             actor: "user".to_string(),
-            target_type: "chapter".to_string(),
-            target_id: source.chapter_id.clone().expect("chapter"),
+            target_type: if source.chapter_id.is_some() {
+                "chapter"
+            } else {
+                "asset"
+            }
+            .to_string(),
+            target_id: source
+                .chapter_id
+                .clone()
+                .unwrap_or_else(|| source.novel_id.clone()),
             base_revision: None,
             apply_transaction_id: None,
             conflict_code: None,
@@ -135,7 +143,7 @@ pub(super) fn decide(
     .expect("record exact user candidate decision");
 }
 
-fn append_revision_turn(
+pub(super) fn append_revision_turn(
     connection: &mut rusqlite::Connection,
     input: &mut StartTaskTurnInput,
     source: Option<&ArtifactRevisionSource>,
@@ -180,6 +188,86 @@ fn assert_no_formal_writes(connection: &rusqlite::Connection) {
         .query_row("SELECT word_count FROM chapters", [], |row| row.get(0))
         .expect("formal words");
     assert_eq!(words, 0);
+}
+
+#[test]
+fn story_plan_revision_preserves_exact_novel_source_and_rejects_cross_type_or_scope() {
+    let (mut connection, mut input) = fixture();
+    input.chapter_id = None;
+    input.chapter_host_gate = None;
+    input.continuity_claim = None;
+    input.task_kind = "story_plan_generate".to_string();
+    input.expected_tool = Some("generate_outline".to_string());
+    input.expected_artifact_type = Some("outline".to_string());
+    input.required_read_tools = vec!["novel.read_context".to_string()];
+    let raw =
+        json!({"planKind":"story_plan","title":"原全书规划","content":"原规划的完整因果闭环。",
+        "targetWordCount":3200,"volumes":[{"title":"第一卷","order":1,"chapters":[
+        {"title":"第一章","order":1,"outline":"公平线索。","targetWordCount":3200}]}]})
+        .to_string();
+    let original = completed_candidate(&mut connection, &input, "plan-source", &raw);
+    let source = candidate_source(&connection, &input, &original);
+    decide(&mut connection, &source, "request_revision");
+    append_revision_turn(
+        &mut connection,
+        &mut input,
+        Some(&source),
+        "生成全书规划候选，修补原规划因果闭环，不生成正文",
+    );
+    revision_source::freeze_turn_revision(&connection, &mut input)
+        .expect("freeze exact novel plan");
+    validate_turn_contract(&input).expect("plan revision contract");
+    assert!(workbench_turn_prompt(&input).contains(&raw));
+    let revised_raw = raw.replace("原全书规划", "修订全书规划");
+    let revised = completed_candidate(&mut connection, &input, "plan-revised", &revised_raw);
+    assert_eq!(
+        revised.artifact.parent_artifact_id.as_deref(),
+        Some(source.artifact_id.as_str())
+    );
+    assert_eq!(
+        revised.artifact.derivation_type.as_deref(),
+        Some("revision")
+    );
+    assert!(revised.artifact.source_chapter_id.is_none());
+    let replay = artifact_service::CreateResultArtifactInput {
+        task_id: revised.artifact.task_id.clone(),
+        attempt_id: revised.artifact.attempt_id.clone(),
+        artifact_type: "outline".to_string(),
+        schema_version: 1,
+        raw_content: revised_raw,
+        display_content: None,
+        structured_payload_json: revised.structured_payload_json.clone(),
+        parent_artifact_id: Some(source.artifact_id.clone()),
+        derivation_type: Some("revision".to_string()),
+    };
+    assert!(artifact_service::create_artifact(&mut connection, replay.clone()).is_err());
+    assert!(artifact_service::create_verified_chapter_revision_artifact(
+        &mut connection,
+        replay.clone()
+    )
+    .is_err());
+    assert_eq!(
+        artifact_service::create_verified_revision_artifact(&mut connection, replay)
+            .expect("same plan derivation is idempotent")
+            .artifact
+            .artifact_id,
+        revised.artifact.artifact_id
+    );
+    let mut wrong_type = input.clone();
+    wrong_type
+        .revision_source
+        .as_mut()
+        .expect("source")
+        .artifact_type = "chapter_text".to_string();
+    assert!(validate_turn_contract(&wrong_type).is_err());
+    let mut wrong_scope = source.clone();
+    wrong_scope.chapter_id = Some("ch-1".to_string());
+    assert!(
+        source_authority::verify_source(&connection, &wrong_scope, &input.novel_id, None).is_err()
+    );
+    decide(&mut connection, &source, "reject");
+    assert!(revision_source::revalidate_frozen(&connection, &input).is_err());
+    assert_no_formal_writes(&connection);
 }
 
 #[test]

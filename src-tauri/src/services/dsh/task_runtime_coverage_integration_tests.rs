@@ -36,6 +36,7 @@ fn persisted_complete_coverage_accepts_candidate_and_legacy_read_only_paths() {
     input.expected_artifact_type = None;
     input.chapter_word_range = None;
     input.task_kind = "read".to_string();
+    input.chapter_host_gate = None;
     input.conversation_id = PLUGIN_PROBE_CONVERSATION_ID.to_string();
     validate_turn_contract(&input).expect("legacy probe read contract");
     assert_eq!(

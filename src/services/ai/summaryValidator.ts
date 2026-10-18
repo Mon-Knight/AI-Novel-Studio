@@ -3,6 +3,7 @@
  * v1.7.13: 本地校验总结是否与正文一致
  */
 import type { ChapterSummarizeResult, ChapterSummaryValidation } from '../../types/chapterSummary';
+import { validateSummaryGrounding } from './chapterSummaryGrounding';
 
 /**
  * 对章节总结进行一致性校验。
@@ -70,10 +71,24 @@ export function validateSummary(
     }
   }
 
+  const grounding = validateSummaryGrounding(draftContent, summaryResult);
+  for (const issue of grounding.issues) {
+    problems.push({
+      type: issue.severity === 'error' ? 'fabrication' : 'speculation',
+      message: `${issue.path}：${issue.message}`,
+    });
+  }
   const score = Math.max(0, 100 - problems.length * 12);
   const passed = problems.length === 0;
 
-  return { passed, score, problems, safeToContext: score >= 70 };
+  return {
+    passed,
+    score,
+    problems,
+    safeToContext: !grounding.issues.some((issue) => issue.severity === 'error') && score >= 70,
+    semanticValidation: 'not_checked',
+    groundingIssues: grounding.issues,
+  };
 }
 
 /** 从中文文本中提取关键词（简单分词） */

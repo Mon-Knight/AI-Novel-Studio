@@ -89,10 +89,7 @@ function renderApp(coordinator: StartupCoordinator, onShellReady = vi.fn()) {
     onShellReady,
     ...render(
       <StrictMode>
-        <MemoryRouter
-          initialEntries={['/']}
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        >
+        <MemoryRouter initialEntries={['/']}>
           <App startupCoordinator={coordinator} onShellReady={onShellReady} />
         </MemoryRouter>
       </StrictMode>,

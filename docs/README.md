@@ -4,15 +4,16 @@
 
 ## 从这里开始
 
-| 你要做什么               | 入口与阅读顺序                                                                                                                                 |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| 使用软件                 | [快速开始](user/quick-start.md) → [创作工作流](user/workflow-guide.md) → [桌面使用](user/desktop-usage.md) → [AI 设置](user/ai-settings.md)    |
-| 让编码 Agent 修改项目    | [根 AGENTS.md](../AGENTS.md) → [Agent 工作流](agent-workflow.md) → 任务相关设计/实现/测试                                                      |
-| 查任务与开发辅助         | [任务速查](project/agent-task-rules.md)、[开发 Skills](development-skills.md)                                                                  |
-| 修改工作台/Agent Runtime | [对话工作台架构](architecture/conversational-creative-workbench.md) → [Runtime](agent-runtime.md) → [模块边界](module-boundaries.md)           |
-| 修改数据库/保存采用      | [数据模型](data-model.md) → [Safe Apply](architecture/safe-apply.md) → [测试策略](technical/testing.md)                                        |
-| 修改世界/规则与候选来源  | [世界规则契约](design/world-rule-contract.md) → [Writing SubAgent 契约](architecture/writing-subagent-contract.md) → [数据模型](data-model.md) |
-| 查看版本或准备发布       | [版本路线](version-roadmap.md)、[CHANGELOG](../CHANGELOG.md)、[Git 治理](project/git-workflow.md)                                              |
+| 你要做什么               | 入口与阅读顺序                                                                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 使用软件                 | [快速开始](user/quick-start.md) → [创作工作流](user/workflow-guide.md) → [桌面使用](user/desktop-usage.md) → [AI 设置](user/ai-settings.md)                                                                                    |
+| 让编码 Agent 修改项目    | [根 AGENTS.md](../AGENTS.md) → [Agent 工作流](agent-workflow.md) → 任务相关设计/实现/测试                                                                                                                                      |
+| 查任务与开发辅助         | [任务速查](project/agent-task-rules.md)、[开发 Skills](development-skills.md)                                                                                                                                                  |
+| 修改工作台/Agent Runtime | [对话工作台架构](architecture/conversational-creative-workbench.md) → [Runtime](agent-runtime.md) → [模块边界](module-boundaries.md)                                                                                           |
+| 修改数据库/保存采用      | [数据模型](data-model.md) → [Safe Apply](architecture/safe-apply.md) → [测试策略](technical/testing.md)                                                                                                                        |
+| 修改世界/规则与候选来源  | [世界规则契约](design/world-rule-contract.md) → [Writing SubAgent 契约](architecture/writing-subagent-contract.md) → [数据模型](data-model.md)                                                                                 |
+| 查看版本或准备发布       | [版本路线](version-roadmap.md)、[CHANGELOG](../CHANGELOG.md)、[Git 治理](project/git-workflow.md)                                                                                                                              |
+| 规划下一版与功能缺陷治理 | [缺口复核与用户旅程](feature-gap-analysis-v3.7.0.md#gap-review-20260927) → [v3.8.0 单版本总体计划](version-roadmap.md#v380-integrated-plan) → [完整自我迭代机制](ai-agent-roadmap.md#writing-self-improvement)（规划／未实施） |
 
 ### 文档时效与权威
 
@@ -21,6 +22,7 @@
 - 产品/UI/开发长文保留早期设计；优先读取开头的演进说明和当前版本覆盖章节。v3.3.0+ 工作台以专门架构文档为准。
 - 本次 v3.7.0 交互、候选与世界规则修复仍在集成；当前源码契约见工作台架构第 13.1 节、Writing SubAgent 第 3.4 节及世界规则契约。用户已明确授权新增兼容迁移 `039_result_artifacts_cross_task_lineage`（数据模型第 44 节），001～038 保持发布定义与 checksum，README 迁移范围同步为 001-039；授权状态与旧库/新库升级验收分开。实现同步与统一验收分开，历史验证记录不证明本批通过，R4 live 云端仍 NOT VERIFIED；证据报告由父任务在全部修复后的统一验收中更新。
 - `audit/`、`audit-v2/`、`architecture-audit-v2/` 和历史发布归档是带版本/时间的证据，不是当前待办或自动执行授权；`architecture-audit-v2/` 是 Canonical exposure 前快照。Mock、loopback、真实桌面与 live 云端结论必须区分。当前缺口以 [`feature-gap-analysis-v3.7.0.md`](feature-gap-analysis-v3.7.0.md) 为准。
+- 2026-09-27 规划核对：上述“仍在集成/待统一验收”说明保留原批次语义，后续适用本地、Rust、SQLite、桌面与 EXE 收尾结果以[最近复核为 2026-09-26 的报告](../reports/closeout-2026-09-18.md)为准；不包含 R4 live 或未来改动。缺陷台账第 6 节补充最新核对，下一版将完整自我迭代与核心缺陷治理统一交付，不分成多个版本。
 
 ---
 
@@ -36,16 +38,16 @@
 
 ## project/ - 项目管理文档
 
-| 文档                                                             | 说明                                  | 状态               |
-| ---------------------------------------------------------------- | ------------------------------------- | ------------------ |
-| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                    | ✅ 持续维护        |
-| [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                          | ✅ 已有            |
-| [development-rules.md](development-rules.md)                     | 开发规则总览                          | ✅ 已有            |
-| [feature-gap-analysis-v3.7.0.md](feature-gap-analysis-v3.7.0.md) | v3.7.0 对照代码的已关闭/仍开放缺口    | ✅ 2026-09-09 当前 |
-| [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口（历史快照）       | 📦 2026-07-28 快照 |
-| [agent-task-rules.md](project/agent-task-rules.md)               | Agent 任务速查与权威入口导航          | ✅ 已整理          |
-| [git-workflow.md](project/git-workflow.md)                       | 分支策略、PR 门禁、发布与紧急修复流程 | ✅ v3.0.0 已明确   |
-| [release-history.md](project/release-history.md)                 | 40 份历史发布说明的单一只读归档       | ✅ v3.0.0 已合并   |
+| 文档                                                             | 说明                                        | 状态                   |
+| ---------------------------------------------------------------- | ------------------------------------------- | ---------------------- |
+| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ 持续维护            |
+| [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有                |
+| [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有                |
+| [feature-gap-analysis-v3.7.0.md](feature-gap-analysis-v3.7.0.md) | v3.7.0 缺口历史截面、总体复核与旅程验收规划 | 📝 2026-09-27 补充核对 |
+| [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口（历史快照）             | 📦 2026-07-28 快照     |
+| [agent-task-rules.md](project/agent-task-rules.md)               | Agent 任务速查与权威入口导航                | ✅ 已整理              |
+| [git-workflow.md](project/git-workflow.md)                       | 分支策略、PR 门禁、发布与紧急修复流程       | ✅ v3.0.0 已明确       |
+| [release-history.md](project/release-history.md)                 | 40 份历史发布说明的单一只读归档             | ✅ v3.0.0 已合并       |
 
 ## technical/ - 技术文档
 

@@ -39,17 +39,24 @@ function readPinnedMatrix(file, pinnedCommit) {
   if (matrix?.sourceCommit !== pinnedCommit) {
     throw staleCarrier('VERSION_MATRIX.sourceCommit does not match the pinned DSH source');
   }
+  if (typeof matrix?.gatewaySha256 !== 'string' || !/^[0-9a-f]{64}$/iu.test(matrix.gatewaySha256)) {
+    throw staleCarrier('VERSION_MATRIX.gatewaySha256 is missing or invalid');
+  }
+  return matrix;
 }
 
 export function verifyExtractedCarrierGateway({ extractedRoot, currentGateway, pinnedCommit }) {
   requireNonEmptyFile(currentGateway, 'current Gateway release binary');
   const carrierGateway = path.join(extractedRoot, GATEWAY_RELATIVE);
   requireNonEmptyFile(carrierGateway, 'carrier Gateway binary');
-  readPinnedMatrix(path.join(extractedRoot, MATRIX_RELATIVE), pinnedCommit);
+  const matrix = readPinnedMatrix(path.join(extractedRoot, MATRIX_RELATIVE), pinnedCommit);
 
   const currentGatewaySha256 = sha256(currentGateway);
   const carrierGatewaySha256 = sha256(carrierGateway);
-  if (carrierGatewaySha256 !== currentGatewaySha256) {
+  if (
+    carrierGatewaySha256 !== currentGatewaySha256 ||
+    carrierGatewaySha256 !== matrix.gatewaySha256.toLowerCase()
+  ) {
     throw staleCarrier('Gateway SHA-256 does not match the current release build');
   }
   return currentGatewaySha256;

@@ -7,10 +7,15 @@ import type {
   TaskModelSnapshot,
   TaskRun,
 } from '../../types/conversation';
-import { buildCoreAssetGenerationGoal, chapterAssetRecoveryStore } from './chapterAssetReadiness';
+import {
+  buildCoreAssetGenerationGoal,
+  chapterAssetRecoveryStore,
+  type ChapterAssetRecovery,
+} from './chapterAssetReadiness';
 import {
   ensurePersistedChapterGoalTurn,
   recoverPersistedChapterAssetRecovery,
+  resolveChapterAssetPreparationModel,
   resolvePreflightAssetPreparationRetryTurn,
 } from './chapterAssetRecoveryPersistence';
 import { encodeWorkbenchTurnContent } from './workbenchTurnOrigin';
@@ -27,6 +32,69 @@ const modelSnapshot: TaskModelSnapshot = {
   options: {},
   capturedAt: '2026-08-28T00:00:00.000Z',
 };
+
+test('asset retry resolves its exact Run model, not a stale recovery or current task selection', async () => {
+  const preparation = userTurn(
+    'turn-preparation',
+    1,
+    encodeWorkbenchTurnContent(
+      buildCoreAssetGenerationGoal('world_setting', sparseGoal),
+      'workbench_asset_preparation',
+    ),
+  );
+  const original = {
+    ...run('run-preparation', preparation.turnId, 'failed', modelSnapshot.capturedAt),
+    modelSnapshot: { ...modelSnapshot, modelId: 'B' },
+  };
+  const recovery: ChapterAssetRecovery = {
+    conversationId,
+    novelId,
+    originalGoal: sparseGoal,
+    missingAssets: ['world_setting'],
+    modelSnapshot,
+    orchestration: {
+      phase: 'failed',
+      asset: 'world_setting',
+      preparationTurnId: preparation.turnId,
+      preparationRunId: original.runId,
+      updatedAt: modelSnapshot.capturedAt,
+    },
+    createdAt: modelSnapshot.capturedAt,
+    checkedAt: modelSnapshot.capturedAt,
+  };
+  const current = { ...modelSnapshot, modelId: 'C' };
+  const data = bundle({ turns: [preparation], runs: [original] });
+  const deps = { getConversation: async () => data };
+  assert.equal((await resolveChapterAssetPreparationModel(recovery, current, deps)).modelId, 'B');
+  assert.equal(
+    (
+      await resolveChapterAssetPreparationModel(
+        { ...recovery, orchestration: { ...recovery.orchestration, preparationRunId: undefined } },
+        current,
+        deps,
+      )
+    ).modelId,
+    'B',
+  );
+  await assert.rejects(
+    () =>
+      resolveChapterAssetPreparationModel(
+        { ...recovery, orchestration: { ...recovery.orchestration, preparationRunId: 'missing' } },
+        current,
+        deps,
+      ),
+    /作用域/,
+  );
+  await assert.rejects(
+    () =>
+      resolveChapterAssetPreparationModel(
+        { ...recovery, orchestration: { ...recovery.orchestration, asset: 'protagonist' } },
+        current,
+        deps,
+      ),
+    /作用域/,
+  );
+});
 
 function userTurn(
   turnId: string,
@@ -244,6 +312,16 @@ test('rebuild uses the latest failed preparation retry instead of an older attem
   assert.equal(recovery?.orchestration.preparationTurnId, retry.turnId);
   assert.equal(recovery?.orchestration.preparationRunId, 'run-world-retry');
   assert.equal(recovery?.orchestration.error, 'Provider 暂时不可用');
+  persisted.conversation.defaultModel = { ...modelSnapshot, modelId: 'new-next-turn-model' };
+  const switched = await recoverPersistedChapterAssetRecovery(
+    { conversationId },
+    {
+      getConversation: async () => persisted,
+      inspectReadiness: async () => ({ ready: false, missingAssets: ['world_setting'] }),
+      now: () => '2026-08-28T00:00:06.000Z',
+    },
+  );
+  assert.deepEqual(switched?.modelSnapshot, modelSnapshot);
 });
 
 test('rebuild resumes the original source turn after all formal assets are present', async () => {

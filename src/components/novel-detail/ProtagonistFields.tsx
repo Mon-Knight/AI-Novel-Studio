@@ -137,6 +137,16 @@ export default function ProtagonistFields({ profile, label, onChange }: Protagon
             placeholder="角色弧光/成长方向"
           />
         </div>
+        <div className="detail-gap-top">
+          <label className="panel-field-label">人物备注</label>
+          <textarea
+            value={profile.notes || ''}
+            onChange={(event) => update({ notes: event.target.value })}
+            className="form-textarea detail-textarea detail-text-sm"
+            placeholder="补充人物设定或叙事要求..."
+            rows={3}
+          />
+        </div>
       </div>
     </div>
   );

@@ -2314,14 +2314,14 @@ test('tool argument summaries redact query and candidate text payloads', async (
   );
 });
 
-test('a task rejects model replacement and mismatched runs after its model is frozen', async () => {
+test('task model selection can change between turns without rewriting historical or retry models', async () => {
   (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
     new MemoryStorage() as unknown as Storage;
-  const lockedModel = mockModel('Mock-A');
+  const firstModel = mockModel('Mock-A');
   const conversation = await taskConversationService.create(
     'novel-001',
     '快照不可改写',
-    lockedModel,
+    firstModel,
   );
   const turn = await taskConversationService.appendTurn(
     conversation.conversationId,
@@ -2331,32 +2331,122 @@ test('a task rejects model replacement and mismatched runs after its model is fr
   const run = await taskConversationService.createRun(
     conversation.conversationId,
     turn.turnId,
-    lockedModel,
+    firstModel,
     'worker-snapshot',
   );
-  await assert.rejects(
-    taskConversationService.updateDefaultModel(conversation.conversationId, mockModel('Mock-B')),
-    /任务模型已在创建时固定/,
-  );
+  await taskConversationService.updateRun(run.runId, 'cancelled');
+  const secondModel = {
+    ...mockModel('Mock-B'),
+    baseUrl: 'https://second-provider.invalid/v1',
+    options: { temperature: 0.8 },
+  };
+  await taskConversationService.updateDefaultModel(conversation.conversationId, secondModel);
   const secondTurn = await taskConversationService.appendTurn(
     conversation.conversationId,
     'user',
     '尝试更换模型',
   );
-  await assert.rejects(
-    taskConversationService.createRun(
-      conversation.conversationId,
-      secondTurn.turnId,
-      mockModel('Mock-B'),
-      'worker-mismatched-model',
-    ),
-    /运行模型与任务创建时固定的模型不一致/,
+  const secondRun = await taskConversationService.createRun(
+    conversation.conversationId,
+    secondTurn.turnId,
+    secondModel,
+    'worker-second-model',
+  );
+  await taskConversationService.updateRun(secondRun.runId, 'cancelled');
+  const retryRun = await taskConversationService.createRun(
+    conversation.conversationId,
+    turn.turnId,
+    firstModel,
+    'worker-retry-first-model',
   );
   const bundle = await taskConversationService.get(conversation.conversationId);
-  assert.equal(bundle?.conversation.defaultModel?.modelId, 'Mock-A');
-  assert.equal(
-    bundle?.runs.find((item) => item.runId === run.runId)?.modelSnapshot.modelId,
-    'Mock-A',
+  assert.deepEqual(bundle?.conversation.defaultModel, secondModel);
+  assert.deepEqual(
+    bundle?.runs.find((item) => item.runId === run.runId)?.modelSnapshot,
+    firstModel,
   );
+  assert.deepEqual(
+    bundle?.runs.find((item) => item.runId === secondRun.runId)?.modelSnapshot,
+    secondModel,
+  );
+  assert.deepEqual(
+    bundle?.runs.find((item) => item.runId === retryRun.runId)?.modelSnapshot,
+    firstModel,
+  );
+  assert.equal(bundle?.turns.length, 2);
   assert.equal(JSON.stringify(bundle?.runs).includes('apiKey'), false);
+});
+
+test('task model changes reject active runs and archived tasks without changing saved models', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  const firstModel = mockModel('Mock-A');
+  const conversation = await taskConversationService.create(
+    'novel-001',
+    '活跃模型门禁',
+    firstModel,
+  );
+  const turn = await taskConversationService.appendTurn(
+    conversation.conversationId,
+    'user',
+    '执行',
+  );
+  const run = await taskConversationService.createRun(
+    conversation.conversationId,
+    turn.turnId,
+    firstModel,
+    'worker-active',
+  );
+  for (const status of ['queued', 'running', 'cancel_requested'] as const) {
+    if (status !== 'queued') await taskConversationService.updateRun(run.runId, status);
+    await assert.rejects(
+      taskConversationService.updateDefaultModel(conversation.conversationId, mockModel('Mock-B')),
+      /运行中的任务不能更换模型/,
+    );
+    assert.deepEqual(
+      (await taskConversationService.get(conversation.conversationId))?.conversation.defaultModel,
+      firstModel,
+    );
+  }
+  await taskConversationService.updateRun(run.runId, 'cancelled');
+  await taskConversationService.setArchived(conversation.conversationId, true);
+  await assert.rejects(
+    taskConversationService.updateDefaultModel(conversation.conversationId, mockModel('Mock-B')),
+    /归档任务不能更换模型/,
+  );
+  await taskConversationService.setArchived(conversation.conversationId, false);
+  await taskConversationService.updateDefaultModel(
+    conversation.conversationId,
+    mockModel('Mock-B'),
+  );
+  assert.equal(
+    (await taskConversationService.get(conversation.conversationId))?.conversation.defaultModel
+      ?.modelId,
+    'Mock-B',
+  );
+});
+
+test('legacy tasks without a selected model can choose one after existing turns and runs', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  const conversation = await taskConversationService.create('novel-001', '旧任务');
+  const turn = await taskConversationService.appendTurn(
+    conversation.conversationId,
+    'user',
+    '旧回合',
+  );
+  const run = await taskConversationService.createRun(
+    conversation.conversationId,
+    turn.turnId,
+    mockModel('Mock-A'),
+    'worker-legacy',
+  );
+  await taskConversationService.updateRun(run.runId, 'cancelled');
+  await taskConversationService.updateDefaultModel(
+    conversation.conversationId,
+    mockModel('Mock-B'),
+  );
+  const bundle = await taskConversationService.get(conversation.conversationId);
+  assert.equal(bundle?.conversation.defaultModel?.modelId, 'Mock-B');
+  assert.equal(bundle?.runs[0].modelSnapshot.modelId, 'Mock-A');
 });

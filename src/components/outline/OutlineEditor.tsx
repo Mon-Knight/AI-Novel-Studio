@@ -17,7 +17,7 @@ import {
   buildVolumeOutlineGeneratePrompt,
   buildChapterOutlineGeneratePrompt,
 } from '../../services/ai/promptBuilder';
-import type { OutlineGenerationContext, OutlineType } from '../../types/outline';
+import type { MasterOutline, OutlineGenerationContext, OutlineType } from '../../types/outline';
 import type {
   OutlineGeneratePromptContext,
   VolumeOutlineGeneratePromptContext,
@@ -38,6 +38,8 @@ interface OutlineEditorProps {
   parentOutlineId?: string; // for chapter -> volume outline, for volume -> master outline
   onSaved?: () => void;
 }
+
+type OutlineVersion = Pick<MasterOutline, 'id' | 'version' | 'isActive' | 'title' | 'content'>;
 
 /** 构建章节大纲 AI 生成 Prompt 上下文 */
 function buildChapterPromptContext(
@@ -74,9 +76,7 @@ function OutlineEditor({
   const [isDirty, setIsDirty] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<number>(0);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [versions, setVersions] = useState<{ id: string; version: number; isActive: boolean }[]>(
-    [],
-  );
+  const [versions, setVersions] = useState<OutlineVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [context, setContext] = useState<OutlineGenerationContext | null>(null);
   const [showContext, setShowContext] = useState(false);
@@ -85,50 +85,50 @@ function OutlineEditor({
     outlineType === 'master' ? '总纲' : outlineType === 'volume' ? '分卷大纲' : '章节大纲';
 
   // 加载当前大纲
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      let result;
-      if (outlineType === 'master') {
-        result = await masterOutlineService.getActive(projectId);
-      } else if (outlineType === 'volume') {
-        result = await volumeOutlineService.getActive(projectId, targetId);
-      } else {
-        result = await chapterOutlineService.getActive(projectId, targetId);
+  const load = useCallback(
+    async (preferred?: OutlineVersion) => {
+      setLoading(true);
+      try {
+        let result;
+        if (outlineType === 'master') {
+          result = await masterOutlineService.getActive(projectId);
+        } else if (outlineType === 'volume') {
+          result = await volumeOutlineService.getActive(projectId, targetId);
+        } else {
+          result = await chapterOutlineService.getActive(projectId, targetId);
+        }
+        // 加载版本列表
+        let versionList;
+        if (outlineType === 'master') {
+          versionList = await masterOutlineService.getVersions(projectId);
+        } else if (outlineType === 'volume') {
+          versionList = await volumeOutlineService.getVersions(projectId, targetId);
+        } else {
+          versionList = await chapterOutlineService.getVersions(projectId, targetId);
+        }
+        setVersions(versionList);
+        const selected =
+          versionList.find((version) => version.id === preferred?.id) || preferred || result;
+        setContent(selected?.content || '');
+        setTitle(selected?.title || '');
+        setCurrentVersion(selected?.version || 0);
+        setCurrentId(selected?.id || null);
+        setIsDirty(false);
+      } catch (error) {
+        await reportAndPresentError({
+          event: 'OUTLINE_EDITOR_LOAD_FAILED',
+          error,
+          fallbackMessage: '大纲及版本记录加载失败，请重试。',
+          title: '大纲加载失败',
+          testId: 'outline-load-error',
+          context: { projectId, outlineType, targetId },
+        });
+      } finally {
+        setLoading(false);
       }
-      if (result) {
-        setContent(result.content);
-        setTitle(result.title);
-        setCurrentVersion(result.version);
-        setCurrentId(result.id);
-      } else {
-        setContent('');
-        setCurrentVersion(0);
-        setCurrentId(null);
-      }
-      // 加载版本列表
-      let versionList;
-      if (outlineType === 'master') {
-        versionList = await masterOutlineService.getVersions(projectId);
-      } else if (outlineType === 'volume') {
-        versionList = await volumeOutlineService.getVersions(projectId, targetId);
-      } else {
-        versionList = await chapterOutlineService.getVersions(projectId, targetId);
-      }
-      setVersions(versionList.map((v) => ({ id: v.id, version: v.version, isActive: v.isActive })));
-    } catch (error) {
-      await reportAndPresentError({
-        event: 'OUTLINE_EDITOR_LOAD_FAILED',
-        error,
-        fallbackMessage: '大纲及版本记录加载失败，请重试。',
-        title: '大纲加载失败',
-        testId: 'outline-load-error',
-        context: { projectId, outlineType, targetId },
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, outlineType, targetId]);
+    },
+    [projectId, outlineType, targetId],
+  );
 
   useEffect(() => {
     load();
@@ -293,6 +293,12 @@ function OutlineEditor({
           async () => {
             const contextSnapshot = context ? JSON.stringify(context).slice(0, 10000) : undefined;
             const sourceType = 'manual';
+            // The existing save command updates the active version; edits of a historical
+            // version must stay separate until the user explicitly adopts them.
+            const saveAsNewVersion =
+              saveAsNew ||
+              Boolean(currentId && !versions.find((v) => v.id === currentId)?.isActive);
+            let saved: OutlineVersion;
 
             if (outlineType === 'master') {
               const result = await masterOutlineService.save({
@@ -301,10 +307,9 @@ function OutlineEditor({
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             } else if (outlineType === 'volume') {
               const result = await volumeOutlineService.save({
                 projectId,
@@ -315,10 +320,9 @@ function OutlineEditor({
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             } else {
               const result = await chapterOutlineService.save({
                 projectId,
@@ -329,14 +333,18 @@ function OutlineEditor({
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             }
 
+            setContent(saved.content);
+            setTitle(saved.title);
+            setCurrentId(saved.id);
+            setCurrentVersion(saved.version);
+            setVersions((previous) => [saved, ...previous.filter((v) => v.id !== saved.id)]);
             setIsDirty(false);
-            await load();
+            await load(saved);
             onSaved?.();
           },
         );
@@ -347,6 +355,7 @@ function OutlineEditor({
     [
       content,
       context,
+      currentId,
       load,
       onSaved,
       outlineType,
@@ -357,12 +366,13 @@ function OutlineEditor({
       targetTitle,
       title,
       typeLabel,
+      versions,
     ],
   );
 
   // 设为采用版本
   const handleSetActive = async () => {
-    if (!currentId) return;
+    if (!currentId || isDirty) return;
     try {
       if (outlineType === 'master') {
         await masterOutlineService.setActive(currentId, projectId);
@@ -411,6 +421,14 @@ function OutlineEditor({
       onAiGenerate={handleAiGenerate}
       onSave={handleSave}
       onSetActive={handleSetActive}
+      onSelectVersion={(id) => {
+        const selected = versions.find((version) => version.id === id);
+        if (!selected || isDirty) return;
+        setContent(selected.content);
+        setTitle(selected.title);
+        setCurrentId(selected.id);
+        setCurrentVersion(selected.version);
+      }}
       onToggleContext={() => setShowContext((visible) => !visible)}
       onTitleChange={(nextTitle) => {
         setTitle(nextTitle);

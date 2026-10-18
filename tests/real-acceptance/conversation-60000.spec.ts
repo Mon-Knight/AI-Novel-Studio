@@ -1496,13 +1496,21 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
   }
   input.evidence.chapterId = input.chapterId;
   const currentTurnId = await waitForLatestCreativeTurn(conversationId, input.expectedPrompts);
-  const fixedModel = await waitForTestId('workbench-model-select');
+  const selectedModel = await waitForTestId('workbench-model-select');
   requireCondition(
-    (await fixedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
-      (await fixedModel.isEnabled()) === false &&
-      (await fixedModel.getAttribute('data-model-locked')) === 'true',
-    `Chapter ${input.chapterNumber} did not keep its task model fixed.`,
+    (await selectedModel.getTagName()) === 'select' &&
+      (await selectedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
+      (await selectedModel.getAttribute('data-model-value')) ===
+        `openai_compatible:${input.profile.model}` &&
+      (await selectedModel.getAttribute('aria-label')) === '后续回合模型',
+    `Chapter ${input.chapterNumber} did not retain the requested next-turn model selection.`,
   );
+  if ((await selectedModel.getAttribute('data-model-locked')) === 'true') {
+    requireCondition(
+      !(await selectedModel.isEnabled()),
+      `Chapter ${input.chapterNumber} allowed a model change during an active turn.`,
+    );
+  }
 
   await waitForChapterRunWithTransientRecovery({
     chapterNumber: input.chapterNumber,
@@ -1517,6 +1525,11 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
     conversationId,
   });
   const currentRun = assertActiveConversation(activeBundle, input);
+  await selectedModel.waitForEnabled({ timeout: 30_000 });
+  requireCondition(
+    (await selectedModel.getAttribute('data-model-locked')) === 'false',
+    `Chapter ${input.chapterNumber} did not make next-turn model selection available after the run finished.`,
+  );
   input.evidence.turnId = currentRun.turnId;
   input.evidence.runId = currentRun.runId;
   input.evidence.instructionHash = sha256(input.prompt);
@@ -2583,12 +2596,14 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
           !failedBundle?.runs.some((item) => item.turnId === turnId),
         `Chapter ${input.chapterNumber} ${asset} preflight retry did not preserve a no-Run automatic turn.`,
       );
-      const fixedModel = await waitForTestId('workbench-model-select');
+      const selectedModel = await waitForTestId('workbench-model-select');
+      await selectedModel.waitForEnabled({ timeout: 30_000 });
       requireCondition(
-        (await fixedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
-          (await fixedModel.isEnabled()) === false &&
-          (await fixedModel.getAttribute('data-model-locked')) === 'true',
-        `Chapter ${input.chapterNumber} ${asset} preflight retry changed the task model.`,
+        (await selectedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
+          (await selectedModel.getAttribute('data-model-value')) ===
+            `openai_compatible:${input.profile.model}` &&
+          (await selectedModel.getAttribute('data-model-locked')) === 'false',
+        `Chapter ${input.chapterNumber} ${asset} preflight failure did not retain an editable next-turn selection.`,
       );
       input.preflightRetries.push({
         chapter: input.chapterNumber,
@@ -3432,12 +3447,14 @@ async function waitForChapterRunWithTransientRecovery(input: {
       );
     }
     await returnToContinuousTaskForChapter(input);
-    const fixedModel = await waitForTestId('workbench-model-select');
+    const selectedModel = await waitForTestId('workbench-model-select');
+    await selectedModel.waitForEnabled({ timeout: 30_000 });
     requireCondition(
-      (await fixedModel.getValue()) === `openai_compatible:${input.evidence.model.modelId}` &&
-        (await fixedModel.isEnabled()) === false &&
-        (await fixedModel.getAttribute('data-model-locked')) === 'true',
-      `Chapter ${input.chapterNumber} preflight retry unlocked the frozen task model.`,
+      (await selectedModel.getValue()) === `openai_compatible:${input.evidence.model.modelId}` &&
+        (await selectedModel.getAttribute('data-model-value')) ===
+          `openai_compatible:${input.evidence.model.modelId}` &&
+        (await selectedModel.getAttribute('data-model-locked')) === 'false',
+      `Chapter ${input.chapterNumber} preflight failure did not retain an editable next-turn selection.`,
     );
     input.evidence.preflightRetries.push({
       retryAttempt: retryAttempt as 1 | 2,

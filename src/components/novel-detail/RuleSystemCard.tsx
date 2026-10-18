@@ -107,6 +107,12 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete, onPreview }: RuleSystem
                 {source.content.slice(0, 120)}
                 {source.content.length > 120 ? '…' : ''}
               </div>
+              {source.content.length > 120 && (
+                <details className="detail-content-disclosure">
+                  <summary>查看完整规则内容</summary>
+                  <div className="detail-fact-text detail-fact-text--pre">{source.content}</div>
+                </details>
+              )}
               <WorldRuleSummary structuredJson={source.structuredJson} />
             </>
           )}

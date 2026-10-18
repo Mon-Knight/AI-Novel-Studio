@@ -140,6 +140,14 @@ pub fn update_character(id: String, input: UpdateCharacterInput) -> Result<Chara
 }
 
 #[tauri::command]
+pub fn save_character_profile(
+    input: crate::domain::world::SaveCharacterProfileInput,
+) -> Result<CharacterDto, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    crate::services::character_profile_service::save_character_profile(&mut conn, input)
+}
+
+#[tauri::command]
 pub fn delete_character(id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     character_asset_service::delete_character(&conn, &id)

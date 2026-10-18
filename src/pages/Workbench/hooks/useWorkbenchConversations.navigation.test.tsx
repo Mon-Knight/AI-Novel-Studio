@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkbenchConversations } from './useWorkbenchConversations';
+import type { TaskConversation } from '../../../types/conversation';
 
 const fixture = vi.hoisted(() => ({
   tasks: [
@@ -33,6 +34,7 @@ const fixture = vi.hoisted(() => ({
     },
   ],
   get: vi.fn(),
+  read: vi.fn(),
   refresh: vi.fn(),
   setArchived: vi.fn(),
   saveSelection: vi.fn(),
@@ -57,6 +59,12 @@ vi.mock('../../../services/novels/novelService', () => ({
 }));
 vi.mock('../../../services/conversation/taskConversationService', () => ({
   taskConversationService: { get: fixture.get, setArchived: fixture.setArchived },
+}));
+vi.mock('../../../services/conversation/taskConversationWindow', () => ({
+  taskConversationWindow: {
+    read: (...args: unknown[]) => fixture.read(...args),
+    listRunningTargets: async () => [],
+  },
 }));
 vi.mock('../../../services/conversation/taskModelSnapshot', () => ({
   captureTaskModelSnapshot: () => ({
@@ -84,13 +92,26 @@ describe('project navigation keeps the selected task', () => {
     vi.clearAllMocks();
     fixture.tasks = fixture.tasks.map((task) => ({ ...task, archivedAt: undefined }));
     fixture.refresh.mockImplementation(async () => [...fixture.tasks]);
-    fixture.get.mockImplementation(async (id: string) => ({
+    const bundleFor = (id: string) => ({
       conversation: fixture.tasks.find((task) => task.conversationId === id),
       turns: [],
       runs: [],
       toolEvents: [],
       artifacts: [],
       decisions: [],
+    });
+    fixture.get.mockImplementation(async (id: string) => bundleFor(id));
+    fixture.read.mockImplementation(async (query: { conversationId: string }) => ({
+      bundle: bundleFor(query.conversationId),
+      page: {
+        startSequence: null,
+        endSequenceExclusive: null,
+        oldestUserSequence: null,
+        newestUserSequence: null,
+        hasOlder: false,
+        hasNewer: false,
+        userRoundCount: 0,
+      },
     }));
     fixture.setArchived.mockImplementation(async (id: string, archived: boolean) => {
       fixture.tasks = fixture.tasks.map((task) =>
@@ -141,5 +162,114 @@ describe('project navigation keeps the selected task', () => {
     await act(async () => result.current.setTaskArchived('a2', true));
     act(() => result.current.selectProject('project-a'));
     await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a1'));
+  });
+
+  it('keeps the last bundle when refreshing the same task fails, and clears a deleted task', async () => {
+    const { result } = renderHook(useWorkbenchConversations);
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a1'));
+    fixture.read.mockRejectedValueOnce(new Error('暂时读不到'));
+    await act(async () => {
+      await result.current.refreshBundle('a1');
+    });
+    expect(result.current.bundle?.conversation.conversationId).toBe('a1');
+    expect(result.current.bundleStaleError).toMatch(/暂时读不到/);
+    expect(result.current.conversationsError).toBe('');
+    fixture.read.mockResolvedValueOnce(null);
+    await act(async () => {
+      await result.current.refreshBundle('a1');
+    });
+    expect(result.current.bundle).toBeNull();
+    expect(result.current.conversationsError).toMatch(/不存在或已移除/);
+  });
+
+  it('does not apply a late refresh failure to the task selected afterwards', async () => {
+    const { result } = renderHook(useWorkbenchConversations);
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a1'));
+    let rejectStale: (error: Error) => void = () => undefined;
+    const stalled = new Promise<never>((_resolve, reject) => {
+      rejectStale = reject;
+    });
+    fixture.read.mockImplementationOnce(() => stalled);
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.refreshBundle('a1');
+    });
+    act(() => result.current.selectTask('project-a', 'a2'));
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a2'));
+    rejectStale(new Error('旧任务刷新失败'));
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.bundle?.conversation.conversationId).toBe('a2');
+    expect(result.current.bundleStaleError).toBe('');
+  });
+
+  it('keeps the persisted next-turn model when an older bundle refresh completes later', async () => {
+    const { result } = renderHook(useWorkbenchConversations);
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a1'));
+    const staleBundle = result.current.bundle!;
+    let resolveStale!: (value: unknown) => void;
+    fixture.read.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    let refresh!: Promise<void>;
+    act(() => {
+      refresh = result.current.refreshBundle('a1');
+    });
+    await waitFor(() => expect(resolveStale).toBeTypeOf('function'));
+    const updated: TaskConversation = {
+      ...staleBundle.conversation,
+      defaultModel: {
+        providerId: 'mock',
+        modelId: 'B',
+        runtimeMode: 'mock',
+        capabilities: [],
+        options: {},
+        capturedAt: '2026-10-13T00:00:00Z',
+      },
+      updatedAt: '2026-10-13T00:00:00Z',
+    };
+    act(() => result.current.applyConversationUpdate(updated));
+    expect(result.current.selectedModel.modelId).toBe('B');
+    expect(result.current.bundle?.conversation.defaultModel?.modelId).toBe('B');
+    await act(async () => {
+      resolveStale({
+        bundle: staleBundle,
+        page: { hasNewer: false, hasOlder: false, userRoundCount: 0 },
+      });
+      await refresh;
+    });
+    expect(result.current.selectedModel.modelId).toBe('B');
+    expect(result.current.bundle?.conversation.defaultModel?.modelId).toBe('B');
+  });
+
+  it('updates the original task record without changing the model of a newly selected task', async () => {
+    const { result } = renderHook(useWorkbenchConversations);
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('a1'));
+    const original = result.current.bundle!.conversation;
+    act(() => result.current.selectTask('project-b', 'b1'));
+    await waitFor(() => expect(result.current.bundle?.conversation.conversationId).toBe('b1'));
+    act(() =>
+      result.current.applyConversationUpdate({
+        ...original,
+        defaultModel: {
+          providerId: 'mock',
+          modelId: 'B',
+          runtimeMode: 'mock',
+          capabilities: [],
+          options: {},
+          capturedAt: '2026-10-13T00:00:00Z',
+        },
+      }),
+    );
+    expect(result.current.selectedModel.modelId).toBe('Mock');
+    expect(result.current.bundle?.conversation.conversationId).toBe('b1');
+    expect(
+      result.current.conversations.find((item) => item.conversationId === 'a1')?.defaultModel
+        ?.modelId,
+    ).toBe('B');
   });
 });

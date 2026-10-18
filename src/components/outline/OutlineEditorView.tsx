@@ -33,6 +33,7 @@ interface OutlineEditorViewProps {
   onAiGenerate: () => Promise<void>;
   onSave: (saveAsNew: boolean) => Promise<void>;
   onSetActive: () => Promise<void>;
+  onSelectVersion: (id: string) => void;
   onToggleContext: () => void;
   onTitleChange: (title: string) => void;
   onContentChange: (content: string) => void;
@@ -52,6 +53,7 @@ export function OutlineEditorView({
   onAiGenerate,
   onSave,
   onSetActive,
+  onSelectVersion,
   onToggleContext,
   onTitleChange,
   onContentChange,
@@ -110,7 +112,12 @@ export function OutlineEditorView({
           保存为新版本
         </button>
         {currentId && (
-          <button className="btn btn-secondary btn-sm" onClick={onSetActive}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onSetActive}
+            disabled={isDirty}
+            title={isDirty ? '请先保存修改，再采用已保存版本' : undefined}
+          >
             <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
             设为采用版本
           </button>
@@ -224,8 +231,14 @@ export function OutlineEditorView({
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {versions.map((version) => (
-              <span
+              <button
+                type="button"
+                className="btn btn-sm"
                 key={version.id}
+                onClick={() => onSelectVersion(version.id)}
+                aria-label={`查看版本 v${version.version}${version.isActive ? '（当前采用）' : ''}`}
+                aria-pressed={version.id === currentId}
+                disabled={isDirty}
                 style={{
                   padding: '2px 8px',
                   borderRadius: 4,
@@ -238,13 +251,19 @@ export function OutlineEditorView({
                   cursor: 'pointer',
                   fontWeight: version.isActive ? 600 : 400,
                 }}
-                title={version.isActive ? '当前采用版本' : `版本 ${version.version}`}
+                title={
+                  isDirty
+                    ? '请先保存当前修改，再切换版本'
+                    : version.isActive
+                      ? '当前采用版本'
+                      : `版本 ${version.version}`
+                }
               >
                 v{version.version}
                 {version.isActive && (
-                  <CheckCircle2 aria-label="当前采用版本" size={11} strokeWidth={1.8} />
+                  <CheckCircle2 aria-hidden="true" size={11} strokeWidth={1.8} />
                 )}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -253,6 +272,9 @@ export function OutlineEditorView({
       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', display: 'flex', gap: 16 }}>
         <span>字数：{content.length}</span>
         <span>版本：v{currentVersion}</span>
+        {currentId && !versions.find((version) => version.id === currentId)?.isActive && (
+          <span>未采用版本的修改将保存为新版本</span>
+        )}
         {isDirty && (
           <span
             style={{

@@ -179,6 +179,24 @@ pub struct UpdateCharacterInput {
     pub is_active: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveCharacterProfileInput {
+    pub novel_id: String,
+    pub character_id: String,
+    pub expected_updated_at: String,
+    pub expected_source: String,
+    pub name: String,
+    pub role_type: String,
+    pub identity: String,
+    pub faction: String,
+    pub relation_to_protagonist: String,
+    pub goal: String,
+    pub personality: String,
+    pub behavior_limits: String,
+    pub forbidden_behaviors: String,
+}
+
 // ==================== Chapter Character ====================
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

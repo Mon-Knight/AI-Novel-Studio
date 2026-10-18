@@ -16,10 +16,10 @@ $StaleVersion = "$StaleMajor.0.0"
 $SameMajorStaleVersion = if ($CurrentVersion -ceq "$CurrentMajor.999.999") { "$CurrentMajor.999.998" } else { "$CurrentMajor.999.999" }
 $GatewayCleanCommand = "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
 $GatewayBuildCommand = "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
-$SerialRustCommand = "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
+$SerialRustCommand = "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
 $VerificationGatewayClean = 'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")'
 $VerificationGatewayBuild = 'Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")'
-$VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")'
+$VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--workspace", "--", "--test-threads=1")'
 $DesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || inputs.suite || ''smoke'' }}'
 $CallerEventGatedDesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || ((github.event_name == ''workflow_dispatch'' || github.event_name == ''workflow_call'') && inputs.suite) || ''smoke'' }}'
 $RepositoryReadme = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $RepositoryRoot "README.md")
