@@ -3,9 +3,7 @@ import type { ConversationArtifactCard, TaskConversationBundle } from '../../typ
 const MISSING_TURN_SEQUENCE = Number.MAX_SAFE_INTEGER;
 
 /** Rank among every card in the conversation, matching the full public projection. */
-export function conversationCandidateOrdinals(
-  bundle: TaskConversationBundle,
-): Map<string, number> {
+export function conversationCandidateOrdinals(bundle: TaskConversationBundle): Map<string, number> {
   const conversationId = bundle.conversation.conversationId;
   const turns = new Map(bundle.turns.map((turn) => [turn.turnId, turn]));
   const runs = new Map(bundle.runs.map((run) => [run.runId, run]));
@@ -16,9 +14,7 @@ export function conversationCandidateOrdinals(
       const run = card.runId ? runs.get(card.runId) : undefined;
       const owner = turns.get((run ? run.turnId : card.turnId) ?? '');
       const at =
-        epochMillis(card.createdAt) ??
-        (run ? epochMillis(run.createdAt) : undefined) ??
-        fallback;
+        epochMillis(card.createdAt) ?? (run ? epochMillis(run.createdAt) : undefined) ?? fallback;
       return {
         cardId: card.cardId,
         at,

@@ -162,9 +162,9 @@ describe('writingSubAgentContract', () => {
     });
     expect(capped.budget.maxOutputTokens).toBe(1000);
     expect(capped.budget.maxIntegrityRepairs).toBe(2);
-    expect(() =>
-      plan({ previousChapter: { chapterId: 'chapter-0', sourceHash: 'abc' } }),
-    ).toThrow(/全文哈希/u);
+    expect(() => plan({ previousChapter: { chapterId: 'chapter-0', sourceHash: 'abc' } })).toThrow(
+      /全文哈希/u,
+    );
   });
 
   it('rejects any attempt to widen the tool surface or escape candidate-only mode', () => {

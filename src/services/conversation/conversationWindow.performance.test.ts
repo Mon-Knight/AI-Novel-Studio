@@ -66,7 +66,10 @@ test('real page merge keeps an early card while projecting the refreshed tail', 
   assert.equal(capped.page.hasNewer, false);
   assert.equal(capped.page.hasOlder, true);
   assert.equal(rounds.length, 200);
-  assert.equal(merged.artifacts.some((card) => card.cardId === 'first-card'), true);
+  assert.equal(
+    merged.artifacts.some((card) => card.cardId === 'first-card'),
+    true,
+  );
   assert.equal(merged.artifacts.find((card) => card.cardId === 'first-card')?.content, '最早正文');
   assert.ok(elapsed < 2000, `projection took ${elapsed}ms`);
 });

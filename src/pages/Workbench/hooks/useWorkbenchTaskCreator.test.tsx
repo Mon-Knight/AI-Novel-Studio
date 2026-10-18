@@ -43,12 +43,10 @@ function input() {
     onCreated: vi.fn(),
     selectChapter: vi.fn().mockResolvedValue(undefined),
     validateModelForSend: vi.fn(async (value: TaskModelSnapshot) => value),
-    createTask: vi
-      .fn()
-      .mockResolvedValue({
-        conversation: { conversationId: 'task', novelId: 'novel' },
-        turn: { turnId: 'turn' },
-      }),
+    createTask: vi.fn().mockResolvedValue({
+      conversation: { conversationId: 'task', novelId: 'novel' },
+      turn: { turnId: 'turn' },
+    }),
     startInitializedTask: vi.fn().mockResolvedValue(undefined),
   };
 }
