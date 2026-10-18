@@ -94,9 +94,7 @@ export function sliceConversationWindow(
   }
   const includesEarliest = selected[0] === rounds[0];
   const nextRound = rounds.find((sequence) => sequence > selected[selected.length - 1]);
-  const start = includesEarliest
-    ? (turns[0]?.sequence ?? selected[0])
-    : selected[0];
+  const start = includesEarliest ? (turns[0]?.sequence ?? selected[0]) : selected[0];
   return windowForTurns(
     bundle,
     turns.filter(
@@ -127,7 +125,8 @@ export function mergeConversationWindow(
     sequence >= page.startSequence! &&
     (page.endSequenceExclusive == null || sequence < page.endSequenceExclusive);
   const sequences = new Map<string, number>();
-  for (const turn of [...previous.turns, ...incoming.turns]) sequences.set(turn.turnId, turn.sequence);
+  for (const turn of [...previous.turns, ...incoming.turns])
+    sequences.set(turn.turnId, turn.sequence);
   const runsById = new Map<string, TaskRun>();
   for (const run of [...previous.runs, ...incoming.runs]) runsById.set(run.runId, run);
   const runInSpan = (run: TaskRun) => {
@@ -142,7 +141,9 @@ export function mergeConversationWindow(
     ...previous.runs.filter((run) => !runInSpan(run)),
     ...incoming.runs.filter((run) => runInSpan(run)),
   ];
-  const replacedRunIds = new Set(incoming.runs.filter((run) => runInSpan(run)).map((run) => run.runId));
+  const replacedRunIds = new Set(
+    incoming.runs.filter((run) => runInSpan(run)).map((run) => run.runId),
+  );
   const keptRunIds = new Set(runs.map((run) => run.runId));
   const toolEvents = [
     ...previous.toolEvents.filter(
@@ -152,7 +153,8 @@ export function mergeConversationWindow(
   ];
   const openTail = page.endSequenceExclusive == null;
   const previousCards = new Map(previous.artifacts.map((card) => [card.cardId, card]));
-  const place = (card: ConversationArtifactCard) => cardPlacement(card, sequences, runsById, inSpan);
+  const place = (card: ConversationArtifactCard) =>
+    cardPlacement(card, sequences, runsById, inSpan);
   const artifacts = [
     ...previous.artifacts.filter((card) => {
       const placement = place(card);
@@ -247,7 +249,9 @@ function windowSpansTouch(previous: TaskConversationBundle, page: ConversationWi
   return end >= min && start <= max + 1;
 }
 
-export function conflictPeersFromRunningTargets(targets: readonly RunningTaskTarget[]): TaskConflictPeer[] {
+export function conflictPeersFromRunningTargets(
+  targets: readonly RunningTaskTarget[],
+): TaskConflictPeer[] {
   return targets.map((target) => {
     const goal = readableRunningGoal(target.latestGoal);
     return {
@@ -323,8 +327,10 @@ function resolveMode(
   rounds: number[],
   input: Record<string, unknown>,
 ): WindowMode {
-  if (input.beforeUserSequence != null) return { kind: 'before', sequence: Number(input.beforeUserSequence) };
-  if (input.minUserSequence != null) return { kind: 'min', sequence: Number(input.minUserSequence) };
+  if (input.beforeUserSequence != null)
+    return { kind: 'before', sequence: Number(input.beforeUserSequence) };
+  if (input.minUserSequence != null)
+    return { kind: 'min', sequence: Number(input.minUserSequence) };
   if (typeof input.focusTurnId === 'string' || typeof input.focusCardId === 'string') {
     const sequence = focusSequence(bundle, turns, input);
     const owning = [...rounds].reverse().find((item) => item <= sequence) ?? null;
@@ -349,8 +355,7 @@ function focusSequence(
   if (!card || card.conversationId !== bundle.conversation.conversationId) {
     throw new ConversationWindowQueryError('定位的产物不属于当前任务');
   }
-  const turnId =
-    card.turnId ?? bundle.runs.find((run) => run.runId === card.runId)?.turnId;
+  const turnId = card.turnId ?? bundle.runs.find((run) => run.runId === card.runId)?.turnId;
   const turn = turnId ? turns.find((item) => item.turnId === turnId) : undefined;
   if (!turn) throw new ConversationWindowQueryError('定位的产物不属于当前任务');
   return turn.sequence;

@@ -414,7 +414,10 @@ function WorkbenchConversationStream({
               >
                 <History aria-hidden="true" size={14} strokeWidth={1.8} />
                 加载更早记录（
-                {Math.min(hiddenRoundCount || WORKBENCH_HISTORY_PAGE_SIZE, WORKBENCH_HISTORY_PAGE_SIZE)}{' '}
+                {Math.min(
+                  hiddenRoundCount || WORKBENCH_HISTORY_PAGE_SIZE,
+                  WORKBENCH_HISTORY_PAGE_SIZE,
+                )}{' '}
                 个完整回合）
               </button>
             )}

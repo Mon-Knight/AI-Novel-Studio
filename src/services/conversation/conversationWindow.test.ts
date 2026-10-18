@@ -21,7 +21,10 @@ import {
 
 const at = '2026-08-20T00:00:01.000Z';
 
-function bundle(roundCount: number, extras?: Partial<TaskConversationBundle>): TaskConversationBundle {
+function bundle(
+  roundCount: number,
+  extras?: Partial<TaskConversationBundle>,
+): TaskConversationBundle {
   const turns: ConversationTurn[] = [];
   for (let index = 0; index < roundCount; index += 1) {
     turns.push({
@@ -100,7 +103,10 @@ test('latest page keeps eight user rounds and equal timestamps stay in sequence 
   assert.equal(rounds.length, 8);
   assert.equal(page.page.hasOlder, true);
   assert.equal(page.page.hasNewer, false);
-  assert.equal(page.bundle.turns.some((turn) => turn.turnId === 'automatic'), false);
+  assert.equal(
+    page.bundle.turns.some((turn) => turn.turnId === 'automatic'),
+    false,
+  );
   const ordered = projectWorkbenchEvents(page.bundle).filter((event) => event.kind === 'turn');
   const sequences = ordered.map((event) => event.turnSequence);
   assert.deepEqual(
@@ -153,19 +159,37 @@ test('refresh cap replaces only the returned span and keeps the earlier card', (
   assert.equal(capped.page.userRoundCount, 8);
   assert.equal(capped.page.hasOlder, true);
   assert.equal(capped.page.hasNewer, false);
-  assert.equal(capped.bundle.artifacts.some((card) => card.cardId === 'early'), false);
+  assert.equal(
+    capped.bundle.artifacts.some((card) => card.cardId === 'early'),
+    false,
+  );
   const merged = mergeConversationWindow(loaded.bundle, capped.bundle, capped.page);
-  assert.equal(merged.artifacts.some((card) => card.cardId === 'early'), true);
+  assert.equal(
+    merged.artifacts.some((card) => card.cardId === 'early'),
+    true,
+  );
   assert.equal(merged.artifacts.find((card) => card.cardId === 'early')?.content, '早期正文');
-  assert.equal(merged.turns.some((turn) => turn.turnId === 'user-0'), true);
-  assert.equal(merged.turns.some((turn) => turn.turnId === 'user-11'), true);
-  const cursor = cursorAfterWindow('task', merged, capped.page, {
-    conversationId: 'task',
-    oldestUserSequence: 0,
-    loadedUserRounds: 12,
-    hasOlder: false,
-    hasNewer: false,
-  }, 'refresh');
+  assert.equal(
+    merged.turns.some((turn) => turn.turnId === 'user-0'),
+    true,
+  );
+  assert.equal(
+    merged.turns.some((turn) => turn.turnId === 'user-11'),
+    true,
+  );
+  const cursor = cursorAfterWindow(
+    'task',
+    merged,
+    capped.page,
+    {
+      conversationId: 'task',
+      oldestUserSequence: 0,
+      loadedUserRounds: 12,
+      hasOlder: false,
+      hasNewer: false,
+    },
+    'refresh',
+  );
   assert.equal(cursor.hasOlder, false);
   assert.equal(cursor.oldestUserSequence, 0);
 });
@@ -182,13 +206,19 @@ test('an empty older page does not wipe retained rounds', () => {
   assert.equal(older.page.startSequence, null);
   const merged = mergeConversationWindow(latest.bundle, older.bundle, older.page);
   assert.equal(merged.turns.length, latest.bundle.turns.length);
-  const cursor = cursorAfterWindow('task', merged, older.page, {
-    conversationId: 'task',
-    oldestUserSequence: latest.page.oldestUserSequence,
-    loadedUserRounds: 1,
-    hasOlder: true,
-    hasNewer: false,
-  }, 'older');
+  const cursor = cursorAfterWindow(
+    'task',
+    merged,
+    older.page,
+    {
+      conversationId: 'task',
+      oldestUserSequence: latest.page.oldestUserSequence,
+      loadedUserRounds: 1,
+      hasOlder: true,
+      hasNewer: false,
+    },
+    'older',
+  );
   assert.equal(cursor.hasOlder, false);
 });
 
@@ -204,15 +234,27 @@ test('a disjoint latest page replaces the parked window instead of leaving a gap
   const lastParked = parked.bundle.turns[parked.bundle.turns.length - 1];
   assert.ok((latest.page.startSequence ?? 0) > (lastParked?.sequence ?? 0) + 1);
   const merged = mergeConversationWindow(parked.bundle, latest.bundle, latest.page);
-  assert.equal(merged.turns.some((turn) => turn.turnId === 'user-2'), false);
-  assert.equal(merged.turns.some((turn) => turn.turnId === 'user-23'), true);
-  const cursor = cursorAfterWindow('task', merged, latest.page, {
-    conversationId: 'task',
-    oldestUserSequence: parked.page.oldestUserSequence,
-    loadedUserRounds: parked.page.userRoundCount,
-    hasOlder: parked.page.hasOlder,
-    hasNewer: true,
-  }, 'refresh');
+  assert.equal(
+    merged.turns.some((turn) => turn.turnId === 'user-2'),
+    false,
+  );
+  assert.equal(
+    merged.turns.some((turn) => turn.turnId === 'user-23'),
+    true,
+  );
+  const cursor = cursorAfterWindow(
+    'task',
+    merged,
+    latest.page,
+    {
+      conversationId: 'task',
+      oldestUserSequence: parked.page.oldestUserSequence,
+      loadedUserRounds: parked.page.userRoundCount,
+      hasOlder: parked.page.hasOlder,
+      hasNewer: true,
+    },
+    'refresh',
+  );
   assert.equal(cursor.hasNewer, false);
   assert.equal(cursor.hasOlder, true);
 });
@@ -248,10 +290,7 @@ test('the same card keeps its conversation ordinal across the first page, older 
   const lateCard = latest.bundle.artifacts.find((card) => card.cardId === 'late');
   assert.equal(lateCard?.candidateOrdinal, full.get('late'));
   assert.equal(lateCard?.candidateOrdinal, 2);
-  assert.equal(
-    workbenchCandidateNumbers(projectWorkbenchEvents(latest.bundle)).get('late'),
-    2,
-  );
+  assert.equal(workbenchCandidateNumbers(projectWorkbenchEvents(latest.bundle)).get('late'), 2);
   const older = sliceConversationWindow(source, {
     conversationId: 'task',
     beforeUserSequence: latest.page.oldestUserSequence ?? 0,
@@ -313,5 +352,8 @@ test('conflict peers use the run chapter and goal, never the selected chapter', 
     '同一章',
   );
   assert.equal(peers[0]?.chapterId, 'chapter-2');
-  assert.equal(peers.some((peer) => peer.chapterId === 'chapter-1' && peer.conversationId === 'other'), false);
+  assert.equal(
+    peers.some((peer) => peer.chapterId === 'chapter-1' && peer.conversationId === 'other'),
+    false,
+  );
 });
