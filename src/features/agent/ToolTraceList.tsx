@@ -60,10 +60,10 @@ export const ToolTraceCard = memo(function ToolTraceCard({
       data-testid="agent-tool-card"
       data-tool-name={record.toolName}
       style={{
-        border: '1px solid var(--color-border-light, #e2e8f0)',
+        border: '1px solid var(--color-border-light)',
         borderRadius: 8,
         padding: '10px 12px',
-        background: '#ffffff',
+        background: 'var(--color-bg-card)',
         fontSize: 12,
         marginBottom: 8,
       }}
@@ -83,13 +83,15 @@ export const ToolTraceCard = memo(function ToolTraceCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <ToolIcon aria-hidden="true" size={14} strokeWidth={1.8} />
           <strong style={{ fontSize: 13 }}>{meta.label}</strong>
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>({record.toolName})</span>
+          <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
+            ({record.toolName})
+          </span>
           <span
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
-              color: '#64748b',
+              color: 'var(--color-text-muted)',
               fontSize: 12,
             }}
           >
@@ -106,8 +108,8 @@ export const ToolTraceCard = memo(function ToolTraceCard({
             fontSize: 12,
             padding: '1px 6px',
             borderRadius: 4,
-            background: record.success ? '#dcfce7' : '#fee2e2',
-            color: record.success ? '#15803d' : '#b91c1c',
+            background: record.success ? 'var(--color-success-bg)' : 'var(--color-error-bg)',
+            color: record.success ? 'var(--color-success-text)' : 'var(--color-error-text)',
           }}
         >
           {record.success ? (
@@ -125,9 +127,9 @@ export const ToolTraceCard = memo(function ToolTraceCard({
 
       {/* 默认折叠内容：展开后展示输入输出详情 */}
       {expanded && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e2e8f0' }}>
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border)' }}>
           {/* 输入参数 */}
-          <div style={{ marginBottom: 6, color: '#64748b' }}>
+          <div style={{ marginBottom: 6, color: 'var(--color-text-muted)' }}>
             <span style={{ fontWeight: 500 }}>输入参数: </span>
             <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
               {JSON.stringify(record.inputArgs)}
@@ -137,7 +139,7 @@ export const ToolTraceCard = memo(function ToolTraceCard({
           {/* 输出结果摘要 */}
           <div
             style={{
-              background: '#f8fafc',
+              background: 'var(--color-bg-subtle)',
               padding: 8,
               borderRadius: 4,
               maxHeight: 140,

@@ -5,6 +5,9 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[path = "migrations_chapter_workflow_stages.rs"]
+mod chapter_workflow_stages;
+
 #[path = "migrations_cross_task_lineage.rs"]
 mod cross_task_lineage;
 
@@ -25,7 +28,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 39] {
+fn migrations() -> [Migration; 40] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -221,6 +224,11 @@ fn migrations() -> [Migration; 39] {
             id: cross_task_lineage::MIGRATION_ID,
             definition: cross_task_lineage::MIGRATION_DEFINITION,
             apply: cross_task_lineage::apply,
+        },
+        Migration {
+            id: chapter_workflow_stages::MIGRATION_ID,
+            definition: chapter_workflow_stages::MIGRATION_DEFINITION,
+            apply: chapter_workflow_stages::apply,
         },
     ]
 }

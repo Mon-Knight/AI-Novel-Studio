@@ -62,6 +62,7 @@ const tables = [
   'artifact_validation_issues',
   'artifact_decisions',
   'review_authorizations',
+  'chapter_workflow_stages',
   'chapter_summaries',
   'context_records',
   'quality_check_reports',
@@ -118,9 +119,10 @@ const introducedSchema = new Map([
   ['artifact_validation_issues', 10],
   ['artifact_decisions', 11],
   ['review_authorizations', 11],
+  ['chapter_workflow_stages', 12],
 ]);
 
-function completeBackup(schemaVersion = 11) {
+function completeBackup(schemaVersion = 12) {
   const schemaTables = tables.filter((name) => schemaVersion >= (introducedSchema.get(name) ?? 2));
   return {
     type: 'ai_novel_studio_project',
@@ -260,13 +262,26 @@ test('schemaVersion 10 requires conversation workbench tables without decisions'
 
 test('schemaVersion 11 requires artifact decisions and review authorizations', () => {
   const currentBackup = completeBackup(11);
-  assert.equal(backupSchema.PROJECT_BACKUP_SCHEMA_VERSION, 11);
+  assert.equal(backupSchema.PROJECT_BACKUP_SCHEMA_VERSION, 12);
   assert.equal(backupSchema.isCompleteProjectBackup(currentBackup), true);
   assert.ok(Array.isArray(currentBackup.tables.artifact_decisions));
   assert.ok(Array.isArray(currentBackup.tables.review_authorizations));
 
   delete currentBackup.tables.review_authorizations;
   assert.equal(backupSchema.isCompleteProjectBackup(currentBackup), false);
+});
+
+test('schemaVersion 12 requires workflow stage facts while schema 11 remains readable', () => {
+  const current = completeBackup(12);
+  assert.equal(backupSchema.isCompleteProjectBackup(current), true);
+  assert.deepEqual(current.tables.chapter_workflow_stages, []);
+  delete current.tables.chapter_workflow_stages;
+  assert.equal(backupSchema.isCompleteProjectBackup(current), false);
+  const previous = completeBackup(11);
+  assert.equal(backupSchema.isCompleteProjectBackup(previous), true);
+  assert.equal(previous.tables.chapter_workflow_stages, undefined);
+  previous.tables.chapter_workflow_stages = [];
+  assert.equal(backupSchema.isCompleteProjectBackup(previous), false);
 });
 
 test('非整数 schemaVersion 不得进入 Rust 完整恢复链路', () => {
@@ -276,7 +291,7 @@ test('非整数 schemaVersion 不得进入 Rust 完整恢复链路', () => {
 });
 
 test('损坏或未来版本的完整备份不会降级为旧版项目 JSON', () => {
-  const malformed = { ...completeBackup(), schemaVersion: 12 };
+  const malformed = { ...completeBackup(), schemaVersion: 13 };
   const result = jsonImport.detectJsonImportType(malformed);
 
   assert.equal(result.type, 'ai_novel_studio_project');
@@ -510,7 +525,7 @@ test('local-only drafts are remapped before references and valid predecessor cha
 });
 
 test('all supported schemas retain safe raw outlines and exact ID suffixes', async () => {
-  for (let schema = 2; schema <= 11; schema += 1) {
+  for (let schema = 2; schema <= 12; schema += 1) {
     const backup = completeBackup(schema);
     backup.novel = { id: 'novel-source', title: 'schema fixture' };
     backup.tables.chapters = [{ id: 'chapter-source' }];

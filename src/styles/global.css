@@ -24,6 +24,7 @@ body {
   font-family: var(--font-family);
   font-size: var(--font-size-md);
   line-height: var(--line-height-normal);
+  letter-spacing: 0.01em;
   color: var(--color-text-primary);
   background-color: var(--color-bg-app);
   -webkit-font-smoothing: antialiased;
@@ -32,11 +33,14 @@ body {
 
 a {
   color: var(--color-primary);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
 a:hover {
   color: var(--color-primary-hover);
+  text-decoration-color: var(--color-accent);
 }
 
 button {
@@ -55,16 +59,16 @@ select {
 select,
 .panel-select,
 select.input {
-  background-color: var(--color-bg-card, #ffffff);
-  padding: 6px 10px;
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-primary, #0f172a);
+  background-color: var(--color-bg-card);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
   cursor: pointer;
   box-sizing: border-box;
 }
@@ -72,16 +76,16 @@ select.input {
 select:hover:not(:disabled),
 .panel-select:hover:not(:disabled),
 select.input:hover:not(:disabled) {
-  border-color: var(--color-primary-hover, #4f46e5);
-  background-color: var(--color-bg-hover, #f8fafc);
+  border-color: var(--color-primary-hover);
+  background-color: var(--color-bg-hover);
 }
 
 select:focus,
 .panel-select:focus,
 select.input:focus {
   outline: none;
-  border-color: var(--color-primary, #4338ca);
-  box-shadow: 0 0 0 2px var(--color-primary-light, #e0e7ff);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
 select:disabled,
@@ -89,7 +93,7 @@ select:disabled,
 select.input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background-color: var(--color-bg-hover, #f1f5f9);
+  background-color: var(--color-bg-hover);
 }
 
 /* === 通用弹窗覆盖与内容容器 === */
@@ -108,10 +112,10 @@ select.input:disabled {
 
 .modal-content,
 .modal-dialog {
-  background: var(--color-bg-card, #ffffff);
+  background: var(--color-bg-card);
   color: var(--color-text-primary);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 20px 24px;
   min-width: 0;
   max-height: calc(100vh - 32px);
@@ -119,9 +123,7 @@ select.input:disabled {
   overflow-wrap: anywhere;
   overscroll-behavior: contain;
   font-size: var(--font-size-md);
-  box-shadow:
-    0 10px 25px -5px rgba(0, 0, 0, 0.1),
-    0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-lg);
   z-index: calc(var(--z-modal, 400) + 1);
   box-sizing: border-box;
 }
@@ -269,18 +271,18 @@ select.input:disabled {
 .back-button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border, #e5e7eb);
-  background: var(--color-bg-card, #ffffff);
-  color: var(--color-text-secondary, #374151);
-  font-size: 13px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 .back-button:hover {
-  background: var(--color-bg-hover, #f3f4f6);
+  background: var(--color-bg-hover);
 }
 
 /* 通用工具类 */
@@ -290,13 +292,18 @@ select.input:disabled {
 
 .text-error {
   color: var(--color-error-text);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.6;
 }
 
 /* === 焦点可见样式（替代 outline:none） === */
 :focus-visible {
-  outline: 2px solid var(--color-focus-ring, #4a7cf7);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+summary:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
@@ -388,8 +395,10 @@ select.input:disabled {
 }
 
 .empty-state-icon {
-  font-size: 48px;
-  opacity: 0.4;
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-3xl);
+  color: var(--color-accent);
+  opacity: 0.55;
 }
 
 .empty-state-text {
@@ -403,7 +412,8 @@ select.input:disabled {
   justify-content: center;
   gap: var(--spacing-xs);
   padding: var(--spacing-sm) var(--spacing-lg);
-  border-radius: var(--radius-md);
+  min-height: 32px;
+  border-radius: var(--radius-control);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
@@ -411,10 +421,15 @@ select.input:disabled {
     background-color var(--transition-fast),
     border-color var(--transition-fast),
     color var(--transition-fast),
-    opacity var(--transition-fast);
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
   border: 1px solid transparent;
   white-space: nowrap;
   user-select: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .btn:disabled {
@@ -430,6 +445,11 @@ select.input:disabled {
 
 .btn-primary:hover:not(:disabled) {
   background-color: var(--color-primary-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  background-color: var(--color-primary);
+  filter: brightness(0.92);
 }
 
 .btn-secondary {
@@ -456,7 +476,7 @@ select.input:disabled {
 .card {
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   padding: var(--spacing-lg);
   transition: box-shadow var(--transition-fast);
 }
@@ -470,7 +490,7 @@ select.input:disabled {
 .detail-card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   padding: 12px 14px;
   transition:
     border-color var(--transition-fast),
@@ -541,7 +561,7 @@ select.input:disabled {
 .form-textarea:focus {
   border-color: var(--color-border-focus);
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-primary-light);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
 .input::placeholder,
@@ -575,12 +595,6 @@ textarea.input,
 .panel-select {
   width: 100%;
   min-width: 0;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  background: var(--color-bg-card);
 }
 
 .panel-select:focus {
@@ -590,33 +604,38 @@ textarea.input,
 /* === 按钮尺寸变体 === */
 .btn-sm {
   height: 28px;
+  min-height: 28px;
   padding: 0 var(--spacing-md);
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
 }
 
 .btn-xs {
   min-height: 28px;
   padding: 4px 8px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-control);
 }
 
 .btn-lg {
   height: 40px;
   padding: 0 var(--spacing-xl);
   font-size: var(--font-size-lg);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
 }
 
 .btn-icon {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.btn-icon:active:not(:disabled) {
+  background-color: var(--color-bg-active);
 }
 
 /* === 表单布局 === */
@@ -663,4 +682,14 @@ textarea.input,
   background-color: var(--color-border);
   margin: var(--spacing-md) 0;
   border: none;
+}
+
+/* === 铅字书房工具类 === */
+.font-display {
+  font-family: var(--font-family-display);
+  letter-spacing: var(--tracking-tight);
+}
+
+.pressable:active {
+  transform: translateY(1px);
 }

@@ -89,12 +89,19 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--color-text-primary);
   color: var(--color-bg-app);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
   letter-spacing: 0;
+}
+
+/* 品牌章是全站唯一常驻的朱砂印记；侧栏头像与标签标记保持墨色，避免红色泛滥。 */
+.frame-brand-mark {
+  background: var(--color-accent);
+  color: var(--color-on-primary);
+  letter-spacing: var(--tracking-wide);
 }
 
 .frame-icon-button {
@@ -138,7 +145,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1;
   white-space: nowrap;
   text-decoration: none;
@@ -180,7 +187,7 @@
 .frame-version {
   padding: 0 8px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 /* === 快捷操作（侧栏与工作台树共用） === */
@@ -199,7 +206,7 @@
   padding: 0 10px;
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   text-align: left;
   cursor: pointer;
   transition:
@@ -229,7 +236,7 @@
   flex: 0 0 auto;
   color: var(--color-text-muted);
   font-family: var(--font-family);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0;
 }
 
@@ -295,7 +302,7 @@
 
 .sidebar-nav-section {
   padding: 10px 18px 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   letter-spacing: 0;
@@ -311,7 +318,7 @@
   margin: 1px 8px;
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   transition:
     background-color var(--transition-fast),
     color var(--transition-fast);
@@ -376,14 +383,14 @@
 .sidebar-footer-name {
   overflow: hidden;
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sidebar-footer .version {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 

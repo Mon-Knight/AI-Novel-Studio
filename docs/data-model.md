@@ -13,7 +13,7 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。当前完整项目备份 schema 为 11。小说继续是领域数据最高级对象。第 43 节补充当前 v3.7.0 修复中的规则集、精确修订来源与采用回执；实现仍在集成、待统一验收，本轮不新增测试/桌面/live 通过结论或改写历史记录。
+> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`；migration 040 增加章节写作阶段事实 `chapter_workflow_stages`。当前完整项目备份 schema 为 12。小说继续是领域数据最高级对象。第 43 节补充当前 v3.7.0 修复中的规则集、精确修订来源与采用回执；实现仍在集成、待统一验收，本轮不新增测试/桌面/live 通过结论或改写历史记录。
 
 ---
 
@@ -817,6 +817,33 @@ scenePlan` 重建单元身份；仅允许 `finish_reason=stop` 的原始 Artifac
 不一致的单元会关闭全部后续复用。复用记录通过新 job 步骤中的 `reusedFromJobId` 保留来源，
 Token 统计只计算本次真实请求；该机制由用户再次启动生成触发，不把应用重启或网络中断解释为
 自动重发授权。
+
+## 8.4.2 章节写作阶段事实（migration 040）
+
+> 集成中：阶段表、内部服务与只读 IPC 已落，尚未接入生产工作台／DSH 阶段工具。
+> 实际 Provider messages 绑定、关联 Run 终结后的迟到拒绝及跨重启端到端验证仍在收口；建表与定向测试不等于生产恢复已验收。
+
+`chapter_workflow_stages` 是章节分阶段写作的权威执行事实，不是正式正文、正式人物状态或
+采用授权。工作流身份固定为原始 user `turn_id`，`run_id` 表示该回合的一次尝试；每个阶段行
+冻结 `plan_version`、`context_hash`、`base_hash`、`input_hash`、`plan_hash` 和由
+`task_runs.model_snapshot_json` 原生重算的 `model_snapshot_hash`，客户端不能自报模型身份。
+
+阶段以 `stage_key / stage_kind / scene_id / beat_id / attempt` 定位，允许同一阶段在新尝试中
+重试，但同一 workflow/stage 只允许一个 `succeeded` 行。状态边为
+`pending → running → succeeded | failed | cancelled`，`pending` 也可直接取消；每次 CAS 更新
+必须把 `revision` 精确加一。终态行不可再更新，失败或取消后到达的完成结果失败关闭。
+
+成功结果必须且只能落在一种载体中：专属 `large_text_documents` 文档（`target_type` 为
+`chapter_workflow_stage`、`field_name` 为 `result`）、不超过 16 KiB 的有效 JSON 对象，或
+经绑定复验的既有 ResultArtifact。`result_hash` 必须与所选载体内容哈希一致。verified
+artifact 入口还要求 Artifact、Task、Attempt 均为成功终结，且 InputSnapshot 的
+`chapterWorkflow` 绑定与当前阶段的 workflow/stage/input/plan 完全一致；缺失或不同即拒绝。
+表内没有通用 DAG，也不把 `tool_call_events` 的公开成功事件当作阶段权威。
+
+只读 IPC 按 `novel_id + chapter_id` 强制作用域，可选 conversation/workflow/run/stage
+过滤；写方法只在 Rust 内部以 `pub(crate)` 暴露，不注册任意“写成功”命令。启动恢复只把
+`running` 阶段标记为 `failed`（`WORKFLOW_INTERRUPTED`），不自动重放或发起 Provider
+请求。该表随项目备份 schema 12 导出、按新作品重映射身份，并计入项目清理。
 
 ---
 
@@ -1644,7 +1671,7 @@ export interface AiTaskRecord {
 
 ## 36.5 备份与恢复
 
-参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 11 继续包含这些表并依次追加 Scheduler、正式故事资产、对话工作台和产物决定/审阅授权。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
+参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 12 继续包含这些表并依次追加 Scheduler、正式故事资产、对话工作台、产物决定/审阅授权和章节写作阶段。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
 
 ---
 
@@ -2961,16 +2988,17 @@ chapter_event_locations   章节事件—地点关系
 
 资产 identity、novel scope 和创建时间不可变；更新必须提交 expected revision。所有关系端点必须属于同一作品。地点父子图拒绝自身父级和环，批量创建时按拓扑顺序写入，因此冻结集合中的子地点可以先于父地点出现。
 
-# 38. 完整项目备份 schema 8～11
+# 38. 完整项目备份 schema 8～12
 
 - schema 8 在 schema 7 的 Memory 基线上加入四张 scheduler 表。恢复时废弃中断 owner/epoch，重算 policy/request/decision/payload hash，并保证没有 active lease 残留。
 - schema 9 加入九张势力、地点及关系表；地点按父子拓扑恢复，随后恢复关系和章节关联。
 - schema 10 加入任务对话、回合、运行、工具事件、产物卡片、AI Task 快照和 ResultArtifact 工作台事实。
 - schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。恢复为副本时，`authorization_id` 与 `consumed_by_draft_id` 分别按身份和引用重映射；`issued / consumed / expired`、签发与消费时间原样保留，不因恢复重新授权。写库前复验授权、未删除章节、正文产物、作者 confirm 决定、卡片/会话、消费草稿的整条同作品同章节关系及哈希；未知状态、备份外引用和同书换章篡改均拒绝。
+- schema 12 加入 `chapter_workflow_stages`。恢复时重映射 stage/workflow/turn/conversation/run/chapter、结果大文本和 verified artifact 引用，保留状态、attempt、revision 与结果哈希，但不重新执行阶段、不自动请求模型，也不把恢复行解释为新的采用授权。旧 schema 2～11 缺少该表时按空集合兼容。
 - `ai_task_attempts.provider_request_id` 若本来是 attempt/run 身份别名，使用相同新身份；真实 DSH 治理请求号则为副本分配新值并同步结构化引用，避免与原作品的唯一索引冲突。原作品记录不变，不复制应用级预算/费用账本，不把恢复视为一次实际 Provider 请求。
 - content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
-- 项目清理覆盖 scheduler、正式资产和作品所属的设定建议、落位提案/应用/链接、Agent 计划依赖/尝试/租约/检查点、内容事务及目标、DSH 准备运行。清理范围不能由备份表集合替代。相关 no-delete 守卫仅在同一维护事务中临时移除并在提交前恢复；失败回滚同时恢复行和守卫，不删除其他作品。触及当前作品却连接到另一作品的损坏落位链会整体拒绝，不借清理修复跨作品引用。
-- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权。未来或非整数 schema 版本拒绝进入完整恢复链路。
+- 项目清理覆盖 scheduler、正式资产和作品所属的设定建议、落位提案/应用/链接、Agent 计划依赖/尝试/租约/检查点、内容事务及目标、DSH 准备运行，以及章节写作阶段。清理范围不能由备份表集合替代。相关 no-delete 守卫仅在同一维护事务中临时移除并在提交前恢复；失败回滚同时恢复行和守卫，不删除其他作品。触及当前作品却连接到另一作品的损坏落位链会整体拒绝，不借清理修复跨作品引用。
+- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权；schema 12 必须包含章节写作阶段表。未来或非整数 schema 版本拒绝进入完整恢复链路。
 
 # 39. migration 029：桌面端全局 AI 请求治理
 
@@ -3189,7 +3217,7 @@ task_runs             + chapter_id TEXT NULL
 
 # 43. v3.7.0 修复中的规则与候选持久契约
 
-> 本节为当前已落源码的事实同步，代码仍在集成、待全部修复后统一验收；不升级 v3.7.0，备份 schema 仍为 11，不产生测试/桌面/live 通过结论。用户已明确授权新增一个正式兼容 migration `039_result_artifacts_cross_task_lineage`（见第 44 节），既有 010/M1 迁移保持发布定义与 checksum 不变。第 41～42 节及既有历史验证日期/范围保留，R4 live 云端 NOT VERIFIED 不变。
+> 本节为当前已落源码的事实同步，代码仍在集成、待全部修复后统一验收；不升级 v3.7.0，039 当时备份 schema 仍为 11（后续 040 已提升为 12，见 8.4.2 与第 38 节），不产生测试/桌面/live 通过结论。用户已明确授权新增一个正式兼容 migration `039_result_artifacts_cross_task_lineage`（见第 44 节），既有 010/M1 迁移保持发布定义与 checksum 不变。第 41～42 节及既有历史验证日期/范围保留，R4 live 云端 NOT VERIFIED 不变。
 
 ## 43.1 世界规则复用 structured_json
 
@@ -3288,7 +3316,7 @@ checksum 为 `sha256(definition)`（`migrations.rs` 的 `checksum()`），与 `m
 ## 44.4 已修补库、新库与幂等
 
 - 预发布分支中已被就地改为单列外键的库：识别为 `Lineage` 后跳过重建，只执行同一套校验并写入 039 ledger 条目，不重复 rebuild、不改 schema_version。
-- 全新空库按 001～039 顺序执行，039 同样重建空表，与旧库升级得到同一 schema 结构（索引、触发器、外键一致）。
+- 全新空库按 001～039 顺序执行，039 同样重建空表，与旧库升级得到同一 schema 结构（索引、触发器、外键一致）；040 随后追加章节写作阶段表。
 - 039 是普通 ledger 条目（version `3.3.0`）；重复启动只在 checksum 匹配时跳过，不重写 ledger；checksum 被篡改仍在启动时失败关闭。只前向、无 down migration，失败仅回滚本次事务。
 
 ## 44.5 历史定义、冻结指纹与边界

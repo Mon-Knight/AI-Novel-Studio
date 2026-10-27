@@ -88,7 +88,7 @@ test('a requested revision can resume after session draft loss without exposing 
         createElement(ArtifactCard, { artifact, busy, onDecide: () => undefined }),
       );
       assert.match(html, /workbench-artifact-resume-revision/);
-      assert.match(html, /继续填写修订意见/);
+      assert.match(html, /返回修订输入区/);
       assert.doesNotMatch(
         html,
         /data-testid="(?:workbench-artifact-apply|workbench-artifact-confirm-review)"/,

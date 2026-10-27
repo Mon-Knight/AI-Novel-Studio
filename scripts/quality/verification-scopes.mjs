@@ -57,6 +57,39 @@ export function packageScope(before, after) {
 
 export const verificationScopes = [
   {
+    name: 'staged chapter planning and execution',
+    match:
+      /^src\/(?:types\/(?:chapterWritingWorkflow|chapterEngineering)\.|services\/generation\/chapterWriting(?:State|Workflow)|services\/ai\/(?:chapter(?:SceneOnlyPlan|SceneBeatPlan|BeatPlanPolicy|BeatState|PlanningCandidate)|mockChapterStagedResponses)|services\/ai\/compilation\/chapterPlanningCompilationDefinitions|services\/engineering\/chapterScenePlanNormalization|test\/(?:chapter-planning|chapter-writing)\/)/u,
+    tests: [
+      'src/test/chapter-planning/',
+      'src/services/generation/chapterWritingWorkflow.test.ts',
+      'src/services/generation/chapterWritingState.test.ts',
+      'src/services/ai/chapterBeatStateService.test.ts',
+      'src/services/ai/mockAiClient.test.ts',
+      'src/services/engineering/chapterEngineeringService.test.ts',
+      'src/services/ai/chapterScenePlanService.test.ts',
+    ],
+    safety: ['src/services/ai/aiCancellation.test.ts'],
+    e2e: ['workbench-writing-smoke', 'generation-job-cancel'],
+  },
+  {
+    name: 'native chapter workflow stages',
+    match:
+      /^(?:src-tauri\/src\/(?:(?:services|repositories)\/chapter_workflow_stage[^/]*|commands\/chapter_workflow_stages|migrations_chapter_workflow_stages)\.rs$|src\/types\/chapterWorkflowStage\.)/u,
+    rustFull: true,
+    e2e: ['workbench-writing-smoke', 'project-backup-boundary', 'generation-job-cancel'],
+  },
+  {
+    name: 'chapter stage presentation',
+    match:
+      /^src\/(?:features\/workbench\/chapterStageProjection|pages\/Workbench\/WorkbenchChapterStageTree)/u,
+    tests: [
+      'src/features/workbench/chapterStageProjection.test.ts',
+      'src/pages/Workbench/WorkbenchChapterStageTree.test.tsx',
+    ],
+    e2e: ['workbench-writing-smoke'],
+  },
+  {
     name: 'guarded character profile editing',
     match:
       /^(?:src-tauri\/src\/services\/character_profile_service|src\/(?:services\/characters\/character(?:Profile|Service)|features\/characters\/|components\/novel-card\/Character(?:LibraryCard|ProfileEditor|ProfileFields)|test\/components\/CharacterLibraryCard))/u,
@@ -164,12 +197,16 @@ export const verificationScopes = [
   {
     name: 'grounded chapter summaries',
     match:
-      /^(?:src-tauri\/src\/services\/(?:summary_grounding|structured_summary_grounding)|prompts\/chapter_summary_grounding\.md|tests\/fixtures\/chapter-summary-grounding\.json|src\/(?:services\/ai\/chapterSummary(?:Grounding|PromptContract)|pages\/Workbench\/SummaryGroundingReview|test\/components\/SummaryGroundingReview))/u,
+      /^(?:src-tauri\/src\/services\/(?:summary_grounding|summary_coverage|structured_summary_grounding|structured_summary_apply|structured_summary_character_reference_tests)|prompts\/chapter_summary_grounding\.md|tests\/fixtures\/chapter-summary-grounding\.json|src\/(?:services\/ai\/chapterSummary(?:Grounding|PromptContract)|pages\/Workbench\/SummaryGroundingReview|test\/components\/SummaryGroundingReview))/u,
     tests: [
       'src/services/ai/chapterSummaryGrounding.test.ts',
       'src/test/components/SummaryGroundingReview.test.tsx',
     ],
-    rustFilters: ['services::summary_grounding::', 'services::structured_artifact_apply_service::'],
+    rustFilters: [
+      'services::summary_grounding::',
+      'services::summary_coverage::',
+      'services::structured_artifact_apply_service::',
+    ],
     e2e: ['chapter-context-persistence', 'workbench-writing-smoke'],
   },
   {
@@ -331,7 +368,7 @@ export const verificationScopes = [
   {
     name: 'SQLite and native shared state',
     match:
-      /^src-tauri\/src\/(?:migrations|db\.|main\.|lib\.|runtime\.|e2e|(?:services|repositories|domain)\/mod\.|services\/(?:content_transaction|structured_artifact_apply))/u,
+      /^src-tauri\/src\/(?:migrations|db(?:\.|\/)|main\.|lib\.|runtime\.|e2e|(?:services|repositories|domain)\/mod\.|services\/(?:content_transaction|structured_artifact_apply))/u,
     rustFull: true,
     e2e: [
       'workbench-writing-smoke',
@@ -382,7 +419,7 @@ export const verificationScopes = [
   ...nativeServiceOwners.map((name) => ({
     name: `native ${name}`,
     match: new RegExp(
-      `^src-tauri/src/(?:services/${name}_service(?:_tests)?|repositories/${name}_repository)\\.rs$`,
+      `^src-tauri/src/(?:services/${name}_service(?:_tests)?(?:\\.rs|/[^/]+\\.rs)|repositories/${name}_repository\\.rs)$`,
       'u',
     ),
     rustFilters: [`services::${name}_service::`],

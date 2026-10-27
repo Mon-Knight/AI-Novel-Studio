@@ -117,7 +117,7 @@ const { structuredRuleGovernanceService } = structuredRuleGovernanceModule;
 const { useWorkbenchChapterAssetRecovery } = chapterAssetRecoveryHookModule;
 const WorkbenchPage = pageModule.default;
 
-const { act, cleanup, fireEvent, render, renderHook, screen, waitFor } =
+const { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } =
   await import('@testing-library/react');
 
 const originalGetAll = novelRepository.getAll;
@@ -250,6 +250,13 @@ const mockBundle: TaskConversationBundle = {
     },
   ],
   artifacts: [],
+};
+
+/** Stable snapshot: useSyncExternalStore 会在每次 getSnapshot 返回新对象时强制重渲染。 */
+const settledStartupSnapshot = {
+  conversationRecovery: { status: 'succeeded' as const, result: { recoveredRuns: 0 } },
+  contextMigration: { status: 'succeeded' as const },
+  generationRecovery: { status: 'succeeded' as const },
 };
 
 /**
@@ -1038,8 +1045,10 @@ test('WorkbenchPage keeps the draft editable and restores bundle without waiting
       resolveChapters = resolve;
     });
   };
-  taskConversationService.get = () => {
+  taskConversationService.get = (_conversationId, options) => {
     bundleRequests += 1;
+    // 恢复偏好读取只需要会话身份，直接返回，避免阻塞显示 bundle 的受控 Promise。
+    if (options?.hydrateArtifacts === false) return Promise.resolve(restoredBundle);
     return new Promise<TaskConversationBundle | null>((resolve) => {
       resolveBundle = resolve;
     });
@@ -1067,7 +1076,8 @@ test('WorkbenchPage keeps the draft editable and restores bundle without waiting
   await act(async () => resolveConversations([mockConversation]));
   await waitFor(() => {
     assert.equal(chapterRequests, 1);
-    assert.equal(bundleRequests, 1);
+    // 最近任务恢复读取一次 bundle 以确认可恢复身份，选中会话后再读取一次用于显示。
+    assert.equal(bundleRequests, 2);
     assert.ok(screen.getByTestId('workbench-bundle-loading'));
   });
   const restoringComposer = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
@@ -2245,7 +2255,7 @@ test('Workbench keeps a failed automatic preparation idle until explicit retry',
   assert.equal(appendedTurns, 0);
 });
 
-test('Workbench rejects same-turn preflight retry when the persisted preparation goal mismatches', async () => {
+test('Workbench rejects same-turn preflight retry when the persisted preparation scope mismatches', async () => {
   useBrowserMockModel();
   const originalGoal = '生成本章正文';
   const preparationTurn: ConversationTurn = {
@@ -2312,7 +2322,7 @@ test('Workbench rejects same-turn preflight retry when the persisted preparation
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'failed');
     assert.equal(readiness.dataset.orchestrationErrorCode, 'MODEL_TOOL_CALLING_NOT_VERIFIED');
-    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+    assert.match(readiness.textContent ?? '', /作用域不匹配/);
   });
   assert.equal(appendedTurns, 0);
   assert.equal(startedRuns, 0);
@@ -2323,7 +2333,7 @@ test('Workbench rejects same-turn preflight retry when the persisted preparation
   await waitFor(() => {
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'failed');
-    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+    assert.match(readiness.textContent ?? '', /作用域不匹配/);
   });
   assert.equal(appendedTurns, 0);
   assert.equal(startedRuns, 0);
@@ -2853,6 +2863,8 @@ test('Workbench rechecks a blocked goal only after a structured candidate report
 
 test('Workbench rechecks a queued asset before appending its automatic preparation turn', async () => {
   useBrowserMockModel();
+  startupCoordinator.getSnapshot = () => settledStartupSnapshot;
+  startupCoordinator.subscribe = () => () => undefined;
   const goal = '写个六万字左右的悬疑故事。';
   let inspectionCount = 0;
   const appendedTurns: ConversationTurn[] = [];
@@ -2896,11 +2908,27 @@ test('Workbench rechecks a queued asset before appending its automatic preparati
       <WorkbenchPage />
     </MemoryRouter>,
   );
-  const composer = await screen.findByTestId('workbench-composer-input');
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-task-header').getAttribute('data-conversation-id'),
+      mockConversation.conversationId,
+    ),
+  );
+  const composer = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
   fireEvent.change(composer, { target: { value: goal } });
-  const send = screen.getByTestId('workbench-send-task') as HTMLButtonElement;
-  await waitFor(() => assert.equal(send.disabled, false));
-  fireEvent.click(send);
+  await waitFor(() => {
+    const sendButton = screen.getByTestId('workbench-send-task') as HTMLButtonElement;
+    assert.equal(
+      sendButton.disabled,
+      false,
+      JSON.stringify({
+        pending: screen.queryByTestId('workbench-task-pending')?.textContent ?? null,
+        contextPending: Boolean(screen.queryByTestId('workbench-context-pending')),
+        draft: (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
+      }),
+    );
+  });
+  fireEvent.click(screen.getByTestId('workbench-send-task'));
 
   await waitFor(() => assert.equal(startedInputs.length, 1));
   assert.ok(inspectionCount >= 2);
@@ -3938,7 +3966,7 @@ test('Workbench retries a renderer-recovered Writer run on its original turn and
   assert.equal(recoveryError.textContent, '工作台已重新加载，上一轮运行已中断。请重试本回合。');
   const retryButton = (await screen.findByTestId('workbench-retry-turn')) as HTMLButtonElement;
   assert.equal(retryButton.disabled, false);
-  assert.equal(retryButton.textContent, '重试此回合');
+  assert.equal(retryButton.textContent, '重试失败阶段');
   fireEvent.click(retryButton);
   fireEvent.click(retryButton);
 
@@ -4006,21 +4034,6 @@ test('retrying an older failed run creates a new run on the original user turn',
         ...mockBundle.toolEvents[0],
         eventId: 'evt-latest',
         runId: 'run-latest',
-      },
-    ],
-    artifacts: [
-      {
-        cardId: 'card-old',
-        conversationId: mockBundle.conversation.conversationId,
-        turnId: 'turn-old',
-        runId: 'run-old',
-        artifactId: 'artifact-old',
-        artifactType: 'quality_report',
-        title: '旧运行报告',
-        summary: '旧运行产物',
-        content: '旧运行证据',
-        status: 'candidate',
-        createdAt: '2026-08-20T00:00:01.000Z',
       },
     ],
   };
@@ -4145,7 +4158,6 @@ test('retrying an older failed run creates a new run on the original user turn',
     assert.equal(retryRun.getAttribute('data-turn-id'), 'turn-old');
     for (const [selector, runId] of [
       ['[data-event-id="evt-old"]', 'run-old'],
-      ['[data-card-id="card-old"]', 'run-old'],
       ['[data-event-id="evt-retry"]', 'run-retry'],
       ['[data-card-id="card-retry"]', 'run-retry'],
     ]) {
@@ -5250,7 +5262,7 @@ test('WorkbenchPage keeps editing responsive while legacy context is still settl
 
   fireEvent.click(screen.getByTestId('workbench-create-task'));
   const creator = await screen.findByTestId('workbench-task-creator');
-  const goal = screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement;
+  const goal = within(creator).getByTestId('workbench-new-task-goal') as HTMLTextAreaElement;
   assert.equal(goal.disabled, false);
   assert.ok(screen.getByTestId('workbench-new-task-context-pending'));
   fireEvent.change(goal, { target: { value: '生成下一章' } });
@@ -5350,10 +5362,16 @@ test('WorkbenchPage saves a new model in the same task and uses it only for the 
       <WorkbenchPage />
     </MemoryRouter>,
   );
-  const selector = (await screen.findByRole('combobox', {
+  await screen.findByRole('combobox', { name: '后续回合模型' });
+  await waitFor(() =>
+    assert.equal(
+      (screen.getByRole('combobox', { name: '后续回合模型' }) as HTMLSelectElement).disabled,
+      false,
+    ),
+  );
+  const selector = screen.getByRole('combobox', {
     name: '后续回合模型',
-  })) as HTMLSelectElement;
-  await waitFor(() => assert.equal(selector.disabled, false));
+  }) as HTMLSelectElement;
   const draft = '完善当前章节大纲';
   fireEvent.change(screen.getByTestId('workbench-composer-input'), { target: { value: draft } });
   fireEvent.change(selector, { target: { value: 'mock:Mock' } });

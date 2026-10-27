@@ -48,16 +48,17 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #f5f6f8;
+        background: #f0ece2;
       }
 
       #startup-splash {
         position: fixed;
         inset: 0;
         z-index: 9999;
-        background: #f5f6f8;
-        color: #1a1a2e;
-        font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+        background: #f0ece2;
+        color: #1d1b17;
+        font-family:
+          'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
         transition:
           opacity 180ms ease,
           visibility 180ms ease;
@@ -77,8 +78,8 @@
       }
 
       .startup-sidebar {
-        border-right: 1px solid #e1e4e8;
-        background: #f7f8fa;
+        border-right: 1px solid #ded7c7;
+        background: #f5f1e8;
       }
 
       .startup-brand {
@@ -86,8 +87,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        border-bottom: 1px solid #e1e4e8;
-        color: #20242b;
+        border-bottom: 1px solid #ded7c7;
+        color: #1d1b17;
       }
 
       .startup-brand-mark {
@@ -95,11 +96,12 @@
         height: 26px;
         display: grid;
         place-items: center;
-        border-radius: 6px;
-        background: #2563eb;
-        color: #ffffff;
-        font-size: 10px;
+        border-radius: 4px;
+        background: #a8382a;
+        color: #fbf7ee;
+        font-size: 11px;
         font-weight: 700;
+        letter-spacing: 0.04em;
       }
 
       .startup-nav {
@@ -122,13 +124,13 @@
         height: 16px;
         flex: 0 0 auto;
         border-radius: 4px;
-        background: #dce1e8;
+        background: #ddd6c6;
       }
 
       .startup-line {
         height: 7px;
         border-radius: 4px;
-        background: #d9dee5;
+        background: #ddd6c6;
         animation: startup-pulse 1.25s ease-in-out infinite alternate;
       }
 
@@ -142,8 +144,8 @@
 
       .startup-task-rail {
         min-width: 0;
-        border-right: 1px solid #e1e4e8;
-        background: #fbfbfc;
+        border-right: 1px solid #ded7c7;
+        background: #faf7f0;
         padding: 20px 8px 12px;
       }
 
@@ -164,7 +166,7 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
-        background: #ffffff;
+        background: #fffdf8;
       }
 
       .startup-canvas-header {
@@ -174,7 +176,7 @@
         justify-content: space-between;
         gap: 20px;
         padding: 0 24px;
-        border-bottom: 1px solid #e1e4e8;
+        border-bottom: 1px solid #ded7c7;
       }
 
       .startup-canvas-actions {
@@ -187,7 +189,7 @@
         width: 28px;
         height: 28px;
         border-radius: 6px;
-        background: #e3e7ec;
+        background: #ddd6c6;
       }
 
       .startup-thread {
@@ -206,7 +208,7 @@
         width: 24px;
         height: 24px;
         border-radius: 6px;
-        background: #cfd6df;
+        background: #ddd6c6;
       }
 
       .startup-thread-copy {
@@ -227,10 +229,10 @@
         width: min(860px, calc(100% - 48px));
         height: 152px;
         margin: 0 auto 22px;
-        border: 1px solid #d8dde5;
-        border-radius: 8px;
-        background: #ffffff;
-        box-shadow: 0 4px 14px rgba(29, 38, 54, 0.06);
+        border: 1px solid #ded7c7;
+        border-radius: 10px;
+        background: #fffdf8;
+        box-shadow: 0 4px 14px rgba(58, 48, 30, 0.07);
       }
 
       @keyframes startup-pulse {
@@ -292,7 +294,7 @@
         height: 7px;
         margin-left: 11px;
         border-radius: 4px;
-        background: #d9dee5;
+        background: #ddd6c6;
         content: '';
         animation: startup-pulse 1.25s ease-in-out infinite alternate;
       }
@@ -315,30 +317,39 @@
       :root[data-effective-theme='dark'],
       :root[data-effective-theme='dark'] body,
       :root[data-effective-theme='dark'] #startup-splash {
-        background: #1f2023;
-        color: #f1f3f5;
+        background: #14130f;
+        color: #ece5d6;
       }
 
-      :root[data-effective-theme='dark'] .startup-sidebar,
+      :root[data-effective-theme='dark'] .startup-sidebar {
+        background: #191813;
+        border-color: #2e2a22;
+      }
+
       :root[data-effective-theme='dark'] .startup-task-rail {
-        background: #252526;
-        border-color: #3c3c3c;
+        background: #1e1c18;
+        border-color: #2e2a22;
       }
 
       :root[data-effective-theme='dark'] .startup-brand,
       :root[data-effective-theme='dark'] .startup-canvas-header {
-        border-color: #353940;
-        color: #f1f3f5;
+        border-color: #2e2a22;
+        color: #ece5d6;
+      }
+
+      :root[data-effective-theme='dark'] .startup-brand-mark {
+        background: #e07a63;
+        color: #17150f;
       }
 
       :root[data-effective-theme='dark'] .startup-canvas,
       :root[data-effective-theme='dark'] .startup-composer {
-        background: #2d2d30;
+        background: #232019;
       }
 
       :root[data-effective-theme='dark'] .startup-task-rail,
       :root[data-effective-theme='dark'] .startup-composer {
-        border-color: #353940;
+        border-color: #2e2a22;
       }
 
       :root[data-effective-theme='dark'] .startup-nav-icon,
@@ -346,11 +357,11 @@
       :root[data-effective-theme='dark'] .startup-thread-avatar,
       :root[data-effective-theme='dark'] .startup-line,
       :root[data-effective-theme='dark'] .startup-action-dot {
-        background: #454a52;
+        background: #3a352a;
       }
 
       :root[data-effective-theme='dark'][data-startup-layout='standard'] .startup-nav-row::after {
-        background: #454a52;
+        background: #3a352a;
       }
     </style>
   </head>

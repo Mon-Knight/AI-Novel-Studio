@@ -14,6 +14,7 @@ import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
 import { volumeRepository } from '../database/volumeRepository';
+import { chapterEngineeringService } from '../engineering/chapterEngineeringService';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { taskRetryRecovery } from './taskRetryRecovery';
 import {
@@ -206,13 +207,22 @@ function mockTauriWindow(): PropertyDescriptor | undefined {
     configurable: true,
     value: { __TAURI_INTERNALS__: {} },
   });
+  chapterEngineeringService.getBundle = async () => ({
+    activeState: undefined,
+    latestDraft: undefined,
+    states: [],
+    hasUnappliedDraft: false,
+  });
   return originalWindow;
 }
 
 function restoreWindow(originalWindow: PropertyDescriptor | undefined): void {
+  chapterEngineeringService.getBundle = originalEngineeringGetBundle;
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
   else Reflect.deleteProperty(globalThis, 'window');
 }
+
+const originalEngineeringGetBundle = chapterEngineeringService.getBundle;
 
 const readModelSnapshot: TaskModelSnapshot = {
   providerId: 'deepseek-official',

@@ -295,6 +295,7 @@ fn main() {
             commands::conversations::get_task_conversation_window,
             commands::conversations::list_running_task_targets,
             commands::conversations::get_task_turn_run_projection,
+            commands::conversations::chapter_workflow_stages::list_chapter_workflow_stages,
             commands::conversations::update_task_conversation_model,
             commands::conversations::rename_task_conversation,
             commands::conversations::set_task_conversation_archived,

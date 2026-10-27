@@ -1,0 +1,347 @@
+/**
+ * Read-only chapter Scene/Beat progress tree.
+ *
+ * Scoped to the workbench progress component; no global layout or token
+ * overrides. Colours and spacing come from the shared semantic tokens.
+ */
+
+.workbench-chapter-stage-tree {
+  width: min(100%, var(--workbench-content-width, 860px));
+  margin: var(--space-2) auto 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-bg-panel) 88%, transparent);
+  color: var(--color-text-primary);
+}
+
+.workbench-chapter-stage-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.workbench-chapter-stage-heading {
+  min-width: 0;
+}
+
+.workbench-chapter-stage-heading h3 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-normal);
+}
+
+.workbench-chapter-stage-subtitle {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-persistence {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-persistence-label {
+  color: var(--color-text-muted);
+}
+
+.workbench-chapter-stage-persistence-value {
+  color: var(--color-text-secondary);
+}
+
+.workbench-chapter-stage-persistence[data-persistence='browser']
+  .workbench-chapter-stage-persistence-value {
+  color: var(--color-warning-text);
+}
+
+.workbench-chapter-stage-persistence[data-persistence='none']
+  .workbench-chapter-stage-persistence-value {
+  color: var(--color-text-muted);
+}
+
+.workbench-chapter-stage-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workbench-chapter-stage-fixed,
+.workbench-chapter-stage-scene {
+  min-width: 0;
+}
+
+.workbench-chapter-stage-fixed {
+  padding: 3px 0;
+}
+
+.workbench-chapter-stage-fixed-title,
+.workbench-chapter-stage-section-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.workbench-chapter-stage-scene {
+  margin-top: var(--space-1);
+  padding: 2px 0 3px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.workbench-chapter-stage-scene-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.workbench-chapter-stage-scene-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+.workbench-chapter-stage-scene-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.workbench-chapter-stage-scene-toggle:focus-visible,
+.workbench-chapter-stage-locate:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 1px;
+}
+
+.workbench-chapter-stage-scene-toggle svg {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.workbench-chapter-stage-scene-toggle[aria-expanded='false'] svg {
+  transform: none;
+}
+
+.workbench-chapter-stage-scene-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.workbench-chapter-stage-scene-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-scene-body {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0 var(--space-3);
+  padding: var(--space-2) 0 var(--space-1) var(--space-3);
+  border-left: 1px solid var(--color-border-light);
+}
+
+.workbench-chapter-stage-scene.is-future .workbench-chapter-stage-scene-toggle {
+  color: var(--color-text-muted);
+}
+
+.workbench-chapter-stage-section {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workbench-chapter-stage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  min-width: 0;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.workbench-chapter-stage-row:hover {
+  background: var(--color-bg-hover);
+}
+
+.workbench-chapter-stage-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+}
+
+.workbench-chapter-stage-row[data-status='running'] .workbench-chapter-stage-dot {
+  background: var(--color-primary);
+}
+
+.workbench-chapter-stage-row[data-status='completed'] .workbench-chapter-stage-dot {
+  background: var(--color-success);
+}
+
+.workbench-chapter-stage-row[data-status='failed'] .workbench-chapter-stage-dot {
+  background: var(--color-error);
+}
+
+.workbench-chapter-stage-row[data-status='cancelled'] .workbench-chapter-stage-dot,
+.workbench-chapter-stage-row[data-status='interrupted'] .workbench-chapter-stage-dot {
+  background: var(--color-warning);
+}
+
+.workbench-chapter-stage-row[data-status='not_recorded'] .workbench-chapter-stage-dot,
+.workbench-chapter-stage-row[data-status='pending'] .workbench-chapter-stage-dot {
+  background: var(--color-border-strong);
+}
+
+.workbench-chapter-stage-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-meta {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-status {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.workbench-chapter-stage-status.is-running {
+  color: var(--color-primary);
+}
+
+.workbench-chapter-stage-status.is-completed {
+  color: var(--color-success-text);
+}
+
+.workbench-chapter-stage-status.is-failed {
+  color: var(--color-error-text);
+}
+
+.workbench-chapter-stage-status.is-cancelled,
+.workbench-chapter-stage-status.is-interrupted,
+.workbench-chapter-stage-status.is-partial {
+  color: var(--color-warning-text);
+}
+
+.workbench-chapter-stage-locate {
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.workbench-chapter-stage-locate:hover {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
+}
+
+.workbench-chapter-stage-beat {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.workbench-chapter-stage-beat-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workbench-chapter-stage-beat-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.workbench-chapter-stage-beat-head .workbench-chapter-stage-status {
+  margin-left: 0;
+}
+
+.workbench-chapter-stage-empty {
+  margin: 0;
+  padding: 1px 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.workbench-chapter-stage-unscoped {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.workbench-chapter-stage-note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-chapter-stage-scene-toggle svg {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .workbench-chapter-stage-tree {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .workbench-chapter-stage-header {
+    flex-wrap: wrap;
+  }
+
+  .workbench-chapter-stage-persistence {
+    white-space: normal;
+  }
+}

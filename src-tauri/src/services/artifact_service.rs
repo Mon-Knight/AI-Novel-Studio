@@ -391,6 +391,22 @@ fn create_artifact_internal(
             crate::services::summary_grounding::candidate(&input.raw_content, structured.as_ref());
         // Every newly created summary uses the current contract. Historical replay
         // already returned above; a missing producer marker must never downgrade admission.
+        // Admission only requires the two arrays; item semantics are checked at apply.
+        issues.extend(
+            crate::services::summary_coverage::validate(
+                &payload,
+                true,
+                crate::services::summary_coverage::Depth::Presence,
+            )
+            .into_iter()
+            .map(|item| ValidationIssue {
+                severity: item.severity,
+                code: item.code,
+                message: item.message,
+                json_path: Some(item.json_path),
+                details_json: None,
+            }),
+        );
         issues.extend(
             crate::services::summary_grounding_source::validate_candidate(
                 &transaction,

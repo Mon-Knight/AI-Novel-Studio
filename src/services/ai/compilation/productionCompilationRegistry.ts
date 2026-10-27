@@ -33,6 +33,10 @@ import {
   type AiTaskCompilationDefinition,
 } from './executionContractCompiler';
 import { CHAPTER_GENERATION_ALLOWED_SOURCE_TYPES } from './chapterGenerationSourcePolicy';
+import {
+  chapterPlanningCompilationDefinitions,
+  usesChapterPlanningThinkingPolicy,
+} from './chapterPlanningCompilationDefinitions';
 
 function autonomousUserPrompt(marker: string) {
   return (taskInput: Record<string, unknown>) => {
@@ -378,6 +382,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
     maxOutputTokens: CHAPTER_SCENE_PLAN_MAX_OUTPUT_TOKENS,
     defaultTemperature: CHAPTER_SCENE_PLAN_TEMPERATURE,
   },
+  ...chapterPlanningCompilationDefinitions,
   autonomous_plot_plan: autonomousDefinition({
     taskType: 'autonomous_plot_plan',
     promptTemplateId: 'autonomous/plot_planner',
@@ -459,10 +464,9 @@ function definitionForExecution(
   modelId: string,
 ): AiTaskCompilationDefinition | undefined {
   const definition = definitions[taskType];
-  const thinkingMode =
-    taskType === 'chapter_scene_plan_generate'
-      ? chapterScenePlanThinkingModeForModel(modelId)
-      : undefined;
+  const thinkingMode = usesChapterPlanningThinkingPolicy(taskType)
+    ? chapterScenePlanThinkingModeForModel(modelId)
+    : undefined;
   if (definition && thinkingMode) {
     return { ...definition, thinkingMode };
   }

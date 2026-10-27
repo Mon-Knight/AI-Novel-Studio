@@ -33,7 +33,7 @@ async function testIdAttributes(testId: string, attribute: string): Promise<stri
 }
 
 describe('conversational creative workbench', () => {
-  it('keeps legacy routes and blocks empty tasks when the Runtime model is unavailable', async () => {
+  it('keeps legacy routes and allows sending with a configured model when the Runtime directory is unavailable', async () => {
     await waitForTestId('workbench-no-projects');
     expect(['', '#/']).toContain(await browser.execute(() => window.location.hash));
 
@@ -61,9 +61,10 @@ describe('conversational creative workbench', () => {
     const model = await waitForTestId('workbench-new-task-model-select');
     expect(await model.getValue()).toBe('mock:Mock');
     const modelStatus = await waitForTestId('workbench-new-task-model-status');
-    expect(await modelStatus.getText()).toMatch(/Runtime|模型目录|所选模型/);
+    expect(await modelStatus.getText()).toMatch(/已配置模型|Runtime|模型目录|所选模型/);
     const createAndStart = await waitForTestId('workbench-create-and-start');
-    expect(await createAndStart.isEnabled()).toBe(false);
+    // v3.7.0：模型目录只作描述，选择和发送不依赖目录验证；实际失败写入对话。
+    expect(await createAndStart.isEnabled()).toBe(true);
     expect(await testIdCount('workbench-task')).toBe(0);
 
     const closeCreator = await creator.$('button[aria-label="关闭新建会话"]');

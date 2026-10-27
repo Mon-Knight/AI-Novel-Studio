@@ -90,6 +90,19 @@ test.before(async () => {
     mockMode: true,
     apiKey: '',
     baseUrl: '',
+    // 固定快照测试所需的云端模型配置，不依赖本机遗留的 LocalStorage。
+    savedApiModels: [
+      {
+        id: 'test-deepseek-chat',
+        label: 'DeepSeek Chat',
+        provider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        modelName: 'deepseek-chat',
+        temperature: 0.7,
+        maxTokens: 4096,
+        timeoutSeconds: 60,
+      },
+    ],
   });
 });
 

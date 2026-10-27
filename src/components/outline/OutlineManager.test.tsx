@@ -34,6 +34,12 @@ vi.mock('../../services/database/chapterRepository', () => ({
         chapter.id === id ? { ...chapter, ...input } : chapter,
       );
     },
+    saveDetails: async (baseline: Chapter, input: Partial<Chapter>) => {
+      state.updateChapter(baseline.id, input);
+      state.chapters = state.chapters.map((chapter) =>
+        chapter.id === baseline.id ? { ...chapter, ...input } : chapter,
+      );
+    },
     remove: vi.fn(),
   },
 }));

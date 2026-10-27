@@ -4,6 +4,10 @@ import {
   type SessionModelCredentialIdentity,
 } from '../ai/aiSettingsStore';
 import { executeChapterGeneration } from '../ai/chapterGenerationExecutionService';
+import {
+  runWorkbenchStagedChapter,
+  stagedScenePlanFromSnapshot,
+} from './workbenchStagedChapterWrite';
 import { draftVersionService } from '../database/draftVersionService';
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
@@ -486,40 +490,55 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         : {}),
     });
 
-    let result = await executeGen({
-      novelId: input.novelId,
-      chapterId: input.chapterId,
-      operationId,
-      settings,
-      request,
-      sourceId: input.chapterId + ':' + operationId,
-      sourceVersion: snapshot.contextHash ?? '',
-      compilationSources,
-      taskInput: {
-        chapterTitle:
-          snapshot.compiledContext?.baseContext?.chapterTitle ??
-          snapshot.sources?.find((s) => s.type === 'chapter_outline')?.title ??
-          '未命名章节',
-        contextHash: snapshot.contextHash ?? '',
-        targetWordCount: snapshot.compiledContext?.baseContext?.targetWordCount ?? 2000,
-        mode: input.mode === 'polish' || Boolean(sourceText) ? 'rewrite' : 'new',
-        userGoal: input.goal,
-        novelId: input.novelId,
-        chapterId: input.chapterId,
-        purpose: 'workbench_chapter_candidate',
-        contextCoverage,
-        ...(revisionSource
-          ? {
-              revisionSource,
-              sourceArtifactId: revisionSource.artifactId,
-              sourceContentHash: revisionSourceContentHash,
-              parentArtifactId: revisionSource.artifactId,
-              derivationType: CHAPTER_REVISION_DERIVATION_TYPE,
-            }
-          : {}),
-      },
-      signal: input.signal,
-    });
+    const stagedPlan =
+      input.mode === 'generate' && !sourceText && !revisionSource
+        ? stagedScenePlanFromSnapshot(snapshot)
+        : undefined;
+    const stagedAssembly = Boolean(stagedPlan);
+    let result = stagedPlan
+      ? await runWorkbenchStagedChapter({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          operationId,
+          attemptId: operationId,
+          settings,
+          snapshot,
+          signal: input.signal,
+        })
+      : await executeGen({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          operationId,
+          settings,
+          request,
+          sourceId: input.chapterId + ':' + operationId,
+          sourceVersion: snapshot.contextHash ?? '',
+          compilationSources,
+          taskInput: {
+            chapterTitle:
+              snapshot.compiledContext?.baseContext?.chapterTitle ??
+              snapshot.sources?.find((s) => s.type === 'chapter_outline')?.title ??
+              '未命名章节',
+            contextHash: snapshot.contextHash ?? '',
+            targetWordCount: snapshot.compiledContext?.baseContext?.targetWordCount ?? 2000,
+            mode: input.mode === 'polish' || Boolean(sourceText) ? 'rewrite' : 'new',
+            userGoal: input.goal,
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            purpose: 'workbench_chapter_candidate',
+            contextCoverage,
+            ...(revisionSource
+              ? {
+                  revisionSource,
+                  sourceArtifactId: revisionSource.artifactId,
+                  sourceContentHash: revisionSourceContentHash,
+                  parentArtifactId: revisionSource.artifactId,
+                  derivationType: CHAPTER_REVISION_DERIVATION_TYPE,
+                }
+              : {}),
+          },
+          signal: input.signal,
+        });
     let providerRequestEvidence = await linkProviderRequestEvidence(
       snapshot,
       snapshot.contextHash,
@@ -533,6 +552,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
     let lengthRepairCount = 0;
     while (
       wordRange &&
+      !stagedAssembly &&
       isChapterWordCountOutOfRange(wordRange, finalWordCount) &&
       lengthRepairCount < MAX_LENGTH_REPAIR_ATTEMPTS
     ) {
@@ -637,6 +657,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       previousChapterText: adoptedPreviousChapter?.content,
     });
     while (
+      !stagedAssembly &&
       integrityIssues.some((issue) => issue.severity === 'error') &&
       integrityRepairCount < MAX_INTEGRITY_REPAIR_ATTEMPTS
     ) {

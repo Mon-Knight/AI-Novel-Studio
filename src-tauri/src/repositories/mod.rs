@@ -7,6 +7,7 @@ pub mod chapter_engineering_repository;
 pub mod chapter_event_repository;
 pub mod chapter_repository;
 pub mod chapter_summary_repository;
+pub mod chapter_workflow_stage_repository;
 pub mod character_asset_repository;
 pub mod character_state_repository;
 pub mod context_record_repository;

@@ -1,6 +1,6 @@
 总结只能依据 chapter.read_outline 返回的 currentAdoptedDraft 完整采用正文；若 truncated=true、采用正文缺失或读取失败，停止并说明无法完整总结。大纲、角色安排、旧总结和用户纠错要求只用于检查，不能成为本章已发生事实的来源。
 
-candidateText 必须为 JSON，含 summary 与 grounding。需要时提取 keyEvents、factsMustRemember、characterChanges、contextRecords 等字段；没有实际变化则返回空数组或省略，避免冗余。
+candidateText 必须为 JSON，含 summary、characterChanges、contextRecords 与 grounding。characterChanges 和 contextRecords 必须是数组：本章确认没有人物状态变化或没有额外长期记录时返回空数组，不得省略字段；省略任一字段视为候选不完整，宿主会拒收。本章总结本身会作为 chapter_summary 上下文写入，contextRecords 只列额外长期记录，不必重复摘要。characterChanges 每项至少包含 characterName（或 characterId）与非空 stateSummary；contextRecords 每项至少包含非空 title 与 content。没有采用稿原文依据的变化不要填写；空数组只表示“已核对且没有可记录的变化”，不构成对遗漏的语义证明。新版契约下人物状态只从 characterChanges 写入，importantCharacterChanges 与 protagonistStateChange 只是描述性旧字段，不授予状态写入权。
 
 grounding 格式为 {"version":1,"claims":[{"path":"/summary","status":"confirmed","quotes":["从本章采用正文逐字复制的完整句子"]},{"path":"/keyEvents/0","status":"planned","quotes":["包含计划而非完成动作的原文句子"]}]}。
 

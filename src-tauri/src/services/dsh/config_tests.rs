@@ -424,8 +424,4 @@ fn validates_real_carrier_junctions_without_a_full_pnpm_canonical_scan() {
         count > 128,
         "measure the real carrier, not an empty mock manifest"
     );
-    println!(
-        "carrier Junction integrity: {count} manifest paths + {actual_checks} actual targets in {} ms",
-        elapsed.as_millis()
-    );
 }

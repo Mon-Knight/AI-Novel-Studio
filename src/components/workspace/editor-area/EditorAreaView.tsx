@@ -63,8 +63,6 @@ export default function EditorAreaView({
   const busy = document.saving || document.adopting;
   return (
     <div className="editor-content" data-document-state={documentState}>
-      <h1 className="editor-chapter-title">{formatChapterHeading(chapter)}</h1>
-
       {ready && currentDraft && (
         <details className="editor-document-metadata" key={`${chapter.id}:${currentDraft.id}`}>
           <summary>
@@ -154,15 +152,22 @@ export default function EditorAreaView({
       )}
 
       {ready && document.effectiveContentState?.status === 'unavailable' ? (
-        <ContentUnavailableState
-          state={document.effectiveContentState}
-          retrying={retryingContent}
-          onRetry={() => onRetryContent?.()}
-          onOpenHistory={onOpenDraftHistory}
-          onBackToChapters={onBackToChapters}
-        />
+        // 正文不可用时纸面不渲染，标题需要保留在桌面上，否则用户会失去当前章节的定位。
+        <>
+          <h1 className="editor-chapter-title editor-chapter-title--detached">
+            {formatChapterHeading(chapter)}
+          </h1>
+          <ContentUnavailableState
+            state={document.effectiveContentState}
+            retrying={retryingContent}
+            onRetry={() => onRetryContent?.()}
+            onOpenHistory={onOpenDraftHistory}
+            onBackToChapters={onBackToChapters}
+          />
+        </>
       ) : (
         <div className="editor-paper">
+          <h1 className="editor-chapter-title">{formatChapterHeading(chapter)}</h1>
           {ready && reviewLocked && (
             <div className="editor-review-banner" data-testid="chapter-review-lock">
               <span>当前为审阅模式：打开不等于保存，保存不等于采用。</span>
@@ -214,6 +219,13 @@ export default function EditorAreaView({
             }
             spellCheck={false}
           />
+          <div className="editor-paper-folio" aria-hidden="true">
+            <span>第 {chapter.chapterNumber} 章</span>
+            <span>
+              {countTextWords(document.content)} 字
+              {chapter.targetWords ? ` · 目标 ${chapter.targetWords}` : ''}
+            </span>
+          </div>
         </div>
       )}
     </div>

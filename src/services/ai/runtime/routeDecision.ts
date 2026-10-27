@@ -35,6 +35,9 @@ export function roleForTaskType(taskType: AiTaskType): CreativeRole {
     case 'chapter_rewrite':
       return 'writer.chapter_fallback';
     case 'chapter_scene_plan_generate':
+    case 'chapter_scene_plan_v2_generate':
+    case 'chapter_beat_plan_generate':
+    case 'chapter_beat_state_extract':
       return 'director.scene_plan';
     case 'chapter_beat_repair':
     case 'quality_fix':

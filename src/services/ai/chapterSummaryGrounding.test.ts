@@ -55,6 +55,22 @@ test('normalization retains malformed evidence for validation and does not fabri
   assert.equal(validation.safeToContext, false);
   assert.equal(validation.semanticValidation, 'not_checked');
 });
+test('normalization distinguishes omitted coverage arrays from explicit empty arrays', () => {
+  const missing = normalizeChapterSummarizeResult({ summary: '唐棠收到旧信。' }, '');
+  assert.deepEqual(missing.coverage, {
+    characterChanges: 'missing',
+    contextRecords: 'missing',
+  });
+  const explicit = normalizeChapterSummarizeResult(
+    { summary: '唐棠收到旧信。', characterChanges: [], contextRecords: [] },
+    '',
+  );
+  assert.deepEqual(explicit.coverage, {
+    characterChanges: 'explicit',
+    contextRecords: 'explicit',
+  });
+});
+
 test('review includes uncovered memory assertions with an explicit unclassified state', () => {
   const claims = summaryClaimViews(fixtures[6].payload);
   assert.equal(claims.length, 6);

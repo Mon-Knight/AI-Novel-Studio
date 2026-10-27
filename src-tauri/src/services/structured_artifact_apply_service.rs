@@ -1,6 +1,5 @@
 use crate::domain::context::{
-    SaveChapterContextBundleInput, SaveChapterSummaryInput, SaveCharacterStateInput,
-    SaveContextRecordInput,
+    SaveChapterContextBundleInput, SaveChapterSummaryInput, SaveContextRecordInput,
 };
 use crate::errors::AppError;
 use crate::repositories::{
@@ -11,15 +10,17 @@ use crate::repositories::{
 use crate::services::world_rule_governance::{
     self as rule_governance, RuleChangeAuthorization, RuleChangePreview,
 };
-use crate::services::{ai_task_service, artifact_service, chapter_context_bundle_service};
+use crate::services::{
+    ai_task_service, artifact_service, chapter_context_bundle_service, structured_summary_apply,
+};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
-const MAX_ITEMS: usize = 200;
-const MAX_NAME_CHARS: usize = 240;
-const MAX_FIELD_CHARS: usize = 400_000;
+pub(super) const MAX_ITEMS: usize = 200;
+pub(super) const MAX_NAME_CHARS: usize = 240;
+pub(super) const MAX_FIELD_CHARS: usize = 400_000;
 const MAX_STORY_PLAN_BYTES: usize = 2_000_000;
 const MAX_STORY_PLAN_VOLUMES: usize = 50;
 const MAX_STORY_PLAN_CHAPTERS: usize = 200;
@@ -220,7 +221,7 @@ fn parse_loose_json(raw: &str) -> Option<Value> {
     })
 }
 
-fn trimmed_text(value: Option<&Value>, max_chars: usize) -> Option<String> {
+pub(super) fn trimmed_text(value: Option<&Value>, max_chars: usize) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
@@ -313,7 +314,7 @@ fn optional_field(object: &Map<String, Value>, key: &str) -> Option<String> {
     trimmed_text(object.get(key), MAX_FIELD_CHARS)
 }
 
-fn stored_field(object: &Map<String, Value>, key: &str) -> Option<String> {
+pub(super) fn stored_field(object: &Map<String, Value>, key: &str) -> Option<String> {
     match object.get(key) {
         Some(Value::String(value)) => {
             let value = value.trim();
@@ -2331,6 +2332,9 @@ fn summary_context_records(
             });
         }
     }
+    // `contextRecords` lists additional long-term records. The chapter summary itself is
+    // always derived here when absent, so an explicit empty array means "no extra records",
+    // not "write no context record at all".
     if !records
         .iter()
         .any(|record| record.context_type == "chapter_summary")
@@ -2361,153 +2365,6 @@ fn summary_context_records(
         });
     }
     Ok(records)
-}
-
-fn resolve_summary_character_id(
-    connection: &Connection,
-    novel_id: &str,
-    object: &Map<String, Value>,
-) -> Result<Option<String>, AppError> {
-    if let Some(character_id) = trimmed_text(object.get("characterId"), MAX_NAME_CHARS) {
-        return connection
-            .query_row(
-                "SELECT id FROM characters
-                 WHERE id=?1 AND novel_id=?2 AND is_active=1 LIMIT 1",
-                params![character_id, novel_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(AppError::database);
-    }
-    let Some(name) = trimmed_text(
-        object.get("characterName").or_else(|| object.get("name")),
-        MAX_NAME_CHARS,
-    ) else {
-        return Ok(None);
-    };
-    connection
-        .query_row(
-            "SELECT id FROM characters
-             WHERE novel_id=?1 AND name=?2 AND is_active=1
-             ORDER BY is_protagonist DESC, protagonist_order, created_at, id LIMIT 1",
-            params![novel_id, name],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(AppError::database)
-}
-
-fn existing_character_state_id(
-    connection: &Connection,
-    novel_id: &str,
-    chapter_id: &str,
-    character_id: &str,
-) -> Result<Option<String>, AppError> {
-    connection
-        .query_row(
-            "SELECT id FROM character_states
-             WHERE novel_id=?1 AND chapter_id=?2 AND character_id=?3
-             ORDER BY created_at DESC, id DESC LIMIT 1",
-            params![novel_id, chapter_id, character_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(AppError::database)
-}
-
-fn summary_character_states(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    object: Option<&Map<String, Value>>,
-) -> Result<Vec<SaveCharacterStateInput>, AppError> {
-    let Some(chapter_id) = input.chapter_id.as_deref() else {
-        return Ok(Vec::new());
-    };
-    let mut changes = Vec::<Map<String, Value>>::new();
-    if let Some(items) = object
-        .and_then(|value| value.get("characterChanges"))
-        .and_then(Value::as_array)
-    {
-        changes.extend(
-            items
-                .iter()
-                .take(MAX_ITEMS)
-                .filter_map(Value::as_object)
-                .cloned(),
-        );
-    }
-    if let Some(items) = object
-        .and_then(|value| value.get("importantCharacterChanges"))
-        .and_then(Value::as_array)
-    {
-        for item in items.iter().take(MAX_ITEMS).filter_map(Value::as_object) {
-            let mut normalized = item.clone();
-            if normalized.get("characterName").is_none() {
-                if let Some(name) = normalized.get("name").cloned() {
-                    normalized.insert("characterName".to_string(), name);
-                }
-            }
-            if normalized.get("stateSummary").is_none() {
-                if let Some(change) = normalized.get("change").cloned() {
-                    normalized.insert("stateSummary".to_string(), change);
-                }
-            }
-            changes.push(normalized);
-        }
-    }
-    if let Some(protagonist_state) =
-        object.and_then(|value| trimmed_text(value.get("protagonistStateChange"), MAX_FIELD_CHARS))
-    {
-        let protagonist = connection
-            .query_row(
-                "SELECT id,name FROM characters
-                 WHERE novel_id=?1 AND is_active=1 AND is_protagonist=1
-                 ORDER BY protagonist_order, created_at, id LIMIT 1",
-                params![input.novel_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()
-            .map_err(AppError::database)?;
-        if let Some((character_id, character_name)) = protagonist {
-            let mut change = Map::new();
-            change.insert("characterId".to_string(), Value::String(character_id));
-            change.insert("characterName".to_string(), Value::String(character_name));
-            change.insert("stateSummary".to_string(), Value::String(protagonist_state));
-            changes.push(change);
-        }
-    }
-
-    let mut seen = HashSet::new();
-    let mut states = Vec::new();
-    for change in changes {
-        let Some(state_summary) = trimmed_text(change.get("stateSummary"), MAX_FIELD_CHARS) else {
-            continue;
-        };
-        let Some(character_id) =
-            resolve_summary_character_id(connection, &input.novel_id, &change)?
-        else {
-            continue;
-        };
-        if !seen.insert(character_id.clone()) {
-            continue;
-        }
-        let id =
-            existing_character_state_id(connection, &input.novel_id, chapter_id, &character_id)?
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        states.push(SaveCharacterStateInput {
-            id: Some(id),
-            novel_id: input.novel_id.clone(),
-            character_id,
-            chapter_id: Some(chapter_id.to_string()),
-            state_summary,
-            relationship_changes: stored_field(&change, "relationshipChanges"),
-            goal_changes: stored_field(&change, "goalChanges"),
-            location: stored_field(&change, "location"),
-            health_state: stored_field(&change, "healthState"),
-            knowledge_state: stored_field(&change, "knowledgeState"),
-        });
-    }
-    Ok(states)
 }
 
 fn apply_summary(
@@ -2570,6 +2427,22 @@ fn apply_summary(
     {
         return Ok(DomainOutcome::Conflict("SUMMARY_GROUNDING_REVIEW_REQUIRED"));
     }
+    let coverage_required = crate::services::summary_coverage::required_by_snapshot(
+        summary_snapshot
+            .as_ref()
+            .map(|snapshot| &snapshot.payload_json),
+    );
+    let coverage_issues = crate::services::summary_coverage::validate(
+        &value,
+        coverage_required,
+        crate::services::summary_coverage::Depth::Complete,
+    );
+    if coverage_issues
+        .iter()
+        .any(|issue| issue.severity == "error")
+    {
+        return Ok(DomainOutcome::Conflict("SUMMARY_COVERAGE_INCOMPLETE"));
+    }
     let object = value.as_object();
     let summary = object
         .and_then(|object| trimmed_text(object.get("summary"), MAX_FIELD_CHARS))
@@ -2613,6 +2486,12 @@ fn apply_summary(
                 "severity": issue.severity, "code": issue.code,
                 "path": issue.json_path, "message": issue.message,
             })).collect::<Vec<_>>(),
+            "summaryCoverageVersion": if coverage_required {
+                json!(crate::services::summary_coverage::VERSION)
+            } else {
+                Value::Null
+            },
+            "coverageValidation": if coverage_required { "passed" } else { "legacy_not_required" },
             "problems": [{"type": "speculation", "message": "作者已审阅应用；原文依据核对不等于语义证明。"}]
         }).to_string()),
         enabled: Some(true),
@@ -2629,7 +2508,17 @@ fn apply_summary(
         input_summary.content_hash.as_deref(),
         input_summary.draft_version,
     )?;
-    let character_states = summary_character_states(connection, input, object)?;
+    let character_states = match structured_summary_apply::summary_character_states(
+        connection,
+        input,
+        object,
+        coverage_required,
+    )? {
+        structured_summary_apply::CharacterStatesOutcome::Ready(states) => states,
+        structured_summary_apply::CharacterStatesOutcome::Conflict(code) => {
+            return Ok(DomainOutcome::Conflict(code));
+        }
+    };
     chapter_context_bundle_service::persist_chapter_context_bundle_in_transaction(
         connection,
         &SaveChapterContextBundleInput {
@@ -3100,6 +2989,22 @@ mod tests {
         artifact_type: &str,
         payload: Value,
     ) -> (String, artifact_service::ResultArtifactBundle) {
+        publish_draft_artifact_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            json!({}),
+        )
+    }
+
+    fn publish_draft_artifact_with_snapshot_extra(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+        snapshot_extra: Value,
+    ) -> (String, artifact_service::ResultArtifactBundle) {
         let conversation_id = create_conversation(connection, suffix);
         let raw = serde_json::to_string(&payload).expect("payload json");
         let mut task_input =
@@ -3115,7 +3020,13 @@ mod tests {
             "baseChapterRevision": CHAPTER_REVISION,
         }));
         task_input.input_snapshot.input_type = "workbench_apply_test".to_string();
-        task_input.input_snapshot.payload_json = json!({"conversationId": conversation_id});
+        let mut snapshot_payload = json!({"conversationId": conversation_id});
+        if let Some(extra) = snapshot_extra.as_object() {
+            for (key, value) in extra {
+                snapshot_payload[key] = value.clone();
+            }
+        }
+        task_input.input_snapshot.payload_json = snapshot_payload;
         task_input.input_snapshot.body = raw.clone();
         task_input.input_snapshot.source_draft_id = Some(DRAFT_ID.to_string());
         task_input.input_snapshot.source_draft_version = Some(3);
@@ -3179,8 +3090,32 @@ mod tests {
         conversation_service::ConversationArtifactCardRecord,
         artifact_service::ResultArtifactBundle,
     ) {
-        let (conversation_id, bundle) =
-            publish_draft_artifact(connection, suffix, artifact_type, payload);
+        publish_draft_based_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            json!({}),
+        )
+    }
+
+    fn publish_draft_based_with_snapshot_extra(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+        snapshot_extra: Value,
+    ) -> (
+        conversation_service::ConversationArtifactCardRecord,
+        artifact_service::ResultArtifactBundle,
+    ) {
+        let (conversation_id, bundle) = publish_draft_artifact_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            snapshot_extra,
+        );
         let card = conversation_service::create_artifact_card(
             connection,
             conversation_service::CreateArtifactCardInput {
@@ -3237,6 +3172,7 @@ mod tests {
     include!("structured_artifact_rule_governance_tests.rs");
     include!("structured_setting_apply_tests.rs");
     include!("structured_summary_grounding_tests.rs");
+    include!("structured_summary_character_reference_tests.rs");
 
     fn count(connection: &Connection, table: &str) -> i64 {
         connection

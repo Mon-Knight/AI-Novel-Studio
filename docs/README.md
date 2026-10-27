@@ -20,7 +20,7 @@
 - 机器版本以 `package.json` 和版本同步检查为准；本索引不另行维护一份“当前版本”总声明。
 - 仓库开发规则只有根 `AGENTS.md` 一个主入口；IDE 指令、Skills 与任务速查只补充，不扩大授权。
 - 产品/UI/开发长文保留早期设计；优先读取开头的演进说明和当前版本覆盖章节。v3.3.0+ 工作台以专门架构文档为准。
-- 本次 v3.7.0 交互、候选与世界规则修复仍在集成；当前源码契约见工作台架构第 13.1 节、Writing SubAgent 第 3.4 节及世界规则契约。用户已明确授权新增兼容迁移 `039_result_artifacts_cross_task_lineage`（数据模型第 44 节），001～038 保持发布定义与 checksum，README 迁移范围同步为 001-039；授权状态与旧库/新库升级验收分开。实现同步与统一验收分开，历史验证记录不证明本批通过，R4 live 云端仍 NOT VERIFIED；证据报告由父任务在全部修复后的统一验收中更新。
+- 本次 v3.7.0 交互、候选与世界规则修复仍在集成；当前源码契约见工作台架构第 13.1 节、Writing SubAgent 第 3.4 节及世界规则契约。用户已明确授权新增兼容迁移 `039_result_artifacts_cross_task_lineage`（数据模型第 44 节），001～038 保持发布定义与 checksum；后续已新增 `040_chapter_workflow_stages`，README 迁移范围同步为 001-040，当前项目备份 schema 为 12。授权状态与旧库/新库升级验收分开。实现同步与统一验收分开，历史验证记录不证明本批通过，R4 live 云端仍 NOT VERIFIED；证据报告由父任务在全部修复后的统一验收中更新。
 - `audit/`、`audit-v2/`、`architecture-audit-v2/` 和历史发布归档是带版本/时间的证据，不是当前待办或自动执行授权；`architecture-audit-v2/` 是 Canonical exposure 前快照。Mock、loopback、真实桌面与 live 云端结论必须区分。当前缺口以 [`feature-gap-analysis-v3.7.0.md`](feature-gap-analysis-v3.7.0.md) 为准。
 - 2026-09-27 规划核对：上述“仍在集成/待统一验收”说明保留原批次语义，后续适用本地、Rust、SQLite、桌面与 EXE 收尾结果以[最近复核为 2026-09-26 的报告](../reports/closeout-2026-09-18.md)为准；不包含 R4 live 或未来改动。缺陷台账第 6 节补充最新核对，下一版将完整自我迭代与核心缺陷治理统一交付，不分成多个版本。
 

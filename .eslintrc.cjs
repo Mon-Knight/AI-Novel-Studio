@@ -10,6 +10,9 @@ module.exports = {
     'dist',
     'build',
     'src-tauri/target',
+    // 本地故障注入/桌面 E2E 会解包完整 DSH 载体，其中包含第三方 .d.ts；
+    // 这些是 gitignored 运行产物，不应进入源码 lint。
+    'test-results',
     'node_modules',
     '*.config.js',
     '*.config.ts',

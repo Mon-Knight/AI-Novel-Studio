@@ -19,7 +19,7 @@
   align-items: center;
   min-height: 64px;
   gap: var(--spacing-md);
-  padding: 10px 18px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-card);
 }
@@ -41,6 +41,12 @@
 .autonomous-icon-button:hover {
   color: var(--color-primary);
   background: var(--color-bg-hover);
+}
+
+.autonomous-icon-button:active {
+  color: var(--color-primary);
+  background: var(--color-bg-active);
+  transform: translateY(1px);
 }
 
 .autonomous-heading {
@@ -76,6 +82,7 @@
   border-radius: 4px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
 }
 
 .autonomous-status.status-running {
@@ -137,8 +144,8 @@
 .autonomous-continuation-notice {
   display: grid;
   gap: 4px;
-  margin-bottom: 14px;
-  padding: 9px 10px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
   border-left: 3px solid var(--color-info-border);
   background: var(--color-info-bg);
   color: var(--color-info-text);
@@ -158,7 +165,7 @@
 
 .autonomous-field > span {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
@@ -169,7 +176,7 @@
 .autonomous-field select {
   width: 100%;
   min-width: 0;
-  padding: 8px 9px;
+  padding: 8px;
   color: var(--color-text-primary);
   border: 1px solid var(--color-border);
   border-radius: 5px;
@@ -194,7 +201,7 @@
 .autonomous-number-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .autonomous-primary-actions {
@@ -222,9 +229,9 @@
 }
 
 .autonomous-error {
-  margin: 14px 18px 0;
-  padding: 9px 12px;
-  color: var(--color-error);
+  margin: 16px 18px 0;
+  padding: 12px;
+  color: var(--color-error-text);
   border-left: 3px solid var(--color-error);
   background: var(--color-error-bg);
   font-size: var(--font-size-sm);
@@ -252,7 +259,7 @@
 }
 
 .autonomous-progress-band {
-  padding: 16px 18px 14px;
+  padding: 16px 18px 12px;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-bg-card);
 }
@@ -281,7 +288,7 @@
 
 .autonomous-progress-track {
   height: 5px;
-  margin-top: 9px;
+  margin-top: 8px;
   overflow: hidden;
   background: var(--color-border-light);
 }
@@ -296,7 +303,7 @@
 .autonomous-agent-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px 14px;
+  gap: 6px 12px;
   margin-top: 12px;
 }
 
@@ -308,7 +315,7 @@
   gap: 6px;
   padding: 4px 0;
   border-bottom: 1px solid var(--color-border-light);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-agent-state span {
@@ -322,11 +329,11 @@
 .autonomous-agent-state strong {
   flex: 0 0 auto;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-agent-state.agent-succeeded strong {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .autonomous-agent-state.agent-running strong {
@@ -335,7 +342,7 @@
 
 .autonomous-agent-state.agent-failed strong,
 .autonomous-agent-state.agent-cancelled strong {
-  color: var(--color-error);
+  color: var(--color-error-text);
 }
 
 .autonomous-execution-band {
@@ -397,7 +404,7 @@
 }
 
 .autonomous-execution-count strong {
-  color: var(--color-success);
+  color: var(--color-success-text);
   font-size: 18px;
 }
 
@@ -408,7 +415,7 @@
 
 .autonomous-execution-current {
   margin-top: 12px;
-  padding: 11px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--color-border-light);
 }
 
@@ -417,7 +424,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 14px;
+  padding: 12px 16px;
   border-top: 1px solid var(--color-border-light);
   background: var(--color-bg-subtle);
 }
@@ -456,14 +463,14 @@
 }
 
 .autonomous-review-result strong {
-  color: var(--color-success);
+  color: var(--color-success-text);
   font-size: var(--font-size-xs);
 }
 
 .autonomous-review-result span {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-review-result.is-running strong {
@@ -492,7 +499,7 @@
 }
 
 .autonomous-analysis-error {
-  color: var(--color-error) !important;
+  color: var(--color-error-text) !important;
 }
 
 .autonomous-execution-complete {
@@ -512,7 +519,7 @@
 
 .autonomous-tabs button {
   min-width: 0;
-  padding: 10px 5px 8px;
+  padding: 8px 4px;
   color: var(--color-text-muted);
   border-bottom: 2px solid transparent;
   font-size: var(--font-size-xs);
@@ -522,6 +529,10 @@
 .autonomous-tabs button:hover {
   color: var(--color-text-primary);
   background: var(--color-bg-hover);
+}
+
+.autonomous-tabs button:active {
+  background: var(--color-bg-active);
 }
 
 .autonomous-tabs button.active {
@@ -559,13 +570,13 @@
 
 .autonomous-bible dl div {
   min-width: 0;
-  padding: 10px;
+  padding: 12px;
   background: var(--color-bg-card);
 }
 
 .autonomous-bible dt {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-bible dd {
@@ -585,7 +596,7 @@
 
 .autonomous-metrics div {
   min-width: 0;
-  padding: 10px 6px;
+  padding: 8px 6px;
   text-align: center;
 }
 
@@ -601,7 +612,7 @@
 .autonomous-metrics span {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-arc-list,
@@ -614,7 +625,7 @@
 .autonomous-arc-list article,
 .autonomous-list article,
 .autonomous-pacing-list article {
-  padding: 13px 4px;
+  padding: 12px 4px;
   border-bottom: 1px solid var(--color-border-light);
 }
 
@@ -664,7 +675,7 @@
 .autonomous-beats {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 10px;
+  gap: 4px 8px;
   margin-top: 8px;
 }
 
@@ -675,7 +686,7 @@
 
 .autonomous-tension {
   height: 5px;
-  margin-top: 9px;
+  margin-top: 8px;
   overflow: hidden;
   background: var(--color-border-light);
 }
@@ -690,7 +701,7 @@
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
   gap: 12px;
-  padding: 11px 4px;
+  padding: 12px 4px;
   border-bottom: 1px solid var(--color-border-light);
 }
 
@@ -715,7 +726,7 @@
   justify-content: space-between;
   min-height: 66px;
   gap: 18px;
-  padding: 10px 18px;
+  padding: 12px 18px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-card);
   box-shadow: 0 -4px 14px var(--color-shadow);
@@ -770,7 +781,7 @@
 .autonomous-scheduler-unavailable span,
 .autonomous-scheduler-progress {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-scheduler-modes {
@@ -782,7 +793,7 @@
 .autonomous-scheduler-modes button {
   display: grid;
   gap: 4px;
-  padding: 10px;
+  padding: 12px;
   text-align: left;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -790,9 +801,17 @@
   background: var(--color-bg-panel);
 }
 
+.autonomous-scheduler-modes button:hover:not(.active) {
+  background: var(--color-bg-hover);
+}
+
+.autonomous-scheduler-modes button:active {
+  transform: translateY(1px);
+}
+
 .autonomous-scheduler-modes button span {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
@@ -811,16 +830,16 @@
 .autonomous-scheduler-grid label,
 .autonomous-scheduler-window label {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .autonomous-scheduler-grid input,
 .autonomous-scheduler-window input[type='time'] {
   width: 100%;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
@@ -837,14 +856,14 @@
 .autonomous-scheduler-window .checkbox-field {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding-bottom: 7px;
+  gap: 8px;
+  padding-bottom: 8px;
 }
 
 .autonomous-scheduler-progress {
   justify-content: flex-start;
   flex-wrap: wrap;
-  padding: 9px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-hover);
 }
@@ -853,14 +872,16 @@
   padding: 4px 8px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .autonomous-scheduler-error {
   margin: 0;
-  color: var(--color-error);
-  font-size: 12px;
+  color: var(--color-error-text);
+  font-size: var(--font-size-xs);
 }
 
 @media (max-width: 900px) {
