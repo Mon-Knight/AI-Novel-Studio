@@ -112,7 +112,6 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-const router = { v7_startTransition: true, v7_relativeSplatPath: true };
 
 beforeEach(() => {
   services.novels.mockResolvedValue([]);
@@ -141,7 +140,7 @@ describe('novel library read state and creation', () => {
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce([novel('recovered-library', '恢复读取的作品')]);
     render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <HomePage />
       </MemoryRouter>,
     );
@@ -161,7 +160,7 @@ describe('novel library read state and creation', () => {
     const pending = deferred<Novel[]>();
     services.novels.mockReturnValueOnce(pending.promise);
     render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <HomePage />
       </MemoryRouter>,
     );
@@ -195,7 +194,7 @@ describe('novel library read state and creation', () => {
   it('opens new-project creation with keyboard on a real button and exposes explicit field names', async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <HomePage />
       </MemoryRouter>,
     );
@@ -214,7 +213,7 @@ describe('novel library read state and creation', () => {
     const pending = deferred<Novel>();
     services.create.mockReturnValueOnce(pending.promise);
     render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <HomePage />
       </MemoryRouter>,
     );
@@ -271,7 +270,7 @@ describe('project-scoped asset counts', () => {
   it('counts existing foundation categories instead of reporting one for every novel', async () => {
     services.novels.mockResolvedValue([novel('empty-foundation')]);
     const view = render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <AssetsPage />
       </MemoryRouter>,
     );
@@ -333,7 +332,7 @@ describe('project-scoped asset counts', () => {
       .mockRejectedValueOnce(new Error('模拟资产读取失败'))
       .mockResolvedValueOnce([{}, {}, {}]);
     render(
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <AssetsPage />
       </MemoryRouter>,
     );
@@ -406,7 +405,7 @@ describe('AI record read and filter feedback', () => {
   it('distinguishes loading, failure and empty filtered records, with an explicit clear-filter action', () => {
     const values = props();
     const wrap = (patch: Partial<AiTasksPageViewProps>) => (
-      <MemoryRouter future={router}>
+      <MemoryRouter>
         <AiTasksPageView {...values} {...patch} />
       </MemoryRouter>
     );

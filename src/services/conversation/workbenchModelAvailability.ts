@@ -34,8 +34,8 @@ interface WorkbenchModelAvailabilityInput {
   selectionLocked?: boolean;
   /**
    * Whether the selected model's process-scoped credential can be resolved.
-   * `undefined` means the asynchronous check has not settled yet, so the
-   * directory result remains authoritative until it does.
+   * This is an advisory setting hint. It never gates submission, switches
+   * models or proves that a provider request will succeed.
    */
   credentialAvailable?: boolean;
 }
@@ -60,7 +60,7 @@ export class WorkbenchModelCredentialUnavailableError extends WorkbenchModelUnav
   constructor(model: WorkbenchModelSelection) {
     super(model);
     this.name = 'WorkbenchModelCredentialUnavailableError';
-    this.message = `当前任务固定模型 ${workbenchModelKey(model)} 的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint} 或使用当前已配置模型新建任务。`;
+    this.message = `模型 ${workbenchModelKey(model)} 的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint} 或在当前任务选择其他已配置模型后发送新回合。重试仍使用原回合模型。`;
   }
 }
 
@@ -159,103 +159,56 @@ export function getWorkbenchModelAvailability({
   selectedModel,
   refreshing,
   refreshError,
-  allowLocalFallback = false,
-  selectionLocked = false,
   credentialAvailable,
 }: WorkbenchModelAvailabilityInput): WorkbenchModelAvailability {
   const options = listAvailableWorkbenchModels(plugins);
   const selectedKey = workbenchModelKey(selectedModel);
   const selectedOption = options.find((option) => option.key === selectedKey);
+  // A directory entry is descriptive. Availability is established by the actual
+  // request, whose failure belongs in the persisted conversation.
+  const canSend = Boolean(selectedModel.providerId.trim() && selectedModel.modelId.trim());
   const runtimeFailure = plugins.find(
     (plugin) =>
       plugin.category === 'other' &&
       plugin.source === 'dsh-runtime-projection' &&
       plugin.status === 'failed',
   )?.description;
-
   if (refreshing) {
     return {
       status: 'refreshing',
       options,
       selectedOption,
-      canSend: false,
-      message: '正在刷新 Runtime 模型目录；可以继续编辑，完成后即可发送依赖模型的创作任务。',
+      canSend,
+      message: '正在刷新模型列表；仍可直接发送，调用失败会显示在对话中。',
     };
   }
-
   if (refreshError) {
     return {
       status: 'unavailable',
       options,
       selectedOption,
-      canSend: false,
-      message: 'Runtime 模型目录刷新失败，依赖模型的创作任务暂无法发送。',
+      canSend,
+      message: '模型列表刷新失败；仍可直接发送，调用失败会显示在对话中。',
     };
   }
-
-  const localFallback =
-    allowLocalFallback && isLocalLikeWorkbenchModel(selectedModel)
-      ? options.find((option) => !isLocalLikeWorkbenchModel(option) && option.providerId !== 'mock')
-      : undefined;
-
   if (credentialAvailable === false) {
-    if (!localFallback) {
-      return {
-        status: 'unavailable',
-        options,
-        selectedOption,
-        canSend: false,
-        message: selectionLocked
-          ? `当前任务固定模型 ${selectedKey} 的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint} 或使用当前已配置模型新建任务。`
-          : `当前模型的匹配凭据不可用；${getCredentialStorageCopy().unavailableHint}`,
-      };
-    }
     return {
-      status: 'available',
+      status: 'unavailable',
       options,
       selectedOption,
-      fallbackOption: localFallback,
-      canSend: true,
-      message: '本地模型的匹配凭据不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
+      canSend,
+      message: `尚未找到当前模型的匹配凭据；${getCredentialStorageCopy().unavailableHint} 发送后将使用同一模型执行，错误显示在对话中。`,
     };
   }
-
-  if (options.length === 0) {
-    return {
-      status: 'unavailable',
-      options,
-      canSend: false,
-      message: runtimeFailure
-        ? `当前 Runtime 模型目录不可用：${runtimeFailure}`
-        : '当前 Runtime 模型目录不可用，依赖模型的创作任务暂无法发送。',
-    };
-  }
-
   if (!selectedOption) {
-    if (localFallback) {
-      return {
-        status: 'available',
-        options,
-        fallbackOption: localFallback,
-        canSend: true,
-        message: '本地模型当前不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
-      };
-    }
     return {
       status: 'unavailable',
       options,
-      canSend: false,
-      message: selectionLocked
-        ? `当前任务固定模型 ${selectedKey} 未进入 Runtime 模型目录；请使用当前已配置模型新建任务。`
-        : '所选模型未进入当前 Runtime 模型目录；请选择已加载模型后发送创作任务。',
+      canSend,
+      message: runtimeFailure
+        ? `模型列表不可用：${runtimeFailure}。仍可直接发送，调用失败会显示在对话中。`
+        : '可直接发送当前已配置模型，调用失败会显示在对话中。',
     };
   }
-
-  return {
-    status: 'available',
-    options,
-    selectedOption,
-    canSend: true,
-    message: '',
-  };
+  return { status: 'available', options, selectedOption, canSend, message: '' };
 }

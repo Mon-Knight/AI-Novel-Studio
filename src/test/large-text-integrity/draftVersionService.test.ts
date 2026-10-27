@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtimeMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  isTauri: true,
 }));
 
 vi.mock('../../services/tauri/runtime', () => ({
-  isTauriRuntime: () => true,
+  isTauriRuntime: () => runtimeMocks.isTauri,
   tauriInvoke: runtimeMocks.invoke,
 }));
 
@@ -34,6 +35,8 @@ function persistedDraft(overrides: Partial<ChapterDraft> = {}): ChapterDraft {
 describe('draft persistence reliability facade', () => {
   beforeEach(() => {
     runtimeMocks.invoke.mockReset();
+    runtimeMocks.isTauri = true;
+    localStorage.clear();
   });
 
   it('reads one exact draft by normalized chapterId and draftId', async () => {
@@ -422,5 +425,183 @@ describe('draft persistence reliability facade', () => {
         base,
       ),
     ).rejects.toEqual(expect.objectContaining({ code: 'DOCUMENT_HASH_MISMATCH' }));
+  });
+
+  it('rejects a desktop update when the authoritative content changed after the editor read', async () => {
+    const baseContent = '编辑器打开时的正文';
+    const persistedContent = '另一个窗口已经保存的正文';
+    const baseHash = await computeContentSha256(baseContent);
+    runtimeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'get_drafts_by_chapter_id') {
+        return [persistedDraft({ content: persistedContent, largeTextRefId: undefined })];
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    const base = persistedDraft({
+      content: baseContent,
+      largeTextRefId: undefined,
+      contentState: {
+        status: 'ready',
+        content: baseContent,
+        contentHash: baseHash,
+        contentLength: Array.from(baseContent).length,
+      },
+    });
+
+    await expect(
+      draftVersionService.update(
+        'draft-a',
+        'chapter-a',
+        '编辑器继续输入的正文',
+        'user_edited',
+        undefined,
+        base,
+      ),
+    ).rejects.toEqual(expect.objectContaining({ code: 'DOCUMENT_HASH_MISMATCH' }));
+    expect(runtimeMocks.invoke).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.invoke.mock.calls[0]?.[0]).toBe('get_drafts_by_chapter_id');
+  });
+});
+
+describe('browser draft revision/hash CAS', () => {
+  beforeEach(() => {
+    runtimeMocks.isTauri = false;
+    runtimeMocks.invoke.mockReset();
+    localStorage.clear();
+  });
+
+  it('allocates distinct versions when browser creates race on one chapter', async () => {
+    const [first, second] = await Promise.all([
+      draftVersionService.create({
+        novelId: 'novel-a',
+        chapterId: 'chapter-browser',
+        content: '第一个浏览器候选',
+        source: 'user_edited',
+      }),
+      draftVersionService.create({
+        novelId: 'novel-a',
+        chapterId: 'chapter-browser',
+        content: '第二个浏览器候选',
+        source: 'user_edited',
+      }),
+    ]);
+
+    expect(new Set([first.id, second.id]).size).toBe(2);
+    expect([first.versionNo, second.versionNo].sort((a, b) => a - b)).toEqual([1, 2]);
+    await expect(draftVersionService.getByChapterId('chapter-browser')).resolves.toHaveLength(2);
+  });
+
+  it('fails closed when a second browser tab saves from a stale draft hash', async () => {
+    const created = await draftVersionService.create({
+      novelId: 'novel-a',
+      chapterId: 'chapter-browser',
+      content: '初始浏览器正文',
+      source: 'user_edited',
+    });
+    const staleTabA = structuredClone(created);
+    const staleTabB = structuredClone(created);
+
+    const firstSave = await draftVersionService.update(
+      created.id,
+      created.chapterId,
+      '标签页 A 保存的正文',
+      'user_edited',
+      undefined,
+      staleTabA,
+    );
+    expect(firstSave.content).toBe('标签页 A 保存的正文');
+
+    await expect(
+      draftVersionService.update(
+        created.id,
+        created.chapterId,
+        '标签页 B 不得覆盖的正文',
+        'user_edited',
+        undefined,
+        staleTabB,
+      ),
+    ).rejects.toEqual(expect.objectContaining({ code: 'DOCUMENT_HASH_MISMATCH' }));
+
+    const persisted = await draftVersionService.getById(created.chapterId, created.id);
+    expect(persisted?.content).toBe('标签页 A 保存的正文');
+    expect(persisted?.contentState).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        content: '标签页 A 保存的正文',
+      }),
+    );
+  });
+
+  it('updates the browser chapter pointer and word count with the adopted draft', async () => {
+    const chapter = {
+      id: 'chapter-browser',
+      novelId: 'novel-a',
+      title: '浏览器章节',
+      status: 'editing',
+      wordCount: 1,
+      currentWords: 1,
+    };
+    localStorage.setItem('ai_novel_studio_chapters', JSON.stringify([chapter]));
+    const draft = await draftVersionService.create({
+      novelId: 'novel-a',
+      chapterId: chapter.id,
+      content: '采用后的浏览器正文，包含新的字数。',
+      source: 'user_edited',
+    });
+
+    const adopted = await draftVersionService.adopt(draft.id, chapter.id);
+
+    expect(adopted.isAdopted).toBe(true);
+    const [persistedChapter] = JSON.parse(
+      localStorage.getItem('ai_novel_studio_chapters') ?? '[]',
+    ) as Array<Record<string, unknown>>;
+    expect(persistedChapter).toEqual(
+      expect.objectContaining({
+        id: chapter.id,
+        adoptedDraftId: draft.id,
+        status: 'adopted',
+        wordCount: adopted.wordCount,
+        currentWords: adopted.wordCount,
+      }),
+    );
+  }, 15_000);
+
+  it('restores browser draft, chapter and context facts when post-adoption authorization fails', async () => {
+    const chapter = {
+      id: 'chapter-browser',
+      novelId: 'novel-a',
+      title: '浏览器章节',
+      status: 'editing',
+      wordCount: 1,
+      currentWords: 1,
+    };
+    localStorage.setItem('ai_novel_studio_chapters', JSON.stringify([chapter]));
+    const draft = await draftVersionService.create({
+      novelId: 'novel-a',
+      chapterId: chapter.id,
+      content: '采用前的完整正文。',
+      source: 'user_edited',
+    });
+    const before = {
+      drafts: localStorage.getItem(`ai_novel_studio_drafts_list_${chapter.id}`),
+      chapters: localStorage.getItem('ai_novel_studio_chapters'),
+      summaries: localStorage.getItem('ai_novel_studio_chapter_summaries'),
+      contexts: localStorage.getItem('ai_novel_studio_context_records'),
+    };
+
+    await expect(
+      draftVersionService.adopt(draft.id, chapter.id, {
+        afterFormalAdoption: async () => {
+          throw new Error('AUTHORIZATION_CONSUME_FAILURE');
+        },
+      }),
+    ).rejects.toThrow('AUTHORIZATION_CONSUME_FAILURE');
+
+    expect({
+      drafts: localStorage.getItem(`ai_novel_studio_drafts_list_${chapter.id}`),
+      chapters: localStorage.getItem('ai_novel_studio_chapters'),
+      summaries: localStorage.getItem('ai_novel_studio_chapter_summaries'),
+      contexts: localStorage.getItem('ai_novel_studio_context_records'),
+    }).toEqual(before);
   });
 });

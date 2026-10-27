@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bot, Database, Palette, Search, ShieldCheck } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
 import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { AiSettings } from '../../types/ai';
@@ -8,6 +8,7 @@ import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
 import AppearanceSettingsCard from '../../components/settings/AppearanceSettingsCard';
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
+import ChapterWordRangeSettingsCard from '../../components/settings/ChapterWordRangeSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
 import AiGatewaySettingsCard from '../../components/settings/AiGatewaySettingsCard';
@@ -23,12 +24,28 @@ import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettin
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
 import { SettingsSidebar, type SettingsTabKey } from './SettingsSidebar';
 import { PageHeader } from '../../components/common/PageLayout';
+import '../../styles/hub.css';
 
 export type { SettingsTabKey };
 
+const SETTINGS_TABS: readonly SettingsTabKey[] = [
+  'general',
+  'ai_models',
+  'governance',
+  'data',
+  'diagnostics',
+];
+
+function isSettingsTab(value: string | null): value is SettingsTabKey {
+  return SETTINGS_TABS.includes(value as SettingsTabKey);
+}
+
 function SettingsPage() {
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<SettingsTabKey>('general');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const activeTab: SettingsTabKey = isSettingsTab(requestedTab) ? requestedTab : 'general';
+  const setActiveTab = (tab: SettingsTabKey) =>
+    setSearchParams(tab === 'general' ? {} : { tab }, { replace: true });
   const [settings, setSettings] = useState<AiSettings>(aiSettingsService.getSettings());
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
@@ -198,51 +215,15 @@ function SettingsPage() {
   };
 
   return (
-    <div
-      className="settings-layout"
-      data-testid="settings-layout"
-      style={{
-        display: 'flex',
-        height: '100%',
-        width: '100%',
-        overflow: 'hidden',
-        background: 'var(--color-bg-app, #ffffff)',
-      }}
-    >
-      {/* 1. 左侧分类导航栏 */}
-      <SettingsSidebar
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onBackHome={() => navigate('/')}
-      />
+    <div className="settings-layout hub-layout" data-testid="settings-layout">
+      <SettingsSidebar activeTab={activeTab} onSelectTab={setActiveTab} />
 
-      {/* 2. 右侧对应分类配置面板 */}
-      <main
-        className="settings-content-pane"
-        data-testid="settings-content-pane"
-        style={{
-          flex: 1,
-          height: '100%',
-          overflowY: 'auto',
-          padding: 24,
-          minWidth: 0,
-        }}
-      >
-        <div style={{ maxWidth: 760, margin: '0 auto' }}>
+      <main className="settings-content-pane hub-content" data-testid="settings-content-pane">
+        <div className="hub-content-inner">
           {message && (
             <div
-              style={{
-                fontSize: 13,
-                padding: '8px 14px',
-                background: message.includes('失败')
-                  ? 'var(--color-error-bg, #fee2e2)'
-                  : 'var(--color-primary-light, #e0e7ff)',
-                borderRadius: 6,
-                marginBottom: 16,
-                color: message.includes('失败')
-                  ? 'var(--color-error, #b91c1c)'
-                  : 'var(--color-primary, #4338ca)',
-              }}
+              className={`hub-flash ${message.includes('失败') ? 'is-error' : ''}`.trim()}
+              role="status"
             >
               {message}
             </div>
@@ -296,7 +277,7 @@ function SettingsPage() {
             <div data-testid="settings-tab-pane-governance">
               <PageHeader
                 title="AI 网关与流控治理"
-                description="配置调用预算阈值、请求速率并发限制与安全审计规则。"
+                description="配置调用预算阈值、请求速率并发限制、章节候选字数验收区间与安全审计规则。"
                 icon={ShieldCheck}
               />
               <AiGovernanceSettingsCard
@@ -305,6 +286,7 @@ function SettingsPage() {
                 onSave={handleSave}
                 refreshVersion={policySnapshotVersion}
               />
+              <ChapterWordRangeSettingsCard />
               <SecuritySettingsCard />
             </div>
           )}

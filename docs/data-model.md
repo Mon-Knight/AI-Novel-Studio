@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -13,7 +13,7 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。当前完整项目备份 schema 为 11。小说继续是领域数据最高级对象。
+> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`；migration 040 增加章节写作阶段事实 `chapter_workflow_stages`。当前完整项目备份 schema 为 12。小说继续是领域数据最高级对象。第 43 节补充当前 v3.7.0 修复中的规则集、精确修订来源与采用回执；实现仍在集成、待统一验收，本轮不新增测试/桌面/live 通过结论或改写历史记录。
 
 ---
 
@@ -818,13 +818,40 @@ scenePlan` 重建单元身份；仅允许 `finish_reason=stop` 的原始 Artifac
 Token 统计只计算本次真实请求；该机制由用户再次启动生成触发，不把应用重启或网络中断解释为
 自动重发授权。
 
+## 8.4.2 章节写作阶段事实（migration 040）
+
+> 集成中：阶段表、内部服务与只读 IPC 已落，尚未接入生产工作台／DSH 阶段工具。
+> 实际 Provider messages 绑定、关联 Run 终结后的迟到拒绝及跨重启端到端验证仍在收口；建表与定向测试不等于生产恢复已验收。
+
+`chapter_workflow_stages` 是章节分阶段写作的权威执行事实，不是正式正文、正式人物状态或
+采用授权。工作流身份固定为原始 user `turn_id`，`run_id` 表示该回合的一次尝试；每个阶段行
+冻结 `plan_version`、`context_hash`、`base_hash`、`input_hash`、`plan_hash` 和由
+`task_runs.model_snapshot_json` 原生重算的 `model_snapshot_hash`，客户端不能自报模型身份。
+
+阶段以 `stage_key / stage_kind / scene_id / beat_id / attempt` 定位，允许同一阶段在新尝试中
+重试，但同一 workflow/stage 只允许一个 `succeeded` 行。状态边为
+`pending → running → succeeded | failed | cancelled`，`pending` 也可直接取消；每次 CAS 更新
+必须把 `revision` 精确加一。终态行不可再更新，失败或取消后到达的完成结果失败关闭。
+
+成功结果必须且只能落在一种载体中：专属 `large_text_documents` 文档（`target_type` 为
+`chapter_workflow_stage`、`field_name` 为 `result`）、不超过 16 KiB 的有效 JSON 对象，或
+经绑定复验的既有 ResultArtifact。`result_hash` 必须与所选载体内容哈希一致。verified
+artifact 入口还要求 Artifact、Task、Attempt 均为成功终结，且 InputSnapshot 的
+`chapterWorkflow` 绑定与当前阶段的 workflow/stage/input/plan 完全一致；缺失或不同即拒绝。
+表内没有通用 DAG，也不把 `tool_call_events` 的公开成功事件当作阶段权威。
+
+只读 IPC 按 `novel_id + chapter_id` 强制作用域，可选 conversation/workflow/run/stage
+过滤；写方法只在 Rust 内部以 `pub(crate)` 暴露，不注册任意“写成功”命令。启动恢复只把
+`running` 阶段标记为 `failed`（`WORKFLOW_INTERRUPTED`），不自动重放或发起 Provider
+请求。该表随项目备份 schema 12 导出、按新作品重映射身份，并计入项目清理。
+
 ---
 
 # 8.5 world_settings：世界背景表
 
 ## 作用
 
-保存作品的大致世界背景。用户不需要填写完整世界观，只需要填写方向性内容。
+保存作品的大致世界背景。用户不需要填写完整世界观，只需要填写方向性内容。当前修复在既有 `structured_json` 上支持可渐进填写的 `world_rules_v1`，不新增世界百科表；结构与原生变更守卫见第 43 节。
 
 ## 字段设计
 
@@ -860,7 +887,7 @@ export interface WorldSetting {
 
 ## 作用
 
-保存魔法、科技、修炼、能力、战斗等规则体系。
+保存魔法、科技、修炼、能力、战斗等规则体系。题材 `category` 与结构化 `kind` 不是同一维度；当前六类性质与 authority / epistemic / strength 独立，社会规范的“禁止”不等于物理不可能。实际结构与保存/停用/删除门禁见第 43 节。
 
 ## 字段设计
 
@@ -1644,7 +1671,7 @@ export interface AiTaskRecord {
 
 ## 36.5 备份与恢复
 
-参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 11 继续包含这些表并依次追加 Scheduler、正式故事资产、对话工作台和产物决定/审阅授权。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
+参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 12 继续包含这些表并依次追加 Scheduler、正式故事资产、对话工作台、产物决定/审阅授权和章节写作阶段。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
 
 ---
 
@@ -2961,15 +2988,17 @@ chapter_event_locations   章节事件—地点关系
 
 资产 identity、novel scope 和创建时间不可变；更新必须提交 expected revision。所有关系端点必须属于同一作品。地点父子图拒绝自身父级和环，批量创建时按拓扑顺序写入，因此冻结集合中的子地点可以先于父地点出现。
 
-# 38. 完整项目备份 schema 8～11
+# 38. 完整项目备份 schema 8～12
 
 - schema 8 在 schema 7 的 Memory 基线上加入四张 scheduler 表。恢复时废弃中断 owner/epoch，重算 policy/request/decision/payload hash，并保证没有 active lease 残留。
 - schema 9 加入九张势力、地点及关系表；地点按父子拓扑恢复，随后恢复关系和章节关联。
 - schema 10 加入任务对话、回合、运行、工具事件、产物卡片、AI Task 快照和 ResultArtifact 工作台事实。
-- schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。
+- schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。恢复为副本时，`authorization_id` 与 `consumed_by_draft_id` 分别按身份和引用重映射；`issued / consumed / expired`、签发与消费时间原样保留，不因恢复重新授权。写库前复验授权、未删除章节、正文产物、作者 confirm 决定、卡片/会话、消费草稿的整条同作品同章节关系及哈希；未知状态、备份外引用和同书换章篡改均拒绝。
+- schema 12 加入 `chapter_workflow_stages`。恢复时重映射 stage/workflow/turn/conversation/run/chapter、结果大文本和 verified artifact 引用，保留状态、attempt、revision 与结果哈希，但不重新执行阶段、不自动请求模型，也不把恢复行解释为新的采用授权。旧 schema 2～11 缺少该表时按空集合兼容。
+- `ai_task_attempts.provider_request_id` 若本来是 attempt/run 身份别名，使用相同新身份；真实 DSH 治理请求号则为副本分配新值并同步结构化引用，避免与原作品的唯一索引冲突。原作品记录不变，不复制应用级预算/费用账本，不把恢复视为一次实际 Provider 请求。
 - content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
-- 项目清理覆盖 scheduler 和正式资产。清理期间只临时移除 checkpoint 的 no-delete trigger，事务完成后原样重建；失败回滚不能留下缺失 trigger。
-- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权。未来或非整数 schema 版本拒绝进入完整恢复链路。
+- 项目清理覆盖 scheduler、正式资产和作品所属的设定建议、落位提案/应用/链接、Agent 计划依赖/尝试/租约/检查点、内容事务及目标、DSH 准备运行，以及章节写作阶段。清理范围不能由备份表集合替代。相关 no-delete 守卫仅在同一维护事务中临时移除并在提交前恢复；失败回滚同时恢复行和守卫，不删除其他作品。触及当前作品却连接到另一作品的损坏落位链会整体拒绝，不借清理修复跨作品引用。
+- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权；schema 12 必须包含章节写作阶段表。未来或非整数 schema 版本拒绝进入完整恢复链路。
 
 # 39. migration 029：桌面端全局 AI 请求治理
 
@@ -3025,6 +3054,8 @@ Workbench（UI 聚合，不是领域父实体）
 
 任务目录按 `updated_at DESC, conversation_id DESC` 的稳定游标分页；作品、归档及标题/作品名搜索在 `LIMIT` 前过滤，不增加表或 migration。浏览器开发回退使用相同游标和筛选规则。最近选中任务按 ID 单独复核所属作品和归档状态，不能因为不在第一页就判为不存在；分页/搜索返回的视图不是新的领域事实源。
 
+对话正文另用只读 `get_task_conversation_window` 按完整用户轮次读取，默认 8 轮；更早页、指定回合/产物定位和已加载范围刷新有独立有界参数。返回所选区间的回合、运行、工具、卡片及相关决定/授权，候选全文按需加载。通用 `get_task_conversation` 保持全量供决定、重试、恢复和安全复验使用，不能因 UI 分页漏掉未决事实。`list_running_task_targets` 从实际活动 Run 的章节与原回合目标生成并发提示，不复制当前界面的章节选择。两项均无 schema 变化。
+
 至少表达：
 
 - 稳定任务 ID 与所属小说 ID；
@@ -3041,7 +3072,7 @@ Workbench（UI 聚合，不是领域父实体）
 
 ## 40.3 `ConversationTurn` 与消息事实
 
-每个回合属于一个任务，并按单调顺序排列。需要区分：
+每个回合属于一个任务，使用该任务内既有 sequence。Turn、Run、工具与候选的序号不是共享时钟；当前公开投影按持久时间与稳定 tie-break 排列，不新增跨域全局事件序号。需要区分：
 
 - 用户输入；
 - AI 面向用户的回复；
@@ -3063,7 +3094,7 @@ Workbench（UI 聚合，不是领域父实体）
 - 全局 AI reservation/settlement 引用；
 - 最终错误分类和用户可见安全摘要。
 
-任务级模型配置只影响后续运行，不能改写历史运行的模型来源。
+`TaskConversation.defaultModel` 是可持久更新的下一回合默认模型，不是任务生命周期锁。已有任务可在回合间切换；归档或有 `queued / running / cancel_requested` Run 时拒绝修改。每个新 Run 独立冻结所选模型，历史 Run 与候选不被改写；重试仍取原 Run 快照，不因任务选择已变更而拒绝或改用新模型。缺配置、地址歧义、凭据不匹配及能力未通过仍失败关闭。复用既有字段和命令，无 schema/migration 变化。
 
 ## 40.5 `ToolCallEvent`
 
@@ -3130,4 +3161,172 @@ DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection
 
 Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个只读 identity 已为 `stable + working`，模型可见集合见本文开头的当前事实块。v3.6.0 发布候选曾未开放这些工具，这是历史基线，不是当前准入状态。
 
-宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章继续由确定性 Writer 编排。
+宿主只读回合已在 start 契约、Worker 环境和宿主授权中统一使用 Canonical-only allowlist，仓内 loopback 已有零产物/零正式写入证据。真实云端 Provider 仍未验收；旧工具事件不能替代 Canonical 或 live 证据，也不能反向改写既有运行事实。生产写章按本文开头事实块分流：桌面 + 真实 API 默认 `writing-subagent`，mock / 本地 / 浏览器为 `deterministic-writer`。
+
+---
+
+# 41. migration 037：用户模板与设定建议正式事实源（审计 GAP-15 收口）
+
+`037_user_templates_and_setting_suggestions` checksum 固定为：
+
+```text
+014aa444b946d1a6e9f89334441238ffa0ea39992938550592e81b6d9ca0fdea
+```
+
+审计 GAP-15 指出用户模板、导入资产、润色记录与设定建议在桌面端仍以 LocalStorage 为事实源，与 SQLite 形成双真相。收口分两步：
+
+1. `imported_assets`、`polish_records` 两张表早已存在但没有写入命令，补齐 `commands/local_assets.rs` 的 list / save / delete（作品、章节、来源/结果草稿、AI 任务归属与枚举复验，按 id 幂等 upsert），不新增 migration。
+2. 本迁移为此前只存在于 LocalStorage 的两类实体建表：
+
+```text
+user_templates        id, name, type, description, content, tags_json, variables_json, source,
+                      file_name, created_at, updated_at
+                      CHECK：tags_json / variables_json 为 JSON 数组；source ∈ system|user_imported|user_created
+setting_suggestions   id, novel_id(FK novels), suggestion_type, world_type, reference_style, prompt,
+                      result_json, item_json, status, adopted_target_id, adopted_target_type,
+                      user_instruction, raw_output, created_at, updated_at
+                      CHECK：suggestion_type ∈ character|faction|location|rule；
+                             status ∈ pending|adopted|edited_adopted|discarded；item_json 为 JSON 对象
+```
+
+- 设定建议状态只允许 `pending → adopted / edited_adopted / discarded` 一次性推进：`decide_setting_suggestion` 用 `WHERE status='pending'` 的 CAS 更新，触发器 `trg_setting_suggestions_status_edges` 兜底拒绝直接 SQL 改回或二次改写；`id / novel_id / suggestion_type / created_at` 由触发器冻结。一次生成的多条候选由 `save_setting_suggestions` 在同一 `IMMEDIATE` 事务内落库，任一条非法整批回滚。
+- `save_user_template` 按 id 幂等 upsert：更新时保留原 `created_at`；迁移历史记录时可携带原 `created_at / updated_at`。标签与变量去重、去空、限长 50 项。
+- 前端 `templateService`（API 改为异步）、`settingSuggestionService`、`importedAssetService`、`polishService` 在桌面端只走命令；浏览器开发模式继续使用各自的 LocalStorage 键。首次在桌面端读取时，把历史 LocalStorage 记录幂等迁入 SQLite（引用已删除作品/章节/草稿的孤儿记录跳过），然后写入迁移标记 `ai_novel_studio_<entity>_sqlite_v1`；标记只在全部 upsert 尝试完成后写入。
+- 用户模板是应用级事实，不随单个作品备份；设定建议是可再生成的 AI 候选，本轮不纳入项目备份 schema（备份仍为 schema 11），`imported_assets / polish_records` 沿用既有备份规则并因此首次在桌面端携带真实数据。
+
+# 42. migration 038：任务运行持久化章节目标（审计 GAP-18 收口）
+
+`038_task_runs_chapter_binding` checksum 固定为：
+
+```text
+fc9b8fc49ac1ea8dd5c6ece3f179ab0921a523ee54de99577e0a798658cc749a
+```
+
+Writing SubAgent E-4b 故障注入验收发现（GAP-18）：`task_runs` 没有章节列，Rust `CreateRunInput` 丢弃前端传入的 `chapterId`，DSH 工具投影只保留 `chapterIdHash`。DSH 运行若在任何工具调用或候选产生前失败（上游持续失败、进程被杀），`resolveRetryRunChapterTarget` 只能靠回合目标文本定位章节，目标写成“生成本章正文…”时重试被 `WORKBENCH_RETRY_TARGET_MISSING` fail-closed 拒绝。本迁移把冻结的章节目标落到运行本身：
+
+```text
+task_runs             + chapter_id TEXT NULL
+                      索引 idx_task_runs_chapter(chapter_id, created_at) WHERE chapter_id IS NOT NULL
+                      触发器 trg_task_runs_immutable_identity 重建，新增 OLD.chapter_id IS NOT NEW.chapter_id
+```
+
+- `create_run` 接受可选 `chapterId`（空白视为未绑定）；若给出，则必须是对话所属作品下未删除的章节，否则返回 `TASK_RUN_CHAPTER_SCOPE_MISMATCH` 且不创建运行——跨书或已删章节的运行根本不会存在。归属校验放在服务层而不是外键，因为章节采用软删除。
+- DSH 运行（`dsh_start_task_turn`）创建 run 时把 `StartTaskTurnInput.chapter_id` 写入；确定性 Writer 路径经 `create_task_run` 命令传入同一字段。`TaskRunRecord.chapter_id` 随会话包序列化为 `chapterId`（无绑定时省略），前端 `normalizeRun` 与 `workbenchRetryTarget` 的 `run.chapterId` 证据源无需改动即可生效。
+- 项目备份：`chapter_id` 属于通用引用列，恢复时随 ID 重映射；行校验新增 `optional_non_empty_text("chapter_id")`。旧备份不含该列，恢复后为 NULL；备份 schema 版本不变。
+- 配套（GAP-19，不涉及 schema）：宿主在创建 run 前统计同一回合已有的失败/取消运行数，重试时在回合提示中追加“用户重试”说明——此前回合的读取已失效，本回合必须重新完成全部必需读取再进入候选阶段。宿主对必需读取的按 run 校验不变。
+
+# 43. v3.7.0 修复中的规则与候选持久契约
+
+> 本节为当前已落源码的事实同步，代码仍在集成、待全部修复后统一验收；不升级 v3.7.0，039 当时备份 schema 仍为 11（后续 040 已提升为 12，见 8.4.2 与第 38 节），不产生测试/桌面/live 通过结论。用户已明确授权新增一个正式兼容 migration `039_result_artifacts_cross_task_lineage`（见第 44 节），既有 010/M1 迁移保持发布定义与 checksum 不变。第 41～42 节及既有历史验证日期/范围保留，R4 live 云端 NOT VERIFIED 不变。
+
+## 43.1 世界规则复用 structured_json
+
+2026-10-16 源设定复核复用 `provenance.sourceRefs` 与作者确认说明记录采用稿引用，格式为 `ans-adopted-chapter-v1:<chapterId>:<draftId>:<sha256>`。只在本次新增引用或确认说明声明该来源时，保存事务要求来源仍为本作品当前完整采用稿；已有引用作为历史保留。没有新字段、migration 或备份版本。
+
+`WorldRuleDocument` 在 `world_settings` / `rule_systems` 的既有 `structured_json` 存储，contract 为 `world_rules_v1`、schemaVersion 为 1。六类 kind 为 world_fact / causal_rule / social_norm / character_belief / author_constraint / narrative_preference；authority（draft/candidate/confirmed/superseded）、epistemic.status（established/uncertain/disputed/belief）与 strength（hard/soft/descriptive）独立，`is_active` 仍是记录层启用标记。
+
+结构还包含 identity.id/revision/supersedesRevision、statement、conditions、scope、chronology（故事生效时间与 revealAt 分离）、epistemic（knownBy/learnedAt/evidence）、boundaries（limitations/cost/ceiling）、exceptions（proposed/author_approved）、provenance（origin/sourceRefs）、dependencies 和 worldParameters。八类世界参数按需填写，未知/N/A 仅作自由文本而非非法 enum；旧 JSON 不被自动升级、抹掉或视为已确认规则。完整字段见 [世界规则契约](design/world-rule-contract.md)。
+
+手动修改记录以 `expectedUpdatedAt` 复验旧版本；规则集以 `expectedRuleSetFingerprint` 复验。`changeAuthorization={previewHash,intent,notes?}` 的 intent 仅 confirm_change / retcon / approve_exception；后两者须说明理由，批准例外还须结构化条件、效果和理由。预览 hash 包含拟改全文、source、采用章/候选影响与阻断，候选应用额外绑定精确候选身份；编辑后不得沿用旧确认。RuleChange 的 operation 为 upsert/delete（缺省 upsert）；规则永久删除仍有原生入口，明确依赖阻断，推荐停用保留来源。
+
+`world_setting_service` 将 CAS、元数据校验、作者授权、写入及旧审阅失效放在同一 IMMEDIATE 事务。逻辑 revision 不是数据库 updatedAt 的替代，两者及规则集指纹各自约束不同基线；UI 状态和前端预检不等于写入成功。
+
+## 43.2 原生规则快照与完整读取证据
+
+- `ai_tasks.target_hint_json.nativeRuleSet` 由原生事务生成 `{novelId,fingerprint,sources}`，拒客户端自报。先保留 caller request_hash 校验，再将宿主冻结快照纳入持久权威 request_hash；精确重放复用原快照，不把旧请求刷新成新规则基线。system 连接探针不冻结作品规则。
+- 共享 `src-tauri/shared/world_rule_fingerprint.rs` 根据实际完整 world/rule DTO 构造来源，包括 sourceType/sourceId/title/isActive、contentHash/forbiddenRulesHash/structuredJsonHash、recordHash；停用行、空值、原 JSON、版本/时间字段都参与原始记录身份，不只 hash 最新启用数据。
+- DSH 本回合的完整读取回执验证后生成 expectedRuleSetFingerprint；新 Task 冻结时必须与实际读时来源一致。Gateway 世界/规则各 128 KiB 全启用完整投影、工程 64 KiB，完整或 context_incomplete，不保留“截断后也 complete”的解释。
+- `tool_call_events.result_json` 引用持久 large_text 结果并存 contentHash/contentChars。native coverage 核对文档 target_type=tool_event、target_id=eventId、field_name=result、真实全文 hash/字符数、root 成功、scope、source ID 集合、每项原文字段 hash、投影字节/hash 和规则集指纹；不能因回执含 complete 就放行。语义结果仍 `not_checked`，不是新增的全书语义证明事实。
+
+## 43.3 修订材料与审阅授权分离
+
+`ArtifactRevisionSource` 为不可变材料引用：conversationId / novelId / chapterId? / cardId / artifactId / artifactHash / artifactType / runId? / title / sourceDraftVersion?。草稿 Store 在当前应用会话内按任务存 text 与 revisionSource，不将未发送正文持久化；发送时把来源编码到用户 Turn 的版本化 envelope，读取后恢复，重试使用原 Turn 来源。无源、scope 不符或 hash 失效时拒绝，不回退最新候选。
+
+新章节派生 ResultArtifact 保留 `parent_artifact_id`，`derivation_type=revision`。窄 IPC `create_chapter_revision_artifact` 在现有 Artifact 事务中校验权威 card/source/hash、最新精确用户 request_revision、来源 raw_content 大文本归属/长度、冻结 input/context 的同一来源及实际请求正文；通用 create_result_artifact 仍拒绝派生，也不能用无 parent 的入口绕过修订来源。没有新的授权表或模型正式写入工具。
+
+2026-10-14 真实桌面试用修复：DSH 全书规划及章节大纲修订也进入上述精确来源候选事务，来源与新产物必须同为 `outline`；小说级规划的 chapterId 为缺省，章节级大纲则严格匹配现存章节。同一作品、会话、卡片、Run、用户修改决定、完整原文及哈希继续复验，派生保留 parent 与 revision，不写正式资产。正文 IPC 保持仅接受 `chapter_text`；不新增 migration 或备份 schema。桌面验收进度按实际试用记录，不据此宣称整本创作或 R4 已通过。
+
+ReviewAuthorization 的 issued / consumed / expired 分别代表可继续审阅、已消费的正式采用历史、不可再消费。规则变更同事务仅 expire 依赖旧规则集的 issued，consumed 和采用稿/决定历史不动；签发/首次消费/正式采用复验候选 Task.nativeRuleSet。打开、编辑、保存和采用不是同一动作。显式对话采用未修改候选只缩短 UI 路径，仍经权威候选、确认/授权、持久草稿、版本/hash 与原子采用。
+
+报告“已阅”按类型使用 confirm 决定，不代表 request_apply 领域写入；阅读定位、展开项或本地勾选不是 ReviewAuthorization。
+
+## 43.4 规则应用与旧建议采用回执
+
+- **结构化规则采用**：`ArtifactDecision.applyTransactionId` 在该路径引用 `large_text_documents` 中的文档 ID（apply-rule- 前缀），target_type 为 artifact、target_id 为候选 artifactId、field_name 为 world_rule_apply_receipt。正文 schema=world-rule-apply-receipt-v1，包含 artifact/card/conversation/novel/decision scope、artifactHash、confirmedBy、expectedRuleSetFingerprint、changeAuthorization（含 notes）、ruleSetAfter 与 targets[{targetType,targetId,targetHash}]。领域写入、回执和 append-only 决定同事务；重放读取完整验证文档并匹配原确认与正式目标 recordHash，漂移失败关闭。此引用不是任意文本标记，也不是所有 applyTransactionId 都指向同一类对象。
+- **旧 setting_suggestions 采用**：原生 `adopt_setting_suggestion` 在单 IMMEDIATE 事务中校验用户/作品、candidateHash、authorizedItemHash、生成基线和 scoped preview，写正式目标、原 item/update 时间的 pending CAS 及 `result_json` 内的 setting-adoption-v1 回执。回执保留 originalItem、requestHash、candidateHash、targetId/type/hash 与作者 guard。相同请求/未漂移目标才幂等读回；旧候选缺生成时快照时仅能明确重新审查，不能补写伪造的历史基线。
+
+这些持久字段复用现有表，并不免除引用清理、备份 ID 重映射、完整性与恢复兼容的要求；相关集成和统一验收结论由父任务收口，本节不提前报告通过。
+
+## 43.5 非持久 UI 与浏览器边界
+
+`workbenchPresentationReading` 仅按作品/任务保存应用会话内的完整轮次窗口、事件锚点/偏移、展开项、跟随状态和已处理定位请求；不引入数据库全局 sequence，不保存用户正文/候选决定，也不保证应用重启恢复阅读位置。
+
+浏览器世界/规则变更用本机前后基线/hash 守卫、同步失效与补偿回滚；旧建议采用用本机 journal 确保恢复仍指向原请求/原目标。本机保存守卫严格失败关闭：`expectedRuleSetFingerprint`、`changeAuthorization.previewHash` 与 `intent` 缺任一项即拒绝，不按本机状态自动补签或复用旧预览；章节审阅的浏览器基线同样要求 mode / novelId / fingerprint 齐全，缺任一项拒绝。章节授权消费仅在本机采用成功后收敛，工作台结构化应用仍失败关闭。这不是 SQLite 事务或跨存储 ACID，不能作为真实 Tauri、DSH 或 live 验收证据。
+
+---
+
+## 43.6 人工章纲保存与采用投影
+
+2026-10-16 实测复核发现，正式 `chapter_outlines.content` 与 `chapters.outline` 可在人工采用后仍保留不同材料，而 Gateway 会读取两者。桌面 `save_chapter_outline` 保存当前 active 版本、或 `set_active_chapter_outline` 显式切换采用版本时，在同一 IMMEDIATE 事务中复验作品与关联章节的存活和归属，并将完整内容同步到该章节的 `outline`；同步失败同时回滚章纲正文或采用标记。保存未采用新版本不改章节材料，未关联章节的章纲也不更新其他章节。
+
+此联动仅从正式章纲指向关联章节材料，不改变章节标题、目标、目标字数、正文状态或采用稿指针；`goal` 仍由作者独立维护，不从章纲文本推断。浏览器大纲保存本就不支持，采用入口也明确拒绝，不能空回调报告成功。本项不新增字段、migration 或备份版本，定向 SQLite 与服务边界检查及桌面进度见 [流程修复记录](../reports/real-use-flow-repairs-2026-10-16.md)。
+
+### 人工资料保存守卫
+
+角色库的显式编辑调用 `save_character_profile`，在 IMMEDIATE 事务内复验作品、角色归属、启用状态、来源及 `updated_at`，更新表单字段后读回验证，失败整体回滚。角色类型与 `is_protagonist` 一致；已有 `protagonist_key`、标签或主角设定来源的绑定角色不允许从此入口降为配角。能力、背景、状态、章节关系、来源和主角绑定不由该表单改写。
+
+章节资料调用 `save_chapter_details`，输入为章节元数据基线与字段差量。事务内同时比较作品/章节身份、`updated_at`、标题、分卷、目标、字数目标、顺序、状态、字数、采用稿指针和章纲投影，拒绝已删作品/章节及跨作品分卷；只修改标题、分卷、目标、字数目标、状态，读回不一致则回滚。空分卷和零字数目标明确清除原值。章纲不在此接口允许字段中，统一从版本化章纲采用链写入，避免详情表单用旧章纲覆盖新采用版。界面冲突保留本地输入，显式核对并更新基线后才重试；未改字段随新基线更新。浏览器仅为开发回退，不构成上述 SQLite 事务证据。
+
+# 44. migration 039：跨任务修订血缘兼容（用户授权的兼容迁移）
+
+> 用户已明确授权新增 `039_result_artifacts_cross_task_lineage`；**授权状态与验收状态分开**：授权指允许新增并执行该兼容迁移，旧库升级、回滚、重开与新库一致属于统一验收范围，本轮未运行、不报告通过。001～038 的发布定义与 checksum 不变。
+
+039 的源码 definition 与 checksum：
+
+```text
+definition: result_artifacts_cross_task_lineage_v1(safe_table_rebuild,single_column_parent_fk,explicit_dependents,verified_foreign_keys)
+checksum:   0ccb6cd137c15169baa1e1e9dda456ea17aa9046cd7b3291df72c37b89307105
+```
+
+checksum 为 `sha256(definition)`（`migrations.rs` 的 `checksum()`），与 `migrations_tests.rs` 的 `EXPECTED_MIGRATION_CHECKSUMS`（39 项）一致；`migrations()` 现返回 39 条。已发布的 `010_result_artifacts` 定义仍为 `result_artifacts_v2(...,parent_same_task,...)`，checksum 仍为 `10d26a27702fb70b1a22b17bc775f1e17527bd5d431ca6fdd23276596ae79e58`。
+
+复合外键 `(task_id, parent_artifact_id) REFERENCES result_artifacts(task_id, artifact_id)` 把父产物限制在同一任务内，因此新任务产生的章节修订候选无法引用上一任务中已被审阅的候选。SQLite 不支持原地删除外键，039 采用**标准 safe table rebuild**：在自身 IMMEDIATE 事务内复制行、删除并重建 `result_artifacts`、只把这条约束换成单列 `parent_artifact_id`，再还原显式索引与触发器；不改写 `sqlite_master`，也不使用 `PRAGMA writable_schema`。
+
+## 44.1 运行顺序与外键开关
+
+`run_migrations` 只对 039 走 `with_foreign_keys_disabled`：在打开 IMMEDIATE 事务**之前**于连接上执行 `PRAGMA foreign_keys=OFF`（SQLite 在事务内执行该 PRAGMA 是 no-op），迁移结束后恢复进入前的取值；写回后仍未恢复时以 `DATABASE_TRANSACTION_FAILED` + reason `foreign_keys_not_restored` 失败，恢复语句本身报错也按数据库失败返回。因此 `apply` 在外键强制开启时直接以 reason `foreign_keys_must_be_off` 拒绝重建；其余 001～038 仍按原顺序在各自的 IMMEDIATE 事务中执行，checksum 校验方式不变。
+
+## 44.2 重建步骤（同一 IMMEDIATE 事务内）
+
+1. 读取 `sqlite_master` 中 `result_artifacts` 的完整 SQL，并用 `pragma_table_info` 要求列名精确等于 22 列（`artifact_id` … `created_at`）。
+2. 用 `pragma_foreign_key_list` 判定父外键形态：`ReleasedComposite`（已发布复合）、`Lineage`（已单列）或 `Other`。已发布 SQL 中复合外键原文必须恰好出现一次，替换时只改这一条约束，其余文本逐字保持（重建表名与父表名分别重写）。
+3. 记录重建前的行 fingerprint：按 `artifact_id` 排序读取全部 22 列，逐值按 SQLite `ValueRef` 分支编码后累积 sha256，并记录行数；这是同 schema 复制前后的一致性校验，不宣称具备独立类型/长度标签的通用序列编码。
+4. 枚举显式依赖并要求齐全：4 个索引（`idx_result_artifacts_task_created` / `idx_result_artifacts_attempt` / `idx_result_artifacts_status_hash` / `uq_result_artifacts_attempt_root`）、表上 4 个触发器（`trg_result_artifacts_immutable_content` / `immutable_delete` / `status_edges` / `validate_insert`），以及引用该表的 9 个其他触发器（`ai_tasks` ×2、`ai_large_text_documents` ×2、`ai_large_text_chunks` ×3、`placement_proposals` 与 `conversation_artifact_cards` 各 1）。缺任一对象即以 `missing_dependent_object` / `missing_schema_object` 失败关闭。
+5. 先 DROP 非本表的 trigger / view 依赖（出现其他依赖类型即 `unexpected_dependent`）；重建表已存在则以 `rebuild_table_exists` 失败关闭。
+6. `CREATE TABLE result_artifacts_039_rebuild (...)`（重写后的 SQL，父外键指向重建表自身）→ 复制全部 22 列 → `DROP TABLE result_artifacts` → 用重写 SQL 重建 `result_artifacts`（父外键 `parent_artifact_id → result_artifacts(artifact_id)`）→ 复制回来 → `DROP TABLE result_artifacts_039_rebuild`。
+7. 按 index → trigger → view、先本表后引用表的固定顺序，用保存的原始 SQL 还原全部依赖对象。
+8. 重新计算行 fingerprint，行数与 hash 必须与重建前完全一致，否则以 `row_fingerprint_changed` 失败关闭。
+
+## 44.3 重建后校验与失败关闭
+
+`verify_lineage_schema` 要求：父外键为 `parent_artifact_id → result_artifacts(artifact_id)` 且 `ON DELETE RESTRICT`；必需外键存在（`task_id, attempt_id → ai_task_attempts`、`task_id, source_input_snapshot_id → ai_input_snapshots`、三个大文本引用列 → `large_text_documents`）；表 SQL 含 `UNIQUE(task_id, artifact_id)` 且不再含已发布复合父外键；列名精确；全部索引与触发器存在；`PRAGMA foreign_key_check` 无违规。
+
+任一步失败都返回 `DATABASE_TRANSACTION_FAILED`（“结果产物跨任务血缘迁移未完成，数据库保持原状”），details 带 `migrationId`、`reason` 与证据；整个 IMMEDIATE 事务回滚，已发布复合外键、全部行、依赖对象与旧 ledger 条目保持不变。升级前已存在孤儿父行时以 `foreign_key_violation` 失败关闭，不带着违规数据提交。
+
+## 44.4 已修补库、新库与幂等
+
+- 预发布分支中已被就地改为单列外键的库：识别为 `Lineage` 后跳过重建，只执行同一套校验并写入 039 ledger 条目，不重复 rebuild、不改 schema_version。
+- 全新空库按 001～039 顺序执行，039 同样重建空表，与旧库升级得到同一 schema 结构（索引、触发器、外键一致）；040 随后追加章节写作阶段表。
+- 039 是普通 ledger 条目（version `3.3.0`）；重复启动只在 checksum 匹配时跳过，不重写 ledger；checksum 被篡改仍在启动时失败关闭。只前向、无 down migration，失败仅回滚本次事务。
+
+## 44.5 历史定义、冻结指纹与边界
+
+- 001～038 的 definition 与 checksum 保持发布值；`db22_m1_sql_schema_fingerprint_is_frozen` 只运行到 038（`run_migrations_through(38)`）并冻结当时的 M1 SQL（含复合父外键，指纹 `8e34fe774ff2490325eab1654e5118230e77279e58beed325a5e09c4f320835e`），039 之后的血缘结构不在该指纹内，也不得为迁就文档改定义或 hash。
+- 039 不新增业务表、不改备份 schema 版本（仍为 11）；重建过程虽复制行，但 fingerprint 证明行数与列内容未变，placement proposal / validation issue / 决定与规则回执引用的 large_text 文档不变。
+- 数据库外键只保证父 artifact 行存在。跨任务血缘仍须通过修订来源校验（novel / chapter / content hash / 来源决定），Rust 在既有 Artifact 事务内验证 `ArtifactRevisionSource`、权威 card/source/hash 与精确 `request_revision` 决定；本迁移不放宽 hash、作用域或作者确认门禁。
+- 038 与 039 的验收彼此独立：`db22` 冻结的是 038 形态；039 的旧库升级、回滚、重开与新库一致属于统一验收项，对应行为用例位于 `migrations_cross_task_lineage_tests.rs`，本轮未运行，不作为本批证据。
+
+## 44.6 已核对的历史假设不再成立
+
+- 旧文本描述“不重建表、只改一行 SQL、`writable_schema` 临时开启、`schema_version` 递增后重解析”——当前源码没有任何 `writable_schema` 路径；实际实现是上文的事务内 safe table rebuild。
+- 旧文本的 checksum `f85352a8…` 不属于当前 definition；以本节源码 definition 与 `sha256` 为准。

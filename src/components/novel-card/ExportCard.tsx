@@ -1,10 +1,14 @@
 /**
  * AI Novel Studio - 作品详情页导出卡片
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Download, FileJson, FileText } from 'lucide-react';
 import { exportService } from '../../services/export/exportService';
 import { describeUnknownError } from '../../utils/errorMessage';
+import {
+  formatExportProgress,
+  type ManuscriptExportOptions,
+} from '../../services/export/manuscriptExport';
 
 interface ExportCardProps {
   novelId: string;
@@ -14,17 +18,31 @@ interface ExportCardProps {
 function ExportCard({ novelId }: ExportCardProps) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const exporting = useRef(false);
 
-  const handleExport = async (fn: () => Promise<string | void>) => {
+  const handleExport = async (fn: (options: ManuscriptExportOptions) => Promise<string | void>) => {
+    if (exporting.current) return;
+    exporting.current = true;
+    setBusy(true);
     setErr('');
     setMsg('正在导出...');
     try {
-      const savedPath = await fn();
-      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
-      setTimeout(() => setMsg(''), 4000);
+      let receipt = '导出成功';
+      const savedPath = await fn({
+        onProgress: (progress) => {
+          const message = formatExportProgress(progress);
+          if (progress.stage === 'complete') receipt = message;
+          setMsg(message);
+        },
+      });
+      setMsg(savedPath ? `${receipt}：${savedPath}` : receipt);
     } catch (e: unknown) {
       setErr(describeUnknownError(e, '导出失败'));
       setMsg('');
+    } finally {
+      exporting.current = false;
+      setBusy(false);
     }
   };
 
@@ -37,20 +55,27 @@ function ExportCard({ novelId }: ExportCardProps) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => handleExport(() => exportService.exportNovelToTxt(novelId))}
+          disabled={busy}
+          onClick={() =>
+            handleExport((options) => exportService.exportNovelToTxt(novelId, options))
+          }
         >
           <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
           导出整本 TXT
         </button>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => handleExport(() => exportService.exportNovelToMarkdown(novelId))}
+          disabled={busy}
+          onClick={() =>
+            handleExport((options) => exportService.exportNovelToMarkdown(novelId, options))
+          }
         >
           <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
           导出整本 Markdown
         </button>
         <button
           className="btn btn-secondary btn-sm"
+          disabled={busy}
           onClick={() => handleExport(() => exportService.exportNovelBackupJson(novelId))}
         >
           <FileJson aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -61,9 +86,23 @@ function ExportCard({ novelId }: ExportCardProps) {
         仅导出已采用的章节正文。完整 JSON 可在桌面版恢复为新的作品。
       </div>
       {msg && (
-        <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>{msg}</div>
+        <div role="status" style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>
+          {msg}
+        </div>
       )}
-      {err && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 4 }}>{err}</div>}
+      {err && (
+        <div
+          role="alert"
+          style={{
+            fontSize: 12,
+            color: 'var(--color-error)',
+            marginTop: 4,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {err}
+        </div>
+      )}
     </div>
   );
 }

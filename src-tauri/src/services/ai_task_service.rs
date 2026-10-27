@@ -1453,169 +1453,9 @@ pub(crate) fn create_dsh_projected_task(
     create_task_after_validation(connection, input)
 }
 
-fn create_task_after_validation(
-    connection: &mut Connection,
-    input: CreateAiTaskInput,
-) -> Result<ai_task_repository::AiTaskRecord, AppError> {
-    let body_hash = large_text_repository::sha256(&input.input_snapshot.body);
-    let compiled_hash = large_text_repository::sha256(&input.context_snapshot.compiled_context);
-    let actual_template_hash =
-        large_text_repository::sha256(&input.constraint_snapshot.prompt_template_body);
-    if input.constraint_snapshot.prompt_template_hash != actual_template_hash {
-        return Err(AppError::new(
-            codes::DOCUMENT_HASH_MISMATCH,
-            "Prompt 模板正文与声明 hash 不一致",
-            false,
-        ));
-    }
-    let input_hash = input_snapshot_hash(&input.input_snapshot, &body_hash)?;
-    let context_hash = context_snapshot_hash(&input.context_snapshot, &compiled_hash)?;
-    let constraint_hash =
-        constraint_snapshot_hash(&input.constraint_snapshot, &actual_template_hash)?;
-    let calculated_request_hash =
-        request_hash(&input, &input_hash, &context_hash, &constraint_hash)?;
-    if input
-        .request_hash
-        .as_deref()
-        .is_some_and(|provided| provided != calculated_request_hash)
-    {
-        return Err(AppError::new(
-            codes::OPERATION_PAYLOAD_CONFLICT,
-            "requestHash 与服务器规范化请求不一致",
-            false,
-        ));
-    }
-
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(AppError::database)?;
-    if let Some(existing) =
-        ai_task_repository::find_task_by_operation(&transaction, &input.operation_id)?
-    {
-        if existing.request_hash_version != REQUEST_HASH_VERSION
-            || existing.request_hash != calculated_request_hash
-        {
-            return Err(AppError::new(
-                codes::OPERATION_PAYLOAD_CONFLICT,
-                "同一 operationId 对应不同 AI Task 请求",
-                false,
-            ));
-        }
-        commit_transaction(transaction, Some(&existing.operation_id))?;
-        get_task_detail(connection, &existing.task_id)?;
-        return Ok(existing);
-    }
-    validate_target(&transaction, &input)?;
-
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let input_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let context_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let constraint_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = input
-        .trace_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(&task_id)
-        .to_string();
-    ai_fact_security::validate_identifier(&trace_id, "traceId", 128)?;
-    let now = Utc::now().to_rfc3339();
-    let (body_ref_id, inserted_body_hash) = insert_snapshot_document(
-        &transaction,
-        &input_snapshot_id,
-        "input_body",
-        &input.input_snapshot.body,
-        &now,
-    )?;
-    let (compiled_context_ref_id, inserted_compiled_hash) = insert_snapshot_document(
-        &transaction,
-        &context_snapshot_id,
-        "compiled_context",
-        &input.context_snapshot.compiled_context,
-        &now,
-    )?;
-    let (prompt_template_ref_id, inserted_template_hash) = insert_snapshot_document(
-        &transaction,
-        &constraint_snapshot_id,
-        "prompt_template",
-        &input.constraint_snapshot.prompt_template_body,
-        &now,
-    )?;
-    debug_assert_eq!(body_hash, inserted_body_hash);
-    debug_assert_eq!(compiled_hash, inserted_compiled_hash);
-    debug_assert_eq!(actual_template_hash, inserted_template_hash);
-
-    let target_hint_json = input
-        .target_hint_json
-        .as_ref()
-        .map(canonical_json)
-        .transpose()?;
-    ai_task_repository::insert_task(
-        &transaction,
-        &ai_task_repository::NewTask {
-            task_id: &task_id,
-            task_type: &input.task_type,
-            novel_id: &input.novel_id,
-            chapter_id: input.chapter_id.as_deref(),
-            draft_id: input.draft_id.as_deref(),
-            scope_type: &input.scope_type,
-            input_snapshot_id: &input_snapshot_id,
-            context_snapshot_id: &context_snapshot_id,
-            constraint_snapshot_id: &constraint_snapshot_id,
-            trace_id: &trace_id,
-            operation_id: &input.operation_id,
-            request_hash_version: REQUEST_HASH_VERSION,
-            request_hash: &calculated_request_hash,
-            expected_artifact_type: &input.expected_artifact_type,
-            expected_artifact_schema_version: input.expected_artifact_schema_version,
-            target_hint_json: target_hint_json.as_deref(),
-            now: &now,
-        },
-    )?;
-    ai_task_repository::insert_input_snapshot(
-        &transaction,
-        &input_snapshot_id,
-        &task_id,
-        input.input_snapshot.schema_version,
-        &input.input_snapshot.input_type,
-        &canonical_json(&input.input_snapshot.payload_json)?,
-        &body_ref_id,
-        input.input_snapshot.source_draft_id.as_deref(),
-        input.input_snapshot.source_draft_version,
-        input.input_snapshot.base_content_hash.as_deref(),
-        &input_hash,
-        &now,
-    )?;
-    ai_task_repository::insert_context_snapshot(
-        &transaction,
-        &context_snapshot_id,
-        &task_id,
-        input.context_snapshot.schema_version,
-        &canonical_json(&input.context_snapshot.source_manifest_json)?,
-        &compiled_context_ref_id,
-        &canonical_json(&input.context_snapshot.budget_json)?,
-        &input.context_snapshot.compiler_version,
-        &context_hash,
-        &now,
-    )?;
-    ai_task_repository::insert_constraint_snapshot(
-        &transaction,
-        &constraint_snapshot_id,
-        &task_id,
-        input.constraint_snapshot.schema_version,
-        &canonical_json(&input.constraint_snapshot.payload_json)?,
-        &input.constraint_snapshot.prompt_template_id,
-        &input.constraint_snapshot.prompt_template_version,
-        &actual_template_hash,
-        &prompt_template_ref_id,
-        &canonical_json(&input.constraint_snapshot.provider_options_json)?,
-        &constraint_hash,
-        &now,
-    )?;
-    let created = ai_task_repository::find_task(&transaction, &task_id)?
-        .ok_or_else(|| AppError::new(codes::AI_TASK_NOT_FOUND, "AI Task 创建失败", false))?;
-    commit_transaction(transaction, Some(&created.operation_id))?;
-    Ok(created)
-}
+#[path = "ai_task_creation.rs"]
+mod creation;
+use creation::create_task_after_validation;
 
 pub fn queue_attempt(
     connection: &mut Connection,
@@ -2601,6 +2441,8 @@ pub(crate) mod tests {
         input
     }
 
+    include!("ai_task_rule_snapshot_tests.rs");
+
     #[test]
     fn book_word_goal_parser_accepts_supported_sparse_chinese_expressions() {
         for (content, words, comparison) in [
@@ -2689,6 +2531,20 @@ pub(crate) mod tests {
             large_text_repository::sha256(&expected_input.context_snapshot.compiled_context);
         let expected_template_hash =
             large_text_repository::sha256(&expected_input.constraint_snapshot.prompt_template_body);
+        // Creation freezes the native rule snapshot into the target hint before hashing, so the
+        // expected identity must include the same trusted snapshot instead of a client-shaped hint.
+        {
+            let hint = expected_input
+                .target_hint_json
+                .get_or_insert_with(|| serde_json::json!({}));
+            hint["nativeRuleSet"] = serde_json::to_value(
+                crate::services::world_rule_governance::rule_set_snapshot(
+                    &connection,
+                    &expected_input.novel_id,
+                )?,
+            )
+            .map_err(|error| AppError::new("REQUEST_HASH_INVALID", error.to_string(), false))?;
+        }
         let expected_request_hash = request_hash(
             &expected_input,
             &input_snapshot_hash(&expected_input.input_snapshot, &expected_body_hash)?,

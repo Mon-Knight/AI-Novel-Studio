@@ -1,6 +1,5 @@
 import type {
   AiSettings,
-  CloudApiProvider,
   GatewayModelConfig,
   LocalChapterModelSettings,
   SavedApiModelProfile,
@@ -9,6 +8,7 @@ import type {
 } from '../../types/ai';
 import { createUniqueId } from '../../utils/uniqueId';
 import {
+  normalizeSavedApiModelProfile,
   persistableSavedApiModel,
   profileFromActiveSettings,
   savedApiModelMatchesSettings,
@@ -63,7 +63,7 @@ function credentialIdentityKey(identity: SessionModelCredentialIdentity): string
   return JSON.stringify([identity.scope, providerId, baseUrl, modelId]);
 }
 
-function rememberSessionModelApiKey(
+export function rememberSessionModelApiKey(
   identity: SessionModelCredentialIdentity,
   apiKey: string,
 ): void {
@@ -188,6 +188,16 @@ export async function syncSessionModelCredentialsToNative(settings: AiSettings):
   const gateway = settings.gateway ?? settings.remoteWriter;
   if (gateway) {
     bindings.push({ identity: gatewayCredentialIdentity(gateway), apiKey: gateway.apiKey });
+  }
+  for (const profile of settings.savedApiModels ?? []) {
+    const identity = {
+      scope: 'provider' as const,
+      providerId: profile.provider,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
+    };
+    const apiKey = resolveSessionModelApiKey(identity);
+    if (apiKey) bindings.push({ identity, apiKey });
   }
   await Promise.all(
     bindings.map(({ identity, apiKey }) => setNativeSessionModelApiKey(identity, apiKey)),
@@ -347,35 +357,6 @@ function normalizeGatewaySettings(
 }
 
 export const normalizeRemoteWriterSettings = normalizeGatewaySettings;
-
-function isCloudApiProvider(value: unknown): value is CloudApiProvider {
-  return value === 'deepseek' || value === 'openai_compatible';
-}
-
-function normalizeSavedApiModelProfile(stored: unknown): SavedApiModelProfile | undefined {
-  if (!stored || typeof stored !== 'object') return undefined;
-  const raw = stored as Partial<SavedApiModelProfile>;
-  if (!isCloudApiProvider(raw.provider)) return undefined;
-  const id = String(raw.id ?? '').trim();
-  const baseUrl = String(raw.baseUrl ?? '').trim();
-  const modelName = String(raw.modelName ?? '').trim();
-  const label = String(raw.label ?? '').trim() || modelName;
-  if (!id || !baseUrl || !modelName) return undefined;
-  return persistableSavedApiModel({
-    id,
-    label,
-    provider: raw.provider,
-    baseUrl,
-    modelName,
-    temperature: normalizeNumber(raw.temperature, 0.7, 0, 2),
-    maxTokens: Math.round(normalizeNumber(raw.maxTokens, 8000, 1, 200000)),
-    timeoutSeconds: Math.round(normalizeNumber(raw.timeoutSeconds, 120, 1, 1800)),
-    inputPricePerMillionTokens: normalizeOptionalPrice(raw.inputPricePerMillionTokens),
-    outputPricePerMillionTokens: normalizeOptionalPrice(raw.outputPricePerMillionTokens),
-    lastTestAt: typeof raw.lastTestAt === 'string' ? raw.lastTestAt : undefined,
-    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : undefined,
-  });
-}
 
 function normalizeSavedApiModels(
   stored: Partial<AiSettings>,

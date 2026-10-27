@@ -88,6 +88,117 @@ function fixture(goal: string, runPatch: Partial<TaskRun> = {}): TaskConversatio
 
 const dependencies = { listChapters: async () => chapters };
 
+test('novel setting revision retry keeps its frozen scope despite chapter citations and negated prose', async () => {
+  const goal = '修订所选设定候选：第2章只发现疑点；暂不生成正文。';
+  const bundle = fixture(goal);
+  bundle.turns[0].revisionSource = {
+    conversationId: 'conversation-001',
+    novelId: 'novel-001',
+    cardId: 'card-setting',
+    artifactId: 'artifact-setting',
+    artifactHash: 'a'.repeat(64),
+    artifactType: 'setting_candidates',
+    title: '创作准备模板',
+  };
+  const target = await resolveRetryRunChapterTarget(
+    { bundle, sourceRun: bundle.runs[0], sourceGoal: goal },
+    dependencies,
+  );
+  assert.deepEqual(target, {
+    source: 'novel',
+    evidence: ['turn:turn-source:settingRevision:artifact-setting'],
+  });
+  const noChapters = await resolveRetryRunChapterTarget(
+    { bundle, sourceRun: bundle.runs[0], sourceGoal: goal },
+    { listChapters: async () => [] },
+  );
+  assert.equal(noChapters.chapterId, undefined);
+});
+
+test('setting revision retry rejects mismatched source identities and persisted chapter scope', async () => {
+  const goal = '修订所选设定候选：暂不生成正文。';
+  for (const patch of [
+    { novelId: 'novel-other' },
+    { conversationId: 'conversation-other' },
+    { runChapterId: 'chapter-001' },
+  ]) {
+    const bundle = fixture(goal, {
+      chapterId: 'runChapterId' in patch ? patch.runChapterId : undefined,
+    });
+    bundle.turns[0].revisionSource = {
+      conversationId: patch.conversationId ?? 'conversation-001',
+      novelId: patch.novelId ?? 'novel-001',
+      cardId: 'card-setting',
+      artifactId: 'artifact-setting',
+      artifactHash: 'a'.repeat(64),
+      artifactType: 'setting_candidates',
+      title: '创作准备模板',
+    };
+    await assert.rejects(
+      resolveRetryRunChapterTarget(
+        { bundle, sourceRun: bundle.runs[0], sourceGoal: goal },
+        dependencies,
+      ),
+      { code: 'WORKBENCH_RETRY_TARGET_CONFLICT' },
+    );
+  }
+});
+
+test('outline retry freezes its source chapter or novel scope despite another chapter citation', async () => {
+  const goal = '修订所选大纲，第2章写深秋，不生成正文。';
+  for (const chapterId of [undefined, 'chapter-001']) {
+    const bundle = fixture(goal);
+    bundle.turns[0].revisionSource = {
+      conversationId: 'conversation-001',
+      novelId: 'novel-001',
+      chapterId,
+      cardId: 'card-outline',
+      artifactId: 'artifact-outline',
+      artifactHash: 'a'.repeat(64),
+      artifactType: 'outline',
+      title: '旧大纲',
+    };
+    const target = await resolveRetryRunChapterTarget(
+      { bundle, sourceRun: bundle.runs[0], sourceGoal: goal },
+      dependencies,
+    );
+    assert.equal(target.chapterId, chapterId);
+    assert.equal(target.source, chapterId ? 'turn.revisionSource.chapterId' : 'novel');
+    bundle.runs[0].chapterId = 'chapter-002';
+    await assert.rejects(
+      resolveRetryRunChapterTarget(
+        { bundle, sourceRun: bundle.runs[0], sourceGoal: goal },
+        dependencies,
+      ),
+      { code: 'WORKBENCH_RETRY_TARGET_CONFLICT' },
+    );
+  }
+});
+
+test('outline retry rejects a missing source chapter and a foreign source identity', async () => {
+  const bundle = fixture('修订所选大纲，第2章写深秋。');
+  const source = {
+    conversationId: 'conversation-001',
+    novelId: 'novel-001',
+    chapterId: 'missing',
+    cardId: 'card-outline',
+    artifactId: 'artifact-outline',
+    artifactHash: 'a'.repeat(64),
+    artifactType: 'outline',
+    title: '旧大纲',
+  };
+  bundle.turns[0].revisionSource = source;
+  const input = { bundle, sourceRun: bundle.runs[0], sourceGoal: bundle.turns[0].content! };
+  await assert.rejects(resolveRetryRunChapterTarget(input, dependencies), {
+    code: 'WORKBENCH_RETRY_TARGET_INVALID',
+  });
+  source.chapterId = 'chapter-001';
+  source.novelId = 'foreign';
+  await assert.rejects(resolveRetryRunChapterTarget(input, dependencies), {
+    code: 'WORKBENCH_RETRY_TARGET_CONFLICT',
+  });
+});
+
 const consumedAuthorization: ReviewAuthorization = {
   authorizationId: 'review-summary-001',
   artifactId: 'artifact-chapter-001',

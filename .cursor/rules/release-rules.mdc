@@ -1,7 +1,7 @@
 ---
 description: AI Novel Studio 发布规则 — 发布前必须验证，push/tag 需人工确认
-globs: scripts/agent-workflow/release_workflow.ps1,.github/skills/release-package/**
-alwaysApply: true
+globs: scripts/agent-workflow/release_workflow.ps1,scripts/release/**,.github/workflows/release.yml,.github/skills/release-package/**
+alwaysApply: false
 ---
 
 # Release Rules

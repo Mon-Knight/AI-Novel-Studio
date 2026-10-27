@@ -19,6 +19,7 @@ pub mod content_transactions;
 pub mod context;
 pub mod conversations;
 pub mod drafts;
+pub mod local_assets;
 pub mod memory;
 pub mod multi_agent;
 pub mod output_profiles;
@@ -26,6 +27,8 @@ pub mod placements;
 pub mod project;
 pub mod recovery;
 pub mod reference_library;
+pub mod setting_suggestions;
+pub mod user_templates;
 pub mod world;
 pub mod writing;
 

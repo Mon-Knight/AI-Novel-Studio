@@ -306,7 +306,7 @@ $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob
     '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+    "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build -- --bundles none --ci"
 )
 Add-CheckResult "desktop DSH and gateway precede Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and the production Tauri build"
@@ -329,16 +329,21 @@ $windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob
     '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build:release -- --config"
 )
-Add-CheckResult "release DSH and gateway precede Rust tests" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and signed installer creation"
+Add-CheckResult "release DSH and gateway precede signed packaging" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, signed installer creation; dynamic tests are inherited from desktop-gate"
 
+$releaseReusesExactEvidence =
+    ([string]$windowsReleaseJob).Contains("VERIFIED_SHA:" ) -and
+    ([string]$windowsReleaseJob).Contains('needs.desktop-gate.outputs.verified_sha') -and
+    ([string]$windowsReleaseJob).Contains('$actualSha -ne $env:VERIFIED_SHA') -and
+    ([string]$desktopWorkflow).Contains('verified_sha:')
+Add-CheckResult "release checks inherited evidence commit" $releaseReusesExactEvidence "reused full-gate evidence must match the checked-out release commit"
 $verificationScript = Get-OptionalText "scripts/agent-workflow/verify_project.ps1"
 $verificationHasGatewayOrder = Test-MarkersInOrder ([string]$verificationScript) @(
     'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")',
     'Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")',
-    'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")',
+    'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--workspace", "--", "--test-threads=1")',
     'Invoke-VerificationStep -Name "npm run tauri:build"'
 )
 Add-CheckResult "local verification rebuilds gateway before serial Rust tests" $verificationHasGatewayOrder "verify_project removes cached gateway output, rebuilds it from current source, then runs serial Rust tests before packaging"
@@ -347,7 +352,7 @@ $pullRequestTemplate = Get-OptionalText ".github/pull_request_template.md"
 $pullRequestTemplateHasGatewayOrder = Test-MarkersInOrder ([string]$pullRequestTemplate) @(
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
+    "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
 )
 Add-CheckResult "PR verification template rebuilds gateway before serial Rust tests" $pullRequestTemplateHasGatewayOrder "PR evidence removes cached gateway output and rebuilds current source before the serial Rust test contract"
 

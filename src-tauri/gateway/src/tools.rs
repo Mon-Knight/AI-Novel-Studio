@@ -12,10 +12,22 @@
 //! migrations or recovery. v3.2 should extract a shared read-only crate to
 //! remove the SQL drift risk versus the app repositories.
 
+use crate::tool_allowlist::filter_tool_list;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+
+#[path = "creative_action.rs"]
+mod creative_action;
+
+#[path = "../../shared/world_rule_fingerprint.rs"]
+mod world_rule_fingerprint;
+#[path = "../../shared/memory_lexical_retrieval.rs"]
+mod memory_lexical_retrieval;
+#[cfg(test)]
+#[path = "../../shared/memory_comparison_corpus.rs"]
+mod memory_comparison_corpus;
 
 pub const TOOL_VERSION: &str = "v1";
 
@@ -40,6 +52,11 @@ const STORY_PLAN_CHAPTER_WORD_MAX: u64 = 10_000;
 const TOP_K_MIN: i64 = 1;
 const TOP_K_MAX: i64 = 20;
 const CHUNK_CLIP: usize = 2_000;
+const MEMORY_NO_HIT_WARNING: &str = "记忆检索没有命中。调用已完成，但这不是已读到相关材料。";
+const MEMORY_TRUNCATED_WARNING: &str = "记忆片段已截断，返回的是命中窗口而不是全文。";
+const MEMORY_OMITTED_WARNING: &str = "还有相关记忆未纳入本次返回。";
+const MEMORY_COVERAGE_WARNING: &str =
+    "记忆候选超过本次检索预算，返回的不是完整命中集，不能当成全部未命中。";
 const ADOPTED_BODY_CLIP: usize = 120_000;
 const NOVEL_OUTLINE_CLIP: usize = 6_000;
 const CORE_OUTLINE_CLIP: usize = 6_000;
@@ -47,10 +64,13 @@ const VOLUME_OUTLINE_CLIP: usize = 2_000;
 const CONTEXT_TEXT_CLIP: usize = 1_200;
 const CONTEXT_JSON_CLIP: usize = 800;
 const CHARACTER_FIELD_CLIP: usize = 800;
-const ENGINEERING_FIELD_CLIP: usize = 4_000;
 const SUMMARY_FIELD_CLIP: usize = 2_000;
-const WORLD_SETTING_LIMIT: usize = 6;
-const RULE_SYSTEM_LIMIT: usize = 8;
+const WORLD_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+// Hard rules are atomic context: fit all active scoped rows, or reject as incomplete.
+const RULE_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+const ENGINEERING_CONTEXT_MAX_BYTES: usize = 64 * 1024;
+// Matches the existing Gateway transport envelope; never enlarge Canonical responses.
+const CONTEXT_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const VOLUME_OUTLINE_LIMIT: usize = 8;
 const VOLUME_LIMIT: usize = 24;
 const CHAPTER_LIMIT: usize = 160;
@@ -328,6 +348,7 @@ pub fn tool_list() -> Vec<Value> {
 
 fn legacy_tool_catalog() -> Vec<Value> {
     vec![
+        creative_action::schema(),
         json!({
             "name": "novel.read_context",
             "description": "读取小说上下文与章节结构。只读。",
@@ -421,7 +442,7 @@ fn legacy_tool_catalog() -> Vec<Value> {
         candidate_tool_schema(
             "summarize_chapter",
             "chapter_summary",
-            "接收并验证基于当前已采用章节正文生成的章节总结候选。提交前必须先用 chapter.read_outline 读取正文。candidateText 必须是 JSON 对象的字符串，至少包含 summary；应从正文提取 keyEvents、factsMustRemember，并在存在变化时提供 characterChanges 与 contextRecords。直接生成完整候选，不要要求用户填写 JSON；本工具不写入正式上下文。",
+            "接收并验证基于当前已采用章节正文生成的章节总结候选。提交前必须先用 chapter.read_outline 读取正文。candidateText 必须是 JSON 对象的字符串，至少包含 summary；应从正文提取 keyEvents、factsMustRemember，并必须提供 characterChanges 与 contextRecords 数组，没有变化时返回空数组。直接生成完整候选，不要要求用户填写 JSON；本工具不写入正式上下文。",
         ),
         json!({
             "name": "get_metadata",
@@ -451,7 +472,7 @@ fn legacy_tool_catalog() -> Vec<Value> {
         }),
         json!({
             "name": "search_memory",
-            "description": "在已采用正文的记忆库中检索与查询相关的片段（FTS5，回退 LIKE）。targetChapterId 会严格排除目标章节及之后的事实；chapterId 保留为精确章节过滤。只读。",
+            "description": "在已采用正文的记忆库中检索与查询相关的片段（FTS5 短语，不足时回退子串）。按词法相关度、重要度与章节新旧稳定排序；无词法命中时 data.noHit 为 true，且 warnings 说明这不是已读到材料。候选预算被截断时 data.coverageIncomplete 为 true，不能当成全部未命中。片段截断或结果被截断时同样写入 warnings，内容不含正文或检索词。ok 只表示调用成功。targetChapterId 会严格排除目标章节及之后的事实；chapterId 保留为精确章节过滤。只读。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -539,7 +560,7 @@ fn canonical_tool_catalog() -> Vec<Value> {
         }),
         json!({
             "name": "memory.search",
-            "description": "在当前作品已采用事实中检索带来源的记忆片段。只读。",
+            "description": "在当前作品已采用事实中检索带来源的记忆片段。无命中或截断时 warnings 公开说明，且不包含正文或检索词。ok 只表示调用成功。只读。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -559,24 +580,6 @@ fn list_tools_for_allowlist(allowed_tools: Result<Option<HashSet<String>>, Strin
             filter_tool_list(canonical_tool_catalog(), Ok(Some(allowed)))
         }
         other => filter_tool_list(legacy_tool_catalog(), other),
-    }
-}
-
-fn filter_tool_list(
-    tools: Vec<Value>,
-    allowed_tools: Result<Option<HashSet<String>>, String>,
-) -> Vec<Value> {
-    match allowed_tools {
-        Ok(Some(allowed)) => tools
-            .into_iter()
-            .filter(|tool| {
-                tool.get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| allowed.contains(name))
-            })
-            .collect(),
-        Ok(None) => tools,
-        Err(_) => Vec::new(),
     }
 }
 
@@ -601,7 +604,9 @@ fn call_tool_with_security_context(
         return Err("suspicious credential-like input rejected".to_string());
     }
     if let Some(allowed) = &security_context.allowed_tools {
-        let allowed_for_task = if allowlist_selects_canonical(allowed) {
+        let allowed_for_task = if allowlist_selects_canonical(allowed)
+            && !crate::stage_submission::is_tool(name)
+        {
             is_canonical_read_tool(name) && allowed.contains(name)
         } else {
             allowed.contains(name)
@@ -621,8 +626,27 @@ fn call_tool_with_security_context(
         _ => None,
     };
     let arguments = scoped_arguments.as_ref().unwrap_or(arguments);
-    validate_task_scope(security_context.scope.as_ref(), arguments)?;
+    if name == "creative.plan_action" {
+        // A workflow request may choose a chapter from the scoped novel. The
+        // handler checks ownership; the downstream workflow freezes it anew.
+        let mut novel_arguments = arguments.clone();
+        if let Some(object) = novel_arguments.as_object_mut() { object.remove("chapterId"); }
+        let novel_scope = security_context.scope.as_ref().map(|scope|TaskScope {novel_id:scope.novel_id.clone(),chapter_id:None});
+        validate_task_scope(novel_scope.as_ref(), &novel_arguments)?;
+    } else if crate::stage_submission::is_tool(name)
+        && security_context.allowed_tools.as_ref().is_some_and(|allowed| allowed.contains(name))
+        && security_context.scope.as_ref().and_then(|scope| scope.chapter_id.as_deref()).is_none()
+    {
+        return Err(TASK_CHAPTER_SCOPE_REJECTED.to_string());
+    } else {
+        validate_task_scope(security_context.scope.as_ref(), arguments)?;
+    }
     match name {
+        "creative.plan_action" => creative_action::plan(connection, arguments),
+        "submit_chapter_stage" => crate::stage_submission::call(
+            arguments,
+            security_context.allowed_tools.as_ref(),
+        ),
         "novel.read" | "novel.read_context" => get_metadata(connection, arguments, false),
         "get_metadata" => get_metadata(connection, arguments, true),
         "structure.read" | "context.read" | "chapter.read_outline" | "get_chapter_context" => {
@@ -707,11 +731,7 @@ fn candidate_tool_schema(name: &str, artifact_type: &str, description: &str) -> 
             "或 category=world_rules/magic/technology/cultivation/combat/social，可附 forbiddenRules 数组；",
             "当任务要求生成世界与规则设定候选时，两类条目必须同时存在"
         ),
-        "chapter_summary" => concat!(
-            "模型生成的 JSON 对象字符串，至少包含 summary。应从已采用正文提取 keyEvents 和 factsMustRemember；",
-            "人物发生变化时提供 characterChanges（characterId 或 characterName、stateSummary，可附 location/healthState/knowledgeState）；",
-            "需要长期沉淀的事实提供 contextRecords（contextType、title、content、importance）。不要让用户填写 JSON"
-        ),
+        "chapter_summary" => include_str!("../../../prompts/chapter_summary_grounding.md"),
         _ => "模型已经生成完毕的候选内容；不要把格式填写工作转交给用户",
     };
     let structured_candidate = matches!(
@@ -2199,11 +2219,126 @@ fn read_current_adopted_body(
 // get_metadata
 // ---------------------------------------------------------------------------
 
+fn bounded_context_response(response: Value) -> Result<Value, String> {
+    let bytes = serde_json::to_vec(&response).map_err(|error| error.to_string())?.len();
+    if bytes > CONTEXT_RESPONSE_MAX_BYTES {
+        return Err("context_incomplete: scoped context exceeds the existing 2 MiB response budget".to_string());
+    }
+    Ok(response)
+}
+
+fn read_rule_set_fingerprint(connection: &Connection, novel_id: &str) -> Result<Value, String> {
+    // Same complete camelCase DTOs (including nulls and inactive rows) as the desktop authority.
+    let mut world_statement = connection.prepare(
+        "SELECT id, novel_id, title, content, structured_json, is_active, created_at, updated_at
+         FROM world_settings WHERE novel_id = ?1 ORDER BY id",
+    ).map_err(|error| error.to_string())?;
+    let worlds = world_statement.query_map(params![novel_id], |row| Ok(json!({
+        "id": row.get::<_, String>(0)?, "novelId": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?, "content": row.get::<_, String>(3)?,
+        "structuredJson": row.get::<_, Option<String>>(4)?,
+        "isActive": row.get::<_, i64>(5)? != 0,
+        "createdAt": row.get::<_, String>(6)?, "updatedAt": row.get::<_, String>(7)?
+    }))).map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let mut rule_statement = connection.prepare(
+        "SELECT id, novel_id, title, category, content, forbidden_rules, structured_json,
+                is_active, created_at, updated_at
+         FROM rule_systems WHERE novel_id = ?1 ORDER BY id",
+    ).map_err(|error| error.to_string())?;
+    let rules = rule_statement.query_map(params![novel_id], |row| Ok(json!({
+        "id": row.get::<_, String>(0)?, "novelId": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?, "category": row.get::<_, Option<String>>(3)?,
+        "content": row.get::<_, String>(4)?, "forbiddenRules": row.get::<_, Option<String>>(5)?,
+        "structuredJson": row.get::<_, Option<String>>(6)?,
+        "isActive": row.get::<_, i64>(7)? != 0,
+        "createdAt": row.get::<_, String>(8)?, "updatedAt": row.get::<_, String>(9)?
+    }))).map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(world_rule_fingerprint::snapshot_from_records(novel_id, &worlds, &rules)["fingerprint"].clone())
+}
+
+fn read_rule_context(connection: &Connection, novel_id: &str) -> Result<(Vec<Value>, Value), String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, title, category, content, forbidden_rules, structured_json, updated_at
+             FROM rule_systems WHERE novel_id = ?1 AND is_active = 1 ORDER BY id ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![novel_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "novelId": novel_id,
+                "title": row.get::<_, String>(1)?,
+                "category": row.get::<_, Option<String>>(2)?,
+                "content": row.get::<_, String>(3)?,
+                "forbiddenRules": row.get::<_, Option<String>>(4)?,
+                "structuredJson": row.get::<_, Option<String>>(5)?,
+                "updatedAt": row.get::<_, Option<String>>(6)?
+            }))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut rules = Vec::new();
+    let mut required_count = 0usize;
+    let mut required_bytes = 2usize; // JSON array brackets; every row includes its full fields.
+    for row in rows {
+        let rule = row.map_err(|error| error.to_string())?;
+        let row_bytes = serde_json::to_vec(&rule).map_err(|error| error.to_string())?.len();
+        required_bytes = required_bytes.saturating_add(row_bytes + usize::from(required_count > 0));
+        required_count += 1;
+        if required_bytes <= RULE_CONTEXT_MAX_BYTES {
+            rules.push(rule);
+        } else {
+            // A partial list is not a usable hard-rule context, even when the omitted row is old.
+            rules.clear();
+        }
+    }
+    let complete = required_bytes <= RULE_CONTEXT_MAX_BYTES;
+    let projection = serde_json::to_string(&rules).map_err(|error| error.to_string())?;
+    let source_ids: Vec<&Value> = rules.iter().map(|rule| &rule["id"]).collect();
+    let coverage = json!({
+        "status": if complete { "complete" } else { "context_incomplete" },
+        "requiredCount": required_count,
+        "includedCount": rules.len(),
+        "sourceIds": source_ids,
+        "projectionHash": sha256(&projection),
+        "ruleSetFingerprint": read_rule_set_fingerprint(connection, novel_id)?,
+        "requiredBytes": required_bytes,
+        "projectedBytes": projection.len(),
+        "maxBytes": RULE_CONTEXT_MAX_BYTES,
+        "semanticValidation": "not_checked"
+    });
+    Ok((rules, coverage))
+}
+
+fn incomplete_context_response(novel_id: &str, chapter_id: Option<&str>, coverage: Value) -> Value {
+    json!({
+        "ok": false,
+        "toolVersion": TOOL_VERSION,
+        "error": {
+            "code": "context_incomplete",
+            "message": "Required scoped context cannot be projected in full within the existing response budget. Do not generate a candidate or claim semantic validation; reduce the authored context or use an explicitly verified complete read.",
+            "retryable": false
+        },
+        "data": {
+            "ruleSystems": [],
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "chapterId": chapter_id,
+                "ruleSystems": coverage
+            }
+        }
+    })
+}
+
 fn get_metadata(
     connection: &Connection,
     arguments: &Value,
     require_chapter: bool,
 ) -> Result<Value, String> {
+    let _read_snapshot = connection.unchecked_transaction().map_err(|error| error.to_string())?;
     let novel_id = arg_id(arguments, "novelId")?;
     let chapter_id = if require_chapter {
         Some(arg_id(arguments, "chapterId")?)
@@ -2270,79 +2405,53 @@ fn get_metadata(
     )?;
 
     let mut world_settings = Vec::new();
+    let mut world_required_count = 0usize;
+    let mut world_required_bytes = 2usize;
     {
-        let mut statement = connection
-            .prepare(
-                "SELECT id, title, content, structured_json, created_at, updated_at
-                 FROM world_settings
-                 WHERE novel_id = ?1 AND is_active = 1
-                 ORDER BY updated_at DESC, created_at DESC, id DESC",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map(params![novel_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .map_err(|error| error.to_string())?;
+        let mut statement = connection.prepare(
+            "SELECT id, title, content, structured_json, created_at, updated_at
+             FROM world_settings WHERE novel_id = ?1 AND is_active = 1
+             ORDER BY updated_at DESC, created_at DESC, id DESC",
+        ).map_err(|error| error.to_string())?;
+        let mut primary_selected = false;
+        let rows = statement.query_map(params![novel_id], |row| Ok(json!({
+            "id": row.get::<_, String>(0)?, "novelId": novel_id,
+            "title": row.get::<_, String>(1)?, "content": row.get::<_, String>(2)?,
+            "structuredJson": row.get::<_, Option<String>>(3)?,
+            "createdAt": row.get::<_, String>(4)?, "updatedAt": row.get::<_, String>(5)?,
+            "isActive": true
+        }))).map_err(|error| error.to_string())?;
         for row in rows {
-            let (id, title, content, structured_json, created_at, updated_at) =
-                row.map_err(|error| error.to_string())?;
-            if content.trim().is_empty() {
-                continue;
-            }
-            let role = if world_settings.is_empty() {
-                "primary"
-            } else {
-                "supplemental"
-            };
-            world_settings.push(json!({
-                "id": id,
-                "novelId": novel_id,
-                "title": title,
-                "content": clip_to(content, CONTEXT_TEXT_CLIP),
-                "structuredJson": clip_to(structured_json, CONTEXT_JSON_CLIP),
-                "isActive": true,
-                "role": role,
-                "createdAt": created_at,
-                "updatedAt": updated_at
-            }));
-            if world_settings.len() == WORLD_SETTING_LIMIT {
-                break;
-            }
+            let mut world = row.map_err(|error| error.to_string())?;
+            let primary = !primary_selected && world["content"].as_str().is_some_and(|v| !v.trim().is_empty());
+            primary_selected |= primary;
+            world["role"] = json!(if primary { "primary" } else { "supplemental" });
+            world_required_bytes = world_required_bytes.saturating_add(
+                serde_json::to_vec(&world).map_err(|error| error.to_string())?.len()
+                    + usize::from(world_required_count > 0),
+            );
+            world_required_count += 1;
+            if world_required_bytes <= WORLD_CONTEXT_MAX_BYTES { world_settings.push(world); }
+            else { world_settings.clear(); }
         }
     }
-
-    let mut rule_systems = Vec::new();
-    {
-        let mut statement = connection
-            .prepare(
-                "SELECT id, title, category, content, forbidden_rules, structured_json
-                 FROM rule_systems WHERE novel_id = ?1 AND is_active = 1
-                 ORDER BY updated_at DESC",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map(params![novel_id], |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, String>(1)?,
-                    "category": row.get::<_, Option<String>>(2)?,
-                    "content": clip_to(row.get::<_, String>(3)?, CONTEXT_TEXT_CLIP),
-                    "forbiddenRules": clip_to(row.get::<_, Option<String>>(4)?.unwrap_or_default(), CONTEXT_JSON_CLIP),
-                    "structuredJson": clip_to(row.get::<_, Option<String>>(5)?.unwrap_or_default(), CONTEXT_JSON_CLIP)
-                }))
-            })
-            .map_err(|error| error.to_string())?;
-        for row in rows.take(RULE_SYSTEM_LIMIT) {
-            rule_systems.push(row.map_err(|error| error.to_string())?);
-        }
+    let world_projection = serde_json::to_string(&world_settings).map_err(|error| error.to_string())?;
+    let (rule_systems, rule_coverage) = read_rule_context(connection, &novel_id)?;
+    let world_coverage = json!({
+        "status": if world_required_bytes <= WORLD_CONTEXT_MAX_BYTES { "complete" } else { "context_incomplete" },
+        "requiredCount": world_required_count, "includedCount": world_settings.len(),
+        "sourceIds": world_settings.iter().map(|row| &row["id"]).collect::<Vec<_>>(),
+        "projectionHash": sha256(&world_projection),
+        "ruleSetFingerprint": rule_coverage["ruleSetFingerprint"],
+        "requiredBytes": world_required_bytes, "projectedBytes": world_projection.len(),
+        "maxBytes": WORLD_CONTEXT_MAX_BYTES, "semanticValidation": "not_checked"
+    });
+    if rule_coverage["status"] != "complete" || world_coverage["status"] != "complete" {
+        let mut response = incomplete_context_response(&novel_id, chapter_id.as_deref(), rule_coverage);
+        response["data"]["ruleSystems"] = json!(rule_systems);
+        response["data"]["worldSettings"] = json!(world_settings);
+        response["data"]["contextCoverage"]["worldSettings"] = world_coverage;
+        return bounded_context_response(response);
     }
 
     let master_outline = connection
@@ -2736,7 +2845,7 @@ fn get_metadata(
         }
     }
 
-    Ok(json!({
+    bounded_context_response(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
         "revisions": {
@@ -2762,6 +2871,12 @@ fn get_metadata(
             "protagonists": protagonists,
             "worldSettings": world_settings,
             "ruleSystems": rule_systems,
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "ruleSystems": rule_coverage,
+                "worldSettings": world_coverage
+            },
             "masterOutline": master_outline,
             "volumeOutlines": volume_outlines,
             "currentChapterOutline": current_chapter_outline,
@@ -2778,8 +2893,10 @@ fn get_metadata(
             "referenceWorks": reference_works,
             "referenceExcerpts": reference_excerpts,
             "projectionLimits": {
-                "worldSettings": WORLD_SETTING_LIMIT,
-                "ruleSystems": RULE_SYSTEM_LIMIT,
+                "worldSettings": "all_active_or_context_incomplete",
+                "worldSettingBytes": WORLD_CONTEXT_MAX_BYTES,
+                "ruleSystems": "all_active_or_context_incomplete",
+                "ruleSystemBytes": RULE_CONTEXT_MAX_BYTES,
                 "volumeOutlines": VOLUME_OUTLINE_LIMIT,
                 "volumes": VOLUME_LIMIT,
                 "chapters": CHAPTER_LIMIT,
@@ -2800,6 +2917,7 @@ fn get_metadata(
 // ---------------------------------------------------------------------------
 
 fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Value, String> {
+    let _read_snapshot = connection.unchecked_transaction().map_err(|error| error.to_string())?;
     let novel_id = arg_id(arguments, "novelId")?;
     let chapter_id = arg_id(arguments, "chapterId")?;
 
@@ -2909,13 +3027,43 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
                 Ok(json!({
                     "activeVersion": row.get::<_, i64>(0)?,
                     "status": row.get::<_, String>(1)?,
-                    "chapterCard": clip_to(row.get::<_, String>(2)?, ENGINEERING_FIELD_CLIP),
-                    "scenePlan": clip_to(row.get::<_, String>(3)?, ENGINEERING_FIELD_CLIP),
-                    "generationConstraints": clip_to(row.get::<_, String>(4)?, ENGINEERING_FIELD_CLIP)
+                    "chapterCard": row.get::<_, String>(2)?,
+                    "scenePlan": row.get::<_, String>(3)?,
+                    "generationConstraints": row.get::<_, String>(4)?
                 }))
             },
         )
-        .ok();
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let engineering_projection = serde_json::to_string(&engineering_state)
+        .map_err(|error| error.to_string())?;
+    let engineering_complete = engineering_projection.len() <= ENGINEERING_CONTEXT_MAX_BYTES;
+    let engineering_coverage = json!({
+        "status": if engineering_complete { "complete" } else { "context_incomplete" },
+        "requiredCount": usize::from(engineering_state.is_some()),
+        "includedCount": if engineering_complete { usize::from(engineering_state.is_some()) } else { 0 },
+        "projectionHash": sha256(if engineering_complete { &engineering_projection } else { "null" }),
+        "requiredBytes": engineering_projection.len(),
+        "projectedBytes": if engineering_complete { engineering_projection.len() } else { 4 },
+        "maxBytes": ENGINEERING_CONTEXT_MAX_BYTES,
+        "semanticValidation": "not_checked"
+    });
+    if !engineering_complete {
+        return Ok(json!({
+            "ok": false,
+            "toolVersion": TOOL_VERSION,
+            "error": { "code": "context_incomplete", "message": "Chapter engineering constraints exceed the complete-context budget; generation is not admitted.", "retryable": false },
+            "data": {
+                "engineeringState": null,
+                "contextCoverage": {
+                    "schemaVersion": "writing_context_coverage_v1",
+                    "novelId": novel_id,
+                    "chapterId": chapter_id,
+                    "engineeringState": engineering_coverage
+                }
+            }
+        }));
+    }
 
     let mut events = Vec::new();
     {
@@ -3048,7 +3196,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
     }
     let current_adopted_draft = read_current_adopted_body(connection, &novel_id, &chapter_id)?;
 
-    Ok(json!({
+    bounded_context_response(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
         "revisions": {
@@ -3067,6 +3215,12 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
             "volumeOutline": volume_outline,
             "outline": outline,
             "engineeringState": engineering_state,
+            "contextCoverage": {
+                "schemaVersion": "writing_context_coverage_v1",
+                "novelId": novel_id,
+                "chapterId": chapter_id,
+                "engineeringState": engineering_coverage
+            },
             "chapterRoles": chapter_roles,
             "currentAdoptedDraft": current_adopted_draft,
             "chapterEvents": events,
@@ -3076,7 +3230,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
                 "chapterEvents": CHAPTER_EVENT_LIMIT,
                 "chapterRoles": CHAPTER_ROLE_LIMIT,
                 "previousChapterSummaries": 3,
-                "engineeringFieldChars": ENGINEERING_FIELD_CLIP,
+                "engineeringBytes": ENGINEERING_CONTEXT_MAX_BYTES,
                 "outlineFieldChars": VOLUME_OUTLINE_CLIP
             }
         }
@@ -3133,189 +3287,90 @@ fn search_memory(connection: &Connection, arguments: &Value) -> Result<Value, St
         .or_else(|| arguments.get("min_importance"))
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
-
-    let has_fts: bool = connection
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_chunks_fts'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-        > 0;
-
-    let mut rows = Vec::new();
-    if has_fts && query.chars().count() >= 3 {
-        let mut conditions = vec![
-            "f.novel_id = ?1".to_string(),
-            "d.status = 'active'".to_string(),
-            "memory_chunks_fts MATCH ?2".to_string(),
-        ];
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(novel_id.clone()), Box::new(query.to_string())];
-        if let Some(chapter) = chapter_filter {
-            conditions.push(format!("m.chapter_id = ?{}", params_vec.len() + 1));
-            params_vec.push(Box::new(chapter.to_string()));
+    let found = memory_lexical_retrieval::search_lexical(
+        connection,
+        &memory_lexical_retrieval::LexicalSearchRequest {
+            novel_id: &novel_id,
+            query,
+            top_k,
+            chapter_id: chapter_filter,
+            chapter_start: None,
+            chapter_end: target_sequence_index.map(|index| index - 1),
+            temporal_chapter: target_sequence_index,
+            source_types: &source_types,
+            min_importance,
+            candidate_limit: memory_lexical_retrieval::DEFAULT_CANDIDATE_LIMIT,
+        },
+    )?;
+    let mut chunks = Vec::with_capacity(found.hits.len());
+    let mut truncated_chunks = 0i64;
+    for hit in &found.hits {
+        let snippet =
+            memory_lexical_retrieval::snippet_around_match(&hit.text, query.trim(), CHUNK_CLIP);
+        if snippet.truncated {
+            truncated_chunks += 1;
         }
-        if let Some(target_sequence_index) = target_sequence_index {
-            let boundary_param = params_vec.len() + 1;
-            conditions.push(format!(
-                "m.chapter_order_index < ?{0}
-                 AND (m.temporal_start_chapter IS NULL OR m.temporal_start_chapter <= ?{0})
-                 AND (m.temporal_end_chapter IS NULL OR m.temporal_end_chapter >= ?{0})",
-                boundary_param
-            ));
-            params_vec.push(Box::new(target_sequence_index));
-        }
-        if !source_types.is_empty() {
-            let rebuilt: Vec<String> = source_types
-                .iter()
-                .enumerate()
-                .map(|(index, _)| format!("?{}", params_vec.len() + 1 + index))
-                .collect();
-            conditions.push(format!("d.source_type IN ({})", rebuilt.join(",")));
-            for value in source_types.iter() {
-                params_vec.push(Box::new(value.clone()));
+        chunks.push(json!({
+            "chunkId": hit.chunk_id,
+            "chapterId": hit.chapter_id,
+            "ordinal": hit.ordinal,
+            "text": snippet.text,
+            "textTruncated": snippet.truncated,
+            "textChars": snippet.text_chars,
+            "snippetStart": snippet.snippet_start,
+            "snippetChars": snippet.snippet_chars,
+            "importance": hit.importance,
+            "entityKeys": hit.entity_keys_json,
+            "metadata": hit.metadata_json,
+            "sourceType": hit.source_type,
+            "sourceId": hit.source_id,
+            "sourceVersion": hit.source_version,
+            "score": {
+                "lexical": hit.lexical_score,
+                "importance": hit.importance_score,
+                "recency": hit.recency_score,
+                "final": hit.final_score
             }
-        }
-        if min_importance > 0.0 {
-            conditions.push(format!("m.importance >= ?{}", params_vec.len() + 1));
-            params_vec.push(Box::new(min_importance));
-        }
-        let sql = format!(
-            "SELECT m.id, m.chapter_id, m.ordinal, m.text, m.importance, m.entity_keys_json, m.metadata_json, d.source_type, d.source_id, d.source_version
-             FROM memory_chunks_fts f
-             JOIN memory_chunks m ON m.id = f.chunk_id AND m.novel_id = f.novel_id
-             JOIN memory_documents d ON d.id = m.document_id AND d.novel_id = m.novel_id
-             WHERE {}
-             ORDER BY m.importance DESC LIMIT ?{}",
-            conditions.join(" AND "),
-            params_vec.len() + 1
-        );
-        params_vec.push(Box::new(top_k));
-        let mut statement = connection
-            .prepare(&sql)
-            .map_err(|error| error.to_string())?;
-        let mapped = statement
-            .query_map(
-                rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())),
-                |row| {
-                    Ok(json!({
-                        "chunkId": row.get::<_, String>(0)?,
-                        "chapterId": row.get::<_, String>(1)?,
-                        "ordinal": row.get::<_, i64>(2)?,
-                        "text": clip_chunk(row.get::<_, String>(3)?),
-                        "importance": row.get::<_, f64>(4)?,
-                        "entityKeys": row.get::<_, String>(5)?,
-                        "metadata": row.get::<_, String>(6)?,
-                        "sourceType": row.get::<_, String>(7)?,
-                        "sourceId": row.get::<_, String>(8)?,
-                        "sourceVersion": row.get::<_, i64>(9)?
-                    }))
-                },
-            )
-            .map_err(|error| error.to_string())?;
-        for row in mapped {
-            rows.push(row.map_err(|error| error.to_string())?);
-        }
-    } else {
-        // LIKE fallback
-        let mut conditions = vec![
-            "m.novel_id = ?1".to_string(),
-            "d.status = 'active'".to_string(),
-            "m.text LIKE ?2".to_string(),
-        ];
-        let pattern = format!("%{}%", query);
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(novel_id.clone()), Box::new(pattern)];
-        if let Some(chapter) = chapter_filter {
-            conditions.push(format!("m.chapter_id = ?{}", params_vec.len() + 1));
-            params_vec.push(Box::new(chapter.to_string()));
-        }
-        if let Some(target_sequence_index) = target_sequence_index {
-            let boundary_param = params_vec.len() + 1;
-            conditions.push(format!(
-                "m.chapter_order_index < ?{0}
-                 AND (m.temporal_start_chapter IS NULL OR m.temporal_start_chapter <= ?{0})
-                 AND (m.temporal_end_chapter IS NULL OR m.temporal_end_chapter >= ?{0})",
-                boundary_param
-            ));
-            params_vec.push(Box::new(target_sequence_index));
-        }
-        if !source_types.is_empty() {
-            let placeholders: Vec<String> = source_types
-                .iter()
-                .enumerate()
-                .map(|(index, _)| format!("?{}", params_vec.len() + 1 + index))
-                .collect();
-            conditions.push(format!("d.source_type IN ({})", placeholders.join(",")));
-            for value in source_types.iter() {
-                params_vec.push(Box::new(value.clone()));
-            }
-        }
-        if min_importance > 0.0 {
-            conditions.push(format!("m.importance >= ?{}", params_vec.len() + 1));
-            params_vec.push(Box::new(min_importance));
-        }
-        let sql = format!(
-            "SELECT m.id, m.chapter_id, m.ordinal, m.text, m.importance, m.entity_keys_json, m.metadata_json, d.source_type, d.source_id, d.source_version
-             FROM memory_chunks m
-             JOIN memory_documents d ON d.id = m.document_id AND d.novel_id = m.novel_id
-             WHERE {}
-             ORDER BY m.importance DESC LIMIT ?{}",
-            conditions.join(" AND "),
-            params_vec.len() + 1
-        );
-        params_vec.push(Box::new(top_k));
-        let mut statement = connection
-            .prepare(&sql)
-            .map_err(|error| error.to_string())?;
-        let mapped = statement
-            .query_map(
-                rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())),
-                |row| {
-                    Ok(json!({
-                        "chunkId": row.get::<_, String>(0)?,
-                        "chapterId": row.get::<_, String>(1)?,
-                        "ordinal": row.get::<_, i64>(2)?,
-                        "text": clip_chunk(row.get::<_, String>(3)?),
-                        "importance": row.get::<_, f64>(4)?,
-                        "entityKeys": row.get::<_, String>(5)?,
-                        "metadata": row.get::<_, String>(6)?,
-                        "sourceType": row.get::<_, String>(7)?,
-                        "sourceId": row.get::<_, String>(8)?,
-                        "sourceVersion": row.get::<_, i64>(9)?
-                    }))
-                },
-            )
-            .map_err(|error| error.to_string())?;
-        for row in mapped {
-            rows.push(row.map_err(|error| error.to_string())?);
-        }
+        }));
     }
-
+    let confirmed_miss = chunks.is_empty() && !found.coverage_incomplete;
+    let omitted = found.candidate_count.saturating_sub(chunks.len());
+    let mut warnings = Vec::new();
+    if confirmed_miss {
+        warnings.push(MEMORY_NO_HIT_WARNING);
+    }
+    if found.coverage_incomplete {
+        warnings.push(MEMORY_COVERAGE_WARNING);
+    }
+    if truncated_chunks > 0 {
+        warnings.push(MEMORY_TRUNCATED_WARNING);
+    }
+    if omitted > 0 {
+        warnings.push(MEMORY_OMITTED_WARNING);
+    }
     Ok(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
+        "warnings": &warnings,
+        "coverageIncomplete": found.coverage_incomplete,
         "revisions": {
             "memory": max_updated_at(connection, "memory_documents", "novel_id", &novel_id)
         },
         "data": {
             "query": query,
-            "matchedChunks": rows.len(),
-            "chunks": rows,
-            "searchMode": if has_fts { "fts5" } else { "like" }
+            "hit": !chunks.is_empty(),
+            "noHit": confirmed_miss,
+            "coverageIncomplete": found.coverage_incomplete,
+            "warnings": &warnings,
+            "matchedChunks": chunks.len(),
+            "candidateCount": found.candidate_count,
+            "omittedCandidates": omitted,
+            "truncatedChunks": truncated_chunks,
+            "lexicalPath": found.lexical_path,
+            "chunks": chunks,
+            "searchMode": if found.fts_available { "fts5" } else { "like" }
         }
     }))
-}
-
-fn clip_chunk(value: String) -> String {
-    if value.chars().count() > CHUNK_CLIP {
-        let mut truncated: String = value.chars().take(CHUNK_CLIP).collect();
-        truncated.push_str("…[truncated]");
-        truncated
-    } else {
-        value
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3734,7 +3789,8 @@ mod tests {
                 CREATE TABLE rule_systems (
                     id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
                     category TEXT, content TEXT NOT NULL, forbidden_rules TEXT,
-                    structured_json TEXT, is_active INTEGER NOT NULL, updated_at TEXT
+                    structured_json TEXT, is_active INTEGER NOT NULL, updated_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE master_outlines (
                     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -3876,7 +3932,8 @@ mod tests {
                     '2026-08-21T00:00:00Z',
                     '2026-08-21T00:00:00Z'
                 );
-                INSERT INTO rule_systems VALUES (
+                INSERT INTO rule_systems (id, novel_id, title, category, content, forbidden_rules,
+                    structured_json, is_active, updated_at) VALUES (
                     'rule-1', 'novel-1', '回响规则', '能力', '记忆可换取力量',
                     '不可复活死者', '{}', 1, '2026-08-21T00:00:00Z'
                 );
@@ -4580,6 +4637,11 @@ mod tests {
             "factsMustRemember",
             "characterChanges",
             "contextRecords",
+            "grounding",
+            "confirmed",
+            "inferred",
+            "unresolved",
+            "planned",
         ] {
             assert!(summary_description.contains(required_contract_term));
         }
@@ -4804,7 +4866,12 @@ mod tests {
 
             assert_eq!(
                 matched_chapter_ids(&result),
-                vec!["chapter-2".to_string(), "chapter-1".to_string()]
+                if with_fts {
+                    // bm25 ranks chunk-1 ahead of the higher-importance chunk-2.
+                    vec!["chapter-1".to_string(), "chapter-2".to_string()]
+                } else {
+                    vec!["chapter-2".to_string(), "chapter-1".to_string()]
+                }
             );
             assert_eq!(
                 result["data"]["searchMode"],
@@ -5235,6 +5302,108 @@ mod tests {
         let legacy_error = call_tool(&connection, "get_metadata", &json!({"novelId": "novel-1"}))
             .expect_err("legacy metadata contract still requires chapterId");
         assert!(legacy_error.contains("chapterId"));
+    }
+
+    #[test]
+    fn rule_context_covers_twelve_rules_long_forbidden_and_unknown_json() {
+        let connection = fixture_connection();
+        connection.execute("DELETE FROM rule_systems", []).expect("clear fixture rules");
+        for index in 0..12 {
+            connection.execute(
+                "INSERT INTO rule_systems (id, novel_id, title, content, forbidden_rules, structured_json, is_active, updated_at, created_at)
+                 VALUES (?1, 'novel-1', ?2, ?3, ?4, ?5, 1, ?6, 'created')",
+                params![format!("rule-{index:02}"), format!("Rule {index}"),
+                    format!("{}CONTENT_{index}_TAIL", "约".repeat(1300)),
+                    format!("{}FORBIDDEN_{index}_TAIL", "禁".repeat(350)),
+                    format!(r#"{{"unknown":"{}UNKNOWN_{index}_TAIL"}}"#, "x".repeat(900)),
+                    format!("2026-09-{index:02}")],
+            ).expect("insert long rule");
+        }
+        connection.execute("INSERT INTO rule_systems (id, novel_id, title, content, is_active, updated_at) VALUES ('inactive', 'novel-1', 'inactive', 'INACTIVE_CANARY', 0, 't'), ('foreign', 'other', 'foreign', 'FOREIGN_CANARY', 1, 't')", []).expect("insert excluded rules");
+        let result = call_tool(&connection, "novel.read_context", &json!({"novelId":"novel-1"})).expect("read rules");
+        let rules = &result["data"]["ruleSystems"];
+        let coverage = &result["data"]["contextCoverage"]["ruleSystems"];
+        assert_eq!(result["ok"], true);
+        assert_eq!(rules.as_array().expect("rules").len(), 12);
+        assert_eq!(coverage["requiredCount"], 12);
+        assert_eq!(coverage["includedCount"], 12);
+        assert_eq!(coverage["status"], "complete");
+        assert_eq!(coverage["semanticValidation"], "not_checked");
+        assert_eq!(coverage["projectionHash"], sha256(&rules.to_string()));
+        assert_eq!(coverage["ruleSetFingerprint"], read_rule_set_fingerprint(&connection, "novel-1").expect("fingerprint"));
+        for index in 0..12 {
+            assert!(rules[index]["content"].as_str().expect("content").ends_with(&format!("CONTENT_{index}_TAIL")));
+            assert!(rules[index]["forbiddenRules"].as_str().expect("forbidden").ends_with(&format!("FORBIDDEN_{index}_TAIL")));
+            assert!(rules[index]["structuredJson"].as_str().expect("metadata").contains(&format!("UNKNOWN_{index}_TAIL")));
+        }
+        assert!(!rules.to_string().contains("INACTIVE_CANARY"));
+        assert!(!rules.to_string().contains("FOREIGN_CANARY"));
+        let fingerprint = coverage["ruleSetFingerprint"].clone();
+        connection.execute("UPDATE rule_systems SET content = 'changed inactive' WHERE id = 'inactive'", []).expect("change inactive baseline");
+        assert_ne!(fingerprint, read_rule_set_fingerprint(&connection, "novel-1").expect("new fingerprint"));
+    }
+
+    #[test]
+    fn rule_context_over_budget_is_incomplete_instead_of_recent_rule_sampling() {
+        let connection = fixture_connection();
+        connection.execute("UPDATE rule_systems SET forbidden_rules = ?1", params!["禁".repeat(RULE_CONTEXT_MAX_BYTES)]).expect("oversize forbidden rule");
+        let result = call_tool(&connection, "novel.read_context", &json!({"novelId":"novel-1"})).expect("explicit incomplete result");
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["error"]["code"], "context_incomplete");
+        assert_eq!(result["data"]["ruleSystems"], json!([]));
+        let coverage = &result["data"]["contextCoverage"]["ruleSystems"];
+        assert_eq!(coverage["status"], "context_incomplete");
+        assert_eq!(coverage["requiredCount"], 1);
+        assert_eq!(coverage["includedCount"], 0);
+        assert_eq!(coverage["sourceIds"], json!([]));
+        assert_eq!(coverage["projectionHash"], sha256("[]"));
+        assert!(result.to_string().len() < CONTEXT_RESPONSE_MAX_BYTES);
+    }
+
+    #[test]
+    fn world_context_retains_old_structured_constraints_or_reports_incomplete() {
+        let connection = fixture_connection();
+        for index in 0..12 {
+            connection.execute("INSERT INTO world_settings VALUES (?1,'novel-1',?2,?3,?4,1,'created',?5)",
+                params![format!("world-{index:02}"), format!("World {index}"),
+                    format!("{}WORLD_{index}_TAIL", "界".repeat(1400)),
+                    format!(r#"{{"schemaVersion":"unknown","constraint":"{}METADATA_{index}_TAIL"}}"#, "x".repeat(900)),
+                    format!("2026-09-{index:02}")]).expect("insert world canary");
+        }
+        let result = call_tool(&connection,"novel.read_context",&json!({"novelId":"novel-1"})).expect("read all worlds");
+        let worlds = &result["data"]["worldSettings"];
+        assert_eq!(result["ok"], true);
+        assert_eq!(worlds.as_array().expect("worlds").len(), 13);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["projectionHash"], sha256(&worlds.to_string()));
+        for index in 0..12 {
+            assert!(worlds.to_string().contains(&format!("WORLD_{index}_TAIL")));
+            assert!(worlds.to_string().contains(&format!("METADATA_{index}_TAIL")));
+        }
+        connection.execute("UPDATE world_settings SET structured_json = ?1 WHERE id = 'world-00'",params!["x".repeat(WORLD_CONTEXT_MAX_BYTES)]).expect("oversize world metadata");
+        let incomplete = call_tool(&connection,"novel.read_context",&json!({"novelId":"novel-1"})).expect("incomplete world result");
+        assert_eq!(incomplete["ok"], false);
+        assert_eq!(incomplete["data"]["worldSettings"], json!([]));
+        assert_eq!(incomplete["data"]["contextCoverage"]["worldSettings"]["status"], "context_incomplete");
+        assert_eq!(incomplete["data"]["contextCoverage"]["ruleSystems"]["status"], "complete");
+    }
+
+    #[test]
+    fn engineering_context_retains_viewpoint_knowledge_and_rejects_partial_json() {
+        let connection = fixture_connection();
+        let card = json!({"chapterGoal":"目标".repeat(2500),"viewpointCharacter":"VIEWPOINT_CANARY", "knownInformation":["KNOWN_CANARY"], "unknownInformation":["UNKNOWN_CANARY"]}).to_string();
+        connection.execute("INSERT INTO chapter_engineering_states VALUES ('engineering','novel-1','chapter-1',1,'active',?1,'[]','{}','t')",params![card]).expect("engineering");
+        let args = json!({"novelId":"novel-1","chapterId":"chapter-1"});
+        let result = call_tool(&connection,"chapter.read_outline",&args).expect("engineering read");
+        let state = &result["data"]["engineeringState"];
+        assert_eq!(state["chapterCard"], card);
+        assert!(state["chapterCard"].as_str().expect("card").contains("UNKNOWN_CANARY"));
+        assert_eq!(result["data"]["contextCoverage"]["engineeringState"]["projectionHash"],sha256(&state.to_string()));
+        connection.execute("UPDATE chapter_engineering_states SET chapter_card_json = ?1",params!["x".repeat(ENGINEERING_CONTEXT_MAX_BYTES)]).expect("oversize card");
+        let incomplete = call_tool(&connection,"chapter.read_outline",&args).expect("explicit incomplete card");
+        assert_eq!(incomplete["ok"],false);
+        assert_eq!(incomplete["data"]["engineeringState"],Value::Null);
+        assert_eq!(incomplete["data"]["contextCoverage"]["engineeringState"]["status"],"context_incomplete");
+        assert!(bounded_context_response(json!({"text":"x".repeat(CONTEXT_RESPONSE_MAX_BYTES)})).is_err());
     }
 
     #[test]
@@ -5785,8 +5954,9 @@ mod tests {
             .iter()
             .filter_map(|world| world["id"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["world-b", "world-a", "world-c", "world-d"]);
-        assert_eq!(worlds.len(), 4);
+        assert_eq!(ids, vec!["world-b", "world-a", "world-c", "world-blank", "world-d"]);
+        assert_eq!(worlds.len(), 5);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["requiredCount"], 5);
         assert_eq!(worlds[0]["role"], "primary");
         assert_eq!(worlds[0]["isActive"], true);
         assert_eq!(worlds[0]["novelId"], "novel-1");
@@ -5800,7 +5970,7 @@ mod tests {
     fn context_projection_enforces_item_and_field_budgets_without_chapter_bodies() {
         let connection = fixture_connection();
         let oversized = "界".repeat(CONTEXT_TEXT_CLIP + 500);
-        for index in 0..(WORLD_SETTING_LIMIT + 4) {
+        for index in 0..10 {
             connection
                 .execute(
                     "INSERT INTO world_settings (
@@ -5844,11 +6014,10 @@ mod tests {
         let worlds = result["data"]["worldSettings"]
             .as_array()
             .expect("world settings array");
-        assert_eq!(worlds.len(), WORLD_SETTING_LIMIT);
-        assert!(worlds.iter().all(|world| {
-            world["content"]
-                .as_str()
-                .is_some_and(|content| content.chars().count() <= CONTEXT_TEXT_CLIP + 20)
+        assert_eq!(worlds.len(), 11);
+        assert_eq!(result["data"]["contextCoverage"]["worldSettings"]["status"], "complete");
+        assert!(worlds.iter().filter(|world| world["id"].as_str().unwrap_or_default().starts_with("world-budget-")).all(|world| {
+            world["content"].as_str() == Some(oversized.as_str())
         }));
         assert!(result["data"]["chapters"]
             .as_array()
@@ -6312,5 +6481,498 @@ mod tests {
         assert!(memory["name"]
             .as_str()
             .is_some_and(|name| !name.contains('@')));
+    }
+
+    fn unscoped_security() -> Result<TaskSecurityContext, String> {
+        Ok(TaskSecurityContext {
+            allowed_tools: None,
+            scope: None,
+            candidate_policy: None,
+        })
+    }
+
+    fn install_relevance_chapters(connection: &Connection) {
+        connection
+            .execute_batch(
+                "INSERT INTO volumes VALUES (
+                    'volume-2', 'novel-1', '第二卷', '', '', '', 2, 'planned', NULL,
+                    '2026-08-21T00:00:00Z'
+                 );
+                 INSERT INTO chapters (
+                    id, novel_id, volume_id, title, outline, goal, order_index, status,
+                    word_count, target_word_count, created_at, deleted_at, updated_at
+                 ) VALUES
+                    ('chapter-2', 'novel-1', 'volume-1', '第二章', '', '', 2, 'adopted',
+                     100, 3000, '2026-08-21T00:01:00Z', NULL, '2026-08-21T00:01:00Z'),
+                    ('chapter-3', 'novel-1', 'volume-2', '第三章', '', '', 1, 'draft',
+                     0, 3000, '2026-08-21T00:02:00Z', NULL, '2026-08-21T00:02:00Z'),
+                    ('chapter-4', 'novel-1', 'volume-2', '第四章', '', '', 2, 'adopted',
+                     100, 3000, '2026-08-21T00:03:00Z', NULL, '2026-08-21T00:03:00Z'),
+                    ('chapter-deleted', 'novel-1', 'volume-1', '删章', '', '', 9, 'draft',
+                     0, 3000, '2026-08-21T00:04:00Z', '2026-08-21T00:04:00Z',
+                     '2026-08-21T00:04:00Z');",
+            )
+            .expect("install relevance chapters");
+    }
+
+    fn memory_chunk_ids(result: &Value) -> Vec<String> {
+        result["data"]["chunks"]
+            .as_array()
+            .expect("chunks")
+            .iter()
+            .map(|chunk| chunk["chunkId"].as_str().expect("chunk id").to_string())
+            .collect()
+    }
+
+    fn assert_public_warnings_do_not_leak(result: &Value, secret: &str) {
+        for warning in result["warnings"]
+            .as_array()
+            .expect("top-level warnings")
+            .iter()
+            .chain(result["data"]["warnings"].as_array().expect("data warnings"))
+        {
+            let text = warning.as_str().expect("warning string");
+            assert!(!text.contains(secret), "{text}");
+            assert!(!text.contains("序"));
+            assert!(!text.contains("尾"));
+        }
+        assert_eq!(result["warnings"], result["data"]["warnings"]);
+    }
+
+    #[test]
+    fn search_memory_ranks_with_shared_lexical_search_and_publishes_boundaries() {
+        for with_fts in [false, true] {
+            let connection = fixture_connection();
+            install_relevance_chapters(&connection);
+            super::memory_comparison_corpus::insert_gateway(&connection).expect("insert corpus");
+            if with_fts {
+                super::memory_comparison_corpus::install_fts(&connection).expect("install fts");
+            }
+            let before = total_changes(&connection);
+            let result = call_tool_with_security_context(
+                &connection,
+                "search_memory",
+                &json!({
+                    "novelId": "novel-1",
+                    "query": "铜钥匙",
+                    "targetChapterId": "chapter-3",
+                    "topK": 20
+                }),
+                unscoped_security(),
+            )
+            .expect("ranked search");
+            assert_eq!(total_changes(&connection), before);
+            assert_eq!(result["ok"], true);
+            assert_eq!(result["data"]["hit"], true);
+            assert_eq!(result["data"]["noHit"], false);
+            assert_eq!(
+                result["data"]["searchMode"],
+                if with_fts { "fts5" } else { "like" }
+            );
+            let ids = memory_chunk_ids(&result);
+            let shared = super::memory_lexical_retrieval::search_lexical(
+                &connection,
+                &super::memory_lexical_retrieval::LexicalSearchRequest {
+                    novel_id: "novel-1",
+                    query: "铜钥匙",
+                    top_k: 20,
+                    chapter_id: None,
+                    chapter_start: None,
+                    chapter_end: Some(1),
+                    temporal_chapter: Some(2),
+                    source_types: &[],
+                    min_importance: 0.0,
+                    candidate_limit: super::memory_lexical_retrieval::DEFAULT_CANDIDATE_LIMIT,
+                },
+            )
+            .expect("shared search");
+            assert_eq!(
+                ids,
+                shared
+                    .hits
+                    .iter()
+                    .map(|hit| hit.chunk_id.clone())
+                    .collect::<Vec<_>>()
+            );
+            for banned in [
+                "chunk-important-irrelevant",
+                "chunk-target",
+                "chunk-future",
+                "chunk-not-yet",
+                "chunk-expired",
+                "chunk-invalid",
+                "chunk-other-novel",
+            ] {
+                assert!(!ids.iter().any(|id| id == banned), "{banned}");
+            }
+            if !with_fts {
+                assert_eq!(
+                    ids,
+                    vec![
+                        "chunk-long",
+                        "chunk-weak",
+                        "chunk-tie-a",
+                        "chunk-tie-b",
+                        "chunk-summary",
+                        "chunk-exact",
+                    ]
+                );
+            }
+            let long = result["data"]["chunks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|chunk| chunk["chunkId"] == "chunk-long")
+                .expect("long chunk");
+            assert_eq!(long["textTruncated"], true);
+            assert!(long["text"].as_str().unwrap().contains("铜钥匙"));
+            assert!(long["snippetStart"].as_u64().unwrap() > 0);
+            assert!(long["textChars"].as_u64().unwrap() > 2_000);
+            assert!(result["data"]["truncatedChunks"].as_i64().unwrap() > 0);
+            assert!(result["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning == MEMORY_TRUNCATED_WARNING));
+            assert_public_warnings_do_not_leak(&result, "铜钥匙");
+            let exact = result["data"]["chunks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|chunk| chunk["chunkId"] == "chunk-exact")
+                .expect("exact");
+            assert_eq!(exact["textTruncated"], false);
+            assert_eq!(exact["text"], "铜钥匙");
+        }
+    }
+
+    #[test]
+    fn search_memory_no_hit_is_success_with_public_warning_not_a_read() {
+        let connection = fixture_connection();
+        install_relevance_chapters(&connection);
+        super::memory_comparison_corpus::insert_gateway(&connection).expect("insert corpus");
+        let result = call_tool_with_security_context(
+            &connection,
+            "memory.search",
+            &json!({
+                "novelId": "novel-1",
+                "query": "紫微垣没有这段记忆",
+                "targetChapterId": "chapter-3"
+            }),
+            unscoped_security(),
+        )
+        .expect("a miss is still a successful call");
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["data"]["hit"], false);
+        assert_eq!(result["data"]["noHit"], true);
+        assert_eq!(result["data"]["matchedChunks"], 0);
+        assert!(result["data"]["chunks"].as_array().unwrap().is_empty());
+        assert_eq!(result["data"]["truncatedChunks"], 0);
+        assert!(result["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == MEMORY_NO_HIT_WARNING));
+        assert_public_warnings_do_not_leak(&result, "紫微垣没有这段记忆");
+
+        let blank = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "   ",
+                "targetChapterId": "chapter-3"
+            }),
+            unscoped_security(),
+        )
+        .expect_err("blank query is invalid, not noHit");
+        assert!(blank.contains("query must be"));
+        assert!(!blank.contains("noHit"));
+
+        let deleted = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "铜钥匙",
+                "targetChapterId": "chapter-deleted"
+            }),
+            unscoped_security(),
+        )
+        .expect_err("a soft-deleted target is not an empty hit");
+        assert!(deleted.contains("target chapter not found"));
+
+        let first = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "铜钥匙",
+                "targetChapterId": "chapter-1"
+            }),
+            unscoped_security(),
+        )
+        .expect("sequence zero is an empty success");
+        assert_eq!(first["ok"], true);
+        assert_eq!(first["data"]["noHit"], true);
+        assert_eq!(first["data"]["hit"], false);
+    }
+
+    #[test]
+    fn search_memory_omitted_candidates_and_source_floor_are_explicit() {
+        let connection = fixture_connection();
+        install_relevance_chapters(&connection);
+        super::memory_comparison_corpus::insert_gateway(&connection).expect("insert corpus");
+        let limited = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "铜钥匙",
+                "targetChapterId": "chapter-3",
+                "topK": 1
+            }),
+            unscoped_security(),
+        )
+        .expect("limited search");
+        assert_eq!(limited["ok"], true);
+        assert_eq!(limited["data"]["hit"], true);
+        assert_eq!(limited["data"]["noHit"], false);
+        assert_eq!(limited["data"]["matchedChunks"], 1);
+        assert!(limited["data"]["omittedCandidates"].as_u64().unwrap() > 0);
+        assert!(limited["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == MEMORY_OMITTED_WARNING));
+        assert_public_warnings_do_not_leak(&limited, "铜钥匙");
+
+        let summary = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "铜钥匙",
+                "targetChapterId": "chapter-3",
+                "sourceTypes": ["chapter_summary"],
+                "topK": 20
+            }),
+            unscoped_security(),
+        )
+        .expect("source filter");
+        assert_eq!(memory_chunk_ids(&summary), vec!["chunk-summary".to_string()]);
+
+        let floor = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "铜钥匙",
+                "targetChapterId": "chapter-3",
+                "minImportance": 0.9,
+                "topK": 20
+            }),
+            unscoped_security(),
+        )
+        .expect("importance floor");
+        assert_eq!(memory_chunk_ids(&floor), vec!["chunk-weak".to_string()]);
+    }
+
+    fn insert_scoped_chunk(
+        connection: &Connection,
+        id: &str,
+        status: &str,
+        chapter_id: &str,
+        text: &str,
+        importance: f64,
+        chapter_order_index: i64,
+        temporal_start: i64,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO memory_documents (
+                    id, novel_id, source_type, source_id, source_version, status, updated_at
+                 ) VALUES (?1, 'novel-1', 'adopted_draft', ?1, 1, ?2, '2026-08-21T00:00:00Z')",
+                params![id, status],
+            )
+            .expect("insert crowd document");
+        connection
+            .execute(
+                "INSERT INTO memory_chunks (
+                    id, document_id, novel_id, chapter_id, ordinal, text, importance,
+                    chapter_order_index, temporal_start_chapter, temporal_end_chapter,
+                    entity_keys_json, metadata_json
+                 ) VALUES (?1, ?1, 'novel-1', ?2, 0, ?3, ?4, ?5, ?6, NULL, '[]', '{}')",
+                params![id, chapter_id, text, importance, chapter_order_index, temporal_start],
+            )
+            .expect("insert crowd chunk");
+    }
+
+    #[test]
+    fn search_memory_applies_scope_before_candidate_limit() {
+        for with_fts in [false, true] {
+            let connection = fixture_connection();
+            install_relevance_chapters(&connection);
+            for index in 0..60 {
+                insert_scoped_chunk(
+                    &connection,
+                    &format!("invalid-{index:02}"),
+                    "invalidated",
+                    "chapter-1",
+                    "过去铜印已作废",
+                    1.0,
+                    0,
+                    0,
+                );
+                insert_scoped_chunk(
+                    &connection,
+                    &format!("noise-{index:02}"),
+                    "active",
+                    "chapter-1",
+                    "粮草调度优先级",
+                    0.99,
+                    0,
+                    0,
+                );
+                insert_scoped_chunk(
+                    &connection,
+                    &format!("temporal-{index:02}"),
+                    "active",
+                    "chapter-1",
+                    "过去铜印尚未生效",
+                    0.97,
+                    0,
+                    3,
+                );
+                insert_scoped_chunk(
+                    &connection,
+                    &format!("future-{index:02}"),
+                    "active",
+                    "chapter-4",
+                    "过去铜印在后章",
+                    0.98,
+                    3,
+                    0,
+                );
+            }
+            insert_scoped_chunk(
+                &connection,
+                "past-hit",
+                "active",
+                "chapter-1",
+                "过去铜印在前章",
+                0.05,
+                0,
+                0,
+            );
+            if with_fts {
+                super::memory_comparison_corpus::install_fts(&connection).expect("fts");
+            }
+            let before = total_changes(&connection);
+            let result = call_tool_with_security_context(
+                &connection,
+                "search_memory",
+                &json!({
+                    "novelId": "novel-1",
+                    "query": "过去铜印",
+                    "targetChapterId": "chapter-3",
+                    "topK": 20
+                }),
+                unscoped_security(),
+            )
+            .expect("scoped search");
+            assert_eq!(total_changes(&connection), before);
+            assert_eq!(result["ok"], true);
+            assert_eq!(result["data"]["hit"], true);
+            assert_eq!(result["data"]["noHit"], false);
+            assert_eq!(result["data"]["coverageIncomplete"], false);
+            assert_eq!(result["coverageIncomplete"], false);
+            assert_eq!(memory_chunk_ids(&result), vec!["past-hit".to_string()]);
+            assert_public_warnings_do_not_leak(&result, "过去铜印");
+        }
+    }
+
+    #[test]
+    fn search_memory_budget_truncation_is_incomplete_not_a_total_miss() {
+        let connection = fixture_connection();
+        install_relevance_chapters(&connection);
+        for index in 0..55 {
+            insert_scoped_chunk(
+                &connection,
+                &format!("budget-{index:02}"),
+                "active",
+                "chapter-1",
+                "预算铜印",
+                0.2 + (index as f64) / 1000.0,
+                0,
+                0,
+            );
+        }
+        let capped = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "预算铜印",
+                "targetChapterId": "chapter-3",
+                "topK": 20
+            }),
+            unscoped_security(),
+        )
+        .expect("capped search");
+        assert_eq!(capped["ok"], true);
+        assert_eq!(capped["data"]["hit"], true);
+        assert_eq!(capped["data"]["noHit"], false);
+        assert_eq!(capped["data"]["coverageIncomplete"], true);
+        assert_eq!(capped["coverageIncomplete"], true);
+        assert_eq!(capped["data"]["candidateCount"], 50);
+        assert!(capped["data"]["matchedChunks"].as_u64().unwrap() > 0);
+        assert!(capped["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == MEMORY_COVERAGE_WARNING));
+        assert_public_warnings_do_not_leak(&capped, "预算铜印");
+
+        let connection = fixture_connection();
+        install_relevance_chapters(&connection);
+        for index in 0..60 {
+            insert_scoped_chunk(
+                &connection,
+                &format!("only-future-{index:02}"),
+                "active",
+                "chapter-4",
+                "只有后章铜印",
+                0.99,
+                3,
+                3,
+            );
+        }
+        let miss = call_tool_with_security_context(
+            &connection,
+            "search_memory",
+            &json!({
+                "novelId": "novel-1",
+                "query": "只有后章铜印",
+                "targetChapterId": "chapter-3",
+                "topK": 20
+            }),
+            unscoped_security(),
+        )
+        .expect("future-only search");
+        assert_eq!(miss["ok"], true);
+        assert_eq!(miss["data"]["hit"], false);
+        assert_eq!(miss["data"]["noHit"], true);
+        assert_eq!(miss["data"]["coverageIncomplete"], false);
+        assert!(miss["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == MEMORY_NO_HIT_WARNING));
+        assert!(!miss["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == MEMORY_COVERAGE_WARNING));
     }
 }

@@ -19,13 +19,8 @@ export const WRITER_BENCHMARK_FIXTURES = Object.freeze([
       goal: '隐匿残破玉简与丹药，引开戒律堂盘查',
       injury: '经脉滞涩',
     },
-    activeCharacters: [
-      { name: '岳凌峰', role: '戒律堂执事', attitude: '猜疑冷厉' },
-    ],
-    worldRules: [
-      '青云宗内门夜间禁止私斗与动用神识窥探',
-      '天道誓言不可违逆',
-    ],
+    activeCharacters: [{ name: '岳凌峰', role: '戒律堂执事', attitude: '猜疑冷厉' }],
+    worldRules: ['青云宗内门夜间禁止私斗与动用神识窥探', '天道誓言不可违逆'],
     foreshadowing: '残破玉简中的上古噬魂符印',
     previousSummary: '林清玄刚刚在丹阁后山隐匿处销毁了引路符残渣。',
     sceneGoal: '林清玄在竹林小径迎面遇上搜山的岳凌峰，以宗门礼数与借口周旋脱身。',
@@ -43,13 +38,8 @@ export const WRITER_BENCHMARK_FIXTURES = Object.freeze([
       goal: '重置气闸阀门，阻止外部降压',
       injury: '外骨骼左臂伺服电机受损',
     },
-    activeCharacters: [
-      { name: '艾娃', role: '仿生工程师', attitude: '理智且机械' },
-    ],
-    worldRules: [
-      '主舱氧气剩余不足 12 分钟',
-      '重力系统已离线处于微重力漂浮状态',
-    ],
+    activeCharacters: [{ name: '艾娃', role: '仿生工程师', attitude: '理智且机械' }],
+    worldRules: ['主舱氧气剩余不足 12 分钟', '重力系统已离线处于微重力漂浮状态'],
     foreshadowing: '空间站中央 AI 核心已被植入未知外星序列',
     previousSummary: '二号气密门被爆破，气流将应急工具箱卷入外太空。',
     sceneGoal: '雷诺借助安全缆绳靠近控制面板，手动扳动紧急液压阀门。',
@@ -67,13 +57,8 @@ export const WRITER_BENCHMARK_FIXTURES = Object.freeze([
       goal: '找到被撕掉的第 17 页航海日志',
       injury: '右手指关节轻微擦伤',
     },
-    activeCharacters: [
-      { name: '巡警暗哨', role: '巡逻守卫', attitude: '游荡警觉' },
-    ],
-    worldRules: [
-      '巡逻钟声每隔五分钟在走廊尽头敲响一次',
-      '不可使用明火引燃油灯',
-    ],
+    activeCharacters: [{ name: '巡警暗哨', role: '巡逻守卫', attitude: '游荡警觉' }],
+    worldRules: ['巡逻钟声每隔五分钟在走廊尽头敲响一次', '不可使用明火引燃油灯'],
     foreshadowing: '第七码头沉船案与顾言父亲的旧案卷宗相连',
     previousSummary: '顾言用铜丝撬开了档案室的黄铜暗锁。',
     sceneGoal: '在两次钟声的间隙，借着月光翻找铁皮文件柜并发现蓝色批注。',
@@ -132,7 +117,9 @@ export function evaluateProseOutput(prose, fixture, isEnhanced = false) {
   // 3. Plot Continuity (25%)
   let plotScore = 5.0;
   // 前序摘要衔接
-  const prevKeys = (fixture.previousSummary || '').split(/[，, 与及的在]/).filter((p) => p.length >= 2);
+  const prevKeys = (fixture.previousSummary || '')
+    .split(/[，, 与及的在]/)
+    .filter((p) => p.length >= 2);
   if (prevKeys.some((k) => text.includes(k))) plotScore += 2.0;
   // 场景目标推进
   const goalKeys = (fixture.sceneGoal || '').split(/[，, 与及的在]/).filter((p) => p.length >= 2);
@@ -205,13 +192,15 @@ export function generateMockBenchmarkProse(fixture, isEnhanced = false) {
 export async function runComparativeBenchmark(options = {}) {
   const modelName = options.modelName || 'qwen3.8-27b-writer';
   const fixtures = options.fixtures || WRITER_BENCHMARK_FIXTURES;
-  const generateFn = options.generateFn || (async (fixture, enhanced) => {
-    const start = Date.now();
-    const text = generateMockBenchmarkProse(fixture, enhanced);
-    const latencyMs = Math.max(15, Date.now() - start + Math.floor(Math.random() * 20));
-    const tokenUsage = Math.ceil(text.length * 1.3);
-    return { text, latencyMs, tokenUsage };
-  });
+  const generateFn =
+    options.generateFn ||
+    (async (fixture, enhanced) => {
+      const start = Date.now();
+      const text = generateMockBenchmarkProse(fixture, enhanced);
+      const latencyMs = Math.max(15, Date.now() - start + Math.floor(Math.random() * 20));
+      const tokenUsage = Math.ceil(text.length * 1.3);
+      return { text, latencyMs, tokenUsage };
+    });
 
   const results = [];
 
@@ -243,12 +232,26 @@ export async function runComparativeBenchmark(options = {}) {
         sampleOutput: enhancedGen.text.slice(0, 150) + '...',
       },
       delta: {
-        compositeScoreDiff: Number((enhancedScores.compositeScore - baselineScores.compositeScore).toFixed(2)),
-        characterConsistencyDiff: Number((enhancedScores.characterConsistency - baselineScores.characterConsistency).toFixed(2)),
-        worldConsistencyDiff: Number((enhancedScores.worldConsistency - baselineScores.worldConsistency).toFixed(2)),
-        plotContinuityDiff: Number((enhancedScores.plotContinuity - baselineScores.plotContinuity).toFixed(2)),
-        foreshadowingRetentionDiff: Number((enhancedScores.foreshadowingRetention - baselineScores.foreshadowingRetention).toFixed(2)),
-        styleConsistencyDiff: Number((enhancedScores.styleConsistency - baselineScores.styleConsistency).toFixed(2)),
+        compositeScoreDiff: Number(
+          (enhancedScores.compositeScore - baselineScores.compositeScore).toFixed(2),
+        ),
+        characterConsistencyDiff: Number(
+          (enhancedScores.characterConsistency - baselineScores.characterConsistency).toFixed(2),
+        ),
+        worldConsistencyDiff: Number(
+          (enhancedScores.worldConsistency - baselineScores.worldConsistency).toFixed(2),
+        ),
+        plotContinuityDiff: Number(
+          (enhancedScores.plotContinuity - baselineScores.plotContinuity).toFixed(2),
+        ),
+        foreshadowingRetentionDiff: Number(
+          (enhancedScores.foreshadowingRetention - baselineScores.foreshadowingRetention).toFixed(
+            2,
+          ),
+        ),
+        styleConsistencyDiff: Number(
+          (enhancedScores.styleConsistency - baselineScores.styleConsistency).toFixed(2),
+        ),
       },
     });
   }
@@ -305,9 +308,15 @@ export function formatBenchmarkReportMarkdown(report) {
 
   for (const item of report.results) {
     lines.push(`### 【${item.title}】 (${item.genre})`);
-    lines.push(`- **Baseline 综合得分**: ${item.baseline.scores.compositeScore} | Tokens: ${item.baseline.token_usage} | Latency: ${item.baseline.latencyMs}ms`);
-    lines.push(`- **Enhanced 综合得分**: ${item.enhanced.scores.compositeScore} (▲ +${item.delta.compositeScoreDiff}) | Tokens: ${item.enhanced.token_usage} | Latency: ${item.enhanced.latencyMs}ms`);
-    lines.push(`- **维度得分提升**: 人物一致性 +${item.delta.characterConsistencyDiff} | 世界观 +${item.delta.worldConsistencyDiff} | 情节连贯 +${item.delta.plotContinuityDiff} | 伏笔留存 +${item.delta.foreshadowingRetentionDiff} | 文风 +${item.delta.styleConsistencyDiff}`);
+    lines.push(
+      `- **Baseline 综合得分**: ${item.baseline.scores.compositeScore} | Tokens: ${item.baseline.token_usage} | Latency: ${item.baseline.latencyMs}ms`,
+    );
+    lines.push(
+      `- **Enhanced 综合得分**: ${item.enhanced.scores.compositeScore} (▲ +${item.delta.compositeScoreDiff}) | Tokens: ${item.enhanced.token_usage} | Latency: ${item.enhanced.latencyMs}ms`,
+    );
+    lines.push(
+      `- **维度得分提升**: 人物一致性 +${item.delta.characterConsistencyDiff} | 世界观 +${item.delta.worldConsistencyDiff} | 情节连贯 +${item.delta.plotContinuityDiff} | 伏笔留存 +${item.delta.foreshadowingRetentionDiff} | 文风 +${item.delta.styleConsistencyDiff}`,
+    );
     lines.push(`- **Enhanced 正文片段**: *"${item.enhanced.sampleOutput}"*`);
     lines.push(``);
   }

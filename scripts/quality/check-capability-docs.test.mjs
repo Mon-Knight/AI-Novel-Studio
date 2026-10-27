@@ -6,7 +6,7 @@ import {
 } from './check-capability-docs.mjs';
 
 const identities = ['context.read@1', 'memory.search@1', 'novel.read@1', 'structure.read@1'];
-const facts = `<!-- ans-current-canonical:start -->\n${identities.map((identity) => `\`${identity}\``).join('、')}\n\`canonical-only\`；\`deterministic-writer\`；\`NOT_VERIFIED\`\n<!-- ans-current-canonical:end -->`;
+const facts = `<!-- ans-current-canonical:start -->\n${identities.map((identity) => `\`${identity}\``).join('、')}\n\`canonical-only\`；\`writing-subagent\`；\`deterministic-writer\`；\`NOT_VERIFIED\`\n<!-- ans-current-canonical:end -->`;
 function fixture() {
   return {
     manifest: {
@@ -74,6 +74,7 @@ test('detects missing or repeated blocks and false live-verified statements in t
     '',
     `${facts}\n${facts}`,
     facts.replace('NOT_VERIFIED', 'VERIFIED'),
+    facts.replace('writing-subagent', 'legacy-writer'),
     facts.replace('memory.search@1', 'memory.other@1'),
   ]) {
     const input = fixture();

@@ -1,9 +1,11 @@
-import type { ArtifactDecisionKind } from '../../types/conversation';
+import type { ArtifactDecisionKind, ReviewAuthorizationStatus } from '../../types/conversation';
 
 export function ArtifactDecisionActions({
   revisionCount,
   revisionNotes,
   isChapter,
+  reviewConfirmed = false,
+  reviewStatus,
   canApply,
   isReadOnlyReport,
   isInvalid,
@@ -14,6 +16,8 @@ export function ArtifactDecisionActions({
   revisionCount: number;
   revisionNotes: string;
   isChapter: boolean;
+  reviewConfirmed?: boolean;
+  reviewStatus?: ReviewAuthorizationStatus;
   canApply: boolean;
   isReadOnlyReport: boolean;
   isInvalid: boolean;
@@ -31,12 +35,32 @@ export function ArtifactDecisionActions({
       {isChapter ? (
         <button
           className="btn btn-primary btn-sm"
-          data-testid="workbench-artifact-confirm-review"
-          disabled={busy || isInvalid}
-          title={isInvalid ? '产物结构与来源校验未通过，不能进入章节审阅' : undefined}
+          data-testid={
+            reviewStatus === 'consumed'
+              ? 'workbench-artifact-view-adopted'
+              : reviewConfirmed
+                ? 'workbench-artifact-continue-review'
+                : 'workbench-artifact-confirm-review'
+          }
+          disabled={busy || isInvalid || reviewStatus === 'expired'}
+          title={
+            reviewStatus === 'expired'
+              ? '授权已失效，请要求修改并审阅新候选；不会沿用过期授权'
+              : isInvalid
+                ? '产物结构与来源校验未通过，不能进入章节审阅'
+                : reviewConfirmed
+                  ? '仅打开已授权的章节，不重复生成、保存或采用'
+                  : undefined
+          }
           onClick={() => onDecide?.('confirm')}
         >
-          确认进入审阅
+          {reviewStatus === 'consumed'
+            ? '查看正式正文'
+            : reviewStatus === 'expired'
+              ? '审阅授权已失效'
+              : reviewConfirmed
+                ? '继续审阅'
+                : '确认进入审阅'}
         </button>
       ) : canApply ? (
         <button
@@ -73,23 +97,27 @@ export function ArtifactDecisionActions({
           标记已阅
         </button>
       ) : null}
-      <button
-        className="btn btn-secondary btn-sm"
-        data-testid="workbench-artifact-revise"
-        disabled={busy || (isInvalid && revisionCount > 0)}
-        title="仅追加到当前任务输入区，不自动发送或应用"
-        onClick={() => onDecide?.('request_revision', revisionNotes)}
-      >
-        {revisionCount > 0 ? `带出全部意见（${revisionCount}）` : '要求修改'}
-      </button>
-      <button
-        className="btn btn-secondary btn-sm"
-        data-testid="workbench-artifact-reject"
-        disabled={busy}
-        onClick={() => onDecide?.('reject')}
-      >
-        拒绝
-      </button>
+      {(!reviewConfirmed || reviewStatus === 'expired') && (
+        <>
+          <button
+            className="btn btn-secondary btn-sm"
+            data-testid="workbench-artifact-revise"
+            disabled={busy || (isInvalid && revisionCount > 0)}
+            title="仅追加到当前任务输入区，不自动发送或应用"
+            onClick={() => onDecide?.('request_revision', revisionNotes)}
+          >
+            {revisionCount > 0 ? `带出全部意见（${revisionCount}）` : '要求修改'}
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            data-testid="workbench-artifact-reject"
+            disabled={busy}
+            onClick={() => onDecide?.('reject')}
+          >
+            拒绝
+          </button>
+        </>
+      )}
     </div>
   );
 }

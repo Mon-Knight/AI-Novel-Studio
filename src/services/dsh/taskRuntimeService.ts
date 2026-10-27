@@ -11,6 +11,7 @@ import type {
   TaskModelSnapshot,
   TaskRun,
 } from '../../types/conversation';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { CANONICAL_TOOL_IDS } from '../capabilities/canonical/canonicalToolTypes';
@@ -21,6 +22,7 @@ import {
   type ContextReadToolName,
   type DshTaskKind,
   type DshTurnContract,
+  type CreativePlannedAction,
 } from '../conversation/taskGoalRouting';
 
 export const DSH_TASK_PROJECTION_EVENT = 'ans://task-runtime-projection';
@@ -37,21 +39,54 @@ export interface DshTaskRuntimeInput {
   novelId: string;
   turnId: string;
   goal: string;
+  retrySourceRunId?: string;
   chapterId?: string;
   modelSnapshot: TaskModelSnapshot;
+  /** Renderer-only; stripped before IPC and checked after credential loading. */
+  cancellationSignal?: AbortSignal;
   taskKind: DshTaskKind;
   expectedTool?: CandidateToolName;
   expectedArtifactType?: string;
   requiredReadTools: ContextReadToolName[];
   /**
-   * Read-intent turns request the Canonical-only tool allowlist.
-   * Structured write/audit omit this field so DSH keeps the legacy allowlist.
+   * Dialogue uses optional reads plus creative.plan_action; explicit Canonical reads
+   * and Writing SubAgent turns retain their own fixed allowlists.
    */
   allowedTools?: readonly string[];
+  /** Writing SubAgent turns: the host enforces this word range on the chapter candidate. */
+  chapterWordRange?: { target: number; minimum: number; maximum: number };
+  /** Untrusted identity, never client-verified content or adoption authorization. */
+  revisionSource?: ArtifactRevisionSource;
+  /** Previous-chapter id and full-text hash. The body is never sent. */
+  continuityClaim?: { previousChapterId: string; sourceHash: string };
+  /**
+   * Host gate for chapter candidates. `draft` withholds the artifact; `admit`
+   * re-reads that exact run and does not call the provider.
+   */
+  chapterHostGate?: {
+    phase: 'draft' | 'admit';
+    sourceRunId?: string;
+    contentHash?: string;
+    issueCodes?: string[];
+    issueSeverities?: Array<'error' | 'warning'>;
+    maxIntegrityRepairs?: number;
+    /** Previous draft in the same native budget epoch. Absence must not open a new epoch. */
+    continuesRunId?: string;
+    /** Explicit user retry. The native host opens the epoch; this is not a remaining-count. */
+    explicitRetry?: boolean;
+  };
 }
 
 /** Canonical-only tools requested by desktop read-intent DSH turns. */
 export const CANONICAL_READ_ALLOWED_TOOLS: readonly string[] = [...CANONICAL_TOOL_IDS];
+
+export const CREATIVE_DIALOGUE_ALLOWED_TOOLS: readonly string[] = [
+  'novel.read_context',
+  'chapter.read_outline',
+  'get_character_states',
+  'search_memory',
+  'creative.plan_action',
+];
 
 export type DshTaskStartContract = DshTurnContract & {
   allowedTools?: readonly string[];
@@ -62,9 +97,13 @@ export type DshTaskStartContract = DshTurnContract & {
  * Read intent requests Canonical-only tools; structured_write/audit stay on the
  * legacy DSH allowlist. chapter_write never reaches this helper.
  */
-export function buildDshTaskStartContract(goal: string, chapterId?: string): DshTaskStartContract {
-  const contract = buildDshTurnContract(goal, chapterId);
-  if (classifyTaskIntent(goal) === 'read') {
+export function buildDshTaskStartContract(
+  goal: string,
+  chapterId?: string,
+  revisionSource?: ArtifactRevisionSource,
+): DshTaskStartContract {
+  const contract = buildDshTurnContract(goal, chapterId, revisionSource);
+  if (classifyTaskIntent(goal, revisionSource) === 'read') {
     return {
       ...contract,
       allowedTools: [...CANONICAL_READ_ALLOWED_TOOLS],
@@ -81,8 +120,21 @@ export interface DshTaskRuntimeResult {
   runtime: 'dsh-headless-persistent';
   assistantText?: string;
   artifactId?: string;
+  /** Only a successful, scope-validated creative.plan_action tool may provide this. */
+  plannedAction?: CreativePlannedAction;
   sessionLifecycle?: 'created' | 'continued' | 'resumed';
-  modelToolAttestation: ModelToolCallingAttestation;
+  /** Historical diagnostic evidence only; actual turns do not run a model probe. */
+  modelToolAttestation?: ModelToolCallingAttestation;
+  /** Present only while a length-valid chapter draft is withheld from admission. */
+  pendingChapterCandidate?: {
+    runId: string;
+    contentHash: string;
+    text: string;
+    wordCount: number;
+    previousChapterText?: string;
+    previousChapterId?: string;
+    previousSourceHash?: string;
+  };
 }
 
 export interface DshTaskRuntimeStatus {
@@ -176,6 +228,7 @@ export const dshTaskRuntimeService = {
     active.add(input.conversationId);
     let unlisten: UnlistenFn | undefined;
     try {
+      input.cancellationSignal?.throwIfAborted();
       if (onProjection) {
         unlisten = await listen<DshTaskProjectionNotice>(
           DSH_TASK_PROJECTION_EVENT,
@@ -186,10 +239,14 @@ export const dshTaskRuntimeService = {
       }
       const settings = getAiSettings();
       const modelSnapshot = hydrateTaskModelSnapshotRuntime(input.modelSnapshot);
-      const apiKey = await resolveDshTaskApiKeyAsync(modelSnapshot);
+      // Missing exact credentials fail inside the native Run; never substitute a scope.
+      const apiKey = await resolveDshTaskApiKeyAsync(modelSnapshot).catch(() => '');
+      input.cancellationSignal?.throwIfAborted();
+      const { cancellationSignal, ...nativeInput } = input;
+      void cancellationSignal;
       return await tauriInvoke<DshTaskRuntimeResult>('dsh_start_task_turn', {
         input: {
-          ...input,
+          ...nativeInput,
           modelSnapshot,
           apiKey,
           requestPolicy: {
@@ -198,7 +255,7 @@ export const dshTaskRuntimeService = {
             dailyTokenBudget: settings.dailyTokenBudget,
             dailyCostBudgetUsd: settings.dailyCostBudgetUsd,
             warningPercent: settings.budgetWarningPercent ?? 80,
-            timeoutSeconds: settings.timeoutSeconds ?? 120,
+            timeoutSeconds: modelSnapshot.options.timeoutSeconds ?? settings.timeoutSeconds ?? 120,
           },
         },
       });

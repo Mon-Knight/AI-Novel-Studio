@@ -110,10 +110,7 @@ function chapter(id: string, chapterNumber: number) {
 
 function renderPage() {
   return render(
-    <MemoryRouter
-      initialEntries={['/novels/novel-fixture/story-assets']}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
+    <MemoryRouter initialEntries={['/novels/novel-fixture/story-assets']}>
       <Routes>
         <Route path="/novels/:novelId/story-assets" element={<StoryAssetsPage />} />
       </Routes>

@@ -1,16 +1,5 @@
 import type { Novel } from '../../types/novel';
-import type { LucideIcon } from 'lucide-react';
-import {
-  ArrowRight,
-  BookOpenText,
-  Building2,
-  Heart,
-  Landmark,
-  Rocket,
-  Sparkles,
-  Sword,
-  Trash2,
-} from 'lucide-react';
+import { ArrowRight, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
@@ -24,15 +13,6 @@ interface NovelCardProps {
   onDelete?: (novelId: string) => void;
 }
 
-const genreIcons: Record<string, LucideIcon> = {
-  科幻: Rocket,
-  仙侠: Sword,
-  都市悬疑: Building2,
-  奇幻: Sparkles,
-  历史: Landmark,
-  言情: Heart,
-};
-
 const statusLabels: Record<string, string> = {
   draft: '草稿',
   planning: '规划中',
@@ -43,7 +23,6 @@ const statusLabels: Record<string, string> = {
 };
 
 function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProps) {
-  const GenreIcon = genreIcons[novel.genre || ''] || BookOpenText;
   const wordCount = novel.totalWordCount ?? novel.totalWords ?? 0;
   const targetCount = novel.targetWordCount ?? novel.targetWords ?? 0;
   const [progressLabel, setProgressLabel] = useState('');
@@ -112,9 +91,10 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
         onClick={onClick}
         aria-label={`打开作品 ${novel.title}`}
       >
-        <span className="novel-card-cover-icon" aria-hidden="true">
-          <GenreIcon size={34} strokeWidth={1.8} />
+        <span className="novel-card-cover-glyph" aria-hidden="true">
+          {novel.title.trim().charAt(0) || '书'}
         </span>
+        <span className="novel-card-cover-rule" aria-hidden="true" />
         <span className="novel-card-genre">{novel.genre || '未分类'}</span>
       </button>
       <button

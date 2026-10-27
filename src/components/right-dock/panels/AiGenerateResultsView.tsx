@@ -76,7 +76,7 @@ export function AiGenerateResultsView({
             <strong style={{ fontSize: 12 }}>实时候选预览</strong>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color:
                   streamPreviewStatus === 'interrupted'
                     ? 'var(--color-warning)'
@@ -105,7 +105,7 @@ export function AiGenerateResultsView({
           >
             {streamPreview || '正在等待模型返回首段内容……'}
           </div>
-          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 6 }}>
             输出完成并通过校验后才会保存为草稿并载入写作工作台；中断残片不会覆盖正文。
           </div>
         </div>
@@ -312,7 +312,7 @@ export function AiGenerateResultsView({
               替换全文
             </button>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 6 }}>
             当前生成结果已保存为草稿 v{latestGeneratedDraft.versionNo}。
           </div>
         </div>
@@ -364,7 +364,7 @@ export function AiGenerateResultsView({
         </button>
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-muted)',
             textAlign: 'center',
             marginTop: 6,

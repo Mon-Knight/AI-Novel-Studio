@@ -1,8 +1,4 @@
-import type {
-  AiSettings,
-  GatewayModelConfig,
-  LocalChapterModelSettings,
-} from '../../../types/ai';
+import type { AiSettings, GatewayModelConfig, LocalChapterModelSettings } from '../../../types/ai';
 import type { ModelEndpoint, ModelRef } from '../../../types/modelRuntime';
 
 export function mockModelRef(): ModelRef {
@@ -117,4 +113,3 @@ export const isRemoteEndpointAvailable = isGatewayEndpointAvailable;
 export function allowCloudWriterFallback(local?: LocalChapterModelSettings): boolean {
   return local?.allowCloudWriterFallback !== false;
 }
-

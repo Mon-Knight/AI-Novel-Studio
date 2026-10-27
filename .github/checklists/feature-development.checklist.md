@@ -7,13 +7,12 @@
 
 ## 开发前检查
 
-- [ ] 已阅读 `AGENTS.md`
-- [ ] 已阅读 `.github/copilot-instructions.md`
-- [ ] 已确认本次版本目标（版本号 + 范围）
+- [ ] 已阅读 `AGENTS.md`，并按任务从文档索引定位相关文档（不通读全部 `docs/` 与 IDE 指令）
+- [ ] 已确认本次目标（版本号或“非版本任务” + 范围）
 - [ ] 已确认禁止修改范围（哪些模块/文件不可动）
-- [ ] 已阅读相关 `docs/` 文档（product-design / ui-reference / data-model）
+- [ ] 已确认真实目录、分支与已有修改，保留用户修改
 - [ ] 已分析影响范围（新增/修改文件清单）
-- [ ] 已制定修改计划并输出给用户确认
+- [ ] 已说明影响范围与验证方案；只对尚未解决的关键需求、架构取舍、破坏性操作或范围扩展询问，不重复确认会话中已有的决定
 
 ---
 
@@ -32,13 +31,13 @@
 
 ## 开发后验证
 
-- [ ] 已运行与修改模块直接相关的动态测试
-- [ ] 前端改动已运行 `npm run lint:ci` 与 `npm run build`
-- [ ] Rust/SQLite 改动已运行 `cargo check` 与相关测试
-- [ ] 文档改动已运行 `npm run test:docs-sync`、必要的 version sync、Prettier 与 diff 检查
-- [ ] Tauri/DSH payload/打包改动已运行对应桌面与生产构建门禁
-- [ ] 发布任务已运行 `scripts/agent-workflow/verify_project.ps1`
-- [ ] 所有适用验证步骤通过
+- [ ] 已运行 `npm run verify:change -- --dry-run` 审核变更归属，再运行选出的检查
+- [ ] 新增模块已在 `scripts/quality/verification-scopes.mjs` 声明行为归属，未以零测试通过
+- [ ] 用户交互/写作流程变化已运行对应真实桌面场景（生产界面、隔离 SQLite、固定模型响应）
+- [ ] Migration/共享持久化/DSH/打包改动已扩大到对应完整领域门禁
+- [ ] 同一批未变化且已通过的检查未重复运行；失败修复后只复测受影响项
+- [ ] 发布或明确完整验收任务已运行一次 `scripts/agent-workflow/verify_project.ps1`
+- [ ] 所有适用验证步骤通过，失败与 NOT_RUN 项如实记录
 
 ---
 

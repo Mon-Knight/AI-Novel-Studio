@@ -24,7 +24,7 @@ export const MessageItem = memo(function MessageItem({ msg }: { msg: AgentMessag
     >
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--color-text-muted, #94a3b8)',
           marginBottom: 4,
           padding: '0 4px',

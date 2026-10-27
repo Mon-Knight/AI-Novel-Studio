@@ -187,6 +187,14 @@ test('E2E build exposes deterministic Mock only after the exact storage opt-in',
       capabilities: ['conversation_turn', 'chapter_generate'],
     });
     assert.equal(rows.filter((row) => row.id === 'model:mock:Mock').length, 1);
+    assert.deepEqual(
+      rows.find((row) => row.id === 'model:mock:Mock-Alternate'),
+      {
+        ...deterministic!,
+        id: 'model:mock:Mock-Alternate',
+        name: 'Mock-Alternate',
+      },
+    );
     assert.equal(rows.find((row) => row.id === 'model:browser-fallback:Mock')?.status, 'loaded');
   } finally {
     await vite.close();

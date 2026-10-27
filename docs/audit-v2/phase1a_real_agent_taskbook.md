@@ -1,6 +1,6 @@
 # R4：真实 Main Agent Runtime 验证任务书（Canonical exposure 后置）
 
-> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 DSH 验证。** Catalog/Manifest 已将 4 项 Canonical 只读 Tool 放行为 `stable` + `working`，`modelVisibleToolIdentities` 为 `context.read@1 / memory.search@1 / novel.read@1 / structure.read@1`。不得再把 `catalog_only` 或空可见集合写成当前状态。Gateway 在 Canonical allowlist 下会把无版本号的 `novel.read` 等列入 `tools/list`；工作台 `read` intent 已请求该 allowlist。宿主 `task_runtime` 仍固定注入 legacy `ALLOWED_TOOLS`，生产读回合尚未把 Canonical 名交给模型，R4 未 VERIFIED。Writing SubAgent 与 `chapter_write` 不走 DSH。
+> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 live 云端验收。** 本文是 exposure 后的 R4 任务书快照，不是 v3.7.0 产品现状全文。Catalog/Manifest 已将 4 项 Canonical 只读 Tool 放行为 `stable` + `working`。仓内 loopback 只读闭环已证明；live 云端仍 NOT VERIFIED。Writing SubAgent 已于 v3.7.0 对桌面 + 真实 API 的 `chapter_write` 默认开放，现行契约见 [`../architecture/writing-subagent-contract.md`](../architecture/writing-subagent-contract.md)。下文若仍写“写章不走 DSH / 生产读回合尚未把 Canonical 名交给模型”，视为任务书起草时的历史句子。
 
 ## 1. 阶段定位
 

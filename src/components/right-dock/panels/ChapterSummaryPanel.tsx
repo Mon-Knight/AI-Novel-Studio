@@ -19,13 +19,15 @@ import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoad
 import type { ChapterDraft } from '../../../types/ai';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import { ChapterSummaryPanelView } from './ChapterSummaryPanelView';
+import { ChapterSummaryWorkflowNotice } from '../../workspace/ChapterSummaryWorkflowNotice';
+import { isE2eLegacyWorkspacePanelsEnabled } from '../../../types/rightSidebar';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
   chapter?: Chapter;
 }
 
-function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
+function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   const [summary, setSummary] = useState<ChapterSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -294,4 +296,10 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   );
 }
 
-export default ChapterSummaryPanel;
+export default function ChapterSummaryPanel(props: ChapterSummaryPanelProps) {
+  return isE2eLegacyWorkspacePanelsEnabled() ? (
+    <LegacyChapterSummaryPanel {...props} />
+  ) : (
+    <ChapterSummaryWorkflowNotice {...props} />
+  );
+}

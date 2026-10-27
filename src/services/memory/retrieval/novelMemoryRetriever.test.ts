@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  formatSceneMemoryForCompilation,
-  NovelMemoryRetriever,
-} from './novelMemoryRetriever';
+import { formatSceneMemoryForCompilation, NovelMemoryRetriever } from './novelMemoryRetriever';
 import { novelMemoryManager } from '../novelMemoryManager';
 import type {
   CharacterDynamicState,

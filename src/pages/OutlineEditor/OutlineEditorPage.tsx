@@ -2,9 +2,9 @@
  * AI Novel Studio - 大纲编辑器页面
  * 支持总纲、分卷大纲、章节大纲的查看、编辑、AI 生成和版本管理
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowLeft, BookOpenText, FileText, ListTree, MousePointer2 } from 'lucide-react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import OutlineEditor from '../../components/outline/OutlineEditor';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
@@ -14,6 +14,14 @@ import type { Chapter } from '../../types/chapter';
 function OutlineEditorPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedType = searchParams.get('type');
+  const requestedChapter = searchParams.get('chapterId');
+  const appliedRequest = useRef('');
+  const [loadedNovel, setLoadedNovel] = useState('');
+  const [error, setError] = useState('');
+  const currentNovel = useRef(novelId);
+  currentNovel.current = novelId;
   const [outlineType, setOutlineType] = useState<'master' | 'volume' | 'chapter'>('master');
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -29,16 +37,46 @@ function OutlineEditorPage() {
         volumeRepository.getByNovelId(novelId),
         chapterRepository.getByNovelId(novelId),
       ]);
+      if (currentNovel.current !== novelId) return;
       setVolumes(v);
       setChapters(c);
+      setLoadedNovel(novelId);
+      setError('');
     } catch {
-      /* ignore */
+      if (currentNovel.current === novelId) setError('读取大纲目录失败，请重新进入作品。');
     }
   }, [novelId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!novelId || loadedNovel !== novelId) return;
+    const key = JSON.stringify([novelId, requestedType, requestedChapter]);
+    if (appliedRequest.current === key) return;
+    appliedRequest.current = key;
+    setSelectedChapterId(undefined);
+    setSelectedVolumeId(undefined);
+    setSelectedTitle('');
+    if (requestedType === 'chapter' || requestedChapter) {
+      setOutlineType('chapter');
+      if (!requestedChapter) return;
+      const chapter = chapters.find(
+        (item) => item.id === requestedChapter && item.novelId === novelId,
+      );
+      if (!chapter) {
+        setError('指定章节不存在或不属于当前作品，请在目录中重新选择。');
+        return;
+      }
+      setSelectedChapterId(chapter.id);
+      setSelectedVolumeId(chapter.volumeId);
+      setSelectedTitle(chapter.title);
+      setSelectedIndex(chapter.orderIndex);
+    } else {
+      setOutlineType(requestedType === 'volume' ? 'volume' : 'master');
+    }
+  }, [chapters, loadedNovel, novelId, requestedChapter, requestedType]);
 
   const filteredChapters = chapters.filter(
     (c) => c.volumeId === selectedVolumeId || (!selectedVolumeId && !c.volumeId),
@@ -165,10 +203,13 @@ function OutlineEditorPage() {
 
       {/* 编辑器主体 */}
       <div style={{ flex: 1, padding: 20, overflow: 'auto' }}>
+        {error && <p role="alert">{error}</p>}
         {!novelId ? (
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 48 }}>
             请从作品页面进入
           </div>
+        ) : loadedNovel !== novelId ? (
+          <p role="status">正在读取当前作品的大纲目录…</p>
         ) : outlineType === 'volume' && !selectedVolumeId ? (
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 48 }}>
             <MousePointer2

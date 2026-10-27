@@ -165,10 +165,7 @@ test('NovelMemoryStateUpdater can rollback to a previous version cleanly', async
   );
 
   // 验证崩坏状态生效
-  assert.equal(
-    updater.getCharacterState('novel-state-04', 'char-lin')?.currentEmotion,
-    '濒死发狂',
-  );
+  assert.equal(updater.getCharacterState('novel-state-04', 'char-lin')?.currentEmotion, '濒死发狂');
   assert.equal(updater.getWorldState('novel-state-04')?.timelinePosition, '灾厄纪年');
 
   // 执行回滚至 v1

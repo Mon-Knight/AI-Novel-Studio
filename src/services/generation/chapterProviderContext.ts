@@ -15,6 +15,8 @@ export interface BuildChapterProviderContextInput {
   requestSourceVersion: string;
   requestInstruction: string;
   currentDraft?: ChapterProviderCurrentDraft;
+  /** The explicitly selected immutable candidate; keep it through every repair. */
+  revisionBase?: ChapterProviderCurrentDraft;
 }
 
 interface SectionPolicy {
@@ -85,6 +87,8 @@ const SECTION_POLICIES: Readonly<Record<string, SectionPolicy>> = {
     sortRank: 800,
     priority: 94,
     maxTokens: 8_000,
+    required: true,
+    requireFull: true,
   },
   character_states: {
     sourceType: 'character',
@@ -105,6 +109,8 @@ const SECTION_POLICIES: Readonly<Record<string, SectionPolicy>> = {
     sortRank: 1_100,
     priority: 96,
     maxTokens: 10_000,
+    required: true,
+    requireFull: true,
   },
   context_records: {
     sourceType: 'context_record',
@@ -233,8 +239,8 @@ function sectionSource(
     label: boundedLabel(section.title),
     content: section.content.trim(),
     priority: policy.priority,
-    required: policy.required === true,
-    requireFull: policy.requireFull === true,
+    required: policy.required === true || section.sourceTypes.includes('rule_system'),
+    requireFull: policy.requireFull === true || section.sourceTypes.includes('rule_system'),
     maxTokens: policy.maxTokens,
     sortRank: policy.sortRank,
     stableIndex: index,
@@ -248,6 +254,50 @@ function sectionSource(
 export function buildChapterProviderContextSources(
   input: BuildChapterProviderContextInput,
 ): AiContextSourceInput[] {
+  const { snapshot } = input;
+  const coverage = snapshot.compiledContext.ruleSystemCoverage;
+  const rules = snapshot.compiledContext.baseContext.ruleSystems?.trim();
+  if (
+    (rules && !coverage) ||
+    (coverage &&
+      (coverage.status !== 'complete' ||
+        coverage.novelId !== snapshot.novelId ||
+        coverage.includedCount !== coverage.requiredCount ||
+        coverage.sourceIds.length !== coverage.requiredCount ||
+        (coverage.requiredCount > 0 &&
+          (!rules ||
+            !snapshot.compiledContext.sections.some(
+              (section) =>
+                section.sourceTypes.includes('rule_system') && section.content.includes(rules),
+            )))))
+  ) {
+    throw Object.assign(new Error('context_incomplete：规则投影缺失或不属于当前作品。'), {
+      code: 'GENERATION_CONTEXT_INCOMPLETE',
+    });
+  }
+  const worlds = snapshot.compiledContext.worldSettingCoverage;
+  const base = snapshot.compiledContext.baseContext;
+  if (
+    ((base.worldBackground?.trim() || base.chapterSettings?.trim()) && !worlds) ||
+    (worlds &&
+      (worlds.status !== 'complete' ||
+        worlds.novelId !== snapshot.novelId ||
+        worlds.includedCount !== worlds.requiredCount ||
+        worlds.sourceIds.length !== worlds.requiredCount ||
+        [base.worldBackground, base.chapterSettings].some(
+          (text) =>
+            text?.trim() &&
+            !snapshot.compiledContext.sections.some(
+              (section) =>
+                section.sourceTypes.includes('world_setting') &&
+                section.content.includes(text.trim()),
+            ),
+        )))
+  ) {
+    throw Object.assign(new Error('context_incomplete：世界约束未完整进入模型来源。'), {
+      code: 'GENERATION_CONTEXT_INCOMPLETE',
+    });
+  }
   const pending: PendingSource[] = [
     {
       sourceType: 'request_context',
@@ -282,6 +332,26 @@ export function buildChapterProviderContextSources(
       maxTokens: 26_000,
       sortRank: 500,
       stableIndex: Number.MAX_SAFE_INTEGER,
+    });
+  }
+
+  if (
+    input.revisionBase &&
+    input.revisionBase.sourceVersion !== input.currentDraft?.sourceVersion
+  ) {
+    pending.push({
+      sourceType: 'draft',
+      sourceId: scopedSourceId(snapshot.chapterId, 'explicit-revision-base'),
+      sourceVersion: input.revisionBase.sourceVersion,
+      origin: 'request',
+      label: 'Explicit immutable revision source',
+      content: input.revisionBase.content,
+      priority: 100,
+      required: true,
+      requireFull: true,
+      maxTokens: 26_000,
+      sortRank: 450,
+      stableIndex: Number.MAX_SAFE_INTEGER - 1,
     });
   }
 

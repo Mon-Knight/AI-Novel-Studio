@@ -27,6 +27,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // v8 插桩与大章节列表用例在慢机上会超过默认 5s；提高上限但保持有界。
+    testTimeout: 20_000,
     include: [
       'src/test/critical-components/**/*.test.tsx',
       'src/test/components/CheckPanelCancellation.test.tsx',

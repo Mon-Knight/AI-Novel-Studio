@@ -7,7 +7,7 @@ import ts from 'typescript';
 const testFile = /\.(?:test|spec)\.(?:mjs|js|ts|tsx)$/u;
 const specFile = /\.spec\.(?:mjs|js|ts|tsx)$/u;
 
-function importedRunner(file, source) {
+export function importedRunner(file, source) {
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const modules = parsed.statements
     .filter(ts.isImportDeclaration)
@@ -33,12 +33,22 @@ function defaultCommands(scripts, name = 'test:all', stack = []) {
   });
 }
 
+// Specs that only run through the production desktop binary; each one must be listed by
+// its wdio carrier configuration before the inventory accepts it as owned.
+const PRODUCTION_CARRIER_SPECS = Object.freeze({
+  'tests/real-acceptance/writing-subagent-real-profile.spec.ts':
+    'test:real-profile:writing-subagent',
+  'tests/real-acceptance/writing-subagent-fault-injection.spec.ts':
+    'test:fault-injection:writing-subagent',
+});
+
 export function buildTestInventory({
   files,
   scripts,
   desktopRunner = '',
   browserRunner = '',
   liveRunner = '',
+  realProfileRunner = '',
 }) {
   const commands = defaultCommands(scripts);
   const discovered = commands.includes('@discovered');
@@ -75,6 +85,13 @@ export function buildTestInventory({
         if (runners.get(file) !== runner)
           throw new Error(
             `runner mismatch: ${file} requires ${runners.get(file)}, received ${runner}`,
+          );
+        const previous = assigned.get(file);
+        if (previous !== undefined)
+          throw new Error(
+            previous === command
+              ? `test listed twice in one command: ${file}`
+              : `duplicate assignment: ${file} already runs in ${previous}, not again in ${command}`,
           );
         assigned.set(file, command);
       }
@@ -117,6 +134,16 @@ export function buildTestInventory({
         runner: 'test:e2e:real-conversation',
         reason:
           'Explicit opt-in real Provider authorization, credentials and budget required; never run in test:all.',
+      });
+    } else if (
+      PRODUCTION_CARRIER_SPECS[file] &&
+      realProfileRunner.includes(path.posix.basename(file))
+    ) {
+      excluded.push({
+        file,
+        runner: PRODUCTION_CARRIER_SPECS[file],
+        reason:
+          'Explicit opt-in run through the production desktop binary (real profile or isolated fault-injection profile); never run in test:all.',
       });
     } else throw new Error(`unowned spec: ${file}`);
   }
@@ -164,6 +191,10 @@ export async function inspectWorkspace(root) {
     desktopRunner: await read('scripts/e2e/run-e2e.ts'),
     browserRunner: await read('tests/browser/wdio.conf.ts'),
     liveRunner: await read('scripts/e2e/run-real-conversation-acceptance.ts'),
+    realProfileRunner: [
+      await read('tests/real-acceptance/wdio.real-profile.conf.ts'),
+      await read('tests/real-acceptance/wdio.fault-injection.conf.ts'),
+    ].join('\n'),
   });
 }
 

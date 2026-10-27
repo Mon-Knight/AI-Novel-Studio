@@ -57,6 +57,7 @@ interface E2eChapterCoreAssetFixtureDependencies {
   getNovel?: typeof novelRepository.getById;
   getChapter?: typeof chapterRepository.getById;
   updateChapter?: typeof chapterRepository.update;
+  previewWorldRuleChange?: typeof settingRepository.previewWorldRuleChange;
   saveWorldSetting?: typeof settingRepository.saveWorldSetting;
   saveRuleSystem?: typeof settingRepository.saveRuleSystem;
   saveProtagonist?: typeof protagonistRepository.save;
@@ -111,6 +112,8 @@ export async function seedE2eChapterCoreAssets(
   );
 
   const updateChapter = dependencies.updateChapter ?? chapterRepository.update;
+  const previewWorldRuleChange =
+    dependencies.previewWorldRuleChange ?? settingRepository.previewWorldRuleChange;
   const saveWorldSetting = dependencies.saveWorldSetting ?? settingRepository.saveWorldSetting;
   const saveRuleSystem = dependencies.saveRuleSystem ?? settingRepository.saveRuleSystem;
   const saveProtagonist = dependencies.saveProtagonist ?? protagonistRepository.save;
@@ -129,28 +132,67 @@ export async function seedE2eChapterCoreAssets(
     }),
   );
 
-  const [worldSetting, ruleSystem, protagonist] = await Promise.all([
-    saveWorldSetting(null, {
-      novelId,
-      title: required(input.worldSetting.title, 'worldSetting.title'),
-      content: required(input.worldSetting.content, 'worldSetting.content'),
+  // Only authorized isolated E2E setup uses these guards. Tested business decisions still use UI.
+  // A successful world insertion changes the rule-set fingerprint; never race both previews.
+  const worldInput = {
+    novelId,
+    title: required(input.worldSetting.title, 'worldSetting.title'),
+    content: required(input.worldSetting.content, 'worldSetting.content'),
+    isActive: true,
+  };
+  const worldPreview = await previewWorldRuleChange(novelId, [
+    {
+      targetType: 'world_setting',
+      title: worldInput.title,
+      content: worldInput.content,
       isActive: true,
-    }),
-    saveRuleSystem(null, {
-      novelId,
-      title: required(input.ruleSystem.title, 'ruleSystem.title'),
-      content: required(input.ruleSystem.content, 'ruleSystem.content'),
-      forbiddenRules: input.ruleSystem.forbiddenRules?.trim() || undefined,
-      isActive: true,
-    }),
-    saveProtagonist(null, {
-      novelId,
-      name: required(input.protagonist.name, 'protagonist.name'),
-      identity: required(input.protagonist.identity, 'protagonist.identity'),
-      personality: required(input.protagonist.personality, 'protagonist.personality'),
-      goal: required(input.protagonist.goal, 'protagonist.goal'),
-    }),
+    },
   ]);
+  if (worldPreview.blockingConflicts.length)
+    throw new Error('E2E core-asset fixture world preview has blocking dependencies.');
+  const worldSetting = await saveWorldSetting(null, {
+    ...worldInput,
+    expectedRuleSetFingerprint: worldPreview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: worldPreview.previewHash,
+      intent: 'confirm_change',
+      notes: '已授权的隔离 E2E 前置资产；不代替被测生产 UI 决定。',
+    },
+  });
+  const ruleInput = {
+    novelId,
+    title: required(input.ruleSystem.title, 'ruleSystem.title'),
+    content: required(input.ruleSystem.content, 'ruleSystem.content'),
+    forbiddenRules: input.ruleSystem.forbiddenRules?.trim() || undefined,
+    isActive: true,
+  };
+  const rulePreview = await previewWorldRuleChange(novelId, [
+    {
+      targetType: 'rule_system',
+      title: ruleInput.title,
+      content: ruleInput.content,
+      forbiddenRules: ruleInput.forbiddenRules,
+      isActive: true,
+    },
+  ]);
+  if (rulePreview.blockingConflicts.length)
+    throw new Error('E2E core-asset fixture rule preview has blocking dependencies.');
+  const ruleSystem = await saveRuleSystem(null, {
+    ...ruleInput,
+    expectedRuleSetFingerprint: rulePreview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: rulePreview.previewHash,
+      intent: 'confirm_change',
+      notes: '已授权的隔离 E2E 前置资产；不代替被测生产 UI 决定。',
+    },
+  });
+  const protagonist = await saveProtagonist(null, {
+    novelId,
+    name: required(input.protagonist.name, 'protagonist.name'),
+    identity: required(input.protagonist.identity, 'protagonist.identity'),
+    personality: required(input.protagonist.personality, 'protagonist.personality'),
+    goal: required(input.protagonist.goal, 'protagonist.goal'),
+  });
 
   const chapterOutlineIds: string[] = [];
   for (let index = 0; index < input.chapters.length; index += 1) {

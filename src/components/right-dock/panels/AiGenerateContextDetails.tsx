@@ -30,7 +30,7 @@ export function AiGenerateContextDetails({
   return (
     <div
       style={{
-        fontSize: 11,
+        fontSize: 12,
         lineHeight: 1.7,
         color: 'var(--color-text-secondary)',
         marginTop: 8,

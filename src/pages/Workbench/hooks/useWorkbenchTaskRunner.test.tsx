@@ -33,6 +33,8 @@ const { useRef, useState } = await import('react');
 const { act, cleanup, renderHook, waitFor } = await import('@testing-library/react');
 const { taskConversationService } =
   await import('../../../services/conversation/taskConversationService');
+const { taskConversationWindow } =
+  await import('../../../services/conversation/taskConversationWindow');
 const { taskSessionAdapter } = await import('../../../services/dsh/taskSessionAdapter');
 const { chapterSummaryService } = await import('../../../services/context/chapterSummaryService');
 const { buildCoreAssetGenerationGoal, chapterAssetReadinessService, chapterAssetRecoveryStore } =
@@ -47,6 +49,7 @@ const { chapterRepository } = await import('../../../services/database/chapterRe
 const { volumeRepository } = await import('../../../services/database/volumeRepository');
 const { computeContentSha256 } = await import('../../../utils/contentIntegrity');
 const { useWorkbenchTaskRunner } = await import('./useWorkbenchTaskRunner');
+const { useWorkbenchDraftStore } = await import('../../../store/workbenchDraftStore');
 
 const original = {
   getConversation: taskConversationService.get,
@@ -175,13 +178,14 @@ function bundleWith(artifacts: ConversationArtifactCard[]): TaskConversationBund
 function installConversationStore(): void {
   taskConversationService.get = async (conversationId) =>
     conversationId === liveBundle.conversation.conversationId ? liveBundle : null;
-  taskConversationService.appendTurn = async (conversationId, role, content) => {
+  taskConversationService.appendTurn = async (conversationId, role, content, revisionSource) => {
     const turn = {
       turnId: `turn-${liveBundle.turns.length + 1}`,
       conversationId,
       sequence: liveBundle.turns.length,
       role,
       content,
+      ...(revisionSource ? { revisionSource } : {}),
       createdAt: new Date().toISOString(),
     };
     liveBundle.turns.push(turn);
@@ -224,8 +228,11 @@ function renderRunner(
     chapters,
     chapterId: chapters[0]?.id,
   }),
+  modelSelectionPendingRef?: { current: () => boolean },
+  selectedModelRef?: { current: TaskModelSnapshot },
 ) {
   return renderHook(() => {
+    const selectedModel = selectedModelRef?.current ?? MODEL;
     const selectedNovelRef = useRef('novel-1');
     const [chapterId, setChapterId] = useState<string | undefined>(chapters[0]?.id);
     const [renderedChapters, setRenderedChapters] = useState(chapters);
@@ -246,16 +253,17 @@ function renderRunner(
       bundle: liveBundle,
       conversations,
       setConversations,
-      selectedModel: MODEL,
+      selectedModel,
+      modelSelectionPendingRef,
       selectedNovelRef,
       selectChapter: async (nextChapterId) => setChapterId(nextChapterId),
       reloadChapters: reloadRenderedChapters,
       refreshBundle: async () => undefined,
       loadConversations: async () => undefined,
-      refreshPlugins: async () => [
+      refreshPlugins: async (_conversationId, _allowProbe, snapshot) => [
         {
-          id: 'model:browser-fallback:Mock',
-          name: 'Mock',
+          id: `model:mock:${(snapshot ?? selectedModel).modelId}`,
+          name: (snapshot ?? selectedModel).modelId,
           category: 'model',
           version: 'catalog',
           description: 'test model',
@@ -338,6 +346,7 @@ async function submit(runner: ReturnType<typeof renderRunner>, command: string):
 }
 
 beforeEach(() => {
+  useWorkbenchDraftStore.setState({ drafts: {} });
   localStorage.clear();
   window.sessionStorage.clear();
   liveBundle = bundleWith([]);
@@ -394,6 +403,163 @@ afterEach(() => {
   draftVersionService.create = original.createDraft;
   chapterRepository.getByNovelId = original.chapters;
   volumeRepository.getByNovelId = original.volumes;
+});
+
+test('model selection persistence pauses new runs without losing the unsent draft', async () => {
+  const pending = { current: () => true };
+  const runner = renderRunner([CHAPTER], undefined, pending);
+  await act(async () => runner.result.current.setDraft('生成本章正文'));
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(providerGoals.length, 0);
+  assert.equal(liveBundle.turns.length, 0);
+  assert.equal(runner.result.current.draft, '生成本章正文');
+  pending.current = () => false;
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(providerGoals.length, 1);
+});
+
+test('an accepted send clears the submitted draft while running and keeps newer input after failure', async () => {
+  const running = deferred<TaskRun>();
+  taskSessionAdapter.startTurn = async (input) => {
+    providerGoals.push(input.goal);
+    return running.promise;
+  };
+  const runner = renderRunner();
+  await act(async () => runner.result.current.setDraft('生成本章正文'));
+  let sendPromise = Promise.resolve();
+  act(() => {
+    sendPromise = runner.result.current.sendMessage();
+  });
+  await waitFor(() => assert.deepEqual(providerGoals, ['生成本章正文']));
+  assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
+  assert.equal(runner.result.current.draft, '');
+  await act(async () => runner.result.current.setDraft('下一条独立意见'));
+  await act(async () => {
+    running.reject(new Error('模型生成失败'));
+    await sendPromise;
+  });
+  assert.equal(runner.result.current.draft, '下一条独立意见');
+  assert.match(runner.result.current.composerError, /模型生成失败/u);
+});
+
+test('real-model conversation persists and clears a vague creative brief before checking chapter assets', async () => {
+  const tauriWindow = window as unknown as Record<string, unknown>;
+  tauriWindow.__TAURI_INTERNALS__ = {};
+  const model = {
+    current: {
+      ...MODEL,
+      providerId: 'openai_compatible',
+      modelId: 'real-model',
+      runtimeMode: 'api' as const,
+    },
+  };
+  let assetChecks = 0;
+  chapterAssetReadinessService.inspect = async () => {
+    assetChecks++;
+    return { ready: false, missingAssets: ['world_setting'], chapterId: CHAPTER.id };
+  };
+  const originalTargets = taskConversationWindow.listRunningTargets;
+  taskConversationWindow.listRunningTargets = async () => [];
+  let prepare: Parameters<typeof taskSessionAdapter.startTurn>[0]['preparePlannedAction'];
+  taskSessionAdapter.startTurn = async (input) => {
+    prepare = input.preparePlannedAction;
+    assert.equal(input.goal, '我想写一个悬疑故事，先聊聊背景，不要生成正文');
+    assert.equal(input.modelSnapshot, model.current);
+    return {
+      runId: 'chat-run',
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      status: 'completed',
+      modelSnapshot: model.current,
+      workerId: 'chat-worker',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  };
+  try {
+    const runner = renderRunner([], undefined, undefined, model);
+    await submit(runner, '我想写一个悬疑故事，先聊聊背景，不要生成正文');
+    assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
+    assert.equal(runner.result.current.draft, '');
+    assert.equal(assetChecks, 0);
+    await act(async () =>
+      runner.result.current.startInitializedTask({
+        conversationId: 'conversation-1',
+        novelId: 'novel-1',
+        turnId: liveBundle.turns[0].turnId,
+        goal: '我想写一个悬疑故事，先聊聊背景，不要生成正文',
+        modelSnapshot: model.current,
+      }),
+    );
+    assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
+    assert.equal(assetChecks, 0);
+    assert.ok(prepare);
+    await act(async () => {
+      assert.equal(
+        await prepare!({
+          action: 'generate_chapter',
+          instruction: '写已讨论的开篇',
+          chapterId: CHAPTER.id,
+        }),
+        null,
+      );
+    });
+    assert.ok(assetChecks > 0);
+  } finally {
+    delete tauriWindow.__TAURI_INTERNALS__;
+    taskConversationWindow.listRunningTargets = originalTargets;
+  }
+});
+
+test('word-target-only send works without model readiness, credentials or a chapter and records ANS-local receipt', async () => {
+  taskSessionAdapter.startTurn = original.startTurn;
+  let modelPreflights = 0;
+  const unavailableModel: TaskModelSnapshot = {
+    ...MODEL,
+    runtimeMode: 'api',
+    providerId: 'unavailable',
+    modelId: 'Offline',
+    baseUrl: 'https://offline.invalid/v1',
+  };
+  const selectedNovelRef = { current: 'novel-1' };
+  const runner = renderHook(() => {
+    const [conversations, setConversations] = useState([liveBundle.conversation]);
+    return useWorkbenchTaskRunner({
+      selectedNovelId: 'novel-1',
+      selectedConversationId: 'conversation-1',
+      chapterId: undefined,
+      chapters: [],
+      bundle: liveBundle,
+      conversations,
+      setConversations,
+      selectedModel: unavailableModel,
+      selectedNovelRef,
+      selectChapter: async () => undefined,
+      reloadChapters: async () => null,
+      refreshBundle: async () => undefined,
+      loadConversations: async () => undefined,
+      refreshPlugins: async () => {
+        modelPreflights += 1;
+        throw new Error('model offline');
+      },
+    });
+  });
+  await act(async () => runner.result.current.sendMessage('本任务目标字数设为3200字'));
+  assert.equal(runner.result.current.composerError, '');
+  assert.equal(modelPreflights, 0);
+  assert.deepEqual(providerGoals, []);
+  assert.equal(liveBundle.runs.length, 1);
+  assert.equal(liveBundle.runs[0].modelSnapshot.providerId, 'ans-local');
+  assert.equal(liveBundle.runs[0].status, 'completed');
+  assert.match(
+    liveBundle.turns.find((turn) => turn.role === 'assistant')?.content ?? '',
+    /本任务每章目标字数设为 3200 字/u,
+  );
+  assert.equal(liveBundle.artifacts.length, 0);
+  await act(async () => runner.result.current.sendMessage('本章目标字数设为3200字'));
+  assert.match(runner.result.current.composerError, /本任务目标字数设为3200字/u);
+  assert.equal(modelPreflights, 0);
+  assert.equal(liveBundle.runs.length, 1);
 });
 
 test('send preflight exposes preparing and blocks a duplicate send for the conversation', async () => {
@@ -653,7 +819,7 @@ test('late conversational asset apply settles its original recovery without relo
   assert.match(liveBundle.turns[1]?.content ?? '', /创作资产候选已应用/);
 });
 
-test('generic retry restores a failed automatic asset turn to its pending apply state', async () => {
+test('generic retry restores a failed asset stage even after a completed planning run', async () => {
   const originalGoal = '写个六万字左右的悬疑故事。';
   const goal = buildCoreAssetGenerationGoal('world_setting', originalGoal);
   const turnId = 'turn-world-setting';
@@ -678,6 +844,21 @@ test('generic retry restores a failed automatic asset turn to its pending apply 
     createdAt: '2026-08-31T00:00:00.000Z',
   });
   liveBundle.runs.push(failedRun);
+  liveBundle.runs.push({
+    ...failedRun,
+    runId: 'later-plan',
+    status: 'completed',
+    createdAt: '2026-08-31T00:00:02.500Z',
+  });
+  liveBundle.toolEvents.push({
+    eventId: 'plan-event',
+    runId: 'later-plan',
+    sequence: 1,
+    toolName: 'creative.plan_action',
+    argumentsSummary: {},
+    status: 'succeeded',
+    createdAt: '2026-08-31T00:00:02.600Z',
+  });
   liveBundle.conversation.status = 'failed';
   chapterAssetRecoveryStore.set({
     conversationId: 'conversation-1',
@@ -731,15 +912,146 @@ test('generic retry restores a failed automatic asset turn to its pending apply 
   );
 
   assert.equal(liveBundle.turns.length, 1);
-  assert.equal(liveBundle.runs.length, 2);
+  assert.equal(liveBundle.runs.length, 3);
   assert.equal(startedInputs.length, 1);
   assert.equal(startedInputs[0]?.turnId, turnId);
+  assert.equal(startedInputs[0]?.retrySourceRunId, failedRun.runId);
   assert.equal(startedInputs[0]?.goal, goal);
   assert.deepEqual(startedInputs[0]?.modelSnapshot, MODEL);
   assert.equal(
     runner.result.current.assetRecovery?.orchestration.candidateArtifactId,
     'artifact-world-retry',
   );
+});
+
+test('queued asset uses B and retries B after the task selection changes to C', async () => {
+  const selectedModelRef = { current: { ...MODEL, modelId: 'Model-B' } };
+  chapterAssetRecoveryStore.set({
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    originalGoal: '继续写',
+    missingAssets: ['world_setting'],
+    modelSnapshot: MODEL,
+    orchestration: { phase: 'queued', asset: 'world_setting', updatedAt: MODEL.capturedAt },
+    createdAt: MODEL.capturedAt,
+    checkedAt: MODEL.capturedAt,
+  });
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
+  });
+  const startedInputs: Parameters<typeof taskSessionAdapter.startTurn>[0][] = [];
+  taskSessionAdapter.startTurn = async (input) => {
+    startedInputs.push(input);
+    const failedRun: TaskRun = {
+      runId: `failed-asset-${startedInputs.length}`,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      status: 'failed',
+      modelSnapshot: input.modelSnapshot!,
+      workerId: 'worker-asset',
+      error: 'HTTP_408',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    liveBundle.runs.push(failedRun);
+    return failedRun;
+  };
+  const runner = renderRunner([CHAPTER], undefined, undefined, selectedModelRef);
+  await waitFor(() => {
+    assert.equal(runner.result.current.assetRecovery?.orchestration.phase, 'failed');
+    assert.equal(runner.result.current.selectedConversationPreparing, false);
+  });
+  assert.equal(startedInputs.length, 1);
+  assert.equal(startedInputs[0].modelSnapshot?.modelId, 'Model-B');
+  assert.equal(chapterAssetRecoveryStore.get('conversation-1')?.modelSnapshot?.modelId, 'Model-B');
+  selectedModelRef.current = { ...MODEL, modelId: 'Model-C' };
+  act(() => runner.rerender());
+  await act(async () => runner.result.current.generateMissingAsset('world_setting'));
+  assert.equal(startedInputs.length, 2);
+  assert.equal(startedInputs[1].modelSnapshot?.modelId, 'Model-B');
+  assert.equal(liveBundle.runs[0].modelSnapshot.modelId, 'Model-B');
+});
+
+test('a failed original-model read retains asset Run identity for the next explicit retry', async () => {
+  const originalGoal = '继续写';
+  const preparationTurnId = 'turn-asset-original';
+  const originalRun: TaskRun = {
+    runId: 'run-asset-original',
+    conversationId: 'conversation-1',
+    turnId: preparationTurnId,
+    status: 'failed',
+    modelSnapshot: { ...MODEL, modelId: 'Model-B' },
+    workerId: 'original-worker',
+    createdAt: MODEL.capturedAt,
+    updatedAt: MODEL.capturedAt,
+  };
+  liveBundle.runs.push(originalRun);
+  liveBundle.turns.push({
+    turnId: preparationTurnId,
+    conversationId: 'conversation-1',
+    sequence: 0,
+    role: 'user',
+    content: encodeWorkbenchTurnContent(
+      buildCoreAssetGenerationGoal('world_setting', originalGoal),
+      'workbench_asset_preparation',
+    ),
+    createdAt: MODEL.capturedAt,
+  });
+  chapterAssetRecoveryStore.set({
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    originalGoal,
+    missingAssets: ['world_setting'],
+    modelSnapshot: MODEL,
+    orchestration: {
+      phase: 'failed',
+      asset: 'world_setting',
+      preparationTurnId,
+      preparationRunId: originalRun.runId,
+      updatedAt: MODEL.capturedAt,
+    },
+    createdAt: MODEL.capturedAt,
+    checkedAt: MODEL.capturedAt,
+  });
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
+  });
+  const modelIds: string[] = [];
+  const startTurn = taskSessionAdapter.startTurn;
+  taskSessionAdapter.startTurn = async (input, listener) => {
+    modelIds.push(input.modelSnapshot!.modelId);
+    return startTurn(input, listener);
+  };
+  const runner = renderRunner([CHAPTER], undefined, undefined, {
+    current: { ...MODEL, modelId: 'Model-C' },
+  });
+  await waitFor(() =>
+    assert.equal(runner.result.current.assetRecovery?.orchestration.phase, 'failed'),
+  );
+  let readFailed = false;
+  taskConversationService.get = async () => {
+    if (!readFailed) {
+      readFailed = true;
+      throw new Error('temporary model read failure');
+    }
+    return liveBundle;
+  };
+  await act(async () => runner.result.current.generateMissingAsset('world_setting'));
+  assert.deepEqual(modelIds, []);
+  assert.equal(
+    runner.result.current.assetRecovery?.orchestration.preparationRunId,
+    originalRun.runId,
+  );
+  assert.equal(
+    runner.result.current.assetRecovery?.orchestration.preparationTurnId,
+    preparationTurnId,
+  );
+  await act(async () => runner.result.current.generateMissingAsset('world_setting'));
+  assert.deepEqual(modelIds, ['Model-B']);
 });
 
 test('chapter adoption command stays on the ans-local run while preserving the guarded adoption chain', async () => {
@@ -1073,4 +1385,161 @@ test('summary application continues through the normal writer only after an expl
     ),
     true,
   );
+});
+
+test('sending a selected old candidate retains exact identity in the user turn and runtime', async () => {
+  const selected = artifact('chapter_text', 'old-a', { sourceChapterId: CHAPTER.id });
+  selected.content = JSON.stringify({
+    data: { novelId: 'novel-1', chapterId: CHAPTER.id, text: '旧候选A的完整正文。' },
+  });
+  const hash = await computeContentSha256(selected.content);
+  const source = {
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: CHAPTER.id,
+    cardId: selected.cardId,
+    artifactId: selected.artifactId!,
+    artifactHash: hash,
+    artifactType: 'chapter_text',
+    title: selected.title,
+  };
+  liveBundle.artifacts = [
+    selected,
+    artifact('chapter_text', 'new-b', { sourceChapterId: CHAPTER.id }),
+  ];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  const originalStart = taskSessionAdapter.startTurn;
+  let receivedSource: unknown;
+  taskSessionAdapter.startTurn = async (input, onEvent) => {
+    receivedSource = input.revisionSource;
+    return originalStart(input, onEvent);
+  };
+  const runner = renderRunner();
+  await act(async () => {
+    runner.result.current.setDraft('请修改所选章节正文候选，节奏放慢。');
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', source);
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(runner.result.current.composerError, '');
+  assert.deepEqual(receivedSource, source);
+  assert.deepEqual(liveBundle.turns.find((turn) => turn.role === 'user')?.revisionSource, source);
+  assert.equal(runner.result.current.revisionSource, null);
+  assert.equal(runner.result.current.draft, '');
+});
+test('setting revision with a chapter reference sends its source without preparing missing chapter assets', async () => {
+  const selected = artifact('setting_candidates', 'old-settings');
+  selected.content = JSON.stringify({
+    data: { settings: [{ name: '创作准备模板', content: '旧模板' }] },
+  });
+  const hash = await computeContentSha256(selected.content);
+  const source = {
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    cardId: selected.cardId,
+    artifactId: selected.artifactId!,
+    artifactHash: hash,
+    artifactType: 'setting_candidates',
+    title: selected.title,
+  };
+  liveBundle.artifacts = [selected];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  let assetChecks = 0;
+  chapterAssetReadinessService.inspect = async () => {
+    assetChecks++;
+    return { ready: false, missingAssets: ['story_plan'], chapterId: undefined };
+  };
+  const originalStart = taskSessionAdapter.startTurn;
+  let receivedSource: unknown;
+  taskSessionAdapter.startTurn = async (input, onEvent) => {
+    receivedSource = input.revisionSource;
+    return originalStart(input, onEvent);
+  };
+  const runner = renderRunner([]);
+  await act(async () => {
+    runner.result.current.setDraft(
+      '请仅修订所选设定候选，生成设定修正候选。第2章感谢信只提出疑点，暂不生成人物大纲正文。',
+    );
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', source);
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(runner.result.current.composerError, '');
+  assert.equal(assetChecks, 0);
+  assert.deepEqual(receivedSource, source);
+  assert.deepEqual(liveBundle.turns.find((turn) => turn.role === 'user')?.revisionSource, source);
+  assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
+  assert.equal(runner.result.current.draft, '');
+  assert.equal(runner.result.current.revisionSource, null);
+});
+
+test('outline revision uses the bound novel scope despite selected chapter, bare edits and prose negation', async () => {
+  const selected = artifact('outline', 'old-outline');
+  selected.content = JSON.stringify({ data: { title: '全书规划', chapters: ['旧大纲'] } });
+  const hash = await computeContentSha256(selected.content);
+  const source = {
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    cardId: selected.cardId,
+    artifactId: selected.artifactId!,
+    artifactHash: hash,
+    artifactType: 'outline',
+    title: selected.title,
+  };
+  liveBundle.artifacts = [selected, artifact('outline', 'new-outline')];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  let assetChecks = 0;
+  chapterAssetReadinessService.inspect = async () => {
+    assetChecks++;
+    return { ready: false, missingAssets: ['story_plan'], chapterId: CHAPTER.id };
+  };
+  const originalStart = taskSessionAdapter.startTurn;
+  let request: { chapterId?: string; goal: string; revisionSource?: unknown } | undefined;
+  taskSessionAdapter.startTurn = async (input, onEvent) => {
+    request = input;
+    return originalStart(input, onEvent);
+  };
+  const runner = renderRunner();
+  const goal =
+    '请修订所选全书规划候选。第2章写深秋，写深秋的落叶，其他章节时间线保持一致。不生成正文。';
+  await act(async () => {
+    runner.result.current.setDraft(goal);
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', source);
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.equal(runner.result.current.composerError, '');
+  assert.equal(assetChecks, 0);
+  assert.equal(request?.chapterId, undefined);
+  assert.equal(request?.goal, goal);
+  assert.deepEqual(request?.revisionSource, source);
+  assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
+  assert.equal(runner.result.current.draft, '');
+});
+
+test('failed source revalidation preserves the draft and never appends a turn or calls runtime', async () => {
+  const selected = artifact('chapter_text', 'old-a', { sourceChapterId: CHAPTER.id });
+  selected.content = JSON.stringify({
+    data: { novelId: 'novel-1', chapterId: CHAPTER.id, text: '旧候选A' },
+  });
+  const hash = await computeContentSha256(selected.content);
+  liveBundle.artifacts = [selected];
+  liveBundle.decisions = [{ ...decision(selected, 'request_revision'), artifactHash: hash }];
+  const runner = renderRunner();
+  await act(async () => {
+    runner.result.current.setDraft('修改所选章节正文候选');
+    useWorkbenchDraftStore.getState().bindRevisionSource('conversation-1', {
+      conversationId: 'conversation-1',
+      novelId: 'novel-1',
+      chapterId: CHAPTER.id,
+      cardId: selected.cardId,
+      artifactId: selected.artifactId!,
+      artifactHash: '0'.repeat(64),
+      artifactType: 'chapter_text',
+      title: '失效A',
+    });
+  });
+  await act(async () => runner.result.current.sendMessage());
+  assert.match(runner.result.current.composerError, /修订来源已失效/);
+  assert.equal(liveBundle.turns.length, 0);
+  assert.equal(providerGoals.length, 0);
+  assert.equal(runner.result.current.draft, '修改所选章节正文候选');
+  assert.equal(runner.result.current.revisionSource?.artifactId, selected.artifactId);
 });

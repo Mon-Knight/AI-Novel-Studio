@@ -69,6 +69,9 @@ const qualityModule = (await vite.ssrLoadModule(
 const taskModule = (await vite.ssrLoadModule(
   '/src/services/ai/aiTaskService.ts',
 )) as typeof import('./aiTaskService');
+const providerModule = (await vite.ssrLoadModule(
+  '/src/services/ai/providerAdapter.ts',
+)) as typeof import('./providerAdapter');
 
 const request: AiGenerateRequest = {
   taskType: 'quality_check',
@@ -142,6 +145,101 @@ after(async () => {
     mockModule.releaseMockAiForE2e();
   }
   await vite.close();
+});
+
+function gatewayProbeSettings() {
+  return {
+    runtimeMode: 'mock' as const,
+    provider: 'mock' as const,
+    baseUrl: '',
+    apiKey: '',
+    modelName: '',
+    mockMode: true,
+  };
+}
+
+function gatewayProbeConfig() {
+  return {
+    enabled: false,
+    providerId: 'gateway-fixture',
+    baseUrl: 'https://gateway.invalid/v1/chat/completions',
+    apiKey: 'fixture-gateway-key',
+    modelName: 'gateway-model',
+    timeoutSeconds: 1,
+    temperature: 1.8,
+    maxTokens: 4000,
+  };
+}
+
+test('Gateway probe uses bounded final response budget and frozen gateway identity', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const controller = new AbortController();
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    assert.equal(String(url), gatewayProbeConfig().baseUrl);
+    assert.equal(
+      (init?.headers as Record<string, string>).Authorization,
+      'Bearer fixture-gateway-key',
+    );
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  await providerModule.testGatewayConnection(gatewayProbeSettings(), gatewayProbeConfig(), {
+    signal: controller.signal,
+    requestId: 'gateway-probe-fixture',
+  });
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].model, 'gateway-model');
+  assert.equal(bodies[0].max_tokens, 128);
+  assert.equal(bodies[0].temperature, 0);
+  assert.match(JSON.stringify(bodies[0].messages), /OK/);
+});
+
+test('Gateway probe rejects truncated or unexpected responses without echoing provider content', async () => {
+  for (const [content, finishReason] of [
+    ['OK', 'length'],
+    ['private-provider-output', 'stop'],
+  ]) {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content }, finish_reason: finishReason }],
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+    await assert.rejects(
+      providerModule.testGatewayConnection(gatewayProbeSettings(), gatewayProbeConfig()),
+      (error: unknown) =>
+        error instanceof Error && !error.message.includes('private-provider-output'),
+    );
+  }
+});
+
+test('Gateway probe normalizes an empty provider ID and preserves pre-dispatch cancellation', async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  const config = { ...gatewayProbeConfig(), providerId: ' ' };
+  await providerModule.testGatewayConnection(gatewayProbeSettings(), config);
+  assert.equal(calls, 1);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    providerModule.testGatewayConnection(gatewayProbeSettings(), config, {
+      signal: controller.signal,
+    }),
+    (error: unknown) => cancellationModule.isAiRequestCancelled(error),
+  );
+  assert.equal(calls, 1);
 });
 
 test('Tauri cancellation waits for cancel_ai_request confirmation', async () => {

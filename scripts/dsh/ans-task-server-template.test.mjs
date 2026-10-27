@@ -23,7 +23,7 @@ async function loadPlugin() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 }
 
-function createHarness(plugin, { persisted = false, attestationMode = 'valid' } = {}) {
+function createHarness(plugin, { persisted = false, attestationMode = 'valid', toolNames } = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const listeners = new Map();
@@ -134,7 +134,7 @@ function createHarness(plugin, { persisted = false, attestationMode = 'valid' } 
       return makeHandle(options);
     },
   };
-  const novelTools = [
+  const novelTools = toolNames ?? [
     'mcp__novel__novel_read_context_1e2b3adf9a19',
     'mcp__novel__chapter_read_outline_68634582eb55',
     'mcp__novel__get_character_states',
@@ -376,6 +376,43 @@ const initializeParams = {
   sourceCommit: SOURCE_COMMIT,
   protocol: PROTOCOL,
 };
+
+test(
+  'creative dialogue health accepts its complete narrow tool registry without model probes',
+  { skip: carrierUnavailable },
+  async () => {
+    const plugin = await loadPlugin();
+    const tools = [
+      'mcp__novel__novel_read_context_1e2b3adf9a19',
+      'mcp__novel__chapter_read_outline_68634582eb55',
+      'mcp__novel__get_character_states',
+      'mcp__novel__search_memory',
+      'mcp__novel__creative_plan_action_abcdef123456',
+    ];
+    const complete = createHarness(plugin, { toolNames: tools });
+    await complete.rpc('initialize', initializeParams);
+    const health = await complete.rpc('runtime/health', undefined, { omitParams: true });
+    assert.equal(health.ready, true);
+    assert.equal(health.composition.find((entry) => entry.id === 'mcp-novel').status, 'loaded');
+    assert.equal(complete.stats().llmStreamCount, 0, 'initialization does not test the model');
+    for (const missing of tools) {
+      const partial = createHarness(plugin, {
+        toolNames: tools.filter((tool) => tool !== missing),
+      });
+      await partial.rpc('initialize', initializeParams);
+      const state = await partial.rpc('runtime/health', undefined, { omitParams: true });
+      assert.equal(state.ready, false, `missing creative tool must fail closed: ${missing}`);
+    }
+    const malformed = createHarness(plugin, {
+      toolNames: [...tools.slice(0, -1), 'mcp__novel__creative_plan_action_not_a_hash'],
+    });
+    await malformed.rpc('initialize', initializeParams);
+    assert.equal(
+      (await malformed.rpc('runtime/health', undefined, { omitParams: true })).ready,
+      false,
+    );
+  },
+);
 
 for (const persisted of [false, true]) {
   test(

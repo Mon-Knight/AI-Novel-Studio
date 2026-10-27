@@ -2,16 +2,23 @@ import { useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
 import type { AiSettings, SavedApiModelProfile } from '../../types/ai';
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { applySavedApiModel } from '../../services/ai/savedApiModels';
 import {
-  applySavedApiModel,
-  createSavedApiModelProfile,
-  upsertSavedApiModel,
-} from '../../services/ai/savedApiModels';
+  assignSourceId,
+  primaryProfileInSource,
+  profilesFromSourceCatalog,
+  replaceSavedApiSourceModels,
+  savedApiSourceKey,
+  type SavedApiSourceGroup,
+} from '../../services/ai/savedApiSources';
+import { listCloudModels, mergeFetchedModelIds } from '../../services/ai/cloudModelCatalog';
 import { AiApiModelEditor } from './AiApiModelEditor';
 import {
-  draftFromSavedProfile,
+  draftFromSourceProfiles,
   emptyApiModelDraft,
+  syncPrimaryModelFields,
   type ApiModelEditorDraft,
+  type ApiSourceModelDraft,
 } from './apiModelEditorDraft';
 import { AiSavedApiModelCards } from './AiSavedApiModelCards';
 
@@ -53,6 +60,14 @@ function sessionKeyFor(
   });
 }
 
+function sessionKeyForSource(models: SavedApiModelProfile[]): string {
+  for (const model of models) {
+    const key = sessionKeyFor(model);
+    if (key) return key;
+  }
+  return models[0] ? sessionKeyFor(models[0]) : '';
+}
+
 function AiProviderSettingsCard({
   settings,
   message,
@@ -63,15 +78,26 @@ function AiProviderSettingsCard({
   handleSave,
 }: AiProviderSettingsCardProps) {
   const profiles = settings.savedApiModels ?? [];
-  const [editorOpen, setEditorOpen] = useState(profiles.length === 0);
+  const [expandedSourceKey, setExpandedSourceKey] = useState<string | 'new' | null>(
+    profiles.length === 0 ? 'new' : null,
+  );
   const [draft, setDraft] = useState<ApiModelEditorDraft>(emptyApiModelDraft);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchMessage, setFetchMessage] = useState('');
   const editorSettingsSnapshotRef = useRef<CloudEditorSettingsSnapshot | null>(null);
+  const catalogBaselineRef = useRef<ApiSourceModelDraft[]>([]);
+  const editingSourceKey =
+    expandedSourceKey === 'new' ? undefined : (expandedSourceKey ?? undefined);
 
   const patchDraft = (next: Partial<ApiModelEditorDraft>) => {
     if (!editorSettingsSnapshotRef.current) {
       editorSettingsSnapshotRef.current = snapshotCloudEditorSettings(settings);
     }
-    const merged = { ...draft, ...next };
+    const merged = syncPrimaryModelFields({
+      ...draft,
+      ...next,
+      models: next.models ?? draft.models,
+    });
     const identityChanged =
       merged.provider !== draft.provider ||
       merged.baseUrl !== draft.baseUrl ||
@@ -94,28 +120,62 @@ function AiProviderSettingsCard({
   };
 
   const openAdd = () => {
+    const next = emptyApiModelDraft();
     editorSettingsSnapshotRef.current = null;
-    setDraft(emptyApiModelDraft());
-    setEditorOpen(true);
+    catalogBaselineRef.current = next.models.map((model) => ({ ...model }));
+    setFetchMessage('');
+    setDraft(next);
+    setExpandedSourceKey('new');
   };
 
-  const openEdit = (profile: SavedApiModelProfile) => {
+  const openSource = (group: SavedApiSourceGroup) => {
+    const next = draftFromSourceProfiles(
+      group.models,
+      sessionKeyForSource(group.models),
+      settings.activeSavedApiModelId,
+    );
     editorSettingsSnapshotRef.current = null;
-    setDraft(draftFromSavedProfile(profile, sessionKeyFor(profile)));
-    setEditorOpen(true);
+    catalogBaselineRef.current = next.models.map((model) => ({ ...model }));
+    setFetchMessage('');
+    setDraft(next);
+    setExpandedSourceKey(group.key);
   };
 
-  const useProfile = (profile: SavedApiModelProfile) => {
-    const next = applySavedApiModel(settings, profile, sessionKeyFor(profile));
+  const closeEditor = () => {
     editorSettingsSnapshotRef.current = null;
+    setFetchMessage('');
+    setExpandedSourceKey(null);
+  };
+
+  const discardEditor = () => {
+    const snapshot = editorSettingsSnapshotRef.current;
+    closeEditor();
+    if (!snapshot) return;
+    update({
+      ...snapshot,
+      provider:
+        settings.runtimeMode === 'mock'
+          ? 'mock'
+          : snapshot.provider === 'mock'
+            ? 'openai_compatible'
+            : snapshot.provider,
+    });
+  };
+
+  const toggleSource = (group: SavedApiSourceGroup) => {
+    if (expandedSourceKey === group.key) discardEditor();
+    else openSource(group);
+  };
+
+  const selectSource = (group: SavedApiSourceGroup) => {
+    const primary = primaryProfileInSource(group, settings.activeSavedApiModelId);
+    const next = applySavedApiModel(settings, primary, sessionKeyFor(primary));
     update(next);
-    setEditorOpen(false);
     handleSave(next);
   };
 
-  const deleteProfile = (profile: SavedApiModelProfile) => {
-    editorSettingsSnapshotRef.current = null;
-    const remaining = profiles.filter((item) => item.id !== profile.id);
+  const deleteSource = (group: SavedApiSourceGroup) => {
+    const remaining = profiles.filter((profile) => savedApiSourceKey(profile) !== group.key);
     const nextActive =
       remaining.find((item) => item.id === settings.activeSavedApiModelId) ?? remaining[0];
     if (!nextActive) {
@@ -130,7 +190,7 @@ function AiProviderSettingsCard({
       };
       update(cleared);
       setDraft(emptyApiModelDraft());
-      setEditorOpen(true);
+      setExpandedSourceKey('new');
       handleSave(cleared);
       return;
     }
@@ -139,30 +199,73 @@ function AiProviderSettingsCard({
       savedApiModels: remaining,
     };
     update(next);
+    if (expandedSourceKey === group.key) closeEditor();
     handleSave(next);
   };
 
   const saveDraftAsCard = () => {
-    if (!draft.baseUrl.trim() || !draft.modelName.trim()) return;
-    const profile = createSavedApiModelProfile({
-      id: draft.id,
-      label: draft.label.trim() || draft.modelName.trim(),
+    const named = draft.models.filter((model) => model.modelName.trim());
+    if (!draft.baseUrl.trim() || named.length === 0) return;
+    const sourceId = assignSourceId(draft.sourceId);
+    const previous = editingSourceKey
+      ? profiles.filter((profile) => savedApiSourceKey(profile) === editingSourceKey)
+      : [];
+    const nextProfiles = profilesFromSourceCatalog({
+      sourceId,
+      sourceLabel: draft.label,
       provider: draft.provider,
       baseUrl: draft.baseUrl,
-      modelName: draft.modelName,
       temperature: draft.temperature,
-      maxTokens: draft.maxTokens,
       timeoutSeconds: draft.timeoutSeconds,
+      previous,
+      models: named,
     });
+    if (nextProfiles.length === 0) return;
+    const selected =
+      nextProfiles[Math.min(draft.selectedModelIndex, nextProfiles.length - 1)] ?? nextProfiles[0]!;
+    for (const profile of nextProfiles) {
+      aiSettingsService.rememberProviderApiKey(profile, draft.apiKey);
+    }
     const nextSettings = applySavedApiModel(
-      { ...settings, savedApiModels: upsertSavedApiModel(profiles, profile) },
-      profile,
+      {
+        ...settings,
+        savedApiModels: replaceSavedApiSourceModels(profiles, editingSourceKey, nextProfiles),
+      },
+      selected,
       draft.apiKey,
     );
     editorSettingsSnapshotRef.current = null;
+    setFetchMessage('');
     update(nextSettings);
-    setEditorOpen(false);
+    setExpandedSourceKey(null);
     handleSave(nextSettings);
+  };
+
+  const fetchUpstreamModels = async () => {
+    setFetchingModels(true);
+    setFetchMessage('');
+    try {
+      const ids = await listCloudModels({ baseUrl: draft.baseUrl, apiKey: draft.apiKey });
+      const mergedIds = mergeFetchedModelIds(draft.models, ids);
+      patchDraft({
+        models: mergedIds.map((modelName) => {
+          const existing = draft.models.find((model) => model.modelName.trim() === modelName);
+          return (
+            existing ?? {
+              modelName,
+              label: '',
+              maxTokens: draft.maxTokens,
+              contextTokens: 0,
+            }
+          );
+        }),
+      });
+      setFetchMessage(ids.length ? `已获取 ${ids.length} 个上游模型。` : '上游未返回可用模型。');
+    } catch (error) {
+      setFetchMessage(error instanceof Error ? error.message : '获取上游模型失败。');
+    } finally {
+      setFetchingModels(false);
+    }
   };
 
   return (
@@ -173,56 +276,34 @@ function AiProviderSettingsCard({
       </div>
       <p className="settings-help-text">
         负责世界观、规划、Scene、质检等导演任务；未启用可用的专用本地正文模型时，也负责临时
-        Scene/Beat 与整章候选正文生成。已保存模型只显示名称与状态，不展示具体参数。
+        Scene/Beat 与整章候选正文生成。已保存模型按来源分组，不展示密钥。
       </p>
 
       <div
-        style={{
-          padding: '10px 14px',
-          borderRadius: 8,
-          marginBottom: 12,
-          background:
-            settings.runtimeMode === 'mock' ? 'var(--color-success-bg)' : 'var(--color-info-bg)',
-          border:
-            settings.runtimeMode === 'mock'
-              ? '1px solid var(--color-success-border)'
-              : '1px solid var(--color-info-border)',
-        }}
+        className={`settings-mode-banner ${settings.runtimeMode === 'mock' ? 'is-mock' : 'is-live'}`}
       >
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
+        <div className="settings-mode-banner-title">
           当前模式：{settings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API 模式'}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+        <div className="settings-mode-banner-text">
           {settings.runtimeMode === 'mock'
             ? '所有 AI 功能使用本地模拟，不请求外部 API。'
-            : '当前使用已保存卡片中的模型；参数仅在添加或编辑时填写。'}
+            : '当前使用已保存来源卡片中的模型；点击卡片选中该来源，点击「编辑」打开或收起设置。'}
         </div>
       </div>
 
-      <label
-        htmlFor="mockMode"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 14px',
-          marginBottom: 12,
-          background: 'var(--color-bg-hover)',
-          borderRadius: 8,
-          border: '1px solid var(--color-border)',
-        }}
-      >
+      <label htmlFor="mockMode" className="settings-toggle-row">
         <input
           type="checkbox"
           id="mockMode"
+          className="settings-checkbox"
           checked={settings.runtimeMode === 'mock'}
           onChange={(event) => update({ runtimeMode: event.target.checked ? 'mock' : 'api' })}
-          style={{ width: 18, height: 18, cursor: 'pointer' }}
         />
         <span>
           <strong>Mock 模式</strong>
-          <span className="settings-help-text" style={{ display: 'block', marginTop: 2 }}>
-            开启后使用本地模拟；关闭后使用当前选中的 API 模型卡片。
+          <span className="settings-help-text settings-help-block">
+            开启后使用本地模拟；关闭后使用当前选中的 API 来源卡片。
           </span>
         </span>
       </label>
@@ -230,58 +311,50 @@ function AiProviderSettingsCard({
       <AiSavedApiModelCards
         profiles={profiles}
         activeId={settings.activeSavedApiModelId}
+        expandedKey={expandedSourceKey}
         keyBound={(profile) => Boolean(sessionKeyFor(profile))}
-        onUse={useProfile}
-        onEdit={openEdit}
-        onDelete={deleteProfile}
+        onSelect={selectSource}
+        onEdit={toggleSource}
+        onDelete={deleteSource}
         onAdd={openAdd}
+        editor={
+          expandedSourceKey ? (
+            <AiApiModelEditor
+              draft={draft}
+              onChange={patchDraft}
+              onSave={saveDraftAsCard}
+              onFetchModels={() => {
+                void fetchUpstreamModels();
+              }}
+              onRestoreDefaults={() =>
+                patchDraft({
+                  models: catalogBaselineRef.current.map((model) => ({ ...model })),
+                })
+              }
+              fetchingModels={fetchingModels}
+              fetchMessage={fetchMessage}
+              onCancel={discardEditor}
+            />
+          ) : null
+        }
       />
-
-      {editorOpen && (
-        <AiApiModelEditor
-          draft={draft}
-          onChange={patchDraft}
-          onSave={saveDraftAsCard}
-          onCancel={() => {
-            const snapshot = editorSettingsSnapshotRef.current;
-            editorSettingsSnapshotRef.current = null;
-            setEditorOpen(false);
-            if (snapshot) {
-              update({
-                ...snapshot,
-                provider:
-                  settings.runtimeMode === 'mock'
-                    ? 'mock'
-                    : snapshot.provider === 'mock'
-                      ? 'openai_compatible'
-                      : snapshot.provider,
-              });
-            }
-          }}
-        />
-      )}
 
       {message && (
         <div
-          className="settings-help-text"
+          className={`settings-result ${
+            message.includes('失败') || message.includes('错误')
+              ? 'is-error'
+              : message.includes('成功') || message.includes('已保存')
+                ? 'is-ok'
+                : 'is-info'
+          }`}
           role="status"
-          style={{
-            marginTop: 8,
-            padding: '6px 12px',
-            borderRadius: 6,
-            background:
-              message.includes('失败') || message.includes('错误')
-                ? 'var(--color-error-bg)'
-                : message.includes('成功') || message.includes('已保存')
-                  ? 'var(--color-success-bg)'
-                  : 'var(--color-primary-light)',
-          }}
         >
           {message}
         </div>
       )}
 
-      <div className="settings-card-actions" style={{ marginTop: 12 }}>
+      <div className="settings-card-actions resource-gap-top">
         <button
           type="button"
           className="btn btn-secondary btn-sm"

@@ -112,6 +112,10 @@ vi.mock('../../components/workspace/EditorArea', () => ({
   )),
 }));
 
+vi.mock('../../components/workspace/ChapterSummaryWorkflowNotice', () => ({
+  ChapterSummaryWorkflowNotice: () => <div data-testid="mock-chapter-summary-notice" />,
+}));
+
 vi.mock('../../components/workspace/StatusBar', () => ({
   default: () => <div data-testid="mock-status" />,
 }));
@@ -489,6 +493,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  localStorage.removeItem('ai_novel_studio_e2e_legacy_workspace_panels');
 });
 
 describe('WritingWorkspaceView', () => {
@@ -556,8 +561,9 @@ describe('WritingWorkspaceView', () => {
     expect(mocks.childCalls).toHaveBeenCalled();
   });
 
-  it('keeps the draft rollback surface behind the E2E build flag', () => {
+  it('exposes draft rollback only for an explicitly enabled E2E compatibility fixture', () => {
     vi.stubEnv('VITE_AI_NOVEL_STUDIO_E2E', '1');
+    localStorage.setItem('ai_novel_studio_e2e_legacy_workspace_panels', 'enabled');
     const props = baseProps();
 
     render(

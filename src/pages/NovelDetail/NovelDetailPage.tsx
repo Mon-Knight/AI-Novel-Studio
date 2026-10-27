@@ -1,6 +1,6 @@
 import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, BookOpenText, Compass, FileText, PenLine, Sparkles } from 'lucide-react';
+import { ArrowLeft, BookOpenText, PenLine } from 'lucide-react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
@@ -17,7 +17,12 @@ import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard
 import ExportCard from '../../components/novel-card/ExportCard';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { Novel } from '../../types/novel';
-import type { WorldSetting, RuleSystem, RuleCategory } from '../../types/setting';
+import type { WorldSetting, RuleSystem } from '../../types/setting';
+import type { SettingEditInput } from '../../components/novel-detail/SettingEditForm';
+import WorldRuleChangeConfirmation, {
+  type WorldRuleApplicationGuard,
+} from '../../components/novel-detail/WorldRuleChangeConfirmation';
+import type { WorldRuleChangeImpact } from '../../types/worldRules';
 import type { Protagonist } from '../../types/protagonist';
 import { formatNumber } from '../../utils/format';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -37,8 +42,8 @@ const CORE_ASSET_FOCUS_TARGETS: Record<string, string> = {
   world_setting: 'novel-detail-world-setting',
   rule_system: 'novel-detail-rule-system',
   protagonist: 'novel-detail-protagonist',
+  character: 'novel-detail-characters',
   story_plan: 'novel-detail-outline',
-  chapter_outline: 'novel-detail-outline',
 };
 
 function NovelDetailPage() {
@@ -53,6 +58,19 @@ function NovelDetailPage() {
   const [protagonist, setProtagonist] = useState<Protagonist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingDeletion, setPendingDeletion] = useState<{
+    source: RuleSystem;
+    preview: WorldRuleChangeImpact;
+  } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleting = useRef(false);
+  const currentNovelId = useRef(novelId);
+  currentNovelId.current = novelId;
+  useEffect(() => {
+    setPendingDeletion(null);
+    setDeleteError('');
+  }, [novelId]);
 
   const loadData = useCallback(async () => {
     if (!novelId) return;
@@ -95,6 +113,11 @@ function NovelDetailPage() {
   const focus = searchParams.get('focus') ?? '';
   const focusTargetId = CORE_ASSET_FOCUS_TARGETS[focus];
   const returnToWorkbench = searchParams.get('returnTo') === 'workbench';
+
+  useEffect(() => {
+    if (novelId && focus === 'chapter_outline')
+      navigate(`/novels/${novelId}/outline?type=chapter`, { replace: true });
+  }, [focus, navigate, novelId]);
 
   useEffect(() => {
     if (loading || !novel || !focusTargetId) return;
@@ -140,16 +163,12 @@ function NovelDetailPage() {
     }
   };
 
-  const handleSaveWorldSetting = async (
-    id: string | null,
-    data: { title: string; content: string },
-  ) => {
+  const handleSaveWorldSetting = async (id: string | null, data: SettingEditInput) => {
     if (!novelId) return;
     try {
       const result = await settingRepository.saveWorldSetting(id, {
+        ...data,
         novelId,
-        title: data.title,
-        content: data.content,
       });
       setWorldSettings((prev) => {
         const idx = prev.findIndex((s) => s.id === result.id);
@@ -170,23 +189,12 @@ function NovelDetailPage() {
     }
   };
 
-  const handleSaveRuleSystem = async (
-    id: string | null,
-    data: {
-      title: string;
-      category?: string;
-      content: string;
-      forbiddenRules?: string;
-    },
-  ) => {
+  const handleSaveRuleSystem = async (id: string | null, data: SettingEditInput) => {
     if (!novelId) return;
     try {
       const result = await settingRepository.saveRuleSystem(id, {
+        ...data,
         novelId,
-        title: data.title,
-        category: data.category as RuleCategory | undefined,
-        content: data.content,
-        forbiddenRules: data.forbiddenRules,
       });
       setRuleSystems((prev) => {
         const idx = prev.findIndex((s) => s.id === result.id);
@@ -208,18 +216,52 @@ function NovelDetailPage() {
   };
 
   const handleDeleteRuleSystem = async (id: string) => {
-    if (!novelId) return;
+    if (!novelId || deleting.current) return;
+    const source = ruleSystems.find((rule) => rule.id === id && rule.novelId === novelId);
+    if (!source) throw new Error('规则目标已失效，请刷新后重试');
+    deleting.current = true;
+    setDeleteBusy(true);
+    setDeleteError('');
     try {
-      await settingRepository.deleteRuleSystem(id);
-      const reloaded = await settingRepository.getRuleSystems(novelId);
-      setRuleSystems(reloaded);
-    } catch (e: unknown) {
-      appLogger.captureError('NOVEL_DETAIL_DELETE_RULE_FAILED', e, { novelId });
-      await showError({
-        title: '删除法则体系失败',
-        message: describeUnknownError(e, '删除法则体系失败'),
+      const preview = await settingRepository.previewWorldRuleChange(novelId, [
+        {
+          operation: 'delete',
+          targetType: 'rule_system',
+          targetId: source.id,
+          title: source.title,
+          content: source.content,
+          category: source.category,
+          forbiddenRules: source.forbiddenRules,
+          structuredJson: source.structuredJson,
+          isActive: source.isActive,
+        },
+      ]);
+      if (currentNovelId.current === novelId) setPendingDeletion({ source, preview });
+    } finally {
+      deleting.current = false;
+      setDeleteBusy(false);
+    }
+  };
+  const confirmDeleteRuleSystem = async (guard: WorldRuleApplicationGuard) => {
+    if (!pendingDeletion || deleting.current || pendingDeletion.source.novelId !== novelId) return;
+    deleting.current = true;
+    setDeleteBusy(true);
+    setDeleteError('');
+    const source = pendingDeletion.source;
+    try {
+      await settingRepository.deleteRuleSystem(source.id, {
+        novelId: source.novelId,
+        expectedUpdatedAt: source.updatedAt,
+        ...guard,
       });
-      throw e;
+      if (currentNovelId.current !== source.novelId) return;
+      setRuleSystems((rules) => rules.filter((rule) => rule.id !== source.id));
+      setPendingDeletion(null);
+    } catch (e) {
+      setDeleteError(describeUnknownError(e, '删除失败；请解决依赖或重新预览，记录已保留'));
+    } finally {
+      deleting.current = false;
+      setDeleteBusy(false);
     }
   };
 
@@ -258,13 +300,28 @@ function NovelDetailPage() {
 
   return (
     <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
+      <WorldRuleChangeConfirmation
+        title="永久删除规则（建议优先停用）"
+        previewedContent={
+          pendingDeletion
+            ? `删除《${pendingDeletion.source.title}》及其规则内容，保留已采用正文；若存在依赖须先解决。\n${pendingDeletion.source.content}`
+            : undefined
+        }
+        preview={pendingDeletion?.preview}
+        busy={deleteBusy}
+        error={deleteError}
+        onConfirm={confirmDeleteRuleSystem}
+        onCancel={() => {
+          if (!deleteBusy) setPendingDeletion(null);
+        }}
+      />
       {/* 紧凑详情头部 */}
       <div className="detail-header">
         <div className="detail-cover">
           <BookOpenText aria-hidden="true" size={32} strokeWidth={1.8} />
         </div>
         <div className="detail-info">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="detail-title-row">
             <div className="detail-title">{novel.title}</div>
             <span className="detail-genre">{novel.genre || '未分类'}</span>
           </div>
@@ -311,6 +368,7 @@ function NovelDetailPage() {
                 返回作品列表
               </button>
             )}
+            {/* 设定推演 / 自主创作 / 参考资料等入口由项目标签条统一提供。 */}
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -319,43 +377,21 @@ function NovelDetailPage() {
               <PenLine aria-hidden="true" size={13} strokeWidth={1.8} />
               进入写作工作台
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}
-            >
-              <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
-              设定推演
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/autonomous-planning`)}
-            >
-              <Compass aria-hidden="true" size={13} strokeWidth={1.8} />
-              自主规划
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/novels/${novel.id}/references`)}
-            >
-              <FileText aria-hidden="true" size={13} strokeWidth={1.8} />
-              参考资料
-            </button>
           </div>
         </div>
       </div>
 
-      {/* 紧凑双列无缝网格（无冗余留白） */}
+      {/* 固定尺寸模块；长内容和编辑区在模块内滚动。 */}
       <div className="detail-cards-grid">
-        <PanelErrorBoundary panelTitle="作品基本信息">
-          <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
-        </PanelErrorBoundary>
+        <div className="detail-module">
+          <PanelErrorBoundary panelTitle="作品基本信息">
+            <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
+          </PanelErrorBoundary>
+        </div>
 
         <div
           id="novel-detail-protagonist"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-protagonist' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-protagonist' ? ' is-focused' : ''}`}
           data-testid="novel-detail-protagonist"
           tabIndex={-1}
         >
@@ -390,14 +426,16 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-world-setting"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
           data-testid="novel-detail-world-setting"
           tabIndex={-1}
         >
           <PanelErrorBoundary panelTitle="世界观设定">
             <WorldSettingCard
               novelId={novel.id}
+              key={novel.id}
               settings={worldSettings}
+              onPreview={(change) => settingRepository.previewWorldRuleChange(novel.id, [change])}
               onSave={handleSaveWorldSetting}
             />
           </PanelErrorBoundary>
@@ -405,14 +443,16 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-rule-system"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
           data-testid="novel-detail-rule-system"
           tabIndex={-1}
         >
           <PanelErrorBoundary panelTitle="法则体系">
             <RuleSystemCard
               novelId={novel.id}
+              key={novel.id}
               ruleSystems={ruleSystems}
+              onPreview={(change) => settingRepository.previewWorldRuleChange(novel.id, [change])}
               onSave={handleSaveRuleSystem}
               onDelete={handleDeleteRuleSystem}
             />
@@ -421,9 +461,8 @@ function NovelDetailPage() {
 
         <div
           id="novel-detail-outline"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-outline' ? ' is-focused' : ''}`}
+          className={`detail-module detail-module--wide detail-focus-target${focusTargetId === 'novel-detail-outline' ? ' is-focused' : ''}`}
           data-testid="novel-detail-outline"
-          style={{ gridColumn: '1 / -1' }}
           tabIndex={-1}
         >
           <PanelErrorBoundary panelTitle="大纲管理">
@@ -431,15 +470,24 @@ function NovelDetailPage() {
           </PanelErrorBoundary>
         </div>
 
-        <PanelErrorBoundary panelTitle="角色库">
-          <CharacterLibraryCard novelId={novel.id} />
-        </PanelErrorBoundary>
+        <div
+          id="novel-detail-characters"
+          className={`detail-module detail-focus-target${focusTargetId === 'novel-detail-characters' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-characters"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="角色库">
+            <CharacterLibraryCard novelId={novel.id} />
+          </PanelErrorBoundary>
+        </div>
 
-        <PanelErrorBoundary panelTitle="上下文概览">
-          <ContextOverviewCard novelId={novel.id} />
-        </PanelErrorBoundary>
+        <div className="detail-module">
+          <PanelErrorBoundary panelTitle="上下文概览">
+            <ContextOverviewCard novelId={novel.id} />
+          </PanelErrorBoundary>
+        </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div className="detail-module detail-module--wide">
           <PanelErrorBoundary panelTitle="导出">
             <ExportCard novelId={novel.id} novelTitle={novel.title} />
           </PanelErrorBoundary>

@@ -3,6 +3,12 @@ import { chapterEngineeringService } from '../engineering/chapterEngineeringServ
 import { buildFreshChapterGenerationContext } from '../prompt/contextBuilder';
 import { loadGenerationAssetContext, type GenerationAssetContext } from './generationAssetContext';
 import { hashTextContent } from '../../utils/contentHash';
+import {
+  assertGenerationRuleCoverage,
+  assertRequiredCoreAssets,
+  stableStringifyGenerationContext as stableStringify,
+} from './generationContextCoverage';
+
 import { safeJsonParse, toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import type { ChapterEngineeringState } from '../../types/chapterEngineering';
 import type {
@@ -14,6 +20,12 @@ import type {
   GenerationContextSourceType,
 } from '../../types/generationContext';
 
+export {
+  assertGenerationRuleCoverage,
+  assertRequiredCoreAssets,
+  type GenerationCoreAssetsMissingError,
+} from './generationContextCoverage';
+
 const STORAGE_KEY_PREFIX = 'ai_novel_studio_chapter_generation_snapshots_';
 const SECTION_LIMIT = 8000;
 
@@ -21,36 +33,6 @@ export interface GenerationContextCompilerDependencies {
   buildBaseContext?: typeof buildFreshChapterGenerationContext;
   getEngineeringBundle?: typeof chapterEngineeringService.getBundle;
   loadAssetContext?: (novelId: string, relevanceText: string) => Promise<GenerationAssetContext>;
-}
-
-export interface GenerationCoreAssetsMissingError extends Error {
-  code: 'GENERATION_CORE_ASSETS_MISSING';
-  missingAssets: Array<'chapter_outline' | 'world_setting' | 'rule_system' | 'protagonist'>;
-}
-
-export function assertRequiredCoreAssets(context: CompiledGenerationContext['baseContext']): void {
-  const missingAssets: GenerationCoreAssetsMissingError['missingAssets'] = [];
-  if (!context.chapterOutline?.trim()) missingAssets.push('chapter_outline');
-  if (!context.worldBackground?.trim() && !context.chapterSettings?.trim()) {
-    missingAssets.push('world_setting');
-  }
-  if (!context.ruleSystems?.trim()) missingAssets.push('rule_system');
-  if (!context.protagonist?.trim() && !context.protagonistNames?.trim()) {
-    missingAssets.push('protagonist');
-  }
-  if (missingAssets.length === 0) return;
-  const labels = missingAssets.map((asset) => {
-    if (asset === 'chapter_outline') return '章节大纲';
-    if (asset === 'world_setting') return '世界设定';
-    if (asset === 'rule_system') return '规则体系';
-    return '主角设定';
-  });
-  const error = new Error(
-    `生成所需核心资产不完整：${labels.join('、')}。请先在作品资产中补齐后再生成。`,
-  ) as GenerationCoreAssetsMissingError;
-  error.code = 'GENERATION_CORE_ASSETS_MISSING';
-  error.missingAssets = missingAssets;
-  throw error;
 }
 
 export function limitContinuityText(value: string | undefined, limit = SECTION_LIMIT): string {
@@ -147,17 +129,6 @@ function source(
   return { type, title, status, summary, sourceId };
 }
 
-function stableStringify(value: unknown): string {
-  if (value === undefined) return 'null';
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(',')}}`;
-}
-
 function formatEngineeringState(state: ChapterEngineeringState): string {
   const card = state.chapterCard;
   const constraints = state.generationConstraints;
@@ -168,6 +139,11 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
     `开场状态：${card.openingState}`,
     `结束状态：${card.endingState}`,
     `核心冲突：${card.coreConflict}`,
+    card.viewpointCharacter ? `视角角色：${card.viewpointCharacter}` : '',
+    card.knownInformation.length ? `视角已知信息：\n${formatList(card.knownInformation)}` : '',
+    card.unknownInformation.length
+      ? `视角未知信息（不得无来源获知）：\n${formatList(card.unknownInformation)}`
+      : '',
     card.appearingCharacters.length ? `出场角色：${card.appearingCharacters.join('、')}` : '',
     card.mustHappenEvents.length ? `必须发生：\n${formatList(card.mustHappenEvents)}` : '',
     card.forbiddenEvents.length ? `禁止发生：\n${formatList(card.forbiddenEvents)}` : '',
@@ -419,19 +395,25 @@ export async function compileGenerationContextSnapshot(
   deps: GenerationContextCompilerDependencies = {},
 ): Promise<ChapterGenerationSnapshot> {
   const buildBaseContext = deps.buildBaseContext ?? buildFreshChapterGenerationContext;
-  const getEngineeringBundle =
-    deps.getEngineeringBundle ??
-    ((chapterId: string) => chapterEngineeringService.getBundle(chapterId));
+  const getEngineeringBundle = deps.getEngineeringBundle ?? chapterEngineeringService.getBundle;
   const loadAssetContext = deps.loadAssetContext ?? loadGenerationAssetContext;
   const baseContext = await buildBaseContext({
     novelId: input.novelId,
     volumeId: input.volumeId,
     chapterId: input.chapterId,
     userInstruction: input.userInstruction,
+    targetWordCount: input.targetWordCount,
     styleId: input.styleProfileId,
     outputId: input.outputProfileId,
   });
   if (input.requireCoreAssets) assertRequiredCoreAssets(baseContext);
+  if (
+    input.requireCoreAssets ||
+    baseContext.ruleSystemCoverage ||
+    baseContext.worldSettingCoverage
+  ) {
+    await assertGenerationRuleCoverage(input.novelId, baseContext);
+  }
   const engineeringBundle = await getEngineeringBundle(input.chapterId);
   const activeEngineeringState = input.engineeringStateId
     ? engineeringBundle.states.find((item) => item.id === input.engineeringStateId)
@@ -469,9 +451,14 @@ export async function compileGenerationContextSnapshot(
     ['novel', 'world_setting', 'rule_system'],
     { preserveFullContent: true },
   );
-  addSection(sections, 'world_settings', '补充世界设定', baseContext.chapterSettings, [
-    'world_setting',
-  ]);
+  addSection(
+    sections,
+    'world_settings',
+    '补充世界设定',
+    baseContext.chapterSettings,
+    ['world_setting'],
+    { preserveFullContent: true },
+  );
   addSection(
     sections,
     'world_state_timeline',
@@ -522,6 +509,7 @@ export async function compileGenerationContextSnapshot(
       '章节工程状态',
       formatEngineeringState(activeEngineeringState),
       ['chapter_engineering'],
+      { preserveFullContent: true },
     );
   }
   addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, [
@@ -770,6 +758,8 @@ export async function compileGenerationContextSnapshot(
     volumeId: input.volumeId,
     baseContext,
     activeEngineeringState,
+    ruleSystemCoverage: baseContext.ruleSystemCoverage,
+    worldSettingCoverage: baseContext.worldSettingCoverage,
     sections,
     sources,
     warnings,
@@ -781,6 +771,8 @@ export async function compileGenerationContextSnapshot(
     stableStringify({
       sections,
       sources,
+      ruleSystemCoverage: baseContext.ruleSystemCoverage,
+      worldSettingCoverage: baseContext.worldSettingCoverage,
       engineeringStateId: activeEngineeringState?.id,
       styleProfileId: input.styleProfileId,
       outputProfileId: input.outputProfileId,

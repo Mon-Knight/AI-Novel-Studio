@@ -178,7 +178,7 @@ export function OutlinePanelView({
           )}
         </button>
         {!volume && chapter && (
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
             当前章节未归属分卷，无法生成卷大纲
           </div>
         )}
@@ -208,7 +208,7 @@ export function OutlinePanelView({
           )}
         </button>
         {!chapter && (
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
             请先在左侧目录树中选择一个章节
           </div>
         )}
@@ -315,13 +315,13 @@ export function OutlinePanelView({
                 }}
               />
               {candidate.goal && (
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                   目标：{candidate.goal}
                   {chapter && (
                     <button
                       className="btn btn-text btn-sm"
                       onClick={() => onApplyGeneratedGoal(candidate.goal)}
-                      style={{ fontSize: 11, marginLeft: 6 }}
+                      style={{ fontSize: 12, marginLeft: 6 }}
                     >
                       应用到本章目标
                     </button>
@@ -329,7 +329,7 @@ export function OutlinePanelView({
                 </div>
               )}
               {candidate.targetWordCount && (
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                   建议字数：{formatNumber(candidate.targetWordCount)} 字
                 </div>
               )}
@@ -440,7 +440,7 @@ function VolumeOutlineResult({ outline }: { outline: VolumeOutlineCandidate }) {
       {outline.rawText && (
         <div
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-muted)',
             marginTop: 8,
             whiteSpace: 'pre-wrap',

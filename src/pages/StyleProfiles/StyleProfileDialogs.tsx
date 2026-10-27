@@ -99,48 +99,39 @@ export function StyleProfileDialogs({
             </>
           }
         >
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
+          <div className="resource-form">
             <div>
               <label className="panel-field-label">名称 *</label>
               <input
                 aria-label="风格方案名称"
-                className="form-input"
+                className="form-input resource-fill"
                 value={styleForm.name}
                 onChange={(e) => setStyleForm({ ...styleForm, name: e.target.value })}
-                style={{ width: '100%' }}
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="resource-form-grid">
               <div>
                 <label className="panel-field-label">叙事人称</label>
                 <input
                   aria-label="叙事人称"
-                  className="form-input"
+                  className="form-input resource-fill"
                   value={styleForm.narrativePerspective}
                   onChange={(e) =>
                     setStyleForm({ ...styleForm, narrativePerspective: e.target.value })
                   }
-                  style={{ width: '100%' }}
                 />
               </div>
               <div>
                 <label className="panel-field-label">文风语气</label>
                 <input
                   aria-label="文风语气"
-                  className="form-input"
+                  className="form-input resource-fill"
                   value={styleForm.tone}
                   onChange={(e) => setStyleForm({ ...styleForm, tone: e.target.value })}
-                  style={{ width: '100%' }}
                 />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="resource-form-grid">
               <div>
                 <label className="panel-field-label">节奏</label>
                 <select
@@ -159,18 +150,18 @@ export function StyleProfileDialogs({
                 <label className="panel-field-label">句式特点</label>
                 <input
                   aria-label="句式特点"
-                  className="form-input"
+                  className="form-input resource-fill"
                   value={styleForm.sentenceStyle}
                   onChange={(e) => setStyleForm({ ...styleForm, sentenceStyle: e.target.value })}
-                  style={{ width: '100%' }}
                 />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="resource-form-grid">
               <div>
                 <label className="panel-field-label">对话比例 {styleForm.dialogueRatio}%</label>
                 <input
                   type="range"
+                  className="resource-fill"
                   aria-label="对话比例"
                   min={0}
                   max={100}
@@ -178,13 +169,13 @@ export function StyleProfileDialogs({
                   onChange={(e) =>
                     setStyleForm({ ...styleForm, dialogueRatio: Number(e.target.value) })
                   }
-                  style={{ width: '100%' }}
                 />
               </div>
               <div>
                 <label className="panel-field-label">描写比例 {styleForm.descriptionRatio}%</label>
                 <input
                   type="range"
+                  className="resource-fill"
                   aria-label="描写比例"
                   min={0}
                   max={100}
@@ -192,7 +183,6 @@ export function StyleProfileDialogs({
                   onChange={(e) =>
                     setStyleForm({ ...styleForm, descriptionRatio: Number(e.target.value) })
                   }
-                  style={{ width: '100%' }}
                 />
               </div>
             </div>
@@ -200,10 +190,9 @@ export function StyleProfileDialogs({
               <label className="panel-field-label">风格总结</label>
               <textarea
                 aria-label="风格总结"
-                className="form-textarea"
+                className="form-textarea resource-textarea--short"
                 value={styleForm.styleSummary}
                 onChange={(e) => setStyleForm({ ...styleForm, styleSummary: e.target.value })}
-                style={{ width: '100%', height: 60, resize: 'vertical' }}
               />
             </div>
             {saveError && <p role="alert">{saveError}</p>}
@@ -238,15 +227,14 @@ export function StyleProfileDialogs({
             </>
           }
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="resource-form">
             <div>
               <label className="panel-field-label">名称 *</label>
               <input
                 aria-label="输出方案名称"
-                className="form-input"
+                className="form-input resource-fill"
                 value={outputForm.name}
                 onChange={(e) => setOutputForm({ ...outputForm, name: e.target.value })}
-                style={{ width: '100%' }}
               />
             </div>
             <div>
@@ -254,12 +242,11 @@ export function StyleProfileDialogs({
               <input
                 type="number"
                 aria-label="目标字数"
-                className="form-input"
+                className="form-input resource-fill"
                 value={outputForm.targetWordCount}
                 onChange={(e) =>
                   setOutputForm({ ...outputForm, targetWordCount: Number(e.target.value) })
                 }
-                style={{ width: '100%' }}
               />
             </div>
             <div>
@@ -319,47 +306,27 @@ export function StyleProfileDialogs({
             </>
           }
         >
-          <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+          <div className="text-sm text-muted resource-gap-bottom">
             粘贴参考文本，AI 分析抽象风格。不会复制原文。
           </div>
           <textarea
             aria-label="参考文本"
-            className="form-textarea"
+            className="form-textarea resource-textarea--tall"
             value={analyzeText}
             onChange={(e) => setAnalyzeText(e.target.value)}
             placeholder="在此粘贴参考文本..."
-            style={{ width: '100%', height: 180, resize: 'vertical', fontSize: 14 }}
           />
-          {analyzeError && (
-            <div style={{ fontSize: 13, color: 'var(--color-error)', marginTop: 8 }}>
-              {analyzeError}
-            </div>
-          )}
-          {analyzeStatus && (
-            <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 8 }}>
-              {analyzeStatus}
-            </div>
-          )}
+          {analyzeError && <div className="resource-hint resource-hint--error">{analyzeError}</div>}
+          {analyzeStatus && <div className="resource-hint">{analyzeStatus}</div>}
           {analyzeResult && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: 12,
-                background: 'var(--color-success-bg)',
-                borderRadius: 8,
-                fontSize: 13,
-              }}
-            >
+            <div className="resource-notice resource-notice--success resource-notice--after">
               <strong>分析完成：</strong>
               {analyzeResult.styleSummary}
-              <br />
-              <button
-                className="btn btn-primary btn-sm"
-                style={{ marginTop: 8 }}
-                onClick={applyAnalyzeResult}
-              >
-                应用并创建风格方案
-              </button>
+              <div className="resource-actions">
+                <button className="btn btn-primary btn-sm" onClick={applyAnalyzeResult}>
+                  应用并创建风格方案
+                </button>
+              </div>
             </div>
           )}
         </ModalFrame>

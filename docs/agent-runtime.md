@@ -3,12 +3,12 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`deterministic-writer`；真实云端：`NOT_VERIFIED`。
+读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.6.2
-> 当前状态：v3.6.2 Canonical 只读链路收口补丁；v3.6.0 保持为 Agent Runtime 功能基线
+> 版本：v3.7.0
+> 当前状态：v3.7.0 Writing SubAgent 开放（桌面 + 真实 API 模型的 chapter_write 默认经 DSH candidate-only 回合）；v3.6.0 保持为 Agent Runtime 功能基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---
@@ -190,7 +190,7 @@ v1.0.46 将 Agent Tool Layer 从占位接口升级为只读真实数据接口。
 
 ### 12.1 任务隔离
 
-每个任务对话拥有独立的消息、回合、模型快照、活动运行、取消状态和产物。用户切换任务不会取消后台运行；一个任务失败或取消不会改写另一个任务的状态。
+每个任务对话拥有独立的消息、回合、下一回合模型选择、活动运行、取消状态和产物。同一任务可在回合间切换模型；每个 Run 的模型快照仍不可变，重试沿用原 Run 模型，切换不重写历史或借用其他身份的凭据。用户切换任务不会取消后台运行；一个任务失败或取消不会改写另一个任务的状态。
 
 ### 12.2 对话事件投影
 
@@ -245,7 +245,7 @@ Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少�
 
 完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、决定/审阅授权、章节原子采用、领域候选工具、上下文压缩候选和写作工作台审阅收敛已落地；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已经移除。通用结构化 Safe Apply 仍按失败关闭边界处理。
 
-在 Canonical 1A-A/B/C/D 基础之上，本文开头事实块列出的四项只读工具已解除 blocker，健康度 `working`，exposure `stable`。工作台 `read` intent、宿主 start 契约、Worker 环境和工具授权使用 Canonical-only allowlist，Gateway 据此列出对应无版本号工具名；候选与审计回合保留 legacy 工具。仓内 loopback 已有证据，live 云端仍未验收。`mainAgentRuntimeService` 是未接入发送路径的启发式脚手架，不是 R4 VERIFIED。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
+在 Canonical 1A-A/B/C/D 基础之上，本文开头事实块列出的四项只读工具已解除 blocker，健康度 `working`，exposure `stable`。工作台 `read` intent、宿主 start 契约、Worker 环境和工具授权使用 Canonical-only allowlist，Gateway 据此列出对应无版本号工具名；候选与审计回合保留 legacy 工具。仓内 loopback 已有证据，live 云端仍未验收。`mainAgentRuntimeService` 是未接入发送路径的启发式脚手架，不是 R4 VERIFIED。Writing SubAgent 已对桌面端 + 真实 API 模型的 `chapter_write` 默认开放；mock / 本地模型与浏览器模式继续走确定性 Writer。
 
 ---
 

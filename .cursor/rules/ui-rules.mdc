@@ -1,7 +1,7 @@
 ---
 description: AI Novel Studio UI 规则 - 对话式创作工作台、章节审阅编辑器与桌面视觉标准
 globs: src/**/*.tsx,src/**/*.css
-alwaysApply: true
+alwaysApply: false
 ---
 
 # UI Rules

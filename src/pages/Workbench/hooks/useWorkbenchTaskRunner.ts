@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Chapter } from '../../../types/chapter';
+import type { ArtifactRevisionSource } from '../../../types/artifactRevision';
+import { useWorkbenchDraftStore } from '../../../store/workbenchDraftStore';
+import {
+  captureArtifactRevisionSource,
+  verifyArtifactRevisionSource,
+} from '../../../services/conversation/artifactRevisionSourceService';
 import type {
   TaskConversation,
   TaskConversationBundle,
@@ -9,43 +15,55 @@ import { taskConversationService } from '../../../services/conversation/taskConv
 import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
 import {
   captureLocalConversationalSnapshot,
+  isModelLedCreativeTurn,
   taskSessionAdapter,
 } from '../../../services/dsh/taskSessionAdapter';
 import { hasUsableDshTaskCredentialAsync } from '../../../services/dsh/taskRuntimeService';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import {
-  classifyTaskIntent,
   findTaskTargetConflict,
   isConversationalGoal,
+  type CreativePlannedAction,
+  type CreativeWorkflowAction,
 } from '../../../services/conversation/taskGoalRouting';
+import { conflictPeersFromRunningTargets } from '../../../services/conversation/conversationWindow';
+import { useRunningTaskTargets } from '../../../features/workbench/useRunningTaskTargets';
+import {
+  sendCreativeDialogueTurn,
+  executeCreativeDialogueTurn,
+  projectCreativeRuntimeRun,
+} from '../../../features/workbench/creativeDialogueTurn';
+import { prepareLegacyWorkbenchSend } from '../../../features/workbench/prepareLegacyWorkbenchSend';
 import {
   buildCoreAssetGenerationGoal,
   chapterAssetRecoveryStore,
   resolveCoreAssetGenerationChapterId,
-  type ChapterAssetRecovery,
   type ChapterCoreAsset,
 } from '../../../services/conversation/chapterAssetReadiness';
 import {
-  ensurePersistedChapterGoalTurn,
   PreflightAssetPreparationTurnError,
+  resolveChapterAssetPreparationModel,
   resolvePreflightAssetPreparationRetryTurn,
 } from '../../../services/conversation/chapterAssetRecoveryPersistence';
 import {
   classifyWorkbenchFailure,
   formatWorkbenchFailure,
 } from '../../../services/conversation/workbenchFailure';
+import { resolveWorkbenchChapterTarget } from '../../../services/conversation/workbenchChapterTarget';
 import type { CurrentPluginProjection } from '../../../services/conversation/currentPluginService';
-import { WorkbenchModelUnavailableError } from '../../../services/conversation/workbenchModelAvailability';
+import {
+  createChapterTargetResolvers,
+  STORY_PLAN_COMPLETE_MESSAGE,
+  CORE_ASSET_ARTIFACT_TYPE,
+  isCurrentAssetPreparation,
+  formatModelDirectoryFailure,
+  type AssetDecisionSettlementInput,
+} from '../workbenchTaskRunnerSupport';
 import { validateWorkbenchModelForSend } from './validateWorkbenchModelForSend';
-import {
-  resolveWorkbenchChapterTarget,
-  shouldResolveWorkbenchChapterTarget,
-} from '../../../services/conversation/workbenchChapterTarget';
-import {
-  decodeWorkbenchTurnContent,
-  encodeWorkbenchTurnContent,
-} from '../../../services/conversation/workbenchTurnOrigin';
-import { resolveRetryRunChapterTarget } from '../../../services/conversation/workbenchRetryTarget';
+import { WorkbenchModelUnavailableError } from '../../../services/conversation/workbenchModelAvailability';
+import { encodeWorkbenchTurnContent } from '../../../services/conversation/workbenchTurnOrigin';
+import { prepareWorkbenchRetry } from '../../../features/workbench/prepareWorkbenchRetry';
+import type { RetryExecutionContract } from '../../../services/dsh/taskRetryRecovery';
 import {
   resolveChapterSummaryOrchestration,
   type ChapterSummaryOrchestrationState,
@@ -58,52 +76,11 @@ import { executeWorkbenchConversationDecision } from '../../../services/conversa
 import { buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
 import { executeWorkbenchTurnAfterContextReady } from '../workbenchExecutionGate';
 import { useConversationScopedState } from './useConversationScopedState';
+import { useWorkbenchRevisionDraft } from './useWorkbenchRevisionDraft';
 import { useWorkbenchChapterAssetRecovery } from './useWorkbenchChapterAssetRecovery';
 import { createTrailingRefreshQueue } from './trailingRefreshQueue';
 import { setsEqual, useWorkbenchRuntimeHeartbeat } from './useWorkbenchRuntimeHeartbeat';
 import type { WorkbenchPluginRefreshSource } from './useWorkbenchPlugins';
-
-const STORY_PLAN_COMPLETE_MESSAGE =
-  '全书规划中的最后一章已经采用，当前故事已写到规划终点。请先扩展全书规划，再继续生成新章节。';
-
-const CORE_ASSET_ARTIFACT_TYPE: Record<ChapterCoreAsset, string> = {
-  story_plan: 'outline',
-  world_setting: 'setting_candidates',
-  rule_system: 'setting_candidates',
-  protagonist: 'character_candidates',
-  chapter_outline: 'outline',
-};
-
-interface AssetDecisionSettlementInput {
-  conversationId: string;
-  artifactId: string;
-  decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply';
-  applied: boolean;
-  selectedChapterId?: string;
-}
-
-function isCurrentAssetPreparation(
-  current: ChapterAssetRecovery | null,
-  started: ChapterAssetRecovery,
-  asset: ChapterCoreAsset,
-): current is ChapterAssetRecovery {
-  return Boolean(
-    current &&
-    current.conversationId === started.conversationId &&
-    current.novelId === started.novelId &&
-    current.chapterId === started.chapterId &&
-    current.sourceTurnId === started.sourceTurnId &&
-    current.originalGoal === started.originalGoal &&
-    current.missingAssets[0] === asset &&
-    current.orchestration.asset === asset &&
-    current.orchestration.phase === 'generating',
-  );
-}
-
-function formatModelDirectoryFailure(error: unknown): string {
-  if (error instanceof WorkbenchModelUnavailableError) return error.message;
-  return 'Runtime 模型目录刷新失败，草稿已保留，请稍后重试。';
-}
 
 export function useWorkbenchTaskRunner(input: {
   selectedNovelId: string;
@@ -114,6 +91,7 @@ export function useWorkbenchTaskRunner(input: {
   conversations: TaskConversation[];
   setConversations: React.Dispatch<React.SetStateAction<TaskConversation[]>>;
   selectedModel: TaskModelSnapshot;
+  modelSelectionPendingRef?: React.MutableRefObject<() => boolean>;
   selectedNovelRef: React.MutableRefObject<string>;
   selectChapter: (chapterId: string) => Promise<void>;
   reloadChapters: (
@@ -137,6 +115,7 @@ export function useWorkbenchTaskRunner(input: {
     conversations,
     setConversations,
     selectedModel,
+    modelSelectionPendingRef,
     selectedNovelRef,
     selectChapter,
     reloadChapters,
@@ -145,11 +124,8 @@ export function useWorkbenchTaskRunner(input: {
     refreshPlugins,
   } = input;
 
-  const {
-    value: draft,
-    setValue: setDraft,
-    updateValue: updateDraft,
-  } = useConversationScopedState(selectedConversationId, '');
+  const { draft, revisionSource, updateDraft, setDraft, clearRevisionSource } =
+    useWorkbenchRevisionDraft(selectedConversationId);
   const {
     value: composerError,
     setValue: setComposerError,
@@ -198,6 +174,7 @@ export function useWorkbenchTaskRunner(input: {
       loadConversations,
     });
 
+  const runningTargets = useRunningTaskTargets(selectedNovelId, runningConversationIds);
   const targetConflict = useMemo(
     () =>
       findTaskTargetConflict({
@@ -205,23 +182,9 @@ export function useWorkbenchTaskRunner(input: {
         chapterId,
         conversationId: selectedConversationId,
         goal: draft,
-        peers: conversations
-          .filter((conversation) => runningConversationIds.has(conversation.conversationId))
-          .map((conversation) => ({
-            conversationId: conversation.conversationId,
-            novelId: conversation.novelId,
-            title: conversation.title,
-            chapterId,
-          })),
+        peers: conflictPeersFromRunningTargets(runningTargets),
       }),
-    [
-      chapterId,
-      conversations,
-      draft,
-      runningConversationIds,
-      selectedConversationId,
-      selectedNovelId,
-    ],
+    [chapterId, draft, runningTargets, selectedConversationId, selectedNovelId],
   );
 
   const runningCountRef = useRef(runningConversationIds.size);
@@ -249,12 +212,16 @@ export function useWorkbenchTaskRunner(input: {
     }
   }, []);
 
-  const reservePendingConversation = useCallback((conversationId: string): boolean => {
-    if (pendingSendConversationIdsRef.current.has(conversationId)) return false;
-    pendingSendConversationIdsRef.current.add(conversationId);
-    setPendingReleaseEpoch((current) => current + 1);
-    return true;
-  }, []);
+  const reservePendingConversation = useCallback(
+    (conversationId: string): boolean => {
+      if (modelSelectionPendingRef?.current()) return false;
+      if (pendingSendConversationIdsRef.current.has(conversationId)) return false;
+      pendingSendConversationIdsRef.current.add(conversationId);
+      setPendingReleaseEpoch((current) => current + 1);
+      return true;
+    },
+    [modelSelectionPendingRef],
+  );
 
   const validateModelForSend = useCallback(
     (
@@ -273,6 +240,14 @@ export function useWorkbenchTaskRunner(input: {
       turnId: string;
       goal: string;
       modelSnapshot: TaskModelSnapshot;
+      revisionSource?: ArtifactRevisionSource;
+      explicitChapterRetry?: boolean;
+      retrySourceRunId?: string;
+      retryExecution?: RetryExecutionContract;
+      workflowAction?: CreativeWorkflowAction;
+      preparePlannedAction?: (
+        action: CreativePlannedAction,
+      ) => Promise<{ chapterId?: string } | null>;
       throwOnFailure?: boolean;
     }) => {
       if (runningConversationIds.has(request.conversationId)) {
@@ -280,6 +255,7 @@ export function useWorkbenchTaskRunner(input: {
       }
       const errorOperation = beginComposerErrorOperation(request.conversationId);
       commitComposerErrorOperation(errorOperation, '');
+      await verifyArtifactRevisionSource(request);
       const refreshFromLocalRuntimeEvents = !taskConversationService.isPersistent();
       setRunningConversationIds((current) => {
         const next = new Set(current).add(request.conversationId);
@@ -301,6 +277,7 @@ export function useWorkbenchTaskRunner(input: {
         await refreshRuntimeBundle(request.conversationId);
         const completedRun = await executeWorkbenchTurnAfterContextReady({
           goal: request.goal,
+          requireContext: isModelLedCreativeTurn(request),
           execute: () =>
             taskSessionAdapter.startTurn(
               {
@@ -310,20 +287,18 @@ export function useWorkbenchTaskRunner(input: {
                 turnId: request.turnId,
                 goal: request.goal,
                 modelSnapshot: request.modelSnapshot,
+                retrySourceRunId: request.retrySourceRunId,
+                retryExecution: request.retryExecution,
+                workflowAction: request.workflowAction,
+                ...(request.revisionSource ? { revisionSource: request.revisionSource } : {}),
+                ...(request.explicitChapterRetry ? { explicitChapterRetry: true } : {}),
+                ...(request.preparePlannedAction
+                  ? { preparePlannedAction: request.preparePlannedAction }
+                  : {}),
               },
               ({ run }) => {
                 setConversations((current) =>
-                  current.map((conversation) =>
-                    conversation.conversationId === request.conversationId
-                      ? {
-                          ...conversation,
-                          status: ['queued', 'running', 'cancel_requested'].includes(run.status)
-                            ? 'running'
-                            : conversation.status,
-                          updatedAt: run.updatedAt,
-                        }
-                      : conversation,
-                  ),
+                  projectCreativeRuntimeRun(current, request.conversationId, run),
                 );
                 if (refreshFromLocalRuntimeEvents) {
                   void refreshRuntimeBundle(request.conversationId);
@@ -331,8 +306,7 @@ export function useWorkbenchTaskRunner(input: {
               },
             ),
         });
-        // The persisted run is already terminal here. Release the runtime overlay
-        // before hydrating an increasingly large artifact bundle.
+        // Release the terminal run before hydrating its artifact bundle.
         releaseRuntimeProjection();
         if (selectedNovelRef.current === request.novelId) {
           await loadConversations(request.novelId);
@@ -349,12 +323,10 @@ export function useWorkbenchTaskRunner(input: {
         if (request.throwOnFailure) throw error;
         return undefined;
       } finally {
-        void refreshPlugins(
-          request.conversationId,
-          false,
-          request.modelSnapshot,
-          'background',
-        ).catch(() => undefined);
+        const { goal, conversationId, modelSnapshot: model } = request;
+        if (!isConversationalGoal(goal)) {
+          void refreshPlugins(conversationId, false, model, 'background').catch(() => undefined);
+        }
         releaseRuntimeProjection();
       }
     },
@@ -371,48 +343,9 @@ export function useWorkbenchTaskRunner(input: {
     ],
   );
 
-  const ensureChapterAssetsReady = useCallback(
-    async (request: {
-      conversationId: string;
-      novelId: string;
-      chapterId?: string;
-      turnId?: string;
-      goal: string;
-      modelSnapshot: TaskModelSnapshot;
-    }): Promise<boolean> => {
-      if (classifyTaskIntent(request.goal) !== 'chapter_write') return true;
-      return ensureAssetReadiness({
-        conversationId: request.conversationId,
-        novelId: request.novelId,
-        chapterId: request.chapterId,
-        goal: request.goal,
-        sourceTurnId: request.turnId,
-        modelSnapshot: request.modelSnapshot,
-      });
-    },
-    [ensureAssetReadiness],
-  );
-
-  const resolveChapterTarget = useCallback(
-    async (request: { novelId: string; chapterId?: string; goal: string }) => {
-      if (!shouldResolveWorkbenchChapterTarget(request.goal)) {
-        return { complete: false, chapterId: request.chapterId };
-      }
-      const resolution = await resolveWorkbenchChapterTarget({
-        novelId: request.novelId,
-        currentChapterId: request.chapterId,
-        goal: request.goal,
-      });
-      if (resolution.status === 'complete') {
-        return { complete: true, chapterId: request.chapterId };
-      }
-      const targetChapterId = resolution.chapterId ?? request.chapterId;
-      if (targetChapterId && targetChapterId !== request.chapterId) {
-        await selectChapter(targetChapterId);
-      }
-      return { complete: false, chapterId: targetChapterId };
-    },
-    [selectChapter],
+  const { ensureChapterAssetsReady, resolveChapterTarget } = useMemo(
+    () => createChapterTargetResolvers({ ensureAssetReadiness, selectChapter }),
+    [ensureAssetReadiness, selectChapter],
   );
 
   const executeConversationDecision = useCallback(
@@ -485,6 +418,16 @@ export function useWorkbenchTaskRunner(input: {
         });
 
         if (request.intent.kind === 'request_revision') {
+          useWorkbenchDraftStore
+            .getState()
+            .bindRevisionSource(
+              request.conversationId,
+              captureArtifactRevisionSource(
+                result.artifact,
+                request.novelId,
+                result.decision.artifactHash,
+              ),
+            );
           const revisionDraft = `${buildArtifactRevisionDraft(result.artifact.artifactType)}${
             request.intent.revisionInstruction ?? ''
           }`;
@@ -573,21 +516,33 @@ export function useWorkbenchTaskRunner(input: {
     async (messageOverride?: string) => {
       const message = (messageOverride ?? draft).trim();
       const conversationId = selectedConversationId;
-      if (
-        !message ||
-        !selectedNovelId ||
-        !conversationId ||
-        selectedConversationArchived ||
-        runningConversationIds.has(conversationId)
-      ) {
+      if (!message || !selectedNovelId || !conversationId || selectedConversationArchived) {
         return;
+      }
+      // The in-memory running set can lag behind a completed desktop run. Confirm against the
+      // authoritative runtime fact before refusing the send, otherwise the composer looks
+      // ready while the send is silently dropped.
+      if (runningConversationIds.has(conversationId)) {
+        try {
+          if (await taskSessionAdapter.isRunningAuthoritatively(conversationId)) return;
+        } catch {
+          return;
+        }
       }
       if (!reservePendingConversation(conversationId)) return;
       const errorOperation = beginComposerErrorOperation(conversationId);
       commitComposerErrorOperation(errorOperation, '');
       try {
+        const submittedSource = messageOverride === undefined ? revisionSource : null;
         const decisionIntent = parseWorkbenchDecisionIntent(message);
         if (decisionIntent) {
+          if (submittedSource) {
+            commitComposerErrorOperation(
+              errorOperation,
+              '修订来源不是采用授权；请先移除修订来源，再明确执行候选决定。',
+            );
+            return;
+          }
           try {
             await executeConversationDecision({
               intent: decisionIntent,
@@ -603,63 +558,74 @@ export function useWorkbenchTaskRunner(input: {
           return;
         }
 
-        let targetChapterId = chapterId;
-        let persistedChapterTurnId: string | undefined;
-        let sendModel = selectedModel;
-        try {
-          const target = await resolveChapterTarget({
-            novelId: selectedNovelId,
-            chapterId,
-            goal: message,
-          });
-          if (target.complete) {
-            commitComposerErrorOperation(errorOperation, STORY_PLAN_COMPLETE_MESSAGE);
-            return;
-          }
-          targetChapterId = target.chapterId;
-          if (!isConversationalGoal(message)) {
-            try {
-              sendModel = await validateModelForSend(selectedModel);
-            } catch (error) {
-              commitComposerErrorOperation(errorOperation, formatModelDirectoryFailure(error));
-              return;
-            }
-          }
-          if (classifyTaskIntent(message) === 'chapter_write') {
-            const sourceTurn = await ensurePersistedChapterGoalTurn({
-              conversationId,
-              goal: message,
+        const turnRequest = {
+          conversationId,
+          novelId: selectedNovelId,
+          chapterId,
+          goal: message,
+          modelSnapshot: selectedModel,
+        };
+        if (!submittedSource && isModelLedCreativeTurn(turnRequest)) {
+          try {
+            await sendCreativeDialogueTurn(turnRequest, {
+              clearSubmittedDraft: () => {
+                if (messageOverride === undefined)
+                  useWorkbenchDraftStore
+                    .getState()
+                    .clearSubmittedDraft(conversationId, draft, submittedSource);
+              },
+              execute: executePersistedTurn,
+              isSelected: () =>
+                selectedNovelRef.current === selectedNovelId &&
+                selectedConversationIdRef.current === conversationId,
+              selectChapter,
+              ensureAssetReadiness,
+              completeMessage: STORY_PLAN_COMPLETE_MESSAGE,
             });
-            persistedChapterTurnId = sourceTurn.turnId;
+          } catch (error) {
+            commitComposerErrorOperation(errorOperation, formatWorkbenchFailure(error));
           }
-          const ready = await ensureChapterAssetsReady({
-            conversationId,
-            novelId: selectedNovelId,
-            chapterId: targetChapterId,
-            turnId: persistedChapterTurnId,
-            goal: message,
-            modelSnapshot: sendModel,
-          });
-          if (!ready) return;
-        } catch (error) {
-          commitComposerErrorOperation(errorOperation, formatWorkbenchFailure(error));
           return;
         }
 
         try {
+          const prepared = await prepareLegacyWorkbenchSend(
+            {
+              ...turnRequest,
+              revisionSource: submittedSource ?? undefined,
+            },
+            {
+              resolveChapterTarget,
+              validateModel: validateModelForSend,
+              ensureAssetsReady: ensureChapterAssetsReady,
+              onComplete: () =>
+                commitComposerErrorOperation(errorOperation, STORY_PLAN_COMPLETE_MESSAGE),
+              onModelFailure: (error) =>
+                commitComposerErrorOperation(errorOperation, formatModelDirectoryFailure(error)),
+            },
+          );
+          if (!prepared) return;
           const turnId =
-            persistedChapterTurnId ??
-            (await taskConversationService.appendTurn(conversationId, 'user', message)).turnId;
+            prepared.turnId ??
+            (
+              await taskConversationService.appendTurn(
+                conversationId,
+                'user',
+                message,
+                submittedSource ?? undefined,
+              )
+            ).turnId;
           if (messageOverride === undefined) {
-            updateDraft(conversationId, (current) => (current === draft ? '' : current));
+            useWorkbenchDraftStore
+              .getState()
+              .clearSubmittedDraft(conversationId, draft, submittedSource);
           }
           await executePersistedTurn({
-            conversationId,
-            novelId: selectedNovelId,
-            chapterId: targetChapterId,
+            ...turnRequest,
+            chapterId: prepared.chapterId,
             turnId,
-            goal: message,
-            modelSnapshot: sendModel,
+            modelSnapshot: prepared.modelSnapshot,
+            ...(submittedSource ? { revisionSource: submittedSource } : {}),
           });
         } catch (error) {
           commitComposerErrorOperation(errorOperation, formatWorkbenchFailure(error));
@@ -673,16 +639,19 @@ export function useWorkbenchTaskRunner(input: {
       beginComposerErrorOperation,
       commitComposerErrorOperation,
       draft,
+      revisionSource,
       executeConversationDecision,
       executePersistedTurn,
       ensureChapterAssetsReady,
+      ensureAssetReadiness,
       resolveChapterTarget,
+      selectChapter,
+      selectedNovelRef,
       runningConversationIds,
       selectedConversationArchived,
       selectedConversationId,
       selectedModel,
       selectedNovelId,
-      updateDraft,
       validateModelForSend,
       releasePendingConversation,
       reservePendingConversation,
@@ -749,20 +718,10 @@ export function useWorkbenchTaskRunner(input: {
           throw new Error('当前任务已有运行中的执行。');
         }
 
-        const sourceRun = latestBundle.runs.find((run) => run.runId === sourceRunId);
-        if (!sourceRun || !['failed', 'cancelled'].includes(sourceRun.status)) {
-          throw new Error('只能重试失败或已取消的运行。');
-        }
-        const turnRuns = latestBundle.runs.filter((run) => run.turnId === sourceRun.turnId);
-        if (turnRuns[turnRuns.length - 1]?.runId !== sourceRun.runId) {
-          throw new Error('该回合已有更新的运行，请从最新结果继续。');
-        }
-        const sourceTurn = latestBundle.turns.find((turn) => turn.turnId === sourceRun.turnId);
-        const decodedSourceTurn = decodeWorkbenchTurnContent(sourceTurn?.content);
-        const goal = sourceTurn?.role === 'user' ? decodedSourceTurn.content.trim() : '';
-        if (!sourceTurn || !goal) {
-          throw new Error('原回合内容缺失，无法安全重试。');
-        }
+        const { sourceTurn, decodedSourceTurn, goal, retryRequest } = await prepareWorkbenchRetry(
+          latestBundle,
+          sourceRunId,
+        );
         if (decodedSourceTurn.origin === 'workbench_asset_preparation') {
           const recovery = chapterAssetRecoveryStore.get(conversationId);
           const asset = recovery?.orchestration.asset;
@@ -779,28 +738,23 @@ export function useWorkbenchTaskRunner(input: {
           assetRetry = { asset, turnId: sourceTurn.turnId };
         }
 
-        const retryTarget = await resolveRetryRunChapterTarget({
-          bundle: latestBundle,
-          sourceRun,
-          sourceGoal: goal,
-        });
-        const retryChapterId = retryTarget.chapterId;
+        const retryChapterId = retryRequest.chapterId;
         if (retryChapterId && retryChapterId !== chapterId) {
           await selectChapter(retryChapterId);
         }
 
-        let retryModel = sourceRun.modelSnapshot;
+        let retryModel = retryRequest.modelSnapshot;
         const ready = await ensureChapterAssetsReady({
           conversationId,
           novelId,
           chapterId: retryChapterId,
           turnId: sourceTurn.turnId,
-          goal,
+          goal: retryRequest.goal,
           modelSnapshot: retryModel,
         });
         if (!ready) return;
 
-        if (!isConversationalGoal(goal)) {
+        if (!isConversationalGoal(retryRequest.goal)) {
           try {
             retryModel = await validateModelForSend(retryModel);
           } catch (error) {
@@ -829,12 +783,9 @@ export function useWorkbenchTaskRunner(input: {
         }
 
         const completedRun = await executePersistedTurn({
-          conversationId,
-          novelId,
-          chapterId: retryChapterId,
-          turnId: sourceTurn.turnId,
-          goal,
+          ...retryRequest,
           modelSnapshot: retryModel,
+          ...(sourceTurn.revisionSource ? { revisionSource: sourceTurn.revisionSource } : {}),
         });
         if (assetRetry) {
           const retryTarget = assetRetry;
@@ -943,8 +894,14 @@ export function useWorkbenchTaskRunner(input: {
         releasePendingConversation(recovery.conversationId);
         return;
       }
+      let preparationTurnStarted = false;
       try {
-        let modelSnapshot = recovery.modelSnapshot ?? selectedModel;
+        let modelSnapshot = await resolveChapterAssetPreparationModel(recovery, selectedModel);
+        updateAssetOrchestration(
+          recovery.conversationId,
+          (orchestration) => orchestration,
+          modelSnapshot,
+        );
         modelSnapshot = await validateModelForSend(modelSnapshot);
         const refreshedRecovery = await refreshAssetRecovery(recovery.conversationId);
         if (!isCurrentAssetPreparation(refreshedRecovery, startedRecovery, asset)) return;
@@ -973,6 +930,7 @@ export function useWorkbenchTaskRunner(input: {
               }
             : orchestration,
         );
+        preparationTurnStarted = true;
         const completedRun = await executePersistedTurn({
           conversationId: latestRecovery.conversationId,
           novelId: latestRecovery.novelId,
@@ -1030,6 +988,12 @@ export function useWorkbenchTaskRunner(input: {
         );
       } catch (error) {
         const failure = classifyWorkbenchFailure(error);
+        // 预检失败后的资产重试被作用域/目标校验拒绝时，仍属原预检阶段；
+        // 保留原错误码，避免把“重试目标不匹配”误报成通用模型失败。
+        const preservesPreflightErrorCode =
+          retryOrchestration.errorCode === 'MODEL_TOOL_CALLING_NOT_VERIFIED' &&
+          (error instanceof PreflightAssetPreparationTurnError ||
+            (error instanceof Error && error.message.startsWith('无法重试资产准备：')));
         const message =
           error instanceof PreflightAssetPreparationTurnError
             ? error.message
@@ -1041,7 +1005,15 @@ export function useWorkbenchTaskRunner(input: {
             ? {
                 ...orchestration,
                 phase: 'failed',
-                errorCode: failure.code,
+                ...(!preparationTurnStarted
+                  ? {
+                      preparationRunId: retryOrchestration.preparationRunId,
+                      preparationTurnId: retryOrchestration.preparationTurnId,
+                    }
+                  : {}),
+                errorCode: preservesPreflightErrorCode
+                  ? (retryOrchestration.errorCode ?? failure.code)
+                  : failure.code,
                 error: message,
                 updatedAt: new Date().toISOString(),
               }
@@ -1183,7 +1155,7 @@ export function useWorkbenchTaskRunner(input: {
       ) {
         throw new Error('待恢复正文目标与当前任务不一致，请切回原任务后继续。');
       }
-      let modelSnapshot = refreshed.modelSnapshot ?? selectedModel;
+      let modelSnapshot = selectedModel;
       modelSnapshot = await validateModelForSend(modelSnapshot);
       if (refreshed.chapterId && refreshed.chapterId !== chapterId) {
         await selectChapter(refreshed.chapterId);
@@ -1501,6 +1473,7 @@ export function useWorkbenchTaskRunner(input: {
             chapters,
             summaries,
             credentialAvailable,
+            preferredChapterId: selectedChapterIdRef.current,
           });
 
           if (
@@ -1528,6 +1501,7 @@ export function useWorkbenchTaskRunner(input: {
               chapters,
               summaries,
               credentialAvailable,
+              preferredChapterId: selectedChapterIdRef.current,
               nextTarget,
             });
             if (
@@ -1604,6 +1578,7 @@ export function useWorkbenchTaskRunner(input: {
           }
           if (
             summaryOperationTurnIdsRef.current.has(state.turnId) ||
+            modelSelectionPendingRef?.current() ||
             pendingSendConversationIdsRef.current.has(conversationId) ||
             runningConversationIds.has(conversationId) ||
             freshBundle.runs.some((run) =>
@@ -1629,9 +1604,12 @@ export function useWorkbenchTaskRunner(input: {
               chapters,
               summaries: startSummaries,
               credentialAvailable: true,
+              preferredChapterId: selectedChapterIdRef.current,
             });
             if (
               startState.phase !== 'ready_to_start' ||
+              modelSelectionPendingRef?.current() ||
+              startBundle.conversation.defaultModel?.capturedAt !== fixedModel.capturedAt ||
               startState.turnId !== state.turnId ||
               startBundle.runs.some((run) =>
                 ['queued', 'running', 'cancel_requested'].includes(run.status),
@@ -1709,6 +1687,7 @@ export function useWorkbenchTaskRunner(input: {
   }, [
     beginComposerErrorOperation,
     bundle,
+    chapterId,
     chapters,
     commitComposerErrorOperation,
     executePersistedTurn,
@@ -1721,6 +1700,7 @@ export function useWorkbenchTaskRunner(input: {
     selectedConversationId,
     selectedNovelId,
     summaryStartRetryEpoch,
+    modelSelectionPendingRef,
     validateModelForSend,
   ]);
 
@@ -1750,6 +1730,18 @@ export function useWorkbenchTaskRunner(input: {
       const errorOperation = beginComposerErrorOperation(request.conversationId);
       commitComposerErrorOperation(errorOperation, '');
       try {
+        if (isModelLedCreativeTurn(request)) {
+          await executeCreativeDialogueTurn(request, {
+            execute: executePersistedTurn,
+            selectChapter,
+            ensureAssetReadiness,
+            completeMessage: STORY_PLAN_COMPLETE_MESSAGE,
+            isSelected: () =>
+              selectedNovelRef.current === request.novelId &&
+              selectedConversationIdRef.current === request.conversationId,
+          });
+          return;
+        }
         const target = await resolveChapterTarget(request);
         if (target.complete) {
           commitComposerErrorOperation(errorOperation, STORY_PLAN_COMPLETE_MESSAGE);
@@ -1773,6 +1765,9 @@ export function useWorkbenchTaskRunner(input: {
       beginComposerErrorOperation,
       commitComposerErrorOperation,
       ensureChapterAssetsReady,
+      ensureAssetReadiness,
+      selectChapter,
+      selectedNovelRef,
       executePersistedTurn,
       refreshRuntimeBundle,
       releasePendingConversation,
@@ -1804,6 +1799,8 @@ export function useWorkbenchTaskRunner(input: {
   return {
     draft,
     setDraft,
+    revisionSource,
+    clearRevisionSource,
     composerError,
     setComposerError,
     beginComposerErrorOperation,

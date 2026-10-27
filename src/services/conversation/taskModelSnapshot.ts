@@ -1,5 +1,6 @@
 import { getAiSettings } from '../ai/aiSettingsStore';
 import type { TaskModelSnapshot } from '../../types/conversation';
+import type { AiSettings } from '../../types/ai';
 
 function normalizeApiProviderId(providerId: string): string {
   const normalized = providerId.trim();
@@ -55,16 +56,20 @@ export function captureTaskModelSnapshot(providerId?: string, modelId?: string):
   const frozenProviderId = useMock
     ? 'mock'
     : normalizeApiProviderId(providerId || settings.provider);
+  const frozenModelId = modelId || (useMock ? 'Mock' : settings.modelName || 'default');
+  const configuration = useMock
+    ? settings
+    : resolveModelConfiguration(settings, frozenProviderId, frozenModelId);
   return {
     providerId: frozenProviderId,
-    modelId: modelId || (useMock ? 'Mock' : settings.modelName || 'default'),
+    modelId: frozenModelId,
     runtimeMode,
-    baseUrl: runtimeMode === 'api' ? settings.baseUrl : undefined,
+    baseUrl: runtimeMode === 'api' ? configuration.baseUrl : undefined,
     capabilities: ['conversation_turn', 'chapter_generate'],
     options: {
-      temperature: settings.temperature,
-      maxTokens: settings.maxTokens,
-      timeoutSeconds: settings.timeoutSeconds,
+      temperature: configuration.temperature,
+      maxTokens: configuration.maxTokens,
+      timeoutSeconds: configuration.timeoutSeconds,
       contextCompression: {
         novelProviderId: 'ans.novel-context.extractive-v1',
         novelProviderVersion: '1.0.0',
@@ -75,8 +80,8 @@ export function captureTaskModelSnapshot(providerId?: string, modelId?: string):
     pricing:
       runtimeMode === 'api'
         ? {
-            inputPricePerMillionTokens: settings.inputPricePerMillionTokens,
-            outputPricePerMillionTokens: settings.outputPricePerMillionTokens,
+            inputPricePerMillionTokens: configuration.inputPricePerMillionTokens,
+            outputPricePerMillionTokens: configuration.outputPricePerMillionTokens,
           }
         : undefined,
     runtime: {
@@ -88,4 +93,40 @@ export function captureTaskModelSnapshot(providerId?: string, modelId?: string):
     },
     capturedAt: new Date().toISOString(),
   };
+}
+
+type ModelConfiguration = Pick<
+  AiSettings,
+  | 'baseUrl'
+  | 'temperature'
+  | 'maxTokens'
+  | 'timeoutSeconds'
+  | 'inputPricePerMillionTokens'
+  | 'outputPricePerMillionTokens'
+>;
+
+/** Workbench provider selections cannot borrow gateway/local credential-scope configuration. */
+function resolveModelConfiguration(
+  settings: AiSettings,
+  providerId: string,
+  modelId: string,
+): ModelConfiguration {
+  const matches = (provider: string, model: string) =>
+    normalizeApiProviderId(provider) === providerId && model.trim() === modelId.trim();
+  if (settings.runtimeMode === 'api' && matches(settings.provider, settings.modelName)) {
+    return settings;
+  }
+  const profiles: ModelConfiguration[] = (settings.savedApiModels ?? []).filter((item) =>
+    matches(item.provider, item.modelName),
+  );
+  const endpoints = new Set(profiles.map((item) => item.baseUrl.trim().replace(/\/+$/, '')));
+  if (profiles.length === 1) return profiles[0];
+  if (profiles.length > 1 && endpoints.size === 1) {
+    throw new Error(`模型 ${providerId}:${modelId} 有多个配置，请在设置中心选定该模型后重试。`);
+  }
+  throw new Error(
+    profiles.length
+      ? `模型 ${providerId}:${modelId} 的地址不唯一，请在设置中心选定该模型后重试。`
+      : `模型 ${providerId}:${modelId} 尚未配置，请先在设置中心保存该模型的地址与参数。`,
+  );
 }

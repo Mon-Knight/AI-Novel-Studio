@@ -33,7 +33,7 @@ async function testIdAttributes(testId: string, attribute: string): Promise<stri
 }
 
 describe('conversational creative workbench', () => {
-  it('keeps legacy routes and blocks empty tasks when the Runtime model is unavailable', async () => {
+  it('keeps legacy routes and allows sending with a configured model when the Runtime directory is unavailable', async () => {
     await waitForTestId('workbench-no-projects');
     expect(['', '#/']).toContain(await browser.execute(() => window.location.hash));
 
@@ -61,12 +61,13 @@ describe('conversational creative workbench', () => {
     const model = await waitForTestId('workbench-new-task-model-select');
     expect(await model.getValue()).toBe('mock:Mock');
     const modelStatus = await waitForTestId('workbench-new-task-model-status');
-    expect(await modelStatus.getText()).toMatch(/Runtime|模型目录|所选模型/);
+    expect(await modelStatus.getText()).toMatch(/已配置模型|Runtime|模型目录|所选模型/);
     const createAndStart = await waitForTestId('workbench-create-and-start');
-    expect(await createAndStart.isEnabled()).toBe(false);
+    // v3.7.0：模型目录只作描述，选择和发送不依赖目录验证；实际失败写入对话。
+    expect(await createAndStart.isEnabled()).toBe(true);
     expect(await testIdCount('workbench-task')).toBe(0);
 
-    const closeCreator = await creator.$('button[aria-label="关闭新建任务"]');
+    const closeCreator = await creator.$('button[aria-label="关闭新建会话"]');
     await closeCreator.click();
     await waitForTestIdMissing('workbench-task-creator');
     await waitForTestId('workbench-create-empty-task');
@@ -102,9 +103,16 @@ describe('conversational creative workbench', () => {
     expect(
       pluginStatuses.every((status) => ['loaded', 'failed', 'unavailable'].includes(status)),
     ).toBe(true);
+    // v3.7.0 的 ZCode 侧边面板把插件页作为标签视图打开，除“关闭当前插件”外还保留
+    // “返回标签列表”的导航键；这里锁定面板内只允许这两个控制项，不得出现插件生命周期管理控件。
     const pluginButtons = await pluginPanel.$$('button');
-    expect(pluginButtons).toHaveLength(1);
-    expect(await pluginButtons[0].getAttribute('aria-label')).toBe('关闭当前插件');
+    const pluginButtonLabels: string[] = [];
+    for (const button of pluginButtons) {
+      pluginButtonLabels.push((await button.getAttribute('aria-label')) ?? '');
+    }
+    expect([...pluginButtonLabels].sort()).toEqual(['关闭当前插件', '返回标签列表'].sort());
+    expect(await pluginPanel.$('[data-testid="workbench-plugin-close"]').isExisting()).toBe(true);
+    expect(await pluginPanel.$('[data-testid="workbench-side-back"]').isExisting()).toBe(true);
     const pluginText = await pluginPanel.getText();
     for (const forbidden of ['安装插件', '卸载插件', '启用插件', '禁用插件', '更新插件']) {
       expect(pluginText).not.toContain(forbidden);

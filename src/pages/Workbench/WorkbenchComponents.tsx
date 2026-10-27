@@ -1,27 +1,16 @@
 import { memo, useState } from 'react';
-import {
-  CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  CircleDashed,
-  Database,
-  LoaderCircle,
-  ShieldCheck,
-} from 'lucide-react';
-import type { ConversationArtifactCard, ToolCallEvent } from '../../types/conversation';
-import { isContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
+import { CheckCircle2, ChevronRight, CircleAlert, CircleDashed, LoaderCircle } from 'lucide-react';
+import type { ToolCallEvent } from '../../types/conversation';
 import { GenerationContextReceipt, GenerationContextSummary } from './WorkbenchContextReceipt';
 import {
   hideContextReceiptInternals,
   resolveToolContextReceipt,
 } from './workbenchContextReceiptModel';
-import { ArtifactApplyScopeNotice, ArtifactCandidateList } from './ArtifactCandidateList';
-import { ArtifactDecisionActions } from './ArtifactDecisionActions';
-import { useArtifactCandidateReview } from './hooks/useArtifactCandidateReview';
-import { isStructuredCandidateArtifactType } from './artifactCandidateOptions';
 import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
 
 export { MemoryInspectorCard } from './WorkbenchMemoryInspectorCard';
+export { ArtifactCard } from './ArtifactCard';
+export type { ArtifactCardProps } from './ArtifactCard';
 
 function ToolStatusIcon({ status }: { status: ToolCallEvent['status'] }) {
   if (status === 'succeeded')
@@ -144,7 +133,11 @@ export const ToolEventRow = memo(function ToolEventRow({
   if (!hasDetails) return <div {...commonProps}>{summary}</div>;
 
   return (
-    <details {...commonProps} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <details
+      {...commonProps}
+      data-disclosure-key={`tool:${event.eventId}`}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
       <summary>{summary}</summary>
       {expanded && (
         <div className="workbench-tool-detail">
@@ -169,274 +162,5 @@ export const ToolEventRow = memo(function ToolEventRow({
         </div>
       )}
     </details>
-  );
-});
-
-const ARTIFACT_LABELS: Record<string, string> = {
-  generic_text: '文本候选',
-  generic_json: '结构化候选',
-  chapter_text: '章节正文候选',
-  scene_text: '分镜正文候选',
-  outline: '大纲候选',
-  character_candidates: '人物候选',
-  event_candidates: '事件候选',
-  setting_candidates: '设定候选',
-  quality_report: '质量检查报告',
-  style_analysis: '风格分析报告',
-  chapter_summary: '章节总结候选',
-  volume_summary: '分卷总结候选',
-  tool_result: '工具结果',
-  plan: '创作规划候选',
-  generic: '创作候选',
-};
-
-const ARTIFACT_VALIDATION_LABELS = {
-  raw: '等待结构与来源校验',
-  parsing: '正在校验结构与来源',
-  valid: '结构与来源校验通过',
-  valid_with_warnings: '结构与来源校验通过，含警告',
-  invalid: '结构与来源校验未通过',
-} as const;
-
-const STRUCTURED_APPLY_TYPES = new Set([
-  'outline',
-  'character_candidates',
-  'event_candidates',
-  'setting_candidates',
-  'chapter_summary',
-]);
-
-const READ_ONLY_REPORT_TYPES = new Set(['quality_report', 'style_analysis']);
-
-function isApplicableContextCompression(artifact: ConversationArtifactCard): boolean {
-  if (artifact.artifactType !== 'generic_json') return false;
-  if (artifact.artifactEvidence?.derivationType === 'context_compression') return true;
-  if (!artifact.content) return false;
-  try {
-    const candidate = JSON.parse(artifact.content) as unknown;
-    return isContextCompressionCandidate(candidate) && candidate.valid;
-  } catch {
-    return false;
-  }
-}
-
-function isDeterministicContextCompression(artifact: ConversationArtifactCard): boolean {
-  if (artifact.artifactType !== 'generic_json' || !artifact.content) return false;
-  try {
-    return isContextCompressionCandidate(JSON.parse(artifact.content) as unknown);
-  } catch {
-    return false;
-  }
-}
-
-function compactHash(value: string): string {
-  return value.length > 12 ? `${value.slice(0, 12)}...` : value;
-}
-
-function compactIdentifier(value: string): string {
-  return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
-}
-
-/**
- * 候选产物交互卡片（支持采纳、确认入审、申请应用、修改与拒绝）
- */
-export const ArtifactCard = memo(function ArtifactCard({
-  artifact,
-  onDecide,
-  onReload,
-  busy = false,
-  newlyArrived = false,
-}: {
-  artifact: ConversationArtifactCard;
-  onDecide?: (
-    decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply',
-    revisionNotes?: string,
-  ) => void;
-  onReload?: () => void;
-  busy?: boolean;
-  newlyArrived?: boolean;
-}) {
-  const [contentExpanded, setContentExpanded] = useState(false);
-  const review = useArtifactCandidateReview(artifact);
-  const decision = artifact.latestDecision?.decision;
-  const evidence = artifact.artifactEvidence;
-  const validationIssues = evidence?.validationIssues ?? [];
-  const validationErrors = validationIssues.filter((issue) => issue.severity === 'error').length;
-  const validationWarnings = validationIssues.filter(
-    (issue) => issue.severity === 'warning',
-  ).length;
-  const isInvalid = evidence?.processingStatus === 'invalid';
-  const isChapter = artifact.artifactType === 'chapter_text';
-  const isReadOnlyReport = READ_ONLY_REPORT_TYPES.has(artifact.artifactType);
-  const isDeterministicCompression = isDeterministicContextCompression(artifact);
-  const supportsStructuredApply =
-    STRUCTURED_APPLY_TYPES.has(artifact.artifactType) || isApplicableContextCompression(artifact);
-  const structuredApplyAvailable = !artifact.artifactId?.startsWith('browser-');
-  const projectedStatus = isInvalid
-    ? '结构与来源未通过'
-    : artifact.latestDecision?.conflictCode
-      ? artifact.latestDecision.conflictCode === 'STRUCTURED_APPLY_ATOMIC_UNAVAILABLE'
-        ? '原子应用迁移中'
-        : artifact.latestDecision.conflictCode === 'BROWSER_APPLY_UNSUPPORTED'
-          ? '当前环境不可应用'
-          : `冲突 · ${artifact.latestDecision.conflictCode}`
-      : artifact.latestDecision?.applyTransactionId
-        ? '已应用'
-        : decision === 'confirm'
-          ? isReadOnlyReport
-            ? '已阅'
-            : '已确认'
-          : decision === 'reject'
-            ? '已拒绝'
-            : decision === 'request_revision'
-              ? '需修订'
-              : decision === 'request_apply'
-                ? '待应用'
-                : supportsStructuredApply
-                  ? structuredApplyAvailable
-                    ? '待应用'
-                    : '当前环境不可应用'
-                  : artifact.status === 'candidate'
-                    ? '待确认'
-                    : artifact.status === 'confirmed'
-                      ? '已确认'
-                      : '已拒绝';
-  const canAct = Boolean(
-    onDecide &&
-    artifact.artifactId &&
-    (!decision ||
-      (decision === 'request_apply' &&
-        artifact.latestDecision?.conflictCode &&
-        !artifact.latestDecision.applyTransactionId)),
-  );
-  const canApply = supportsStructuredApply && !decision;
-  const applyUnavailable = canApply && !structuredApplyAvailable;
-  const showStructuredOptions =
-    isStructuredCandidateArtifactType(artifact.artifactType) &&
-    Boolean(artifact.content) &&
-    !artifact.contentLoadError;
-  return (
-    <article
-      className={`workbench-artifact-card ${isChapter ? 'is-chapter' : ''} ${
-        newlyArrived ? 'is-newly-arrived' : ''
-      }`.trim()}
-      data-testid="workbench-artifact-card"
-      data-card-id={artifact.cardId}
-      data-artifact-id={artifact.artifactId}
-      data-run-id={artifact.runId}
-      data-status={artifact.status}
-      data-decision={decision ?? ''}
-      data-newly-arrived={newlyArrived ? 'true' : undefined}
-      data-derivation-mode={isDeterministicCompression ? 'deterministic-local' : undefined}
-    >
-      <div className="workbench-artifact-heading">
-        <div>
-          <div className="workbench-eyebrow">
-            {isDeterministicCompression
-              ? '确定性小说上下文压缩'
-              : (ARTIFACT_LABELS[artifact.artifactType] ?? '创作候选')}
-          </div>
-          <h3>{artifact.title}</h3>
-        </div>
-        <span className="workbench-artifact-status">{projectedStatus}</span>
-      </div>
-      {!isInvalid && <p>{artifact.summary}</p>}
-      {supportsStructuredApply && <ArtifactApplyScopeNotice />}
-      {isDeterministicCompression && (
-        <p
-          className="workbench-artifact-derivation-note"
-          data-testid="workbench-artifact-derivation"
-        >
-          本地确定性提取 · 不使用当前任务的冻结模型
-        </p>
-      )}
-      {evidence && (
-        <div
-          className="workbench-artifact-evidence"
-          data-testid="workbench-artifact-evidence"
-          data-processing-status={evidence.processingStatus}
-        >
-          <div className="workbench-artifact-evidence-summary">
-            <ShieldCheck aria-hidden="true" size={15} strokeWidth={1.8} />
-            <p data-testid="workbench-artifact-validation">
-              {ARTIFACT_VALIDATION_LABELS[evidence.processingStatus]}
-              {validationErrors > 0 ? ` · ${validationErrors} 个错误` : ''}
-              {validationWarnings > 0 ? ` · ${validationWarnings} 个警告` : ''}
-            </p>
-          </div>
-          <details className="workbench-artifact-technical-evidence">
-            <summary>
-              <Database aria-hidden="true" size={13} strokeWidth={1.8} />
-              <span>技术证据</span>
-            </summary>
-            <div>
-              <p data-testid="workbench-artifact-source">
-                生成来源：作品 {compactIdentifier(evidence.sourceNovelId)}
-                {evidence.sourceChapterId
-                  ? ` · 章节 ${compactIdentifier(evidence.sourceChapterId)}`
-                  : ''}
-                {evidence.sourceDraftId
-                  ? ` · 草稿 ${compactIdentifier(evidence.sourceDraftId)}`
-                  : ''}
-              </p>
-              {(evidence.sourceDraftVersion !== undefined || evidence.baseContentHash) && (
-                <p data-testid="workbench-artifact-baseline">
-                  生成时基线：
-                  {evidence.sourceDraftVersion !== undefined
-                    ? `源草稿 v${evidence.sourceDraftVersion}`
-                    : ''}
-                  {evidence.sourceDraftVersion !== undefined && evidence.baseContentHash
-                    ? ' · '
-                    : ''}
-                  {evidence.baseContentHash
-                    ? `内容哈希 ${compactHash(evidence.baseContentHash)}`
-                    : ''}
-                </p>
-              )}
-            </div>
-          </details>
-        </div>
-      )}
-      {showStructuredOptions && artifact.content ? (
-        <ArtifactCandidateList
-          key={artifact.artifactId ?? artifact.cardId}
-          artifactType={artifact.artifactType}
-          content={artifact.content}
-          drafts={review.drafts}
-          onDraftChange={review.updateDraft}
-          reviewAvailable={canAct}
-          disabled={busy || isInvalid}
-        />
-      ) : null}
-      <details onToggle={(event) => setContentExpanded(event.currentTarget.open)}>
-        <summary>{showStructuredOptions ? '原始数据' : '查看候选内容'}</summary>
-        {contentExpanded &&
-          (artifact.contentLoadError ? (
-            <div className="workbench-artifact-load-error" role="alert">
-              <span>{artifact.contentLoadError}</span>
-              {onReload && (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={onReload}>
-                  重新读取
-                </button>
-              )}
-            </div>
-          ) : (
-            <pre>{artifact.content || '候选内容正在载入。'}</pre>
-          ))}
-      </details>
-      {canAct && (
-        <ArtifactDecisionActions
-          revisionCount={review.revisionCount}
-          revisionNotes={review.revisionNotes}
-          isChapter={isChapter}
-          canApply={canApply}
-          isReadOnlyReport={isReadOnlyReport}
-          isInvalid={isInvalid}
-          applyUnavailable={applyUnavailable}
-          busy={busy}
-          onDecide={onDecide}
-        />
-      )}
-    </article>
   );
 });

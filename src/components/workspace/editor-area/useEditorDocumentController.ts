@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
+import { useEditorCandidateAdoption } from './editorReviewAdoption';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { logWorkspaceWarning } from '../../../services/workspace/workspaceErrorService';
 import type { ChapterDraft } from '../../../types/ai';
@@ -9,9 +9,7 @@ import type { ReviewCandidateDocument } from '../../../types/conversation';
 import type { DraftContentState } from '../../../types/draftContentState';
 import type { AiTextApplyRequest, EditorContentSnapshot } from '../../../types/workspaceSafety';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
-import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { formatDateTime } from '../../../utils/date';
-import { confirmInfo } from '../../../utils/nativeDialog';
 import { isComposingKeyboardEvent } from '../../../utils/keyboardEvent';
 import { hasActiveModal } from '../../common/useModalAccessibility';
 import type {
@@ -106,6 +104,17 @@ export function useEditorDocumentController({
   liveDraftIdRef.current = currentDraft?.id;
   liveContentRef.current = content;
   const effectiveContentState = contentStateOverride ?? currentDraft?.contentState;
+  const canAdoptReadOnlyCandidate = Boolean(
+    reviewCandidate &&
+    reviewCandidate.novelId === novelId &&
+    reviewCandidate.chapterId === chapter?.id &&
+    reviewCandidate.authorizationId &&
+    documentState === 'ready' &&
+    effectiveContentState?.status !== 'unavailable' &&
+    !isDirty &&
+    content === reviewCandidate.content &&
+    !currentDraft?.isAdopted,
+  );
   liveAccessRef.current = {
     documentState,
     reviewLocked,
@@ -308,7 +317,7 @@ export function useEditorDocumentController({
         !chapter ||
         !novelId ||
         documentState !== 'ready' ||
-        reviewLocked ||
+        (reviewLocked && !(forAdoption && canAdoptReadOnlyCandidate)) ||
         (!forAdoption && adoptInFlightRef.current === requestEpoch)
       )
         return null;
@@ -355,7 +364,8 @@ export function useEditorDocumentController({
                 novelId: requestNovelId,
                 chapterId: requestChapterId,
                 content: requestContent,
-                source: 'user_edited',
+                source:
+                  reviewCandidate?.content === requestContent ? 'ai_generated' : 'user_edited',
               });
         if (!isDraftSaveResultForDocument(savedDraft, requestNovelId, requestChapterId)) {
           throw new Error('草稿保存结果与当前章节不一致');
@@ -425,6 +435,8 @@ export function useEditorDocumentController({
       novelId,
       onActionStateChange,
       onDraftSaved,
+      canAdoptReadOnlyCandidate,
+      reviewCandidate?.content,
       reviewLocked,
       scope,
       isCurrent,
@@ -473,167 +485,35 @@ export function useEditorDocumentController({
     setSaveState('editing');
   }, [adopting, content, documentState, handleContentChange, reviewLocked, saving]);
 
-  const handleAdoptCurrent = useCallback(async () => {
-    if (!chapter || !novelId || documentState !== 'ready' || reviewLocked) return;
-    const requestEpoch = scope.current.epoch;
-    if (
-      adoptInFlightRef.current === requestEpoch ||
-      saveInFlightRef.current?.epoch === requestEpoch
-    )
-      return;
-    setFeedbackEpoch(requestEpoch);
-    if (effectiveContentState?.status === 'unavailable') {
-      setAdoptMsg('正文不可用，已阻止采用');
-      setAdoptState('error');
-      return;
-    }
-    if (currentDraft?.isAdopted && !isDirty && currentDraft.content === content) {
-      setAdoptMsg('当前正文已采用');
-      setAdoptState('adopted');
-      return;
-    }
-    const requestNovelId = novelId;
-    const requestChapterId = chapter.id;
-    const requestContent = content;
-    const requestDraftId = currentDraft?.id;
-    let draftToAdopt = currentDraft;
-    adoptInFlightRef.current = requestEpoch;
-    setAdopting(true);
-    setAdoptState('confirming');
-    setAdoptMsg('等待确认采用');
-    const hasSameContentAndAccess = () =>
-      isCurrent(requestEpoch) &&
-      liveContentRef.current === requestContent &&
-      liveAccessRef.current.documentState === 'ready' &&
-      !liveAccessRef.current.reviewLocked &&
-      !liveAccessRef.current.unavailable;
-    try {
-      const needsSave = !draftToAdopt || draftToAdopt.content !== content || isDirty;
-      const confirmed = await confirmInfo({
-        title: needsSave ? '保存并采用' : '采用草稿',
-        message: needsSave
-          ? '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？'
-          : `确认采用草稿 v${draftToAdopt?.versionNo} 作为正式正文？`,
-        testId: 'apply-confirm',
-      });
-      if (!isCurrent(requestEpoch)) return;
-      if (!confirmed) {
-        setAdoptState('idle');
-        setAdoptMsg('已取消采用，正文未改变');
-        return;
-      }
-      if (!hasSameContentAndAccess() || liveDraftIdRef.current !== requestDraftId) {
-        throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
-      }
-      if (needsSave) draftToAdopt = await handleSave(true);
-      if (!isCurrent(requestEpoch)) return;
-      if (!draftToAdopt) {
-        setAdoptState('error');
-        setAdoptMsg('尚未采用：草稿保存未完成，请先处理保存反馈。');
-        return;
-      }
-      if (!hasSameContentAndAccess()) {
-        throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
-      }
-      const draftForAdoption = draftToAdopt;
-      const adoptionEditorDraftId = liveDraftIdRef.current;
-      setAdoptState('adopting');
-      setAdoptMsg('正在校验并采用草稿');
-      const activeAuthId = reviewCandidate?.authorizationId || reviewAuthorizationId;
-      let adopted: ChapterDraft;
-      if (activeAuthId) {
-        const expectedContentHash = await computeContentSha256(draftForAdoption.content);
-        if (!isCurrent(requestEpoch)) return;
-        if (!hasSameContentAndAccess() || liveDraftIdRef.current !== adoptionEditorDraftId) {
-          throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
-        }
-        const adoptResult = await artifactDecisionService.adoptReviewAuthorizedDraft({
-          authorizationId: activeAuthId,
-          draftId: draftForAdoption.id,
-          expectedDraftVersion: draftForAdoption.versionNo,
-          expectedContentHash,
-        });
-        adopted = adoptResult.adoptedDraft;
-      } else {
-        if (onBeforeAdopt) await onBeforeAdopt(draftForAdoption.id);
-        if (!isCurrent(requestEpoch)) return;
-        if (!hasSameContentAndAccess() || liveDraftIdRef.current !== adoptionEditorDraftId) {
-          throw new Error('正文或审阅状态已变化，已阻止采用。请检查后重新确认。');
-        }
-        adopted = await draftVersionService.adopt(draftForAdoption.id, requestChapterId);
-      }
-      if (
-        adopted.id !== draftForAdoption.id ||
-        adopted.novelId !== requestNovelId ||
-        adopted.chapterId !== requestChapterId ||
-        !adopted.isAdopted
-      ) {
-        throw new Error('正文采用结果与当前章节不一致');
-      }
-      const liveDocument = liveDocumentRef.current;
-      if (
-        !isCurrent(requestEpoch) ||
-        liveDocument.novelId !== requestNovelId ||
-        liveDocument.chapterId !== requestChapterId
-      ) {
-        return;
-      }
-      if (liveContentRef.current !== draftForAdoption.content) {
-        setAdoptState('idle');
-        setAdoptMsg('先前草稿已采用；当前修改尚未采用。');
-        return;
-      }
-      setAdoptMsg('已采用为正式正文');
-      setAdoptState('adopted');
-      setSaveState('saved');
-      try {
-        await onDraftSaved?.(adopted);
-      } catch {
-        logWorkspaceWarning('post_adopt_callback_failed', {
-          novelId: requestNovelId,
-          chapterId: requestChapterId,
-          draftId: adopted.id,
-        });
-      }
-      if (isCurrent(requestEpoch) && liveContentRef.current === adopted.content) {
-        emitContentSnapshot(adopted.content, false, adopted);
-        onChapterUpdated?.(requestChapterId);
-      }
-    } catch (error) {
-      const liveDocument = liveDocumentRef.current;
-      if (
-        isCurrent(requestEpoch) &&
-        liveDocument.novelId === requestNovelId &&
-        liveDocument.chapterId === requestChapterId
-      ) {
-        const appError = normalizeAppError(error, '采用失败。');
-        setAdoptMsg(`采用失败：${getAppErrorUserMessage(appError)}`);
-        setAdoptState('error');
-      }
-    } finally {
-      if (adoptInFlightRef.current === requestEpoch) adoptInFlightRef.current = null;
-      if (isCurrent(requestEpoch)) setAdopting(false);
-    }
-  }, [
-    chapter,
-    content,
-    currentDraft,
-    documentState,
-    effectiveContentState,
-    emitContentSnapshot,
-    handleSave,
-    isDirty,
+  const { handleAdoptCurrent } = useEditorCandidateAdoption({
+    chapterId: chapter?.id,
     novelId,
+    documentState,
+    reviewLocked,
+    canAdoptReadOnlyCandidate,
+    scope,
+    isCurrent,
+    adoptInFlightRef,
+    saveInFlightRef,
+    liveContentRef,
+    liveAccessRef,
+    liveDraftIdRef,
+    liveDocumentRef,
+    effectiveContentState,
+    currentDraft,
+    content,
+    isDirty,
+    handleSave,
+    authorizationId: reviewCandidate?.authorizationId || reviewAuthorizationId,
     onBeforeAdopt,
     onChapterUpdated,
     onDraftSaved,
-    reviewAuthorizationId,
-    reviewCandidate?.authorizationId,
-    reviewLocked,
-    scope,
-    isCurrent,
-  ]);
-
+    emitContentSnapshot,
+    setFeedbackEpoch,
+    setAdopting,
+    setAdoptState,
+    setAdoptMsg,
+  });
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (
@@ -674,6 +554,7 @@ export function useEditorDocumentController({
     adoptState: feedbackEpoch === scope.current.epoch ? adoptState : ('idle' as DocumentAdoptState),
     adoptMsg: feedbackEpoch === scope.current.epoch ? adoptMsg : '',
     handleAdoptCurrent,
+    canAdoptReadOnlyCandidate,
     isDirty,
     lastSaved,
     loadedChapterIdRef,

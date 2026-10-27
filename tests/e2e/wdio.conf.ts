@@ -219,6 +219,11 @@ export const config = {
       throw new Error('E2E WebView network guard is not installed');
     if (diagnostics.webviewNetwork.total !== 0)
       throw new Error('E2E WebView made a network request during startup');
+    await browser.execute((legacyEnabled) => {
+      const key = 'ai_novel_studio_e2e_legacy_workspace_panels';
+      if (legacyEnabled) localStorage.setItem(key, 'enabled');
+      else localStorage.removeItem(key);
+    }, process.env.AI_NOVEL_STUDIO_E2E_LEGACY_PANELS === '1');
   },
 
   async beforeSession() {

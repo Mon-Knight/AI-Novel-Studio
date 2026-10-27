@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "AI Novel Studio",
-    "version": "3.6.2"
+    "version": "3.7.0"
   },
   "tauri": {
     "allowlist": {
@@ -24,14 +24,22 @@
         "all": false,
         "readFile": true,
         "writeFile": true,
-        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
+        "scope": {
+          "allow": ["$HOME/.ai-novel-studio-local-model-lifecycle.json"],
+          "deny": [],
+          "requireLiteralLeadingDot": true
+        }
       },
       "notification": {
         "all": true
       },
       "window": {
         "all": false,
-        "close": true
+        "close": true,
+        "minimize": true,
+        "maximize": true,
+        "unmaximize": true,
+        "startDragging": true
       }
     },
     "bundle": {
@@ -48,7 +56,9 @@
       "resources": ["bin/unpack-payload.mjs", "bin/dsh-runtime.zip"]
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' http://localhost:1420 http://127.0.0.1:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420 http://127.0.0.1:1420; style-src 'self' 'unsafe-inline' http://localhost:1420 http://127.0.0.1:1420; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: http://localhost:1420 http://127.0.0.1:1420; font-src 'self' data: http://localhost:1420 http://127.0.0.1:1420; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420 https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"]
     },
     "updater": {
       "active": true,
@@ -66,6 +76,7 @@
       {
         "fullscreen": false,
         "resizable": true,
+        "decorations": false,
         "title": "AI Novel Studio",
         "width": 1280,
         "height": 820,

@@ -32,34 +32,14 @@ function statusLabel(status: AiTaskRecord['status']): string {
           : '等待';
 }
 
-function statusColor(status: AiTaskRecord['status']): string {
+function statusPillClass(status: AiTaskRecord['status']): string {
   return status === 'succeeded'
-    ? 'var(--color-success)'
+    ? 'resource-pill resource-pill--success'
     : status === 'failed'
-      ? 'var(--color-error)'
+      ? 'resource-pill resource-pill--error'
       : status === 'cancelled'
-        ? 'var(--color-text-muted)'
-        : 'var(--color-warning)';
-}
-
-function statusBackground(status: AiTaskRecord['status']): string {
-  return status === 'succeeded'
-    ? 'var(--color-success-bg)'
-    : status === 'failed'
-      ? 'var(--color-error-bg)'
-      : status === 'cancelled'
-        ? 'var(--color-bg-hover)'
-        : 'var(--color-warning-bg)';
-}
-
-function statusTextColor(status: AiTaskRecord['status']): string {
-  return status === 'succeeded'
-    ? 'var(--color-success-text)'
-    : status === 'failed'
-      ? 'var(--color-error-text)'
-      : status === 'cancelled'
-        ? 'var(--color-text-secondary)'
-        : 'var(--color-warning-text)';
+        ? 'resource-pill'
+        : 'resource-pill resource-pill--warning';
 }
 
 function AiTaskRecordCard({
@@ -83,74 +63,47 @@ function AiTaskRecordCard({
 
   return (
     <div
-      className="detail-card"
+      className="detail-card ai-task-record"
       data-testid="ai-task-record"
       data-task-id={task.id}
       data-stale={staleResults ? 'true' : 'false'}
-      style={{
-        cursor: 'pointer',
-        borderLeft: `3px solid ${statusColor(task.status)}`,
-        background: selected ? 'var(--color-primary-light)' : undefined,
-      }}
+      data-status={task.status}
+      data-selected={selected ? 'true' : 'false'}
       onClick={() =>
         selectMode && !staleResults
           ? !selectionDisabled && canDelete && onToggleSelect(task.id)
           : onToggleExpand(task.id)
       }
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
-          <div
-            style={{
-              display: 'flex',
-              gap: 6,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginBottom: 4,
-            }}
-          >
+      <div className="resource-card-header">
+        <div className="resource-grow">
+          <div className="resource-row resource-row--wrap">
             {selectMode && canDelete && (
               <input
                 type="checkbox"
+                className="ai-task-record-checkbox"
                 aria-label={`选择任务记录 ${task.id}`}
                 disabled={selectionDisabled}
-                style={{ width: 24, height: 24, flex: '0 0 24px' }}
                 checked={selected}
                 onChange={() => onToggleSelect(task.id)}
                 onClick={(event) => event.stopPropagation()}
               />
             )}
-            <span style={{ fontWeight: 600, fontSize: 13 }}>{AiTaskTypeLabels[task.taskType]}</span>
-            <span
-              style={{
-                fontSize: 12,
-                padding: '1px 6px',
-                borderRadius: 3,
-                background: statusBackground(task.status),
-                color: statusTextColor(task.status),
-              }}
-            >
-              {statusLabel(task.status)}
-            </span>
-            {task.modelName && (
-              <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                {task.modelName}
-              </span>
-            )}
+            <span className="ai-task-record-type">{AiTaskTypeLabels[task.taskType]}</span>
+            <span className={statusPillClass(task.status)}>{statusLabel(task.status)}</span>
+            {task.modelName && <span className="resource-meta">{task.modelName}</span>}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+          <div className="resource-meta">
             {task.inputSummary && task.inputSummary.slice(0, 60)}
             {task.inputSummary && task.inputSummary.length > 60 && '…'}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+          <div className="resource-meta">
             {formatDateTime(task.createdAt)}
             {task.finishedAt && ` → ${formatDateTime(task.finishedAt)}`}
           </div>
         </div>
         {!selectMode && (
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 8 }}
-          >
+          <div className="ai-task-record-actions">
             {canStop && (
               <button
                 className="btn btn-secondary btn-xs"
@@ -166,8 +119,7 @@ function AiTaskRecordCard({
             )}
             {canDelete && (
               <button
-                className="btn btn-text btn-sm"
-                style={{ color: 'var(--color-error-text)', minWidth: 28, minHeight: 28 }}
+                className="btn btn-text btn-sm ai-task-record-delete"
                 onClick={(event) => {
                   event.stopPropagation();
                   onDelete(task);
@@ -183,15 +135,7 @@ function AiTaskRecordCard({
         )}
       </div>
       {expanded && (
-        <div
-          style={{
-            marginTop: 8,
-            padding: 8,
-            background: 'var(--color-bg-primary)',
-            borderRadius: 4,
-            fontSize: 12,
-          }}
-        >
+        <div className="ai-task-record-details">
           <div>
             <strong>任务 ID：</strong>
             {task.id}
@@ -249,23 +193,13 @@ function AiTaskRecordCard({
             </div>
           )}
           {task.errorMessage && (
-            <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
+            <div className="ai-task-record-error">
               <strong>错误：</strong>
               {task.errorMessage}
             </div>
           )}
           {task.resultText && (
-            <div
-              style={{
-                marginTop: 4,
-                whiteSpace: 'pre-wrap',
-                maxHeight: 120,
-                overflowY: 'auto',
-                background: 'var(--color-bg-hover)',
-                padding: 6,
-                borderRadius: 3,
-              }}
-            >
+            <div className="ai-task-record-result">
               {task.resultText.slice(0, 300)}
               {task.resultText.length > 300 && '…'}
             </div>

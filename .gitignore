@@ -53,3 +53,4 @@ tmp/
 
 # local release build output / archives
 release_output*/
+.dsh-checkout/

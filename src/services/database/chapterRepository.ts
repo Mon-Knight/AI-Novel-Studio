@@ -4,6 +4,12 @@ import { appLogger } from '../observability/appLogger';
  */
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
 import { dbCall, lsGet, lsSet, generateId, nowISO } from './db';
+import {
+  chapterDetailsBaseline,
+  requireChapterDetailsBaseline,
+  validateChapterDetailsPatch,
+  type ChapterDetailsPatch,
+} from '../chapters/chapterDetails';
 
 const CHAPTERS_KEY = 'ai_novel_studio_chapters';
 
@@ -189,6 +195,62 @@ export const chapterRepository = {
       return updated;
     });
     return normalizeChapter(updatedRaw);
+  },
+
+  /** Guarded manual metadata editor. Adopted outlines are edited in their versioned editor. */
+  async saveDetails(baseline: Chapter, patch: ChapterDetailsPatch): Promise<Chapter> {
+    validateChapterDetailsPatch(patch);
+    const raw = await dbCall<unknown>(
+      'save_chapter_details',
+      {
+        input: { baseline: chapterDetailsBaseline(baseline), patch },
+      },
+      () => {
+        // Browser development fallback has no desktop SQLite transaction guarantees.
+        const novels =
+          lsGet<Array<{ id: string; deletedAt?: string; deleted_at?: string }>>(
+            'ai_novel_studio_novels',
+          ) ?? [];
+        if (
+          !novels.some(
+            (novel) => novel.id === baseline.novelId && !novel.deletedAt && !novel.deleted_at,
+          )
+        )
+          throw new Error('CHAPTER_DETAILS_CONFLICT: 作品已删除或不可读取。');
+        const items = normalizeChapters(lsGet<unknown>(CHAPTERS_KEY));
+        const index = items.findIndex((chapter) => chapter.id === baseline.id);
+        const current = items[index];
+        requireChapterDetailsBaseline(current, baseline);
+        if (patch.volumeId) {
+          const volumes =
+            lsGet<Array<{ id: string; novelId: string; deletedAt?: string }>>(
+              'ai_novel_studio_volumes',
+            ) ?? [];
+          if (
+            !volumes.some(
+              (volume) =>
+                volume.id === patch.volumeId &&
+                volume.novelId === baseline.novelId &&
+                !volume.deletedAt,
+            )
+          )
+            throw new Error('分卷不属于当前作品或已删除。');
+        }
+        const updated = { ...current, ...patch, updatedAt: nowISO() };
+        if (patch.volumeId === '') updated.volumeId = undefined;
+        if (patch.targetWordCount !== undefined) {
+          updated.targetWordCount = patch.targetWordCount || undefined;
+          updated.targetWords = patch.targetWordCount;
+        }
+        items[index] = updated;
+        saveLocalChapters(items);
+        return updated;
+      },
+    );
+    const saved = normalizeChapter(raw);
+    if (!saved || saved.id !== baseline.id || saved.novelId !== baseline.novelId || saved.deletedAt)
+      throw new Error('章节保存结果范围不匹配，请刷新核对正式版本。');
+    return saved;
   },
 
   async remove(id: string): Promise<void> {

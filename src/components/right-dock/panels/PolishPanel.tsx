@@ -313,7 +313,7 @@ function PolishPanel({
           第{chapter.chapterNumber}章 {chapter.title}
         </div>
         {currentDraft && (
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
             草稿 v{currentDraft.versionNo}（{currentDraft.wordCount} 字）
           </div>
         )}
@@ -387,7 +387,7 @@ function PolishPanel({
             <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
             应用润色结果
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
             润色结果已保存为草稿 v{lastPolishResult.versionNo}（{lastPolishResult.wordCount} 字）
           </div>
           <div style={{ display: 'flex', gap: 6 }}>

@@ -4,6 +4,7 @@ import { CircleAlert, LoaderCircle, X } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
+import { isModelLedCreativeTurn } from '../../services/dsh/taskSessionAdapter';
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import type { TaskTemplate } from './WorkbenchComposer';
@@ -27,6 +28,10 @@ interface WorkbenchTaskCreatorProps {
   goal: string;
   chapterId: string;
   selectedModel: TaskModelSnapshot;
+  modelSourceLabel?: string;
+  modelPending?: boolean;
+  modelUnresolved?: boolean;
+  onRetryModelSource?: () => void;
   creating: boolean;
   error: string;
   onGoalChange: (value: string) => void;
@@ -50,6 +55,10 @@ export function WorkbenchTaskCreator({
   goal,
   chapterId,
   selectedModel,
+  modelSourceLabel,
+  modelPending,
+  modelUnresolved,
+  onRetryModelSource,
   creating,
   error,
   onGoalChange,
@@ -63,7 +72,9 @@ export function WorkbenchTaskCreator({
   const dialogRef = useRef<HTMLElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const conversationalGoal = isConversationalGoal(goal);
-  const contextBlocksSubmit = (contextPending || contextFailed) && !conversationalGoal;
+  const modelLed = isModelLedCreativeTurn({ goal, modelSnapshot: selectedModel });
+  const contextBlocksSubmit =
+    (contextPending || contextFailed) && (modelLed || !conversationalGoal);
   const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
   const modelAvailability = getWorkbenchModelAvailability({
     plugins,
@@ -73,7 +84,7 @@ export function WorkbenchTaskCreator({
     allowLocalFallback: true,
     credentialAvailable,
   });
-  const modelBlocksSubmit = !modelAvailability.canSend && !conversationalGoal;
+  const modelBlocksSubmit = !modelAvailability.canSend && !conversationalGoal && !modelLed;
   const modelDirectoryMessage =
     modelAvailability.status === 'available' || !modelAvailability.message
       ? modelAvailability.message
@@ -101,12 +112,12 @@ export function WorkbenchTaskCreator({
         <header className="workbench-task-creator-header">
           <div>
             <div className="workbench-eyebrow">{novelTitle}</div>
-            <h2 id="workbench-task-creator-title">新建创作任务</h2>
+            <h2 id="workbench-task-creator-title">新建创作会话</h2>
           </div>
           <button
             type="button"
             className="workbench-icon-button"
-            aria-label="关闭新建任务"
+            aria-label="关闭新建会话"
             title="关闭"
             disabled={creating}
             onClick={onCancel}
@@ -117,7 +128,7 @@ export function WorkbenchTaskCreator({
 
         <div className="workbench-task-creator-body">
           <label className="workbench-task-goal">
-            <span>创作目标</span>
+            <span>聊聊你的构思</span>
             <GrowingGoalTextarea
               autoFocus
               data-testid="workbench-new-task-goal"
@@ -125,7 +136,9 @@ export function WorkbenchTaskCreator({
               value={goal}
               disabled={creating}
               placeholder={
-                chapterId ? '例如：写出本章冲突升级后的转折' : '例如：写个六万字左右的悬疑故事'
+                chapterId
+                  ? '例如：先聊聊这一章的冲突和人物动机'
+                  : '例如：我想写悬疑小说，先一起确定背景和主角'
               }
               onChange={(event) => onGoalChange(event.target.value)}
               onKeyDown={(event) => {
@@ -135,6 +148,8 @@ export function WorkbenchTaskCreator({
                   (event.ctrlKey || event.metaKey) &&
                   goal.trim() &&
                   !creating &&
+                  !modelPending &&
+                  !modelUnresolved &&
                   !contextBlocksSubmit &&
                   !modelBlocksSubmit
                 ) {
@@ -155,7 +170,7 @@ export function WorkbenchTaskCreator({
 
           <div className="workbench-task-creator-controls">
             <div className="workbench-scope-control">
-              <label htmlFor="workbench-new-task-chapter">目标范围</label>
+              <label htmlFor="workbench-new-task-chapter">交流范围</label>
               <ChapterLocator
                 chapters={chapters}
                 activeChapterId={chapterId}
@@ -173,11 +188,26 @@ export function WorkbenchTaskCreator({
               selectedModel={selectedModel}
               refreshing={pluginsLoading}
               refreshError={pluginsError}
-              disabled={creating}
+              disabled={creating || modelPending}
               onChange={onModelChange}
             />
           </div>
 
+          {modelSourceLabel && (
+            <p className="workbench-readiness-hint" data-testid="workbench-new-task-model-source">
+              {modelSourceLabel}；实际调用以本回合模型为准，历史重试保留原模型。
+            </p>
+          )}
+          {modelUnresolved && !modelPending && onRetryModelSource && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={creating}
+              onClick={onRetryModelSource}
+            >
+              重新读取作品模型
+            </button>
+          )}
           {contextPending && (
             <div
               className="workbench-readiness-hint"
@@ -191,7 +221,7 @@ export function WorkbenchTaskCreator({
                 size={15}
               />
               <span className="workbench-readiness-copy">
-                正在整理已有章节上下文；可以继续填写，完成后即可创建创作任务。
+                正在整理已有章节上下文；可以继续填写，完成后即可开始对话。
               </span>
             </div>
           )}
@@ -204,7 +234,7 @@ export function WorkbenchTaskCreator({
                 strokeWidth={1.8}
               />
               <span className="workbench-readiness-copy">
-                旧版上下文未能安全整理；创作任务已暂停，请重新启动应用后重试。
+                旧版上下文未能安全整理；会话准备已暂停，请重新启动应用后重试。
               </span>
             </div>
           )}
@@ -238,18 +268,25 @@ export function WorkbenchTaskCreator({
             type="button"
             className="btn btn-primary"
             data-testid="workbench-create-and-start"
-            disabled={creating || contextBlocksSubmit || modelBlocksSubmit || !goal.trim()}
+            disabled={
+              creating ||
+              modelPending ||
+              modelUnresolved ||
+              contextBlocksSubmit ||
+              modelBlocksSubmit ||
+              !goal.trim()
+            }
             onClick={onSubmit}
           >
             {creating
-              ? '正在创建…'
+              ? '正在开启…'
               : pluginsLoading && !conversationalGoal
-                ? '正在校验模型…'
-                : contextFailed && !conversationalGoal
+                ? '正在加载模型…'
+                : contextFailed && contextBlocksSubmit
                   ? '上下文未就绪'
                   : contextBlocksSubmit
                     ? '正在准备上下文…'
-                    : '创建并开始'}
+                    : '开始对话'}
           </button>
         </footer>
       </section>

@@ -20,6 +20,32 @@ export interface ChapterSummaryValidation {
     message: string;
   }>;
   safeToContext: boolean;
+  semanticValidation?: 'not_checked';
+  authorReviewed?: boolean;
+  evidenceValidation?: 'passed' | 'missing';
+  groundingIssues?: Array<{
+    severity: 'warning' | 'error';
+    code: string;
+    path: string;
+    message: string;
+  }>;
+}
+
+export interface ChapterSummaryGrounding {
+  version: 1;
+  claims: Array<{
+    path: string;
+    status: 'confirmed' | 'inferred' | 'unresolved' | 'planned';
+    quotes: string[];
+  }>;
+}
+
+/** Parsed declaration state for the versioned summary coverage contract. */
+export type SummaryCoverageFieldState = 'explicit' | 'missing';
+
+export interface ChapterSummaryCoverage {
+  characterChanges: SummaryCoverageFieldState;
+  contextRecords: SummaryCoverageFieldState;
 }
 
 export interface ChapterCharacterChange {
@@ -109,6 +135,11 @@ export interface CreateChapterSummaryInput {
 }
 
 export interface ChapterSummarizeResult {
+  grounding?: ChapterSummaryGrounding;
+  /** Set only by hosts/callers that use the covered summary contract. */
+  coverageVersion?: 1;
+  /** Parsed declaration state; `missing` is not an explicit empty array. */
+  coverage?: ChapterSummaryCoverage;
   summary: string;
   summaryTitle?: string;
   keyEvents: string[];

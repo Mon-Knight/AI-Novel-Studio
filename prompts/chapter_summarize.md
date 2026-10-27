@@ -36,6 +36,9 @@
 3. 不要擅自改变角色状态（只能基于正文中出现的变化）
 4. 总结要服务于下一章生成
 5. 重点提取关键事件、角色变化、关系变化、伏笔、下一章衔接
+6. characterChanges 与 contextRecords 必须显式返回数组；确认没有变化时返回空数组，不得省略字段
+7. 本章总结本身会作为 chapter_summary 上下文写入；contextRecords 只列额外长期记录，不要重复摘要
+8. 新版契约下人物状态只从 characterChanges 写入；importantCharacterChanges 与 protagonistStateChange 仅作描述，不授予状态写入权
 
 ## 输出格式
 

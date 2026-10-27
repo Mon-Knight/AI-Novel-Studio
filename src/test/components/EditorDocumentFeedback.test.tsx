@@ -563,3 +563,66 @@ describe('editor persistence and adoption feedback', () => {
     expect(screen.queryByText(/雾港来信/)).toBeNull();
   });
 });
+
+it('read-only candidate viewing and cancelled adoption write nothing, while explicit unchanged adoption consumes the original authorization', async () => {
+  const candidate = {
+    authorizationId: 'review-original',
+    artifactId: 'artifact-original',
+    content: draft.content,
+    contentHash: 'verified-content-hash',
+    novelId: chapter.novelId,
+    chapterId: chapter.id,
+  };
+  vi.mocked(draftVersionService.create).mockResolvedValue({ ...draft, source: 'ai_generated' });
+  vi.mocked(artifactDecisionService.adoptReviewAuthorizedDraft).mockResolvedValue({
+    authorization: {
+      authorizationId: candidate.authorizationId,
+      artifactId: candidate.artifactId,
+      chapterId: chapter.id,
+      novelId: chapter.novelId,
+      decisionId: 'original-confirm',
+      status: 'consumed',
+      issuedAt: timestamp,
+      consumedByDraftId: draft.id,
+    },
+    adoptedDraft: { ...draft, isAdopted: true },
+    summaryFollowUp: {
+      status: 'pending_generation',
+      chapterId: chapter.id,
+      adoptedDraftId: draft.id,
+    },
+  });
+  const { result } = renderHook(() =>
+    useEditorDocumentController({
+      chapter,
+      novelId: chapter.novelId,
+      currentDraft: null,
+      documentState: 'ready',
+      reviewCandidate: candidate,
+      reviewLocked: true,
+    }),
+  );
+  expect(result.current.canAdoptReadOnlyCandidate).toBe(true);
+  await act(async () => {
+    await result.current.handleSave();
+  });
+  expect(draftVersionService.create).not.toHaveBeenCalled();
+  vi.mocked(confirmInfo).mockResolvedValueOnce(false);
+  await act(async () => {
+    await result.current.handleAdoptCurrent();
+  });
+  expect(draftVersionService.create).not.toHaveBeenCalled();
+  expect(artifactDecisionService.adoptReviewAuthorizedDraft).not.toHaveBeenCalled();
+  await act(async () => {
+    await result.current.handleAdoptCurrent();
+  });
+  expect(draftVersionService.create).toHaveBeenCalledTimes(1);
+  expect(artifactDecisionService.adoptReviewAuthorizedDraft).toHaveBeenCalledWith({
+    authorizationId: candidate.authorizationId,
+    draftId: draft.id,
+    expectedDraftVersion: draft.versionNo,
+    expectedContentHash: 'verified-content-hash',
+  });
+  expect(draftVersionService.adopt).not.toHaveBeenCalled();
+  expect(result.current.adoptState).toBe('adopted');
+});

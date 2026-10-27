@@ -19,6 +19,8 @@ export type ChapterSummaryOrchestrationPhase =
   | 'rejected'
   | 'conflict'
   | 'failed'
+  | 'disabled'
+  | 'expired'
   | 'resolving_next'
   | 'next_ready'
   | 'story_complete';
@@ -32,6 +34,11 @@ export interface ChapterSummaryOrchestrationState {
   runId?: string;
   cardId?: string;
   nextChapterId?: string;
+  pendingChapters?: Array<{
+    chapterId: string;
+    phase: ChapterSummaryOrchestrationPhase;
+    cardId?: string;
+  }>;
 }
 
 export interface ChapterSummaryNextTarget {
@@ -45,6 +52,7 @@ export interface ResolveChapterSummaryOrchestrationInput {
   summaries: readonly ChapterSummary[];
   credentialAvailable?: boolean;
   nextTarget?: ChapterSummaryNextTarget;
+  preferredChapterId?: string;
 }
 
 const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
@@ -73,11 +81,10 @@ function hasMatchingSummary(
   );
 }
 
-function pendingOrLatestConsumedAuthorization(
+function matchingConsumedAuthorizations(
   bundle: TaskConversationBundle,
   chapters: readonly Chapter[],
-  summaries: readonly ChapterSummary[],
-): ReviewAuthorization | undefined {
+): ReviewAuthorization[] {
   const chapterOrder = new Map(chapters.map((chapter, index) => [chapter.id, index]));
   const matching = [...(bundle.authorizations ?? [])].filter((authorization) => {
     if (authorization.status !== 'consumed' || !authorization.consumedByDraftId) return false;
@@ -87,22 +94,13 @@ function pendingOrLatestConsumedAuthorization(
       chapter.adoptedDraftId === authorization.consumedByDraftId
     );
   });
-  const pending = matching
-    .filter((authorization) => !hasMatchingSummary(authorization, summaries))
-    .sort(
-      (left, right) =>
-        (chapterOrder.get(left.chapterId) ?? Number.MAX_SAFE_INTEGER) -
-          (chapterOrder.get(right.chapterId) ?? Number.MAX_SAFE_INTEGER) ||
-        timeValue(right.consumedAt ?? right.issuedAt) -
-          timeValue(left.consumedAt ?? left.issuedAt) ||
-        right.authorizationId.localeCompare(left.authorizationId),
-    );
-  if (pending[0]) return pending[0];
   return matching.sort(
     (left, right) =>
+      (chapterOrder.get(left.chapterId) ?? Number.MAX_SAFE_INTEGER) -
+        (chapterOrder.get(right.chapterId) ?? Number.MAX_SAFE_INTEGER) ||
       timeValue(right.consumedAt ?? right.issuedAt) - timeValue(left.consumedAt ?? left.issuedAt) ||
       right.authorizationId.localeCompare(left.authorizationId),
-  )[0];
+  );
 }
 
 function latestRun(runs: readonly TaskRun[]): TaskRun | undefined {
@@ -161,11 +159,42 @@ function validSummaryCard(
 export function resolveChapterSummaryOrchestration(
   input: ResolveChapterSummaryOrchestrationInput,
 ): ChapterSummaryOrchestrationState {
-  const authorization = pendingOrLatestConsumedAuthorization(
-    input.bundle,
-    input.chapters,
-    input.summaries,
-  );
+  const matching = matchingConsumedAuthorizations(input.bundle, input.chapters);
+  const pending = matching
+    .filter((authorization) => !hasMatchingSummary(authorization, input.summaries))
+    .map((authorization) => resolveSummaryForAuthorization(input, authorization));
+  // A rejected/awaiting-review chapter never claims that its context exists, but also
+  // must not serialize independent summaries behind a human decision indefinitely.
+  const runnable = new Set<ChapterSummaryOrchestrationPhase>(['ensure_turn', 'ready_to_start']);
+  const selected =
+    pending.find((state) => state.phase === 'generating') ??
+    pending.find(
+      (state) => state.chapterId === input.preferredChapterId && runnable.has(state.phase),
+    ) ??
+    pending.find((state) => runnable.has(state.phase)) ??
+    pending.find((state) => state.chapterId === input.preferredChapterId) ??
+    pending[0];
+  if (selected)
+    return {
+      ...selected,
+      pendingChapters: pending.map((state) => ({
+        chapterId: state.chapterId!,
+        phase: state.phase,
+        cardId: state.cardId,
+      })),
+    };
+  const authorization =
+    matching.find((item) => item.chapterId === input.preferredChapterId) ??
+    [...matching].sort(
+      (a, b) => timeValue(b.consumedAt ?? b.issuedAt) - timeValue(a.consumedAt ?? a.issuedAt),
+    )[0];
+  return resolveSummaryForAuthorization(input, authorization);
+}
+
+function resolveSummaryForAuthorization(
+  input: ResolveChapterSummaryOrchestrationInput,
+  authorization?: ReviewAuthorization,
+): ChapterSummaryOrchestrationState {
   if (!authorization?.consumedByDraftId) return { phase: 'none' };
 
   const base = {
@@ -189,7 +218,42 @@ export function resolveChapterSummaryOrchestration(
     return { phase: 'resolving_next', ...base };
   }
 
+  const existingSummary = input.summaries.find(
+    (summary) =>
+      summary.novelId === authorization.novelId &&
+      summary.chapterId === authorization.chapterId &&
+      summary.adoptedDraftId === authorization.consumedByDraftId,
+  );
+  // An author's disabled summary is not a request to regenerate or enable it.
+  if (existingSummary && (!existingSummary.enabled || existingSummary.isExpired)) {
+    return { phase: existingSummary.isExpired ? 'expired' : 'disabled', ...base };
+  }
+
   const turn = input.bundle.turns.find((item) => item.turnId === base.turnId);
+  const otherSummaryCard = [...input.bundle.artifacts]
+    .filter(
+      (card) =>
+        card.artifactType === 'chapter_summary' &&
+        card.turnId !== base.turnId &&
+        card.artifactEvidence?.sourceNovelId === authorization.novelId &&
+        card.artifactEvidence.sourceChapterId === authorization.chapterId &&
+        card.artifactEvidence.sourceDraftId === authorization.consumedByDraftId &&
+        VALID_ARTIFACT_STATUSES.has(card.artifactEvidence.processingStatus),
+    )
+    .sort((a, b) => timeValue(b.createdAt) - timeValue(a.createdAt))[0];
+  const autoRun = latestRun(input.bundle.runs.filter((run) => run.turnId === base.turnId));
+  if (
+    otherSummaryCard &&
+    (!autoRun ||
+      (!ACTIVE_RUN_STATUSES.has(autoRun.status) &&
+        timeValue(otherSummaryCard.createdAt) >= timeValue(autoRun.updatedAt)))
+  ) {
+    return resolveSummaryDecision(input.bundle, otherSummaryCard, {
+      ...base,
+      turnId: otherSummaryCard.turnId ?? base.turnId,
+      runId: otherSummaryCard.runId,
+    });
+  }
   if (!turn) return { phase: 'ensure_turn', ...base };
   const runs = input.bundle.runs.filter((run) => run.turnId === turn.turnId);
   const run = latestRun(runs);
@@ -204,8 +268,16 @@ export function resolveChapterSummaryOrchestration(
 
   const card = validSummaryCard(input.bundle, run, authorization, turn.turnId);
   if (!card) return { phase: 'failed', ...withRun };
-  const withCard = { ...withRun, cardId: card.cardId };
-  const decision = latestDecision(input.bundle, card);
+  return resolveSummaryDecision(input.bundle, card, withRun);
+}
+
+function resolveSummaryDecision(
+  bundle: TaskConversationBundle,
+  card: ConversationArtifactCard,
+  state: Omit<ChapterSummaryOrchestrationState, 'phase'>,
+): ChapterSummaryOrchestrationState {
+  const withCard = { ...state, cardId: card.cardId };
+  const decision = latestDecision(bundle, card);
   if (!decision) return { phase: 'awaiting_apply', ...withCard };
   if (decision.decision === 'request_revision') {
     return { phase: 'revision_requested', ...withCard };
@@ -224,7 +296,7 @@ export function chapterSummaryOrchestrationLabel(state: ChapterSummaryOrchestrat
     case 'ready_to_start':
       return '正在准备章节总结';
     case 'awaiting_credentials':
-      return '等待当前任务固定模型的会话凭据';
+      return '等待当前所选模型的匹配凭据';
     case 'generating':
       return '正在生成章节总结候选';
     case 'awaiting_apply':
@@ -237,6 +309,10 @@ export function chapterSummaryOrchestrationLabel(state: ChapterSummaryOrchestrat
       return '总结应用发生基线冲突，请重新生成候选';
     case 'failed':
       return state.runId ? '章节总结未完成，请使用回合中的重试操作' : '章节总结启动失败，请重试';
+    case 'disabled':
+      return '本章总结已停用，未用于正式上下文；可在章节审阅中管理';
+    case 'expired':
+      return '本章总结已过期，请依据当前采用稿重新总结';
     case 'resolving_next':
       return '章节总结已应用，正在确定下一计划章节';
     case 'next_ready':

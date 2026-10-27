@@ -48,6 +48,11 @@ pub async fn dsh_start_task_turn(
 }
 
 #[tauri::command]
+pub fn dsh_resolve_task_retry(conversation_id: String, novel_id: String, source_run_id: String) -> Result<task_runtime::retry::RetryResolution, String> {
+    task_runtime::retry::resolve(&conversation_id, &novel_id, &source_run_id)
+}
+
+#[tauri::command]
 pub fn dsh_cancel_task_run(conversation_id: String) -> Result<TaskRuntimeStatus, String> {
     task_runtime::cancel(&conversation_id)
 }
@@ -1259,29 +1264,7 @@ mod response_json_tests {
     }
 }
 
-/// Locates the gateway binary: DSH_GATEWAY_BIN env, then next to the app exe.
-pub(crate) fn resolve_gateway_bin() -> Result<String, String> {
-    if let Ok(bin) = std::env::var("DSH_GATEWAY_BIN") {
-        if !bin.trim().is_empty() && std::path::Path::new(&bin).is_file() {
-            return Ok(bin);
-        }
-    }
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
-        .ok_or_else(|| "无法定位应用可执行目录".to_string())?;
-    let candidates = [
-        crate::db::get_data_dir().join("dsh-runtime/gateway/novel-domain-gateway.exe"),
-        exe_dir.join("dsh-runtime/gateway/novel-domain-gateway.exe"),
-        exe_dir.join("novel-domain-gateway.exe"),
-    ];
-    if let Some(candidate) = candidates.iter().find(|candidate| candidate.is_file()) {
-        return Ok(candidate.to_string_lossy().to_string());
-    }
-    Err(format!(
-        "novel-domain-gateway 未找到（可设 DSH_GATEWAY_BIN 指定）；已检查应用数据和安装目录"
-    ))
-}
+pub(crate) use super::config::resolve_gateway_bin;
 
 #[cfg(test)]
 mod current_plugin_projection_tests {

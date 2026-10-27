@@ -31,13 +31,14 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const { MemoryRouter, Route, Routes } = await import('react-router-dom');
-
 const vite = await createServer({
   appType: 'custom',
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true, hmr: false, watch: null },
 });
+const { MemoryRouter, Route, Routes } = (await vite.ssrLoadModule(
+  '/src/test/routerExports.ts',
+)) as typeof import('react-router-dom');
 
 after(async () => {
   await vite.close();
@@ -79,13 +80,30 @@ const artifactDecisionModule = (await vite.ssrLoadModule(
 const chapterAssetRecoveryHookModule = (await vite.ssrLoadModule(
   '/src/pages/Workbench/hooks/useWorkbenchChapterAssetRecovery.ts',
 )) as typeof import('./hooks/useWorkbenchChapterAssetRecovery');
+const draftStateModule = (await vite.ssrLoadModule(
+  '/src/store/workbenchDraftStore.ts',
+)) as typeof import('../../store/workbenchDraftStore');
+const readingStateModule = (await vite.ssrLoadModule(
+  '/src/features/workbench/workbenchPresentationReading.ts',
+)) as typeof import('../../features/workbench/workbenchPresentationReading');
 const pageModule = (await vite.ssrLoadModule(
   '/src/pages/Workbench/WorkbenchPage.tsx',
 )) as typeof import('./WorkbenchPage');
+const taskWindowModule = (await vite.ssrLoadModule(
+  '/src/services/conversation/taskConversationWindow.ts',
+)) as typeof import('../../services/conversation/taskConversationWindow');
+const conversationWindowModule = (await vite.ssrLoadModule(
+  '/src/services/conversation/conversationWindow.ts',
+)) as typeof import('../../services/conversation/conversationWindow');
+const structuredRuleGovernanceModule = (await vite.ssrLoadModule(
+  '/src/services/conversation/structuredRuleGovernanceService.ts',
+)) as typeof import('../../services/conversation/structuredRuleGovernanceService');
 
 const { novelRepository } = novelRepoModule;
 const { chapterRepository } = chapterRepoModule;
 const { taskConversationService } = taskServiceModule;
+const { taskConversationWindow } = taskWindowModule;
+const { sliceConversationWindow } = conversationWindowModule;
 const { taskSessionAdapter } = taskSessionModule;
 const { chapterSummaryService } = chapterSummaryModule;
 const { startupCoordinator } = startupModule;
@@ -95,10 +113,11 @@ const { buildCoreAssetGenerationGoal, chapterAssetReadinessService, chapterAsset
   chapterAssetReadinessModule;
 const { decodeWorkbenchTurnContent, encodeWorkbenchTurnContent } = workbenchTurnOriginModule;
 const { artifactDecisionService } = artifactDecisionModule;
+const { structuredRuleGovernanceService } = structuredRuleGovernanceModule;
 const { useWorkbenchChapterAssetRecovery } = chapterAssetRecoveryHookModule;
 const WorkbenchPage = pageModule.default;
 
-const { act, cleanup, fireEvent, render, renderHook, screen, waitFor } =
+const { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } =
   await import('@testing-library/react');
 
 const originalGetAll = novelRepository.getAll;
@@ -107,8 +126,10 @@ const originalGetChapters = chapterRepository.getByNovelId;
 const originalListConversations = taskConversationService.list;
 const originalListPage = taskConversationService.listPage;
 const originalGetConversation = taskConversationService.get;
+const originalReadConversationWindow = taskConversationWindow.read;
 const originalCreateConversation = taskConversationService.create;
 const originalCreateInitializedConversation = taskConversationService.createInitialized;
+const originalUpdateConversationModel = taskConversationService.updateDefaultModel;
 const originalAppendConversationTurn = taskConversationService.appendTurn;
 const originalRenameConversation = taskConversationService.rename;
 const originalSetArchivedConversation = taskConversationService.setArchived;
@@ -128,6 +149,7 @@ const originalInspectChapterAssets = chapterAssetReadinessService.inspect;
 const originalApplyStructuredArtifact = artifactDecisionService.applyStructured;
 const originalRecordArtifactDecision = artifactDecisionService.record;
 const originalEnsureChapterSummaryFollowUp = artifactDecisionService.ensureChapterSummaryFollowUp;
+const originalPreviewStructuredRuleChange = structuredRuleGovernanceService.preview;
 
 const mockNovel: Novel = {
   id: 'novel-001',
@@ -230,6 +252,33 @@ const mockBundle: TaskConversationBundle = {
   artifacts: [],
 };
 
+/** Stable snapshot: useSyncExternalStore 会在每次 getSnapshot 返回新对象时强制重渲染。 */
+const settledStartupSnapshot = {
+  conversationRecovery: { status: 'succeeded' as const, result: { recoveredRuns: 0 } },
+  contextMigration: { status: 'succeeded' as const },
+  generationRecovery: { status: 'succeeded' as const },
+};
+
+/**
+ * jsdom has no Tauri bridge, and the read-only rule preview fails closed without it
+ * ('浏览器候选不能冒充桌面规则应用预览。'). Page tests stub that native boundary with an impact
+ * that needs no extra confirmation, so `setting_candidates` applies can walk the real
+ * applyStructured → onStructuredArtifactDecision → settleAssetCandidateDecision chain.
+ */
+function usePermissiveRuleChangePreview(): void {
+  structuredRuleGovernanceService.preview = async (input) => ({
+    novelId: input.novelId,
+    ruleSetFingerprint: 'rule-set-page-test',
+    sources: [],
+    affectedChapters: [],
+    dependentRules: [],
+    blockingConflicts: [],
+    uncertainty: [],
+    requiresConfirmation: false,
+    previewHash: 'preview-page-test',
+  });
+}
+
 function useBrowserMockModel(): void {
   localStorage.setItem(
     'ai_novel_studio_ai_settings',
@@ -243,7 +292,33 @@ function useBrowserMockModel(): void {
   );
 }
 
+/** Projects the current full-bundle fixture through the same window the page now reads. */
+async function readFixtureWindow(
+  query: Parameters<typeof taskConversationWindow.read>[0],
+  options: Parameters<typeof taskConversationWindow.read>[1],
+) {
+  const bundle = await taskConversationService.get(query.conversationId);
+  if (!bundle || bundle.conversation.conversationId !== query.conversationId) return null;
+  try {
+    return sliceConversationWindow(bundle, query);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      options?.allowStaleFocusFallback &&
+      query.focusTurnId &&
+      !query.focusCardId &&
+      message.includes('不属于当前任务')
+    ) {
+      const { focusTurnId: _ignored, ...rest } = query;
+      return sliceConversationWindow(bundle, rest);
+    }
+    throw error;
+  }
+}
+
 beforeEach(() => {
+  draftStateModule.useWorkbenchDraftStore.setState({ drafts: {} });
+  readingStateModule.clearWorkbenchPresentationReading();
   localStorage.clear();
   window.sessionStorage.clear();
   novelRepository.getAll = async () => [mockNovel];
@@ -258,6 +333,7 @@ beforeEach(() => {
     );
   };
   taskConversationService.get = async () => mockBundle;
+  taskConversationWindow.read = readFixtureWindow;
   taskConversationService.create = async (novelId, title, defaultModel) => ({
     conversationId: 'conv-002',
     novelId,
@@ -304,6 +380,7 @@ beforeEach(() => {
   taskSessionAdapter.subscribeToRuntimeProjections = async () => () => undefined;
   chapterSummaryService.getByNovelId = async () => [];
   chapterAssetReadinessService.inspect = async () => ({ ready: true, missingAssets: [] });
+  usePermissiveRuleChangePreview();
 });
 
 afterEach(() => {
@@ -314,8 +391,10 @@ afterEach(() => {
   taskConversationService.list = originalListConversations;
   taskConversationService.listPage = originalListPage;
   taskConversationService.get = originalGetConversation;
+  taskConversationWindow.read = originalReadConversationWindow;
   taskConversationService.create = originalCreateConversation;
   taskConversationService.createInitialized = originalCreateInitializedConversation;
+  taskConversationService.updateDefaultModel = originalUpdateConversationModel;
   taskConversationService.appendTurn = originalAppendConversationTurn;
   taskConversationService.rename = originalRenameConversation;
   taskConversationService.setArchived = originalSetArchivedConversation;
@@ -335,6 +414,7 @@ afterEach(() => {
   artifactDecisionService.applyStructured = originalApplyStructuredArtifact;
   artifactDecisionService.record = originalRecordArtifactDecision;
   artifactDecisionService.ensureChapterSummaryFollowUp = originalEnsureChapterSummaryFollowUp;
+  structuredRuleGovernanceService.preview = originalPreviewStructuredRuleChange;
 });
 
 test('Workbench directory reaches an old task through paged storage, search, and restart selection', async () => {
@@ -965,8 +1045,10 @@ test('WorkbenchPage keeps the draft editable and restores bundle without waiting
       resolveChapters = resolve;
     });
   };
-  taskConversationService.get = () => {
+  taskConversationService.get = (_conversationId, options) => {
     bundleRequests += 1;
+    // 恢复偏好读取只需要会话身份，直接返回，避免阻塞显示 bundle 的受控 Promise。
+    if (options?.hydrateArtifacts === false) return Promise.resolve(restoredBundle);
     return new Promise<TaskConversationBundle | null>((resolve) => {
       resolveBundle = resolve;
     });
@@ -994,7 +1076,8 @@ test('WorkbenchPage keeps the draft editable and restores bundle without waiting
   await act(async () => resolveConversations([mockConversation]));
   await waitFor(() => {
     assert.equal(chapterRequests, 1);
-    assert.equal(bundleRequests, 1);
+    // 最近任务恢复读取一次 bundle 以确认可恢复身份，选中会话后再读取一次用于显示。
+    assert.equal(bundleRequests, 2);
     assert.ok(screen.getByTestId('workbench-bundle-loading'));
   });
   const restoringComposer = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
@@ -1215,8 +1298,8 @@ test('WorkbenchPage preserves a startup draft when the project has no existing t
   fireEvent.change(startupComposer, { target: { value: '先写一个六万字悬疑故事' } });
 
   await waitFor(() => assert.ok(screen.getByTestId('workbench-create-empty-task')));
-  assert.equal(screen.queryByText('任务恢复中，草稿会保留'), null);
-  assert.ok(screen.getByText('请先新建创作任务'));
+  assert.equal(screen.queryByText('会话恢复中，草稿会保留'), null);
+  assert.ok(screen.getByText('请先新建创作会话'));
   assert.equal(
     (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
     '先写一个六万字悬疑故事',
@@ -1292,39 +1375,50 @@ test('WorkbenchPage clicking a task template fills the input draft', async () =>
     assert.ok(screen.getByText('生成下一章'));
   });
 
+  // Templates live behind the composer "+" menu. Applying one closes that menu and hands the
+  // caret back to the input, so picking the next template means opening the menu again.
+  const openAttachMenu = () => {
+    fireEvent.click(screen.getByTestId('workbench-composer-attach'));
+    assert.equal(
+      screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
+      'true',
+    );
+    assert.equal(
+      screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'),
+      false,
+    );
+  };
+  const draftOf = () =>
+    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value;
+
+  openAttachMenu();
   const templateButton = screen.getByText('生成下一章');
   fireEvent.click(templateButton);
 
-  await waitFor(() => {
-    const textarea = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
-    assert.equal(textarea.value, '生成下一章');
-  });
+  await waitFor(() => assert.equal(draftOf(), '生成下一章'));
+  assert.equal(
+    screen.getByTestId('workbench-composer-attach').getAttribute('aria-expanded'),
+    'false',
+  );
+  assert.equal(screen.getByTestId('workbench-composer-attach-menu').hasAttribute('hidden'), true);
+  assert.equal(document.activeElement, screen.getByTestId('workbench-composer-input'));
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('完善大纲'));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '生成下一章',
-  );
+  assert.equal(draftOf(), '生成下一章');
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '完善当前章节大纲',
-  );
+  assert.equal(draftOf(), '完善当前章节大纲');
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('更多模板'));
   fireEvent.click(screen.getByText('人物一致性审计'));
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '审计本章已采用正文的人物一致性',
-  );
+  assert.equal(draftOf(), '审计本章已采用正文的人物一致性');
 
+  openAttachMenu();
   fireEvent.click(screen.getByText('推演事件'));
   fireEvent.click(screen.getByRole('button', { name: '替换目标' }));
-  assert.equal(
-    (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
-    '生成本章剧情事件候选',
-  );
+  assert.equal(draftOf(), '生成本章剧情事件候选');
 });
 
 test('WorkbenchPage identifies automatic asset preparation turns without presenting them as the user', async () => {
@@ -1825,10 +1919,15 @@ test('Workbench automatically sequences missing assets while keeping every apply
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'awaiting_apply', readiness.textContent);
   });
-  assert.equal(
-    (screen.getByTestId('workbench-generate-asset-world_setting') as HTMLButtonElement).disabled,
-    true,
-  );
+  // While the world candidate waits for the user's own apply decision the current asset is not
+  // regenerable; its action becomes locating that exact candidate instead of producing a new one.
+  assert.equal(screen.queryByTestId('workbench-generate-asset-world_setting'), null);
+  const currentAssetAction = screen.getByTestId(
+    'workbench-view-preparation-candidate',
+  ) as HTMLButtonElement;
+  assert.match(currentAssetAction.textContent ?? '', /查看本次候选/);
+  assert.equal(currentAssetAction.disabled, false);
+  assert.equal(currentAssetAction.dataset.candidateCardId, 'card-world_setting');
   assert.equal(startedGoals.length, 1);
   let applyButtons = screen.getAllByTestId('workbench-artifact-apply');
   fireEvent.click(applyButtons[applyButtons.length - 1]!);
@@ -2156,7 +2255,7 @@ test('Workbench keeps a failed automatic preparation idle until explicit retry',
   assert.equal(appendedTurns, 0);
 });
 
-test('Workbench rejects same-turn preflight retry when the persisted preparation goal mismatches', async () => {
+test('Workbench rejects same-turn preflight retry when the persisted preparation scope mismatches', async () => {
   useBrowserMockModel();
   const originalGoal = '生成本章正文';
   const preparationTurn: ConversationTurn = {
@@ -2223,7 +2322,7 @@ test('Workbench rejects same-turn preflight retry when the persisted preparation
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'failed');
     assert.equal(readiness.dataset.orchestrationErrorCode, 'MODEL_TOOL_CALLING_NOT_VERIFIED');
-    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+    assert.match(readiness.textContent ?? '', /作用域不匹配/);
   });
   assert.equal(appendedTurns, 0);
   assert.equal(startedRuns, 0);
@@ -2234,7 +2333,7 @@ test('Workbench rejects same-turn preflight retry when the persisted preparation
   await waitFor(() => {
     const readiness = screen.getByTestId('workbench-asset-readiness');
     assert.equal(readiness.dataset.orchestrationPhase, 'failed');
-    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+    assert.match(readiness.textContent ?? '', /作用域不匹配/);
   });
   assert.equal(appendedTurns, 0);
   assert.equal(startedRuns, 0);
@@ -2764,6 +2863,8 @@ test('Workbench rechecks a blocked goal only after a structured candidate report
 
 test('Workbench rechecks a queued asset before appending its automatic preparation turn', async () => {
   useBrowserMockModel();
+  startupCoordinator.getSnapshot = () => settledStartupSnapshot;
+  startupCoordinator.subscribe = () => () => undefined;
   const goal = '写个六万字左右的悬疑故事。';
   let inspectionCount = 0;
   const appendedTurns: ConversationTurn[] = [];
@@ -2807,11 +2908,27 @@ test('Workbench rechecks a queued asset before appending its automatic preparati
       <WorkbenchPage />
     </MemoryRouter>,
   );
-  const composer = await screen.findByTestId('workbench-composer-input');
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-task-header').getAttribute('data-conversation-id'),
+      mockConversation.conversationId,
+    ),
+  );
+  const composer = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
   fireEvent.change(composer, { target: { value: goal } });
-  const send = screen.getByTestId('workbench-send-task') as HTMLButtonElement;
-  await waitFor(() => assert.equal(send.disabled, false));
-  fireEvent.click(send);
+  await waitFor(() => {
+    const sendButton = screen.getByTestId('workbench-send-task') as HTMLButtonElement;
+    assert.equal(
+      sendButton.disabled,
+      false,
+      JSON.stringify({
+        pending: screen.queryByTestId('workbench-task-pending')?.textContent ?? null,
+        contextPending: Boolean(screen.queryByTestId('workbench-context-pending')),
+        draft: (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
+      }),
+    );
+  });
+  fireEvent.click(screen.getByTestId('workbench-send-task'));
 
   await waitFor(() => assert.equal(startedInputs.length, 1));
   assert.ok(inspectionCount >= 2);
@@ -3721,7 +3838,7 @@ test('Workbench task creator gates chapter templates when project scope is selec
   const chapterSelect = screen.getByTestId('workbench-new-task-chapter') as HTMLSelectElement;
   fireEvent.change(chapterSelect, { target: { value: '' } });
   const taskGoal = screen.getByTestId('workbench-new-task-goal') as HTMLTextAreaElement;
-  assert.equal(taskGoal.placeholder, '例如：写个六万字左右的悬疑故事');
+  assert.equal(taskGoal.placeholder, '例如：我想写悬疑小说，先一起确定背景和主角');
 
   const creator = screen.getByTestId('workbench-task-creator');
   const creatorTemplate = (id: string) =>
@@ -3738,7 +3855,7 @@ test('Workbench task creator gates chapter templates when project scope is selec
 
   fireEvent.change(chapterSelect, { target: { value: mockChapter.id } });
   await waitFor(() => {
-    assert.equal(taskGoal.placeholder, '例如：写出本章冲突升级后的转折');
+    assert.equal(taskGoal.placeholder, '例如：先聊聊这一章的冲突和人物动机');
     assert.equal(creatorTemplate('story-plan').disabled, true);
     assert.equal(creatorTemplate('protagonist').disabled, true);
     assert.equal(creatorTemplate('world-setting').disabled, true);
@@ -3761,9 +3878,11 @@ test('Workbench keeps tool execution details inline in the conversation', async 
   fireEvent.click(screen.getByTestId('workbench-task'));
 
   await waitFor(() => {
-    assert.ok(screen.getByTestId('workbench-message-list'));
-    assert.ok(screen.getByTestId('workbench-tool-event'));
-    assert.ok(screen.getByText('mock · Mock'));
+    const messageList = screen.getByTestId('workbench-message-list');
+    assert.ok(messageList.contains(screen.getByTestId('workbench-tool-event')));
+    const modelSource = screen.getByText('来源模型');
+    assert.equal(modelSource.getAttribute('title'), 'mock · Mock');
+    assert.ok(messageList.contains(modelSource));
   });
   const toolEvent = screen.getByTestId('workbench-tool-event') as HTMLDetailsElement;
   toolEvent.open = true;
@@ -3847,7 +3966,7 @@ test('Workbench retries a renderer-recovered Writer run on its original turn and
   assert.equal(recoveryError.textContent, '工作台已重新加载，上一轮运行已中断。请重试本回合。');
   const retryButton = (await screen.findByTestId('workbench-retry-turn')) as HTMLButtonElement;
   assert.equal(retryButton.disabled, false);
-  assert.equal(retryButton.textContent, '重试此回合');
+  assert.equal(retryButton.textContent, '重试失败阶段');
   fireEvent.click(retryButton);
   fireEvent.click(retryButton);
 
@@ -3915,21 +4034,6 @@ test('retrying an older failed run creates a new run on the original user turn',
         ...mockBundle.toolEvents[0],
         eventId: 'evt-latest',
         runId: 'run-latest',
-      },
-    ],
-    artifacts: [
-      {
-        cardId: 'card-old',
-        conversationId: mockBundle.conversation.conversationId,
-        turnId: 'turn-old',
-        runId: 'run-old',
-        artifactId: 'artifact-old',
-        artifactType: 'quality_report',
-        title: '旧运行报告',
-        summary: '旧运行产物',
-        content: '旧运行证据',
-        status: 'candidate',
-        createdAt: '2026-08-20T00:00:01.000Z',
       },
     ],
   };
@@ -4032,27 +4136,39 @@ test('retrying an older failed run creates a new run on the original user turn',
   await waitFor(() => assert.equal(chapterSelect.value, mockChapter.id));
 
   await waitFor(() => {
-    const oldTurn = document.querySelector('[data-turn-id="turn-old"]');
+    const oldTurn = document.querySelector(
+      '[data-testid="workbench-turn"][data-turn-id="turn-old"]',
+    );
     assert.ok(oldTurn);
-    assert.equal(oldTurn.querySelectorAll('[data-testid="workbench-run"]').length, 2);
-    assert.match(oldTurn.textContent ?? '', /第 1 次运行/);
-    assert.match(oldTurn.textContent ?? '', /第 2 次运行/);
-    assert.match(oldTurn.textContent ?? '', /Mock/);
-    assert.match(oldTurn.textContent ?? '', /旧回合失败/);
-    const oldRun = oldTurn.querySelector('[data-testid="workbench-run"][data-run-id="run-old"]');
-    const retryRun = oldTurn.querySelector(
+    const sourceNodes = screen
+      .getAllByTestId('workbench-public-event')
+      .filter((node) => node.getAttribute('data-turn-id') === 'turn-old');
+    const sourceText = sourceNodes.map((node) => node.textContent ?? '').join('\n');
+    assert.match(sourceText, /第 1 次运行/);
+    assert.match(sourceText, /第 2 次运行/);
+    assert.match(sourceText, /Mock/);
+    assert.match(sourceText, /旧回合失败/);
+    const oldRun = document.querySelector('[data-testid="workbench-run"][data-run-id="run-old"]');
+    const retryRun = document.querySelector(
       '[data-testid="workbench-run"][data-run-id="run-retry"]',
     );
     assert.ok(oldRun);
     assert.ok(retryRun);
-    assert.ok(oldRun.querySelector('[data-event-id="evt-old"]'));
-    assert.ok(oldRun.querySelector('[data-card-id="card-old"]'));
-    assert.equal(oldRun.querySelector('[data-event-id="evt-retry"]'), null);
-    assert.equal(oldRun.querySelector('[data-card-id="card-retry"]'), null);
-    assert.ok(retryRun.querySelector('[data-event-id="evt-retry"]'));
-    assert.ok(retryRun.querySelector('[data-card-id="card-retry"]'));
-    assert.equal(retryRun.querySelector('[data-event-id="evt-old"]'), null);
-    assert.equal(retryRun.querySelector('[data-card-id="card-old"]'), null);
+    assert.equal(oldRun.getAttribute('data-turn-id'), 'turn-old');
+    assert.equal(retryRun.getAttribute('data-turn-id'), 'turn-old');
+    for (const [selector, runId] of [
+      ['[data-event-id="evt-old"]', 'run-old'],
+      ['[data-event-id="evt-retry"]', 'run-retry'],
+      ['[data-card-id="card-retry"]', 'run-retry'],
+    ]) {
+      const node = document
+        .querySelector(selector)
+        ?.closest('[data-testid="workbench-public-event"]');
+      assert.ok(node, selector);
+      assert.equal(node.getAttribute('data-run-id'), runId);
+      assert.equal(node.getAttribute('data-turn-id'), 'turn-old');
+    }
+    assert.ok(oldRun.compareDocumentPosition(retryRun) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });
 
@@ -4180,7 +4296,7 @@ test('WorkbenchPage does not inherit another task model when a legacy task has n
 
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'mock:Task A Model',
     );
   });
@@ -4196,7 +4312,7 @@ test('WorkbenchPage does not inherit another task model when a legacy task has n
       'conv-legacy-model',
     );
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'deepseek-official:deepseek-chat',
     );
   });
@@ -4727,8 +4843,14 @@ test('Workbench creates the task atomically and advances its initialized next-ch
   });
   fireEvent.click(screen.getByTestId('workbench-create-task'));
   const creator = await screen.findByTestId('workbench-task-creator');
-  const goalInput = screen.getByRole('textbox', { name: '创作目标' });
+  const goalInput = screen.getByRole('textbox', { name: '聊聊你的构思' });
   fireEvent.change(goalInput, { target: { value: '生成下一章' } });
+  await waitFor(() =>
+    assert.equal(
+      (screen.getByTestId('workbench-create-and-start') as HTMLButtonElement).disabled,
+      false,
+    ),
+  );
   fireEvent.click(screen.getByTestId('workbench-create-and-start'));
 
   await waitFor(() => assert.equal(startedInput?.conversationId, 'conv-created'));
@@ -5140,7 +5262,7 @@ test('WorkbenchPage keeps editing responsive while legacy context is still settl
 
   fireEvent.click(screen.getByTestId('workbench-create-task'));
   const creator = await screen.findByTestId('workbench-task-creator');
-  const goal = screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement;
+  const goal = within(creator).getByTestId('workbench-new-task-goal') as HTMLTextAreaElement;
   assert.equal(goal.disabled, false);
   assert.ok(screen.getByTestId('workbench-new-task-context-pending'));
   fireEvent.change(goal, { target: { value: '生成下一章' } });
@@ -5188,13 +5310,101 @@ test('WorkbenchPage fails closed for creative tasks when legacy context migratio
   );
 });
 
-test('WorkbenchPage revalidates the model directory before persisting a turn', async () => {
+test('WorkbenchPage saves a new model in the same task and uses it only for the next turn', async () => {
+  useBrowserMockModel();
+  const originalModel = { ...mockBundle.runs[0].modelSnapshot, modelId: 'Original-Mock' };
+  const historicalRun = { ...mockBundle.runs[0], modelSnapshot: originalModel };
+  let storedBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: { ...mockConversation, defaultModel: originalModel },
+    runs: [historicalRun],
+  };
+  taskConversationService.list = async () => [storedBundle.conversation];
+  taskConversationService.get = async () => storedBundle;
+  let finishSave!: () => void;
+  let saveCount = 0;
+  taskConversationService.updateDefaultModel = async (conversationId, defaultModel) => {
+    saveCount += 1;
+    assert.equal(conversationId, mockConversation.conversationId);
+    await new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    storedBundle = {
+      ...storedBundle,
+      conversation: {
+        ...storedBundle.conversation,
+        defaultModel,
+        updatedAt: '2026-10-13T00:00:00.000Z',
+      },
+    };
+    return storedBundle.conversation;
+  };
+  taskConversationService.appendTurn = async (conversationId, role, content) => ({
+    turnId: 'turn-after-model-switch',
+    conversationId,
+    sequence: 2,
+    role,
+    content,
+    createdAt: '2026-10-13T00:00:01.000Z',
+  });
+  const startedInputs: Parameters<typeof taskSessionAdapter.startTurn>[0][] = [];
+  taskSessionAdapter.startTurn = async (input) => {
+    startedInputs.push(input);
+    return {
+      ...historicalRun,
+      runId: 'run-after-model-switch',
+      turnId: input.turnId,
+      modelSnapshot: input.modelSnapshot!,
+    };
+  };
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('combobox', { name: '后续回合模型' });
+  await waitFor(() =>
+    assert.equal(
+      (screen.getByRole('combobox', { name: '后续回合模型' }) as HTMLSelectElement).disabled,
+      false,
+    ),
+  );
+  const selector = screen.getByRole('combobox', {
+    name: '后续回合模型',
+  }) as HTMLSelectElement;
+  const draft = '完善当前章节大纲';
+  fireEvent.change(screen.getByTestId('workbench-composer-input'), { target: { value: draft } });
+  fireEvent.change(selector, { target: { value: 'mock:Mock' } });
+  await waitFor(() => assert.ok(screen.getByTestId('workbench-model-saving')));
+  assert.equal(selector.value, 'mock:Original-Mock');
+  assert.equal(selector.disabled, true);
+  assert.equal((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled, true);
+  fireEvent.keyDown(screen.getByTestId('workbench-composer-input'), {
+    key: 'Enter',
+    ctrlKey: true,
+  });
+  assert.equal(startedInputs.length, 0);
+  await act(async () => finishSave());
+  await waitFor(() => assert.equal(selector.value, 'mock:Mock'));
+  await waitFor(() =>
+    assert.equal((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled, false),
+  );
+  fireEvent.click(screen.getByTestId('workbench-send-task'));
+  await waitFor(() => assert.equal(startedInputs.length, 1));
+  assert.equal(startedInputs[0].conversationId, mockConversation.conversationId);
+  assert.equal(startedInputs[0].modelSnapshot?.modelId, 'Mock');
+  assert.equal(saveCount, 1);
+  assert.equal(historicalRun.modelSnapshot.modelId, 'Original-Mock');
+  assert.equal(storedBundle.runs[0].modelSnapshot.modelId, 'Original-Mock');
+});
+
+test('WorkbenchPage accepts and executes a turn without a model-directory preflight', async () => {
   let appendedTurns = 0;
   let startedTurns = 0;
   taskConversationService.appendTurn = async (conversationId, role, content) => {
     appendedTurns += 1;
     return {
-      turnId: 'turn-should-not-persist',
+      turnId: 'turn-submitted-without-probe',
       conversationId,
       sequence: 2,
       role,
@@ -5221,16 +5431,13 @@ test('WorkbenchPage revalidates the model directory before persisting a turn', a
   fireEvent.click(screen.getByTestId('workbench-task'));
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'mock:Mock',
     );
-    assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).disabled,
-      true,
-    );
+    assert.equal(screen.getByTestId('workbench-model-select').tagName, 'SELECT');
     assert.equal(
       screen.getByTestId('workbench-model-select').getAttribute('data-model-locked'),
-      'true',
+      'false',
     );
   });
 
@@ -5252,15 +5459,9 @@ test('WorkbenchPage revalidates the model directory before persisting a turn', a
   );
   fireEvent.click(screen.getByTestId('workbench-send-task'));
 
-  await waitFor(() => {
-    assert.match(
-      screen.getByTestId('workbench-composer-error').textContent ?? '',
-      /Runtime 模型目录/,
-    );
-  });
-  assert.equal(textarea.value, draft);
-  assert.equal(appendedTurns, 0);
-  assert.equal(startedTurns, 0);
+  await waitFor(() => assert.equal(startedTurns, 1));
+  assert.equal(textarea.value, '');
+  assert.equal(appendedTurns, 1);
 });
 
 test('WorkbenchPage exposes model recovery without discarding the unsent goal', async () => {
@@ -5316,7 +5517,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
 
   await waitFor(() => {
     assert.equal(
-      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      screen.getByTestId('workbench-model-select').getAttribute('data-model-value'),
       'openai_compatible:legacy-model',
     );
   });
@@ -5324,7 +5525,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
   assert.equal(recovery.getAttribute('role'), 'alert');
   assert.ok(screen.getByRole('button', { name: '重试模型目录' }));
   assert.ok(screen.getByRole('button', { name: '模型设置' }));
-  assert.ok(screen.getByRole('button', { name: '使用当前模型新建任务' }));
+  assert.ok(screen.getByRole('button', { name: '使用当前模型新建会话' }));
 
   const readsBeforeRetry = directoryReads;
   fireEvent.click(screen.getByRole('button', { name: '重试模型目录' }));
@@ -5334,7 +5535,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
     '保留这段尚未发送的创作目标',
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '使用当前模型新建任务' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用当前模型新建会话' }));
   await waitFor(() => {
     assert.equal(
       (screen.getByTestId('workbench-new-task-goal') as HTMLTextAreaElement).value,
@@ -5357,7 +5558,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
   await waitFor(() => assert.ok(screen.getByTestId('model-settings-destination')));
 });
 
-test('WorkbenchPage keeps local conversational replies available when the model directory is unavailable', async () => {
+test('WorkbenchPage keeps conversation submission available when the model directory is unavailable', async () => {
   localStorage.setItem(
     'ai_novel_studio_ai_settings',
     JSON.stringify({
@@ -5368,26 +5569,45 @@ test('WorkbenchPage keeps local conversational replies available when the model 
     }),
   );
   let appendedGoal = '';
-  let startedGoal = '';
+  let currentBundle = mockBundle;
+  const startedInputs: Parameters<typeof taskSessionAdapter.startTurn>[0][] = [];
+  taskConversationService.get = async () => currentBundle;
   taskConversationService.appendTurn = async (conversationId, role, content) => {
     appendedGoal = content;
-    return {
-      turnId: 'turn-local-reply',
+    const turn: ConversationTurn = {
+      turnId: 'turn-model-unavailable',
       conversationId,
       sequence: 2,
       role,
       content,
       createdAt: '2026-08-20T00:00:03.000Z',
     };
+    currentBundle = { ...currentBundle, turns: [...currentBundle.turns, turn] };
+    return turn;
   };
+  // Simulate the execution boundary, not an API call: the directory and missing
+  // credential are advisory, and only the attempted run reports execution failure.
+  const executionError = '实际模型执行失败（测试夹具：匹配凭据不可用）';
   taskSessionAdapter.startTurn = async (input) => {
-    startedGoal = input.goal;
-    return {
+    startedInputs.push(input);
+    const failedRun = {
       ...mockBundle.runs[0],
-      runId: 'run-local-reply',
+      runId: 'run-model-unavailable',
       turnId: input.turnId,
       modelSnapshot: input.modelSnapshot!,
+      status: 'failed' as const,
+      error: executionError,
+      startedAt: '2026-08-20T00:00:04.000Z',
+      finishedAt: '2026-08-20T00:00:05.000Z',
+      createdAt: '2026-08-20T00:00:04.000Z',
+      updatedAt: '2026-08-20T00:00:05.000Z',
     };
+    currentBundle = {
+      ...currentBundle,
+      conversation: { ...currentBundle.conversation, status: 'failed' },
+      runs: [...currentBundle.runs, failedRun],
+    };
+    return failedRun;
   };
 
   render(
@@ -5399,7 +5619,14 @@ test('WorkbenchPage keeps local conversational replies available when the model 
   await waitFor(() => assert.ok(screen.getByTestId('workbench-task')));
   fireEvent.click(screen.getByTestId('workbench-task'));
   const recovery = await screen.findByTestId('workbench-model-directory-status');
-  assert.match(recovery.textContent ?? '', /本地能力问答仍可发送/);
+  // This browser fixture has neither a DSH-loaded model entry nor a matching
+  // credential. The missing-credential advisory takes precedence over the directory copy.
+  await waitFor(() => {
+    assert.equal(recovery.dataset.status, 'unavailable');
+    assert.match(recovery.textContent ?? '', /尚未找到当前模型的匹配凭据/);
+    assert.match(recovery.textContent ?? '', /同一模型执行，错误显示在对话中/);
+  });
+  assert.equal(screen.queryByTestId('workbench-run-error'), null);
   fireEvent.change(screen.getByTestId('workbench-composer-input'), {
     target: { value: '你能做什么？' },
   });
@@ -5411,6 +5638,19 @@ test('WorkbenchPage keeps local conversational replies available when the model 
     ctrlKey: true,
   });
 
-  await waitFor(() => assert.equal(startedGoal, '你能做什么？'));
+  await waitFor(() => assert.equal(startedInputs.length, 1));
+  const input = startedInputs[0];
+  assert.equal(input.goal, '你能做什么？');
+  assert.equal(input.turnId, 'turn-model-unavailable');
+  assert.equal(input.conversationId, mockConversation.conversationId);
+  assert.equal(input.novelId, mockNovel.id);
+  assert.equal(input.modelSnapshot?.runtimeMode, 'api');
+  assert.equal(input.modelSnapshot?.providerId, 'deepseek-official');
+  assert.equal(input.modelSnapshot?.modelId, 'deepseek-chat');
+  assert.equal(input.modelSnapshot?.baseUrl, 'https://api.deepseek.com');
   assert.equal(appendedGoal, '你能做什么？');
+  assert.equal((screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value, '');
+  const runError = await screen.findByTestId('workbench-run-error');
+  assert.equal(runError.textContent, executionError);
+  assert.equal(screen.queryByTestId('workbench-composer-error'), null);
 });

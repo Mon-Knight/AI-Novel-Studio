@@ -210,7 +210,7 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
                 )}
                 {ev.title}
               </strong>
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                 {ChapterEventStatusLabels[ev.status]}
               </span>
             </div>
@@ -218,12 +218,12 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
               {ev.description}
             </div>
             {ev.impact && (
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                 影响：{ev.impact}
               </div>
             )}
             {ev.risk && (
-              <div style={{ fontSize: 11, color: 'var(--color-warning)' }}>风险：{ev.risk}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>风险：{ev.risk}</div>
             )}
             <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
               <button
@@ -314,10 +314,10 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
               {s.rawText || s.description}
             </div>
             {s.impact && (
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>影响：{s.impact}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>影响：{s.impact}</div>
             )}
             {s.risk && (
-              <div style={{ fontSize: 11, color: 'var(--color-warning)' }}>风险：{s.risk}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>风险：{s.risk}</div>
             )}
             {!s.rawText && (
               <button
@@ -341,7 +341,7 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
       {/* 提示 */}
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--color-text-muted)',
           padding: '8px 0',
           borderTop: '1px solid var(--color-border-light)',

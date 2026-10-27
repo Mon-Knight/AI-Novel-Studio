@@ -16,6 +16,8 @@ export interface WorkbenchRunProgress {
   stage: string;
   elapsedMs: number;
   lastActivityAtMs: number;
+  requestLimit?: string;
+  providerRetryCount: number;
 }
 
 export function resolveWorkbenchConversationStatus(input: {
@@ -76,8 +78,13 @@ export function resolveWorkbenchRunProgress(
     const name = TOOL_LABELS[activeEvent.toolName] ?? '运行时步骤';
     stage = activeEvent.status === 'running' ? name : `等待${name}`;
   } else if (run.status === 'queued') stage = '等待调度';
-  else if (run.status === 'running') stage = latestEvent ? '整理运行结果' : '准备运行';
-  else stage = statusLabel(run.status);
+  else if (run.status === 'running') {
+    stage = run.error?.startsWith('DSH_CHAPTER_CANDIDATE_WITHHELD')
+      ? '正在校验章节候选'
+      : latestEvent
+        ? '等待模型响应'
+        : '准备运行';
+  } else stage = statusLabel(run.status);
 
   const startedAtMs = timestampMs(run.startedAt) ?? timestampMs(run.createdAt) ?? nowMs;
   const finishedAtMs = active
@@ -98,5 +105,22 @@ export function resolveWorkbenchRunProgress(
     stage,
     elapsedMs: Math.max(0, finishedAtMs - startedAtMs),
     lastActivityAtMs: Math.max(startedAtMs, ...activityCandidates),
+    requestLimit: requestLimitFromHost(orderedEvents),
+    providerRetryCount: orderedEvents.filter(
+      (event) => event.toolName === 'dsh.llm.retry-started' && event.status === 'succeeded',
+    ).length,
   };
+}
+
+function requestLimitFromHost(events: ToolCallEvent[]): string | undefined {
+  const contract = events.find(
+    (event) =>
+      event.toolName === 'dsh.execution_contract' &&
+      event.status === 'succeeded' &&
+      event.argumentsSummary.source === 'ans-host',
+  );
+  const seconds = contract?.argumentsSummary.requestTimeoutSeconds;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? `单次模型请求上限 ${formatRunDuration(seconds * 1000)}`
+    : undefined;
 }

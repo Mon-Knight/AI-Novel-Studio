@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { CircleAlert, LoaderCircle, X } from 'lucide-react';
+import { ArrowLeft, CircleAlert, LoaderCircle, X } from 'lucide-react';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 
 const pluginLifecycleLabel = {
@@ -23,11 +23,13 @@ export const PluginPanel = memo(function PluginPanel({
   loading = false,
   error = '',
   onClose,
+  onBack,
 }: {
   plugins: CurrentPluginProjection[];
   loading?: boolean;
   error?: string;
   onClose: () => void;
+  onBack?: () => void;
 }) {
   const grouped = useMemo(
     () => ({
@@ -45,6 +47,18 @@ export const PluginPanel = memo(function PluginPanel({
       aria-label="当前插件"
     >
       <div className="workbench-plugin-header">
+        {onBack && (
+          <button
+            type="button"
+            className="workbench-icon-button"
+            data-testid="workbench-side-back"
+            aria-label="返回标签列表"
+            title="返回标签列表"
+            onClick={onBack}
+          >
+            <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+          </button>
+        )}
         <div>
           <div className="workbench-eyebrow">Runtime Registry</div>
           <h2>当前插件</h2>

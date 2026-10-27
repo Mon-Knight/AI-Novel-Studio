@@ -14,6 +14,9 @@ const CORE_ASSETS_MISSING = 'GENERATION_CORE_ASSETS_MISSING';
 const PREVIOUS_CHAPTER_NOT_ADOPTED = 'WORKBENCH_PREVIOUS_CHAPTER_NOT_ADOPTED';
 const PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE = 'WORKBENCH_PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE';
 const MODEL_CREDENTIAL_UNAVAILABLE = 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE';
+const CONTEXT_INCOMPLETE = 'DSH_CONTEXT_INCOMPLETE';
+const REVISION_SOURCE_INVALID = 'WORKBENCH_REVISION_SOURCE_INVALID';
+const NATIVE_REVISION_SOURCE_INVALID = 'CHAPTER_REVISION_SOURCE_INVALID';
 const RETRY_TARGET_FAILURES = new Set([
   'WORKBENCH_RETRY_TARGET_MISSING',
   'WORKBENCH_RETRY_TARGET_CONFLICT',
@@ -30,6 +33,21 @@ const RETRYABLE_PROVIDER_FAILURE_CODES = new Set([
   'AI_PROVIDER_TRANSPORT_INTERRUPTED',
 ]);
 
+// Only public attestation reasons may reach the composer. Provider text can contain secrets.
+const MODEL_TOOL_FAILURE_REASONS: Record<string, string> = {
+  NO_TOOL_CALL: '模型没有返回原生工具调用',
+  INVALID_TOOL_CALL: '模型返回的工具名称、参数或结束状态不符合验证要求',
+  PROVIDER_NOT_LOADED: '当前 Runtime 未加载该模型的 Provider',
+  PROVIDER_ERROR: '模型服务在验证请求中返回错误',
+  PROBE_ABORTED: '验证请求已中止',
+  PROBE_TIMEOUT: '验证请求超时',
+  PROBE_INTERNAL_ERROR: 'Runtime 无法完成验证请求',
+  PROBE_TRANSPORT_FAILED: '验证请求与 Runtime 的通信失败',
+  INVALID_ATTESTATION_EVIDENCE: 'Runtime 返回的验证证据格式无效',
+  ATTESTATION_IDENTITY_MISMATCH: '验证证据与本回合固定模型不一致',
+  INVALID_POSITIVE_EVIDENCE: 'Runtime 返回的成功证据不完整或已失效',
+};
+
 export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
   const code =
     error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
@@ -38,15 +56,64 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
   const message = error instanceof Error ? error.message : String(error ?? '任务失败');
   const text = code + ' ' + message;
 
-  if (code === 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED') {
+  if (/DSH.*未授权工具|DSH_TOOL_NOT_AUTHORIZED/.test(text)) {
+    return {
+      layer: 'model',
+      code: 'DSH_TOOL_NOT_AUTHORIZED',
+      message: '模型请求了当前阶段未授权的工具，运行已停止。',
+      hint: '可重试失败阶段；系统会沿用冻结目标和模型，并重新读取本阶段上下文。',
+    };
+  }
+  if (
+    /DSH_RETRY_(?:SOURCE_INVALID|STAGE_SUPERSEDED|ALREADY_HAS_CANDIDATE|LEGACY_RANGE_MISSING|LEGACY_CONTRACT_MISSING)/.test(
+      text,
+    )
+  ) {
+    return {
+      layer: 'data',
+      code: 'DSH_RETRY_SOURCE_INVALID',
+      message,
+      hint: /DSH_RETRY_LEGACY_/.test(text)
+        ? '保留原失败记录，在输入框明确目标章节和字数后发送新任务；这会创建新尝试，不会报告为旧回合恢复。'
+        : '先查看原回合的候选或失败记录；缺失的执行事实不会用当前设置代替。',
+    };
+  }
+
+  if (
+    code === 'WORKBENCH_GOAL_CLARIFICATION_REQUIRED' ||
+    code === 'WORKBENCH_WORD_TARGET_INVALID' ||
+    /DSH_CHAPTER_WORD_TARGET_MISMATCH|WORKBENCH_WORD_TARGET_INVALID/.test(text)
+  ) {
     return {
       layer: 'parameter',
       code,
       message,
-      hint: '请明确一个动作后重新发送；尚未调用模型。',
+      hint: /WORD_TARGET/.test(text)
+        ? '请在输入框确认一个章节目标字数后重新发送；尚未调用模型。'
+        : '请明确一个动作后重新发送；尚未调用模型。',
     };
   }
 
+  if (/DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED/.test(text)) {
+    return {
+      layer: 'model',
+      code: 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED',
+      message,
+      hint: '候选未通过字数硬门禁，未生成可采用产物，正式正文不变。有限修正未成功时，可保留目标字数重试；若创作要求确实改变，发送“本任务目标字数设为3200字”，再发送写章指令。不要通过放宽验收区间掩盖超长。',
+    };
+  }
+  if (
+    code === REVISION_SOURCE_INVALID ||
+    code === NATIVE_REVISION_SOURCE_INVALID ||
+    /修订来源(?:身份不完整|已失效|缺失)/i.test(text)
+  ) {
+    return {
+      layer: 'data',
+      code: REVISION_SOURCE_INVALID,
+      message,
+      hint: '请重新选择要修改的候选后再次发送；修订来源不会降级为最新候选，也不会改写正式正文。',
+    };
+  }
   if (
     code === CHAPTER_REQUIRED ||
     /未绑定章节|请先选择或创建章节|必须绑定目标章节|chapterId is required/i.test(text)
@@ -118,10 +185,15 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
     };
   }
   if (/MODEL_TOOL_CALLING_NOT_VERIFIED/i.test(text)) {
+    const reason = /MODEL_TOOL_CALLING_NOT_VERIFIED\s*:\s*([A-Z_]+)\b/.exec(text)?.[1];
+    const detail =
+      reason && Object.prototype.hasOwnProperty.call(MODEL_TOOL_FAILURE_REASONS, reason)
+        ? '原因：' + MODEL_TOOL_FAILURE_REASONS[reason] + '（' + reason + '）。'
+        : '';
     return {
       layer: 'model',
       code: code || 'MODEL_TOOL_CALLING_NOT_VERIFIED',
-      message: '所选模型未通过当前 Runtime 的工具调用能力验证。',
+      message: '所选模型未通过当前 Runtime 的工具调用能力验证。' + detail,
       hint: '可重试验证，或在模型设置中选择支持原生工具调用的模型后再发送。',
     };
   }
@@ -131,6 +203,14 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       code,
       message: message.trim() || '固定模型的本次会话凭据不可用。',
       hint: getCredentialStorageCopy().unavailableHint,
+    };
+  }
+  if (code === CONTEXT_INCOMPLETE || /(?:^|\s)DSH_CONTEXT_INCOMPLETE(?:\b|:)/i.test(message)) {
+    return {
+      layer: 'data',
+      code: CONTEXT_INCOMPLETE,
+      message: message.trim() || '必需创作上下文的完整读取回执不可用。',
+      hint: '请重新发送当前写作目标，让本回合重新读取必需上下文；如果材料超出完整读取预算，请先补全或缩小世界、规则或章节工程材料。这个错误不是 API Key 凭据错误。',
     };
   }
   if (RETRYABLE_PROVIDER_FAILURE_CODES.has(code) || TRANSIENT_PROVIDER_FAILURE_PATTERN.test(text)) {

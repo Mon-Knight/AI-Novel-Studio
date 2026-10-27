@@ -30,8 +30,20 @@ import type { ChapterCharacterContext, ChapterGenerationContext } from '../../ty
 import type { Chapter } from '../../types/chapter';
 import type { Character, CharacterState } from '../../types/character';
 import type { OutputProfile } from '../../types/output';
-import type { RuleSystem, WorldSetting } from '../../types/setting';
 import type { Volume } from '../../types/volume';
+import {
+  buildRuleSystemsProjectionForWriter,
+  buildWorldSettingsProjectionForWriter,
+  selectPrimaryWorldSettingForWriter,
+} from './worldRuleContextProjection';
+
+export {
+  buildRuleSystemsProjectionForWriter,
+  buildWorldSettingsProjectionForWriter,
+  formatRuleSystemForWriter,
+  resolveWorldBackgroundForWriter,
+  selectPrimaryWorldSettingForWriter,
+} from './worldRuleContextProjection';
 
 function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
@@ -41,78 +53,6 @@ function parseTimestamp(value?: string): number {
   if (!value) return NaN;
   const normalized = value.replace(/\.(\d{3})\d+/, '.$1');
   return Date.parse(normalized);
-}
-
-type WorldSettingSelectionCandidate = Pick<WorldSetting, 'content' | 'isActive'> &
-  Partial<Pick<WorldSetting, 'id' | 'createdAt' | 'updatedAt'>>;
-
-function worldSettingRecency(setting: WorldSettingSelectionCandidate): [number, number] {
-  const updatedAt = parseTimestamp(setting.updatedAt);
-  const createdAt = parseTimestamp(setting.createdAt);
-  return [
-    Number.isFinite(updatedAt) ? updatedAt : Number.NEGATIVE_INFINITY,
-    Number.isFinite(createdAt) ? createdAt : Number.NEGATIVE_INFINITY,
-  ];
-}
-
-export function selectPrimaryWorldSettingForWriter<T extends WorldSettingSelectionCandidate>(
-  worldSettings: readonly T[],
-): T | undefined {
-  return worldSettings
-    .filter((setting) => setting.isActive && extractText(setting.content))
-    .reduce<T | undefined>((selected, candidate) => {
-      if (!selected) return candidate;
-      const [candidateUpdatedAt, candidateCreatedAt] = worldSettingRecency(candidate);
-      const [selectedUpdatedAt, selectedCreatedAt] = worldSettingRecency(selected);
-      if (candidateUpdatedAt !== selectedUpdatedAt) {
-        return candidateUpdatedAt > selectedUpdatedAt ? candidate : selected;
-      }
-      if (candidateCreatedAt !== selectedCreatedAt) {
-        return candidateCreatedAt > selectedCreatedAt ? candidate : selected;
-      }
-      return candidate.id && selected.id && candidate.id.localeCompare(selected.id) > 0
-        ? candidate
-        : selected;
-    }, undefined);
-}
-
-export function resolveWorldBackgroundForWriter(
-  worldSettings: readonly WorldSettingSelectionCandidate[],
-  legacyWorldBackground?: string | null,
-): string | undefined {
-  const activeWorld = selectPrimaryWorldSettingForWriter(worldSettings);
-  return extractText(activeWorld?.content) || extractText(legacyWorldBackground);
-}
-
-function ruleForbiddenItems(value?: string): string[] {
-  const normalized = value?.trim();
-  if (!normalized) return [];
-  try {
-    const parsed = JSON.parse(normalized) as unknown;
-    if (Array.isArray(parsed)) {
-      return parsed
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
-    if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
-  } catch {
-    // Legacy records may store a plain-text rule instead of JSON.
-  }
-  return [normalized];
-}
-
-export function formatRuleSystemForWriter(
-  rule: Pick<RuleSystem, 'title' | 'content' | 'forbiddenRules'>,
-): string {
-  const title = rule.title.trim();
-  const content = rule.content.trim();
-  const sections = [`【${title || '未命名规则'}】${content}`];
-  const forbidden = ruleForbiddenItems(rule.forbiddenRules);
-  if (forbidden.length > 0) {
-    sections.push(`禁止规则：\n${forbidden.map((item) => `- ${item}`).join('\n')}`);
-  }
-  return sections.join('\n');
 }
 
 function isSameOrNewer(left?: string, right?: string): boolean {
@@ -498,8 +438,13 @@ export async function buildChapterContext(
 
   const activeSettings = worldSettings.filter((setting) => setting.isActive);
   const activeWorld = selectPrimaryWorldSettingForWriter(worldSettings);
-  const worldBackground = resolveWorldBackgroundForWriter(worldSettings, novel?.worldBackground);
-  const activeRules = ruleSystems.filter((r) => r.isActive);
+  const worldProjection = await buildWorldSettingsProjectionForWriter(
+    novelId,
+    worldSettings,
+    novel?.worldBackground,
+  );
+  const worldBackground = worldProjection.worldBackground;
+  const ruleProjection = await buildRuleSystemsProjectionForWriter(novelId, ruleSystems);
 
   // 正文生成优先使用“当前采用”的总纲/分卷大纲/章节大纲，字段草稿只作为降级来源。
   const activeMasterOutlineText = extractText(activeMasterOutline?.content);
@@ -653,20 +598,11 @@ export async function buildChapterContext(
     if (outputs) resolvedOutputProfile = outputs;
   }
 
-  // 主世界设定已经单独进入 worldBackground；其余活动设定作为有预算的补充约束。
+  // All active authored world constraints remain intact until the Provider hard budget gate.
   const supplementalWorldSettings = activeSettings
-    .filter((setting) => setting.id !== activeWorld?.id && extractText(setting.content))
-    .sort(
-      (left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id),
-    )
-    .slice(0, 6);
-  const chapterSettingsSummary =
-    supplementalWorldSettings.length > 0
-      ? supplementalWorldSettings
-          .map((setting) => `- ${setting.title}：${setting.content?.slice(0, 600)}`)
-          .join('\n')
-      : undefined;
+    .filter((setting) => setting.id !== activeWorld?.id)
+    .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  const chapterSettingsSummary = worldProjection.chapterSettings;
 
   // v0.7.0 加载本章出场角色和事件
   let chapterCharacterSummary: string | undefined;
@@ -940,6 +876,7 @@ export async function buildChapterContext(
     novelOutline,
     masterOutline: novelOutline,
     worldBackground,
+    worldSettingCoverage: worldProjection.worldSettingCoverage,
     worldSettingSources: [
       ...(activeWorld
         ? [
@@ -958,8 +895,7 @@ export async function buildChapterContext(
         updatedAt: setting.updatedAt,
       })),
     ],
-    ruleSystems:
-      activeRules.length > 0 ? activeRules.map(formatRuleSystemForWriter).join('\n\n') : undefined,
+    ...ruleProjection,
     protagonist: protagonist?.name || prots?.[0]?.name,
     specialAbility: extractText(protagonist?.specialAbility) || prots?.[0]?.specialAbility,
     abilityLimits: extractText(protagonist?.abilityLimits) || prots?.[0]?.abilityLimits,

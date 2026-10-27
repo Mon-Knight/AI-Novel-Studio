@@ -131,11 +131,10 @@ function LocalChapterModelSettingsCard({
       <p className="settings-help-text">
         未启用时正文仍走全局 Cloud Provider。已保存模型以卡片显示，不展示地址、密钥或采样参数。
       </p>
-      <label
-        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
-      >
+      <label className="settings-toggle-row settings-toggle-row--plain">
         <input
           type="checkbox"
+          className="settings-checkbox"
           checked={local?.enabled === true}
           onChange={(event) => {
             if (!local) {
@@ -147,15 +146,13 @@ function LocalChapterModelSettingsCard({
             }
             onChange({ localChapterModel: { ...local, enabled: event.target.checked } });
           }}
-          style={{ width: 18, height: 18 }}
         />
         启用已通过 Benchmark 的本地 Scene/Beat 正文模型
       </label>
-      <label
-        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
-      >
+      <label className="settings-toggle-row settings-toggle-row--plain">
         <input
           type="checkbox"
+          className="settings-checkbox"
           checked={local?.allowCloudWriterFallback !== false}
           onChange={(event) =>
             local &&
@@ -163,7 +160,6 @@ function LocalChapterModelSettingsCard({
               localChapterModel: { ...local, allowCloudWriterFallback: event.target.checked },
             })
           }
-          style={{ width: 18, height: 18 }}
         />
         本地训练、测试或不可用时由云端代写同一 Beat
       </label>
@@ -228,16 +224,11 @@ function LocalChapterModelSettingsCard({
       {healthResult && (
         <div
           data-testid="local-model-health-result"
-          className="settings-help-text"
-          style={{
-            marginTop: 10,
-            padding: '9px 12px',
-            borderRadius: 8,
-            background:
-              healthResult.healthOk && healthResult.modelOk && healthResult.smokeOk
-                ? 'var(--color-success-bg)'
-                : 'var(--color-error-bg)',
-          }}
+          className={`settings-help-text settings-result ${
+            healthResult.healthOk && healthResult.modelOk && healthResult.smokeOk
+              ? 'is-ok'
+              : 'is-error'
+          }`}
         >
           <strong>{healthResult.message}</strong>
         </div>

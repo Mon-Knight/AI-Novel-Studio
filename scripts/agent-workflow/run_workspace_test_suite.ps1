@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $vitestWrapper = Join-Path $PSScriptRoot 'run_vitest_suite.ps1'
-$manifest = Join-Path $repoRoot 'src-tauri\Cargo.toml'
+$cargoRunner = Join-Path $repoRoot 'scripts\quality\run-cargo-tests.mjs'
 
 $suiteConfig = @{
     'components' = @{
@@ -69,31 +69,12 @@ if ($cargoTests.Count -eq 0) {
     exit 0
 }
 
-# Cargo writes normal compilation progress and warnings to stderr. Capturing
-# stderr in Windows PowerShell while ErrorActionPreference is Stop promotes
-# those harmless lines to NativeCommandError and produces a false failure.
-$listOutput = @(& cargo test --manifest-path $manifest -- --list)
-$listExitCode = $LASTEXITCODE
-$listOutput | ForEach-Object { Write-Host $_ }
-if ($listExitCode -ne 0) {
-    Write-Error "cargo test --list failed with exit code $listExitCode"
-    exit $listExitCode
-}
-
-foreach ($cargoTest in $cargoTests) {
-    $exactPattern = '^' + [regex]::Escape($cargoTest) + ': test$'
-    $matched = @(
-        $listOutput | Where-Object { "$_" -match $exactPattern }
-    ).Count
-    if ($matched -ne 1) {
-        Write-Error "Required Rust/SQLite test '$cargoTest' was discovered $matched times. Refusing a zero-test or ambiguous pass."
-        exit 5
-    }
-}
-
-& cargo test --manifest-path $manifest -- --nocapture
-$cargoExitCode = $LASTEXITCODE
-if ($cargoExitCode -ne 0) {
-    Write-Error "Rust/SQLite suite failed with exit code $cargoExitCode"
+$selection = @($cargoTests | ForEach-Object { '--exact'; $_ })
+Push-Location $repoRoot
+try {
+    & node $cargoRunner @selection
+    $cargoExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
 }
 exit $cargoExitCode

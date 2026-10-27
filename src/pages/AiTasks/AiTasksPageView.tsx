@@ -99,6 +99,7 @@ function AiTasksPageView({
     (task) =>
       task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled',
   ).length;
+  const msgIsError = msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测');
 
   return (
     <PageLayout>
@@ -120,38 +121,13 @@ function AiTasksPageView({
       />
       {msg && (
         <div
-          role={
-            msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')
-              ? 'alert'
-              : 'status'
-          }
-          style={{
-            padding: '8px 16px',
-            marginBottom: 16,
-            background:
-              msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')
-                ? 'var(--color-error-bg)'
-                : 'var(--color-primary-light)',
-            borderRadius: 6,
-            fontSize: 13,
-            color:
-              msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')
-                ? 'var(--color-error-text)'
-                : 'var(--color-primary)',
-          }}
+          role={msgIsError ? 'alert' : 'status'}
+          className={`resource-notice ${msgIsError ? 'resource-notice--error' : 'resource-notice--success'}`}
         >
           {msg}
         </div>
       )}
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          flexWrap: 'wrap',
-          alignItems: 'center',
-        }}
-      >
+      <div className="resource-toolbar">
         <button
           className={`btn btn-sm ${selectMode ? 'btn-primary' : 'btn-secondary'}`}
           onClick={onToggleSelectMode}
@@ -225,37 +201,20 @@ function AiTasksPageView({
           )}
         </button>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          flexWrap: 'wrap',
-          alignItems: 'center',
-        }}
-      >
-        <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>类型：</span>
+      <div className="resource-toolbar">
+        <span className="resource-meta">类型：</span>
         {TYPE_FILTERS.map((value) => (
           <button
             key={value}
             className={`btn btn-xs ${typeFilter === value ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => onTypeFilterChange(value)}
-            style={{ fontSize: 12, padding: '4px 8px', minHeight: 28 }}
           >
             {value === 'all' ? '全部' : AiTaskTypeLabels[value]}
           </button>
         ))}
       </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 16,
-          flexWrap: 'wrap',
-          alignItems: 'center',
-        }}
-      >
-        <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>状态：</span>
+      <div className="resource-toolbar resource-gap-bottom-lg">
+        <span className="resource-meta">状态：</span>
         {STATUS_FILTERS.map((value) => {
           const StatusIcon =
             value === 'succeeded'
@@ -284,7 +243,6 @@ function AiTasksPageView({
               key={value}
               className={`btn btn-xs ${statusFilter === value ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => onStatusFilterChange(value)}
-              style={{ fontSize: 12, padding: '4px 8px', minHeight: 28 }}
             >
               {StatusIcon && <StatusIcon aria-hidden="true" size={13} strokeWidth={1.8} />}
               {label}
@@ -293,7 +251,7 @@ function AiTasksPageView({
         })}
       </div>
       {(typeFilter !== 'all' || statusFilter !== 'all') && tasks.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="resource-gap-bottom">
           <button
             className="btn btn-xs btn-danger"
             onClick={onDeleteFiltered}
@@ -347,7 +305,7 @@ function AiTasksPageView({
           }
         />
       ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="resource-list">
           {pagedTasks.map((task) => (
             <AiTaskRecordCard
               key={task.id}

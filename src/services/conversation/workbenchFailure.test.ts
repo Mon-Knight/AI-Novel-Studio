@@ -6,6 +6,36 @@ import {
   formatWorkbenchFailure,
 } from './workbenchFailure';
 
+test('a denied model tool is not misclassified as a database persistence or credential error', () => {
+  const failure = classifyWorkbenchFailure(
+    'DSH 回合失败: session.event rejected: DSH 调用了未授权工具: generate_chapter',
+  );
+  assert.equal(failure.layer, 'model');
+  assert.equal(failure.code, 'DSH_TOOL_NOT_AUTHORIZED');
+  assert.match(failure.hint, /失败阶段/);
+  assert.doesNotMatch(failure.message + failure.hint, /API Key|数据库/);
+});
+
+test('unsafe legacy recovery explains how to explicitly start a new task without claiming recovery', () => {
+  for (const code of ['DSH_RETRY_LEGACY_RANGE_MISSING', 'DSH_RETRY_LEGACY_CONTRACT_MISSING']) {
+    const failure = classifyWorkbenchFailure(`${code}: 旧执行事实不完整`);
+    assert.equal(failure.layer, 'data');
+    assert.match(failure.hint, /输入框.*目标章节和字数.*新任务/);
+    assert.match(failure.hint, /不会报告为旧回合恢复/);
+    assert.doesNotMatch(failure.hint, /API Key|换模型/);
+  }
+});
+
+test('length rejection gives a recoverable target instruction without suggesting wider acceptance', () => {
+  const message = 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED: 章节候选3586字超出2400～3450（目标3000）';
+  const failure = classifyWorkbenchFailure(message);
+  assert.equal(failure.code, 'DSH_CHAPTER_CANDIDATE_LENGTH_REJECTED');
+  assert.equal(failure.message, message);
+  assert.match(failure.hint, /未生成可采用产物/u);
+  assert.match(failure.hint, /有限修正/u);
+  assert.match(failure.hint, /本任务目标字数设为3200字/u);
+});
+
 test('goal clarification is a parameter decision, not a model retry failure', () => {
   const failure = classifyWorkbenchFailure(
     Object.assign(new Error('请明确本回合动作。'), {
@@ -36,6 +66,28 @@ test('classifies missing chapter, candidate, service and model failures', () => 
   assert.match(compatibility.hint, /重试验证/);
   assert.equal(classifyWorkbenchFailure(new Error('模型拒绝输出')).layer, 'model');
   assert.match(formatWorkbenchFailure(chapterRequiredError()), /选择目标章节/);
+});
+
+test('attestation failures explain public reasons without echoing provider details', () => {
+  for (const [reason, explanation] of [
+    ['NO_TOOL_CALL', '没有返回原生工具调用'],
+    ['INVALID_TOOL_CALL', '名称、参数或结束状态'],
+    ['PROBE_TIMEOUT', '超时'],
+    ['PROBE_TRANSPORT_FAILED', '通信失败'],
+    ['ATTESTATION_IDENTITY_MISMATCH', '固定模型不一致'],
+  ]) {
+    const failure = formatWorkbenchFailure(
+      `MODEL_TOOL_CALLING_NOT_VERIFIED: ${reason} (API_KEY_SECRET) https://private.example`,
+    );
+    assert.match(failure, new RegExp(explanation));
+    assert.ok(failure.includes(reason));
+    assert.doesNotMatch(failure, /API_KEY_SECRET|private\.example/);
+  }
+  for (const reason of ['UNKNOWN_SECRET', '__proto__', 'constructor']) {
+    const failure = formatWorkbenchFailure(`MODEL_TOOL_CALLING_NOT_VERIFIED: ${reason}`);
+    assert.doesNotMatch(failure, /原因：|UNKNOWN_SECRET|__proto__|constructor/);
+    assert.match(failure, /重试验证/);
+  }
 });
 
 test('classifies generation readiness failures as project data problems', () => {
@@ -98,6 +150,26 @@ test('classifies missing frozen-model credentials as a recoverable service failu
   assert.equal(failure.code, 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE');
   assert.match(failure.hint, /浏览器凭据只在当前会话内存/);
   assert.doesNotMatch(failure.hint, /API Key\s*[:=]/i);
+});
+
+test('classifies incomplete DSH context coverage as a data read failure, not a credential failure', () => {
+  const withCode = Object.assign(
+    new Error('必需上下文覆盖未完成：旧读取结果没有覆盖凭据，请重新读取'),
+    { code: 'DSH_CONTEXT_INCOMPLETE' },
+  );
+  const failure = classifyWorkbenchFailure(withCode);
+  assert.equal(failure.layer, 'data');
+  assert.equal(failure.code, 'DSH_CONTEXT_INCOMPLETE');
+  assert.match(failure.hint, /重新读取必需上下文/);
+  assert.match(failure.hint, /补全或缩小/);
+  assert.match(failure.hint, /不是 API Key 凭据错误/);
+  assert.doesNotMatch(failure.hint, /检查设置中心/);
+
+  const nativeMessageOnly = classifyWorkbenchFailure(
+    'DSH_CONTEXT_INCOMPLETE: 旧读取结果没有覆盖凭据，请重新读取',
+  );
+  assert.equal(nativeMessageOnly.layer, 'data');
+  assert.equal(nativeMessageOnly.code, 'DSH_CONTEXT_INCOMPLETE');
 });
 
 test('classifies normalized transient Provider failures as retryable service problems', () => {

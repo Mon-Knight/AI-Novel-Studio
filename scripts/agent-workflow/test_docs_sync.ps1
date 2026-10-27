@@ -16,10 +16,10 @@ $StaleVersion = "$StaleMajor.0.0"
 $SameMajorStaleVersion = if ($CurrentVersion -ceq "$CurrentMajor.999.999") { "$CurrentMajor.999.998" } else { "$CurrentMajor.999.999" }
 $GatewayCleanCommand = "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
 $GatewayBuildCommand = "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
-$SerialRustCommand = "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
+$SerialRustCommand = "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
 $VerificationGatewayClean = 'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")'
 $VerificationGatewayBuild = 'Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")'
-$VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")'
+$VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--workspace", "--", "--test-threads=1")'
 $DesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || inputs.suite || ''smoke'' }}'
 $CallerEventGatedDesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || ((github.event_name == ''workflow_dispatch'' || github.event_name == ''workflow_call'') && inputs.suite) || ''smoke'' }}'
 $RepositoryReadme = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $RepositoryRoot "README.md")
@@ -149,9 +149,9 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Checkout pinned DSH runtime source"
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Build installers and signed updater archives" "Checkout pinned DSH runtime source"
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
-    Assert-CheckResult "release tests before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Assert-CheckResult "release packaging before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
@@ -173,15 +173,15 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Build current novel-domain gateway"
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Build installers and signed updater archives" "Build current novel-domain gateway"
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
-    Assert-CheckResult "release tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Assert-CheckResult "release packaging before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseParallelRust = $releaseWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
-    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseParallelRust -Encoding UTF8
-    Assert-CheckResult "release Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    $releaseWrongEvidence = $releaseWorkflow.Replace('$actualSha -ne $env:VERIFIED_SHA', '$actualSha -eq $env:VERIFIED_SHA')
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWrongEvidence -Encoding UTF8
+    Assert-CheckResult "release without matching commit evidence" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath

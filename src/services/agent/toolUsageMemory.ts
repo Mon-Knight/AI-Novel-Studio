@@ -144,7 +144,12 @@ export class ToolUsageMemory {
     ) {
       return 'full_chapter';
     }
-    if (text.includes('人物') || text.includes('性格') || text.includes('角色') || text.includes('心境')) {
+    if (
+      text.includes('人物') ||
+      text.includes('性格') ||
+      text.includes('角色') ||
+      text.includes('心境')
+    ) {
       return 'character';
     }
     if (text.includes('世界观') || text.includes('世界规则') || text.includes('设定')) {
@@ -159,7 +164,10 @@ export class ToolUsageMemory {
     return 'general';
   }
 
-  private findExactExperience(taskIntent: string, toolSequence: string[]): ToolUsageExperience | undefined {
+  private findExactExperience(
+    taskIntent: string,
+    toolSequence: string[],
+  ): ToolUsageExperience | undefined {
     const seqKey = toolSequence.join('->');
     for (const exp of this.experiences.values()) {
       if (exp.taskIntent === taskIntent && exp.toolSequence.join('->') === seqKey) {

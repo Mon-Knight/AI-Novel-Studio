@@ -8,6 +8,9 @@ const stylesheetPaths = [
   'src/styles/reference-library.css',
   'src/styles/autonomous-planning.css',
   'src/styles/novel-detail.css',
+  'src/styles/page-layout.css',
+  'src/styles/hub.css',
+  'src/styles/right-dock.css',
 ] as const;
 
 describe('readable support text in secondary surfaces', () => {
@@ -36,5 +39,23 @@ describe('readable support text in secondary surfaces', () => {
       /\.autonomous-icon-button\s*\{[\s\S]*?width:\s*34px;[\s\S]*?height:\s*34px/u,
     );
     expect(reference).toMatch(/\.reference-work-item\s*\{[\s\S]*?padding:\s*11px 12px/u);
+    const pageLayout = readFileSync(resolve('src/styles/page-layout.css'), 'utf8');
+    expect(pageLayout).toMatch(
+      /\.resource-icon-button\s*\{[\s\S]*?min-width:\s*28px;[\s\S]*?min-height:\s*28px/u,
+    );
+    expect(pageLayout).toMatch(/\.resource-pill\s*\{[\s\S]*?font-size:\s*12px/u);
+    const rightDock = readFileSync(resolve('src/styles/right-dock.css'), 'utf8');
+    expect(rightDock).toMatch(
+      /\.right-toolbar-btn\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px/u,
+    );
+    expect(rightDock).toMatch(/\.right-panel-header\s*\{[\s\S]*?min-height:\s*44px/u);
+  });
+
+  it('keeps the review tool rail and panel on the shell rail/side-panel widths', () => {
+    const variables = readFileSync(resolve('src/styles/variables.css'), 'utf8');
+    expect(variables).toMatch(/--right-toolbar-width:\s*56px/u);
+    expect(variables).toMatch(/--sidebar-rail-width:\s*56px/u);
+    expect(variables).toMatch(/--right-panel-width:\s*360px/u);
+    expect(variables).toMatch(/--side-panel-width:\s*360px/u);
   });
 });

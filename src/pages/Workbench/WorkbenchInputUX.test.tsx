@@ -8,6 +8,8 @@ import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
 import { WorkbenchComposer } from './WorkbenchComposer';
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
+import { WorkbenchModelSelect } from './WorkbenchModelSelect';
+import { saveAiSettings } from '../../services/ai/aiSettingsStore';
 
 vi.mock('./hooks/useWorkbenchModelCredential', () => ({
   useWorkbenchModelCredential: () => ({ credentialAvailable: true }),
@@ -178,7 +180,7 @@ describe('workbench input content protection', () => {
         onCancel={onCancel}
       />,
     );
-    const input = screen.getByRole('textbox', { name: '创作目标' });
+    const input = screen.getByRole('textbox', { name: '聊聊你的构思' });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, isComposing: true });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, keyCode: 229 });
     fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
@@ -194,5 +196,309 @@ describe('workbench input content protection', () => {
     expect(onGoalChange).toHaveBeenCalledWith('生成全书规划候选');
     await act(async () => fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+function ComposerHarness({
+  initial = '',
+  ...overrides
+}: {
+  initial?: string;
+} & Partial<Parameters<typeof WorkbenchComposer>[0]>) {
+  const [value, setValue] = useState(initial);
+  const noop = () => undefined;
+  return (
+    <WorkbenchComposer
+      scopeKey="task-a"
+      templates={WORKBENCH_TASK_TEMPLATES}
+      plugins={[]}
+      pluginsLoading={false}
+      pluginsError=""
+      selectedModel={model}
+      draft={value}
+      composerError=""
+      selectedConversationPreparing={false}
+      selectedConversationRunning={false}
+      selectedConversationArchived={false}
+      hasTask
+      taskReady
+      hasChapter
+      chaptersLoading={false}
+      contextPending={false}
+      contextFailed={false}
+      assetScope={null}
+      assetScopeLoading={false}
+      assetScopeError="可重试的上下文读取提示"
+      onDraftChange={setValue}
+      onRetryModels={noop}
+      onOpenModelSettings={noop}
+      onCreateTaskWithCurrentModel={noop}
+      onSend={noop}
+      onCancel={noop}
+      onRefreshAssetScope={noop}
+      onOpenAssetScopePath={noop}
+      onShowPlugins={noop}
+      {...overrides}
+    />
+  );
+}
+
+describe('composer transient controls', () => {
+  it('waits for context migration for real-model greetings while allowing missing-setting conversations', () => {
+    const tauriWindow = window as unknown as Record<string, unknown>;
+    tauriWindow.__TAURI_INTERNALS__ = {};
+    const apiModel = {
+      ...model,
+      runtimeMode: 'api' as const,
+      providerId: 'openai_compatible',
+      modelId: 'Conversation',
+    };
+    try {
+      const view = render(
+        <ComposerHarness initial="你好" selectedModel={apiModel} contextPending />,
+      );
+      expect((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled).toBe(true);
+      view.rerender(<ComposerHarness initial="你好" selectedModel={apiModel} contextFailed />);
+      expect((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled).toBe(true);
+      view.rerender(<ComposerHarness initial="你好" selectedModel={apiModel} assetScope={null} />);
+      expect((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      Reflect.deleteProperty(tauriWindow, '__TAURI_INTERNALS__');
+    }
+  });
+
+  it('keeps the creator migration gate consistent for a real-model greeting', () => {
+    const tauriWindow = window as unknown as Record<string, unknown>;
+    tauriWindow.__TAURI_INTERNALS__ = {};
+    const props = {
+      novelTitle: '尚未准备设定的作品',
+      chapters: [],
+      templates: [],
+      plugins: [],
+      pluginsLoading: false,
+      pluginsError: '',
+      contextPending: false,
+      contextFailed: true,
+      goal: '你好',
+      chapterId: '',
+      selectedModel: {
+        ...model,
+        runtimeMode: 'api' as const,
+        providerId: 'openai_compatible',
+        modelId: 'Conversation',
+      },
+      creating: false,
+      error: '',
+      onGoalChange: vi.fn(),
+      onChapterChange: vi.fn(),
+      onModelChange: vi.fn(),
+      onRetryModels: vi.fn(),
+      onOpenModelSettings: vi.fn(),
+      onSubmit: vi.fn(),
+      onCancel: vi.fn(),
+    };
+    try {
+      const view = render(<WorkbenchTaskCreator {...props} />);
+      expect((screen.getByTestId('workbench-create-and-start') as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+      view.rerender(<WorkbenchTaskCreator {...props} contextFailed={false} />);
+      expect((screen.getByTestId('workbench-create-and-start') as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    } finally {
+      Reflect.deleteProperty(tauriWindow, '__TAURI_INTERNALS__');
+    }
+  });
+
+  it('enters templates by keyboard, closes after insertion and exposes undo beside the input', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    render(<ComposerHarness onSend={onSend} />);
+    screen.getByTestId('workbench-composer-attach').focus();
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '生成下一章' }));
+    await user.keyboard('{Enter}');
+    const input = screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement;
+    expect(input.value).toBe('生成下一章');
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(true);
+    const undo = screen.getByTestId('workbench-template-undo');
+    expect(undo.closest('.workbench-attach-menu')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '撤销模板' }));
+    expect(input.value).toBe('');
+    expect(document.activeElement).toBe(input);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each(['追加到目标', '替换目标'])(
+    'keeps existing text until %s is confirmed and restores it exactly',
+    async (action) => {
+      const user = userEvent.setup();
+      const original = '  保留原有目标与空格\n最后一行。  ';
+      const onSend = vi.fn();
+      render(<ComposerHarness initial={original} onSend={onSend} />);
+      await user.click(screen.getByTestId('workbench-composer-attach'));
+      await user.click(screen.getByRole('button', { name: '生成下一章' }));
+      const input = screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement;
+      expect(input.value).toBe(original);
+      const confirmation = screen.getByRole('group', { name: '模板插入方式' });
+      fireEvent.keyDown(confirmation, { key: 'Escape', isComposing: true });
+      expect(screen.queryByRole('group', { name: '模板插入方式' })).not.toBeNull();
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('group', { name: '模板插入方式' })).toBeNull();
+      expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(false);
+      await user.click(screen.getByRole('button', { name: '生成下一章' }));
+      await user.click(screen.getByRole('button', { name: action }));
+      expect(input.value).toBe(
+        action === '追加到目标' ? original + '\n\n生成下一章' : '生成下一章',
+      );
+      expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(true);
+      expect(document.activeElement).toBe(input);
+      await user.click(screen.getByRole('button', { name: '撤销模板' }));
+      expect(input.value).toBe(original);
+      expect(onSend).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps disclosures mutually exclusive and clears only transient state on task changes', async () => {
+    const user = userEvent.setup();
+    const view = render(<ComposerHarness initial="保留此目标" />);
+    await user.click(screen.getByTestId('workbench-asset-scope-toggle'));
+    expect(screen.queryByTestId('workbench-asset-scope-panel')).not.toBeNull();
+    await user.click(screen.getByTestId('workbench-composer-attach'));
+    expect(screen.queryByTestId('workbench-asset-scope-panel')).toBeNull();
+    expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(false);
+    view.rerender(<ComposerHarness initial="保留此目标" scopeKey="task-b" />);
+    expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(true);
+    expect(screen.getByTestId('workbench-asset-scope-toggle').getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect((screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement).value).toBe(
+      '保留此目标',
+    );
+  });
+
+  it('dismisses the insertion menu on outside focus and returns Escape to its trigger', async () => {
+    const user = userEvent.setup();
+    render(<ComposerHarness />);
+    const trigger = screen.getByTestId('workbench-composer-attach');
+    await user.click(trigger);
+    await user.keyboard('{Escape}');
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(true);
+    await user.click(trigger);
+    await user.click(screen.getByRole('textbox', { name: '创作目标' }));
+    expect(screen.getByTestId('workbench-composer-attach-menu').hidden).toBe(true);
+  });
+
+  it('offers the next-turn model dropdown without a task-lifetime lock', () => {
+    render(<ComposerHarness />);
+    const selector = screen.getByRole('combobox', { name: '后续回合模型' });
+    expect(selector.getAttribute('data-model-value')).toBe('mock:Mock');
+    expect(selector.getAttribute('data-model-locked')).toBe('false');
+    expect(screen.queryByTestId('workbench-fixed-model-reason')).toBeNull();
+  });
+
+  it('can select a configured API model when the old task model directory fails', () => {
+    saveAiSettings({
+      runtimeMode: 'api',
+      provider: 'openai_compatible',
+      baseUrl: 'https://configured.invalid/v1',
+      apiKey: '',
+      modelName: 'Configured-B',
+      mockMode: false,
+    });
+    const onChange = vi.fn();
+    render(
+      <WorkbenchModelSelect
+        id="recovery-model"
+        plugins={[]}
+        selectedModel={model}
+        refreshing={false}
+        refreshError="旧模型目录失败"
+        onChange={onChange}
+      />,
+    );
+    const selector = screen.getByRole('combobox', { name: '后续回合模型' }) as HTMLSelectElement;
+    expect(selector.disabled).toBe(false);
+    expect(screen.getByRole('option', { name: 'Configured-B' })).toBeTruthy();
+    fireEvent.change(selector, { target: { value: 'openai_compatible:Configured-B' } });
+    expect(onChange).toHaveBeenCalledWith('openai_compatible:Configured-B');
+    localStorage.clear();
+  });
+
+  it('keeps the selected model usable while the passive plugin list refreshes', () => {
+    const onChange = vi.fn();
+    render(
+      <WorkbenchModelSelect
+        id="refreshing-model"
+        plugins={[]}
+        selectedModel={model}
+        refreshing={true}
+        refreshError=""
+        onChange={onChange}
+      />,
+    );
+    const selector = screen.getByRole('combobox', { name: '后续回合模型' }) as HTMLSelectElement;
+    expect(selector.disabled).toBe(false);
+    expect(selector.value).toBe('mock:Mock');
+    expect(screen.getByRole('option', { name: 'Mock' })).toBeTruthy();
+  });
+
+  it.each([
+    { selectedConversationRunning: true },
+    { selectedConversationPreparing: true },
+    { selectedConversationArchived: true },
+    { modelChangePending: true },
+    { modelSelectionDisabled: true },
+  ])('disables selection while execution or model persistence is busy: %o', (props) => {
+    const onSend = vi.fn();
+    render(<ComposerHarness initial="你能做什么？" onSend={onSend} {...props} />);
+    expect(
+      (screen.getByRole('combobox', { name: '后续回合模型' }) as HTMLSelectElement).disabled,
+    ).toBe(true);
+    if (props.modelChangePending) {
+      expect(screen.getByTestId('workbench-model-saving').textContent).toContain(
+        '正在保存模型选择',
+      );
+      expect((screen.getByTestId('workbench-send-task') as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.keyDown(screen.getByRole('textbox', { name: '创作目标' }), {
+        key: 'Enter',
+        ctrlKey: true,
+      });
+      expect(onSend).not.toHaveBeenCalled();
+    }
+  });
+
+  it('shows readable revision provenance and removes only its source binding', async () => {
+    const clear = vi.fn();
+    const onSend = vi.fn();
+    render(
+      <ComposerHarness
+        initial="已有修订要求"
+        onSend={onSend}
+        onClearRevisionSource={clear}
+        revisionSource={{
+          conversationId: 'task-a',
+          novelId: 'novel-a',
+          cardId: 'private-card-id',
+          artifactId: 'private-artifact-id',
+          artifactHash: 'private-hash',
+          artifactType: 'chapter_text',
+          title: '第二章候选',
+          sourceDraftVersion: 3,
+        }}
+      />,
+    );
+    const chip = screen.getByTestId('workbench-revision-source');
+    expect(chip.textContent).toContain('第二章候选');
+    expect(chip.textContent).toContain('v3');
+    expect(chip.textContent).not.toContain('private-');
+    fireEvent.click(screen.getByTestId('workbench-clear-revision-source'));
+    expect(clear).toHaveBeenCalledOnce();
+    expect((screen.getByRole('textbox', { name: '创作目标' }) as HTMLTextAreaElement).value).toBe(
+      '已有修订要求',
+    );
+    expect(onSend).not.toHaveBeenCalled();
   });
 });

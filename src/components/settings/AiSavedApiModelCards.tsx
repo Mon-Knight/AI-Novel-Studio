@@ -1,56 +1,122 @@
+import type { ReactNode } from 'react';
 import type { SavedApiModelProfile } from '../../types/ai';
-import { cloudApiProviderLabel } from '../../services/ai/savedApiModels';
-import { SettingsSavedModelCards } from './SettingsSavedModelCards';
+import {
+  groupSavedApiModelsBySource,
+  primaryProfileInSource,
+  type SavedApiSourceGroup,
+} from '../../services/ai/savedApiSources';
 
 interface AiSavedApiModelCardsProps {
   profiles: SavedApiModelProfile[];
   activeId?: string;
+  expandedKey?: string | 'new' | null;
+  editor?: ReactNode;
   keyBound: (profile: SavedApiModelProfile) => boolean;
-  onUse: (profile: SavedApiModelProfile) => void;
-  onEdit: (profile: SavedApiModelProfile) => void;
-  onDelete: (profile: SavedApiModelProfile) => void;
+  onSelect: (group: SavedApiSourceGroup) => void;
+  onEdit: (group: SavedApiSourceGroup) => void;
+  onDelete: (group: SavedApiSourceGroup) => void;
   onAdd: () => void;
 }
 
 export function AiSavedApiModelCards({
   profiles,
   activeId,
+  expandedKey,
+  editor,
   keyBound,
-  onUse,
+  onSelect,
   onEdit,
   onDelete,
   onAdd,
 }: AiSavedApiModelCardsProps) {
-  const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+  const groups = groupSavedApiModelsBySource(profiles);
+
   return (
-    <SettingsSavedModelCards
-      listTestId="ai-saved-model-list"
-      addTestId="ai-saved-model-add"
-      cardTestId="ai-saved-model-card"
-      help="已保存的 API 模型以卡片显示，不展示密钥、地址或采样参数。可保存多份并随时切换。"
-      empty="还没有保存的 API 模型。添加后会显示为卡片，当前使用的模型会高亮。"
-      addLabel="添加模型"
-      items={profiles.map((profile) => ({
-        id: profile.id,
-        label: profile.label,
-        badge: cloudApiProviderLabel(profile.provider),
-        active: profile.id === activeId,
-        keyBound: keyBound(profile),
-        lastTestOk: profile.lastTestOk,
-      }))}
-      onAdd={onAdd}
-      onUse={(id) => {
-        const profile = byId.get(id);
-        if (profile) onUse(profile);
-      }}
-      onEdit={(id) => {
-        const profile = byId.get(id);
-        if (profile) onEdit(profile);
-      }}
-      onDelete={(id) => {
-        const profile = byId.get(id);
-        if (profile) onDelete(profile);
-      }}
-    />
+    <div data-testid="ai-saved-model-list">
+      <div className="saved-api-model-toolbar">
+        <p>
+          已保存的 API 模型按来源（Base URL +
+          密钥身份）分组。一张来源卡片可管理该上游的模型目录，不展示密钥。
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          data-testid="ai-saved-model-add"
+          onClick={onAdd}
+        >
+          添加来源
+        </button>
+      </div>
+      {groups.length === 0 ? (
+        <p className="saved-api-model-empty">
+          还没有保存的 API 模型。添加后会显示为卡片，当前使用的模型会高亮。
+        </p>
+      ) : null}
+      {expandedKey === 'new' ? editor : null}
+      <div className="api-source-card-stack">
+        {groups.map((group) => {
+          const primary = primaryProfileInSource(group, activeId);
+          const active = group.models.some((model) => model.id === activeId);
+          const ready = group.models.some((model) => keyBound(model));
+          const expanded = expandedKey === group.key;
+          return (
+            <article
+              key={group.key}
+              className={
+                'api-source-card' + (active ? ' is-active' : '') + (expanded ? ' is-expanded' : '')
+              }
+              data-testid="ai-saved-model-card"
+              data-model-id={primary.id}
+              data-active={active ? 'true' : 'false'}
+              onClick={() => onSelect(group)}
+            >
+              <div className="api-source-card-header">
+                <button
+                  type="button"
+                  className="api-source-card-main"
+                  aria-pressed={active}
+                  aria-label={`选中 ${group.label}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelect(group);
+                  }}
+                >
+                  <strong>{group.label}</strong>
+                  <span className="saved-api-model-badge">自定义</span>
+                  <span
+                    className={'api-source-status-dot' + (ready ? ' is-live' : '')}
+                    aria-label={ready ? '本次会话已绑定' : '待填写密钥'}
+                  />
+                </button>
+                <div className="api-source-card-actions">
+                  <button
+                    type="button"
+                    className="api-source-text-btn"
+                    aria-expanded={expanded}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit(group);
+                    }}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    className="api-source-text-btn is-danger"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDelete(group);
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              {expanded ? <div onClick={(event) => event.stopPropagation()}>{editor}</div> : null}
+            </article>
+          );
+        })}
+      </div>
+    </div>
   );
 }

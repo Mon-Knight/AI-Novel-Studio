@@ -1,8 +1,21 @@
-import { useState } from 'react';
+import { useWorkbenchComposerDisclosure } from './hooks/useWorkbenchComposerDisclosure';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
+import { WorkbenchTemplateUndoNotice } from './WorkbenchTemplateUndoNotice';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 import type { WorkbenchAssetScopeSummary } from '../../services/conversation/workbenchAssetScopeService';
-import { ArrowUp, ChevronDown, CircleAlert, Database, LoaderCircle, Square } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  CircleAlert,
+  Database,
+  LoaderCircle,
+  Plus,
+  Puzzle,
+  Square,
+  X,
+} from 'lucide-react';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
+import { isModelLedCreativeTurn } from '../../services/dsh/taskSessionAdapter';
 import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import { WorkbenchModelSelect } from './WorkbenchModelSelect';
@@ -13,6 +26,10 @@ import type { WorkbenchTaskTemplate } from './workbenchTaskTemplates';
 import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
 import { GrowingGoalTextarea } from './GrowingGoalTextarea';
 import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
+import {
+  useWorkbenchWordPreview,
+  type WorkbenchWordPreviewContext,
+} from '../../features/workbench/useWorkbenchWordPreview';
 
 export type TaskTemplate = WorkbenchTaskTemplate;
 
@@ -32,12 +49,19 @@ function resolveCoreAssetReadyCount(
 }
 
 interface WorkbenchComposerProps {
+  wordPreviewContext?: WorkbenchWordPreviewContext;
   scopeKey?: string;
+  revisionSource?: ArtifactRevisionSource | null;
+  onClearRevisionSource?: () => void;
   templates: TaskTemplate[];
   plugins: CurrentPluginProjection[];
   pluginsLoading: boolean;
   pluginsError: string;
   selectedModel: TaskModelSnapshot;
+  modelChangePending?: boolean;
+  modelSelectionDisabled?: boolean;
+  modelChangeError?: string;
+  onModelChange?: (value: string) => void;
   draft: string;
   composerError: string;
   conflictMessage?: string;
@@ -61,15 +85,24 @@ interface WorkbenchComposerProps {
   onCancel: () => void;
   onRefreshAssetScope: () => void;
   onOpenAssetScopePath: (path: string) => void;
+  /** Opens the current-plugin view; offered from the "+" menu when provided. */
+  onShowPlugins?: () => void;
 }
 
 export function WorkbenchComposer({
+  wordPreviewContext,
   scopeKey = '',
+  revisionSource,
+  onClearRevisionSource,
   templates,
   plugins,
   pluginsLoading,
   pluginsError,
   selectedModel,
+  modelChangePending = false,
+  modelSelectionDisabled = false,
+  modelChangeError = '',
+  onModelChange,
   draft,
   composerError,
   conflictMessage,
@@ -93,8 +126,24 @@ export function WorkbenchComposer({
   onCancel,
   onRefreshAssetScope,
   onOpenAssetScopePath,
+  onShowPlugins,
 }: WorkbenchComposerProps) {
-  const [assetScopeOpen, setAssetScopeOpen] = useState(false);
+  const wordPreview = useWorkbenchWordPreview(wordPreviewContext, draft);
+  const {
+    composerRef,
+    extrasRef,
+    attachMenuRef,
+    attachButtonRef,
+    assetButtonRef,
+    assetPanelRef,
+    attachOpen,
+    setAttachOpen,
+    assetScopeOpen,
+    setAssetScopeOpen,
+    templateUndo,
+    setTemplateUndo,
+    focusComposer,
+  } = useWorkbenchComposerDisclosure(scopeKey);
   const composerState = selectedConversationRunning
     ? 'running'
     : selectedConversationPreparing
@@ -103,7 +152,7 @@ export function WorkbenchComposer({
         ? 'archived'
         : 'idle';
   const composerDisabled = composerState === 'archived';
-  const executionLocked = composerState !== 'idle';
+  const executionLocked = composerState !== 'idle' || modelChangePending;
   const templatesDisabled = executionLocked || chaptersLoading;
   const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
   const modelAvailability = getWorkbenchModelAvailability({
@@ -111,124 +160,205 @@ export function WorkbenchComposer({
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
-    selectionLocked: true,
     credentialAvailable,
   });
   const conversationalDraft = isConversationalGoal(draft);
+  const localConversation =
+    conversationalDraft &&
+    !isModelLedCreativeTurn({
+      goal: draft,
+      modelSnapshot: selectedModel,
+      revisionSource: revisionSource ?? undefined,
+    });
   const canSendDraft = Boolean(
     draft.trim() &&
     taskReady &&
-    (!contextPending || conversationalDraft) &&
-    (!contextFailed || conversationalDraft) &&
+    (!contextPending || localConversation) &&
+    (!contextFailed || localConversation) &&
     (modelAvailability.canSend || conversationalDraft),
   );
-  const modelDirectoryMessage =
-    modelAvailability.status === 'available' || !modelAvailability.message
-      ? modelAvailability.message
-      : `${modelAvailability.message} 本地能力问答仍可发送。`;
+  const modelDirectoryMessage = modelAvailability.message;
   const coreAssetReadyCount = resolveCoreAssetReadyCount(assetScope, hasChapter);
   const coreAssetSummary = `核心 ${coreAssetReadyCount ?? '--'}/${CORE_ASSET_TOTAL}`;
 
   return (
     <footer
+      ref={composerRef}
       className="workbench-composer agent-console-composer"
       data-composer-state={composerState}
+      data-attach-open={attachOpen ? 'true' : 'false'}
     >
-      <WorkbenchTemplateControls
-        key={scopeKey}
-        templates={templates}
-        hasChapter={hasChapter}
-        disabled={templatesDisabled}
-        value={draft}
-        onChange={onDraftChange}
-      />
-
       <div className="workbench-composer-surface">
-        {contextPending && (
+        <div className="workbench-composer-extras" ref={extrasRef}>
           <div
-            className="workbench-readiness-hint"
-            data-testid="workbench-context-pending"
-            role="status"
+            id="workbench-composer-attach-menu"
+            className="workbench-attach-menu"
+            data-testid="workbench-composer-attach-menu"
+            ref={attachMenuRef}
+            hidden={!attachOpen}
+            aria-label="插入内容"
           >
-            <LoaderCircle
-              className="workbench-readiness-icon is-spinning"
-              aria-hidden="true"
-              strokeWidth={1.8}
-              size={15}
-            />
-            <span className="workbench-readiness-copy">
-              正在整理已有章节上下文；可以继续编辑，完成后即可发送创作任务。
-            </span>
+            <div className="workbench-attach-section">
+              <div className="workbench-attach-section-title">任务模板</div>
+              <WorkbenchTemplateControls
+                key={scopeKey}
+                templates={templates}
+                hasChapter={hasChapter}
+                disabled={templatesDisabled}
+                value={draft}
+                onChange={onDraftChange}
+                onApplied={(undo) => {
+                  setTemplateUndo(undo);
+                  setAttachOpen(false);
+                  focusComposer();
+                }}
+              />
+            </div>
+            {onShowPlugins && (
+              <div className="workbench-attach-section">
+                <div className="workbench-attach-section-title">运行时</div>
+                <button
+                  type="button"
+                  className="workbench-attach-action"
+                  data-testid="workbench-composer-attach-plugins"
+                  onClick={() => {
+                    setAttachOpen(false);
+                    onShowPlugins();
+                  }}
+                >
+                  <Puzzle aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>查看当前插件与模型目录</span>
+                </button>
+              </div>
+            )}
           </div>
-        )}
-        {contextFailed && (
-          <div
-            className="workbench-readiness-hint is-warning"
-            data-testid="workbench-context-warning"
-            role="status"
-          >
-            <CircleAlert
-              className="workbench-readiness-icon"
-              aria-hidden="true"
-              size={15}
-              strokeWidth={1.8}
-            />
-            <span className="workbench-readiness-copy">
-              旧版上下文未能安全整理；创作执行已暂停，请重新启动应用后重试。
-            </span>
-          </div>
-        )}
-        {composerState === 'archived' && (
-          <div className="workbench-readiness-hint" role="status">
-            <CircleAlert
-              className="workbench-readiness-icon"
-              aria-hidden="true"
-              size={15}
-              strokeWidth={1.8}
-            />
-            <span className="workbench-readiness-copy">
-              此任务已归档；恢复任务后才能继续发送目标。
-            </span>
-          </div>
-        )}
-        <WorkbenchModelRecoveryNotice
-          message={modelDirectoryMessage}
-          status={modelAvailability.status}
-          refreshing={pluginsLoading}
-          testId="workbench-model-directory-status"
-          onRetry={onRetryModels}
-          onOpenSettings={onOpenModelSettings}
-          onCreateTask={onCreateTaskWithCurrentModel}
-        />
-        {composerError && (
-          <div
-            className="workbench-inline-error"
-            data-testid="workbench-composer-error"
-            role="alert"
-          >
-            {composerError}
-          </div>
-        )}
-        {conflictMessage && (
-          <div
-            className="workbench-conflict-hint"
-            data-testid="workbench-conflict-hint"
-            role="status"
-          >
-            {conflictMessage}
-          </div>
-        )}
-
-        {assetScopeOpen && (
-          <WorkbenchAssetScopePanel
-            summary={assetScope}
-            loading={assetScopeLoading}
-            error={assetScopeError}
-            onRefresh={onRefreshAssetScope}
-            onOpen={onOpenAssetScopePath}
+          {contextPending && (
+            <div
+              className="workbench-readiness-hint"
+              data-testid="workbench-context-pending"
+              role="status"
+            >
+              <LoaderCircle
+                className="workbench-readiness-icon is-spinning"
+                aria-hidden="true"
+                strokeWidth={1.8}
+                size={15}
+              />
+              <span className="workbench-readiness-copy">
+                正在整理已有章节上下文；可以继续编辑，完成后即可发送创作任务。
+              </span>
+            </div>
+          )}
+          {contextFailed && (
+            <div
+              className="workbench-readiness-hint is-warning"
+              data-testid="workbench-context-warning"
+              role="status"
+            >
+              <CircleAlert
+                className="workbench-readiness-icon"
+                aria-hidden="true"
+                size={15}
+                strokeWidth={1.8}
+              />
+              <span className="workbench-readiness-copy">
+                旧版上下文未能安全整理；创作执行已暂停，请重新启动应用后重试。
+              </span>
+            </div>
+          )}
+          {composerState === 'archived' && (
+            <div className="workbench-readiness-hint" role="status">
+              <CircleAlert
+                className="workbench-readiness-icon"
+                aria-hidden="true"
+                size={15}
+                strokeWidth={1.8}
+              />
+              <span className="workbench-readiness-copy">
+                此会话已归档；恢复会话后可以继续对话。
+              </span>
+            </div>
+          )}
+          <WorkbenchModelRecoveryNotice
+            message={modelDirectoryMessage}
+            status={modelAvailability.status}
+            refreshing={pluginsLoading}
+            testId="workbench-model-directory-status"
+            onRetry={onRetryModels}
+            onOpenSettings={onOpenModelSettings}
+            onCreateTask={onCreateTaskWithCurrentModel}
           />
-        )}
+          {(composerError || modelChangeError) && (
+            <div
+              className="workbench-inline-error"
+              data-testid="workbench-composer-error"
+              role="alert"
+            >
+              {modelChangeError || composerError}
+            </div>
+          )}
+          {conflictMessage && (
+            <div
+              className="workbench-conflict-hint"
+              data-testid="workbench-conflict-hint"
+              role="status"
+            >
+              {conflictMessage}
+            </div>
+          )}
 
+          {assetScopeOpen && (
+            <div ref={assetPanelRef}>
+              <WorkbenchAssetScopePanel
+                summary={assetScope}
+                loading={assetScopeLoading}
+                error={assetScopeError}
+                onRefresh={onRefreshAssetScope}
+                onOpen={onOpenAssetScopePath}
+              />
+            </div>
+          )}
+          {revisionSource && (
+            <div className="workbench-revision-source" data-testid="workbench-revision-source">
+              <span>
+                修订来源：<strong>{revisionSource.title}</strong>
+                {revisionSource.sourceDraftVersion != null &&
+                  ` · 草稿 v${revisionSource.sourceDraftVersion}`}
+              </span>
+              {onClearRevisionSource && (
+                <button
+                  type="button"
+                  className="workbench-icon-button"
+                  data-testid="workbench-clear-revision-source"
+                  aria-label="移除修订来源"
+                  onClick={() => {
+                    onClearRevisionSource();
+                    focusComposer();
+                  }}
+                >
+                  <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <WorkbenchTemplateUndoNotice
+          undo={templateUndo}
+          value={draft}
+          disabled={templatesDisabled}
+          onUndo={() => {
+            if (!templateUndo || templatesDisabled || draft !== templateUndo.after) return;
+            onDraftChange(templateUndo.before);
+            setTemplateUndo(null);
+            focusComposer();
+          }}
+        />
+
+        {wordPreview && (
+          <p className="text-sm text-muted" role="status" data-testid="workbench-word-preview">
+            {wordPreview}
+          </p>
+        )}
         <GrowingGoalTextarea
           data-testid="workbench-composer-input"
           aria-label="创作目标"
@@ -246,7 +376,7 @@ export function WorkbenchComposer({
               onSend();
             }
           }}
-          placeholder="描述这次要推进的创作目标"
+          placeholder="说说你的想法，我们一起完善故事"
           aria-keyshortcuts="Control+Enter Meta+Enter"
           rows={2}
           disabled={composerDisabled}
@@ -255,13 +385,34 @@ export function WorkbenchComposer({
         <div className="workbench-composer-toolbar">
           <button
             type="button"
+            ref={attachButtonRef}
+            className={`workbench-composer-attach ${attachOpen ? 'is-open' : ''}`.trim()}
+            data-testid="workbench-composer-attach"
+            aria-label={attachOpen ? '关闭插入菜单' : '插入模板或打开运行时'}
+            aria-expanded={attachOpen}
+            aria-controls="workbench-composer-attach-menu"
+            title="任务模板与运行时"
+            disabled={composerDisabled}
+            onClick={() => {
+              setAssetScopeOpen(false);
+              setAttachOpen((open) => !open);
+            }}
+          >
+            <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            ref={assetButtonRef}
             className={`workbench-asset-scope-toggle ${assetScopeOpen ? 'is-open' : ''}`.trim()}
             data-testid="workbench-asset-scope-toggle"
             aria-expanded={assetScopeOpen}
             aria-controls="workbench-asset-scope-panel"
             title={`查看可用创作上下文，${coreAssetSummary}`}
             disabled={!assetScope && !assetScopeLoading && !assetScopeError}
-            onClick={() => setAssetScopeOpen((open) => !open)}
+            onClick={() => {
+              setAttachOpen(false);
+              setAssetScopeOpen((open) => !open);
+            }}
           >
             <Database aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>创作上下文</span>
@@ -287,11 +438,19 @@ export function WorkbenchComposer({
             selectedModel={selectedModel}
             refreshing={pluginsLoading}
             refreshError={pluginsError}
-            disabled={executionLocked}
-            locked
+            disabled={executionLocked || modelSelectionDisabled || !hasTask || !taskReady}
+            onChange={onModelChange}
           />
 
-          {composerState === 'preparing' ? (
+          {modelChangePending ? (
+            <span
+              className="workbench-composer-note"
+              data-testid="workbench-model-saving"
+              role="status"
+            >
+              正在保存模型选择
+            </span>
+          ) : composerState === 'preparing' ? (
             <span
               className="workbench-composer-note"
               data-testid="workbench-task-preparing"
@@ -301,7 +460,7 @@ export function WorkbenchComposer({
             </span>
           ) : !taskReady ? (
             <span className="workbench-composer-note" data-testid="workbench-task-pending">
-              {hasTask ? '任务恢复中，草稿会保留' : '请先新建创作任务'}
+              {hasTask ? '会话恢复中，草稿会保留' : '请先新建创作会话'}
             </span>
           ) : (
             chaptersLoading && <span className="workbench-composer-note">正在读取章节…</span>

@@ -1,0 +1,166 @@
+[
+  {
+    "name": "complete adopted facts with preserved plans",
+    "source": "唐棠收到一封旧信。\n警员计划下周调取账册。",
+    "required": true,
+    "payload": {
+      "summary": "唐棠收到旧信。",
+      "keyEvents": ["【计划】警员下周调取账册。"],
+      "grounding": {
+        "version": 1,
+        "claims": [
+          { "path": "/summary", "status": "confirmed", "quotes": ["唐棠收到一封旧信。"] },
+          { "path": "/keyEvents/0", "status": "planned", "quotes": ["警员计划下周调取账册。"] }
+        ]
+      }
+    },
+    "errors": [],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "new summary cannot silently omit evidence",
+    "source": "唐棠收到一封旧信。",
+    "required": true,
+    "payload": { "summary": "唐棠收到旧信。" },
+    "errors": ["SUMMARY_GROUNDING_MISSING"],
+    "warnings": []
+  },
+  {
+    "name": "legacy candidate stays explicitly unverified",
+    "source": "",
+    "required": false,
+    "payload": { "summary": "旧版总结。" },
+    "errors": [],
+    "warnings": ["SUMMARY_GROUNDING_MISSING"]
+  },
+  {
+    "name": "invented quote cannot establish guilt or whereabouts",
+    "source": "他不知道失踪者的去向。",
+    "required": true,
+    "payload": {
+      "summary": "失踪者已被判罪并远走外省。",
+      "grounding": {
+        "version": 1,
+        "claims": [
+          { "path": "/summary", "status": "confirmed", "quotes": ["失踪者已被判罪并远走外省。"] }
+        ]
+      }
+    },
+    "errors": ["SUMMARY_EVIDENCE_NOT_FOUND"],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "unknown promoted to confirmed is visible",
+    "source": "他不知道失踪者的去向。",
+    "required": true,
+    "payload": {
+      "summary": "失踪者已远走外省。",
+      "grounding": {
+        "version": 1,
+        "claims": [
+          { "path": "/summary", "status": "confirmed", "quotes": ["他不知道失踪者的去向。"] }
+        ]
+      }
+    },
+    "errors": [],
+    "warnings": ["SUMMARY_CERTAINTY_ESCALATION", "SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "plans cannot lose their qualifier in stored prose",
+    "source": "她准备下周回到故乡。",
+    "required": true,
+    "payload": {
+      "summary": "她已在故乡永久定居。",
+      "grounding": {
+        "version": 1,
+        "claims": [{ "path": "/summary", "status": "planned", "quotes": ["她准备下周回到故乡。"] }]
+      }
+    },
+    "errors": ["SUMMARY_QUALIFIER_MISSING"],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "all context and character fields need evidence",
+    "source": "唐棠收到一封旧信。",
+    "required": true,
+    "payload": {
+      "summary": "唐棠收到旧信。",
+      "characterChanges": [
+        {
+          "characterName": "唐棠",
+          "stateSummary": "紧张",
+          "location": "外省",
+          "knowledgeState": "已查清罪名"
+        }
+      ],
+      "contextRecords": [
+        {
+          "title": "线索",
+          "contextType": "plot_progress",
+          "importance": 5,
+          "content": "账册已经调取"
+        }
+      ],
+      "grounding": {
+        "version": 1,
+        "claims": [{ "path": "/summary", "status": "confirmed", "quotes": ["唐棠收到一封旧信。"] }]
+      }
+    },
+    "errors": [
+      "SUMMARY_ASSERTION_UNGROUNDED",
+      "SUMMARY_ASSERTION_UNGROUNDED",
+      "SUMMARY_ASSERTION_UNGROUNDED",
+      "SUMMARY_ASSERTION_UNGROUNDED",
+      "SUMMARY_ASSERTION_UNGROUNDED"
+    ],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "certainty cannot use an unknown enum",
+    "source": "唐棠收到一封旧信。",
+    "required": true,
+    "payload": {
+      "summary": "唐棠收到旧信。",
+      "grounding": {
+        "version": 1,
+        "claims": [{ "path": "/summary", "status": "safe", "quotes": ["唐棠收到一封旧信。"] }]
+      }
+    },
+    "errors": ["SUMMARY_GROUNDING_STATUS_INVALID", "SUMMARY_ASSERTION_UNGROUNDED"],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  },
+  {
+    "name": "matching fragment cannot hide source negation",
+    "source": "前一句。她从未去过外省。下一句。",
+    "required": true,
+    "payload": {
+      "summary": "她去过外省。",
+      "grounding": {
+        "version": 1,
+        "claims": [{ "path": "/summary", "status": "confirmed", "quotes": ["去过外省。"] }]
+      }
+    },
+    "errors": [],
+    "warnings": [
+      "SUMMARY_EVIDENCE_FRAGMENT",
+      "SUMMARY_CERTAINTY_ESCALATION",
+      "SUMMARY_SEMANTICS_REQUIRE_REVIEW"
+    ]
+  },
+  {
+    "name": "memory titles and location names cannot bypass evidence",
+    "source": "唐棠收到一封旧信。",
+    "required": true,
+    "payload": {
+      "summary": "唐棠收到旧信。",
+      "summaryTitle": "罪名已经查明",
+      "newLocations": [{ "name": "外省牢狱" }],
+      "grounding": {
+        "version": 1,
+        "claims": [{ "path": "/summary", "status": "confirmed", "quotes": ["唐棠收到一封旧信。"] }]
+      }
+    },
+    "errors": ["SUMMARY_ASSERTION_UNGROUNDED", "SUMMARY_ASSERTION_UNGROUNDED"],
+    "warnings": ["SUMMARY_SEMANTICS_REQUIRE_REVIEW"]
+  }
+]

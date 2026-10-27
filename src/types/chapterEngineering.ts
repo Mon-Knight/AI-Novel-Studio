@@ -25,13 +25,24 @@ export interface ChapterCard {
   forbiddenWriting: string[];
 }
 
+/**
+ * Scene-only plans are versioned explicitly so legacy merged Scene+Beat plans
+ * cannot be silently reinterpreted or back-filled.
+ */
+export const SCENE_PLAN_VERSION_V2 = 2 as const;
+
 export interface SceneBeat {
   id: string;
   order: number;
   text: string;
   required: boolean;
   characterIds?: string[];
+  /** Planned state immediately before this Beat. Never a substitute for actual prose state. */
+  startState?: string;
+  /** Planned change produced by this Beat. Never a substitute for actual prose state. */
   stateChange?: string;
+  /** Planned prose budget for this Beat, inside the caller's single-call model envelope. */
+  targetCharacters?: number;
 }
 
 export interface ScenePlanItem {
@@ -53,6 +64,11 @@ export interface ScenePlanItem {
   constraints?: string[];
   expectedEndState?: string;
   targetCharacters?: number;
+  /**
+   * 2 marks a Scene-only plan whose Beats are planned when execution reaches the
+   * Scene. Absent means the legacy merged v1 plan.
+   */
+  planVersion?: typeof SCENE_PLAN_VERSION_V2;
 }
 
 export interface GenerationWordRange {

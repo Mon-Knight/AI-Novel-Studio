@@ -1,7 +1,6 @@
 ---
-description: AI Novel Studio Bug 修复规则 — 先定位再修复，最小改动，禁止借 bugfix 重构
-globs: **/*
-alwaysApply: true
+description: AI Novel Studio Bug 修复规则 — 处理 Bug 修复任务时应用：先定位再修复，最小改动，禁止借 bugfix 重构
+alwaysApply: false
 ---
 
 # Bugfix Rules
@@ -32,4 +31,4 @@ alwaysApply: true
 - 说明修复原因（根因）
 - 说明是否存在后续风险
 - 输出修复报告
-- 运行相关验证
+- 为修复的行为补回归，运行 `npm run verify:change` 选出的检查；只复测受影响项，不因修 Bug 运行完整发布矩阵

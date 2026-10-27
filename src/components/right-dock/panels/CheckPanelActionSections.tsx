@@ -72,7 +72,7 @@ export function CheckPanelActionSections({
           第{chapter.chapterNumber}章 {chapter.title}
         </div>
         {currentDraft && (
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
             草稿 v{currentDraft.versionNo}（{currentDraft.wordCount} 字）
           </div>
         )}
@@ -172,7 +172,7 @@ export function CheckPanelActionSections({
               )}
             </button>
             {fixRoundUsed && !fixLoading && (
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
                 当前正文最多允许一轮外部 AI 修稿；如仍未通过，请人工处理。
               </div>
             )}
@@ -201,7 +201,7 @@ export function CheckPanelActionSections({
         {fixStage && !fixLoading && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--color-success)',
               marginTop: 4,
               display: 'flex',

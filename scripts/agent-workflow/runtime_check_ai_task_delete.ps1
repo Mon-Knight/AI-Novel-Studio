@@ -9,10 +9,10 @@ if (-not (Test-Path -LiteralPath $tauriRoot)) {
   throw "Missing src-tauri directory: $tauriRoot"
 }
 
-Push-Location $tauriRoot
+Push-Location $root
 $cargoExitCode = 1
 try {
-  cargo test ai_task_delete -- --nocapture --test-threads=1
+  node scripts/quality/run-cargo-tests.mjs --filter ai_task_delete
   $cargoExitCode = $LASTEXITCODE
 } finally {
   Pop-Location

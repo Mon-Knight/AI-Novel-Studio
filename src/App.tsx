@@ -6,8 +6,10 @@ import {
   useReducer,
   useSyncExternalStore,
 } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Outlet, Routes, Route } from 'react-router-dom';
 import AppShell from './components/layout/AppShell';
+import { HubLayout } from './components/layout/HubLayout';
+import { ProjectPageFrame } from './components/layout/ProjectPageFrame';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import LoadingModal from './components/common/LoadingModal';
 import { useGlobalLoadingModal } from './lib/runWithLoading';
@@ -214,25 +216,41 @@ function App({ startupCoordinator = defaultStartupCoordinator, onShellReady }: A
               }
             />
             <Route path="/novels" element={<HomePage />} />
-            <Route path="/novels/:novelId" element={<NovelDetailPage />} />
             <Route path="/novels/:novelId/workspace" element={<WritingWorkspacePage />} />
-            <Route path="/novels/:novelId/references" element={<ReferenceLibraryPage />} />
-            <Route path="/novels/:novelId/story-assets" element={<StoryAssetsPage />} />
-            <Route path="/styles" element={<StyleProfilesPage />} />
+            <Route
+              element={
+                <ProjectPageFrame>
+                  <Outlet />
+                </ProjectPageFrame>
+              }
+            >
+              <Route path="/novels/:novelId" element={<NovelDetailPage />} />
+              <Route path="/novels/:novelId/references" element={<ReferenceLibraryPage />} />
+              <Route path="/novels/:novelId/story-assets" element={<StoryAssetsPage />} />
+              <Route path="/novels/:novelId/outline" element={<OutlineEditorPage />} />
+              <Route
+                path="/novels/:novelId/setting-suggestions"
+                element={<SettingSuggestionsPage />}
+              />
+              <Route
+                path="/novels/:novelId/autonomous-planning"
+                element={<AutonomousPlanningPage />}
+              />
+            </Route>
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/assets" element={<AssetsPage />} />
-            <Route path="/templates" element={<TemplatesPage />} />
-            <Route path="/ai-tasks" element={<AiTasksPage />} />
-            <Route path="/import-export" element={<ImportExportPage />} />
-            <Route path="/novels/:novelId/outline" element={<OutlineEditorPage />} />
             <Route
-              path="/novels/:novelId/setting-suggestions"
-              element={<SettingSuggestionsPage />}
-            />
-            <Route
-              path="/novels/:novelId/autonomous-planning"
-              element={<AutonomousPlanningPage />}
-            />
+              element={
+                <HubLayout>
+                  <Outlet />
+                </HubLayout>
+              }
+            >
+              <Route path="/styles" element={<StyleProfilesPage />} />
+              <Route path="/assets" element={<AssetsPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/ai-tasks" element={<AiTasksPage />} />
+              <Route path="/import-export" element={<ImportExportPage />} />
+            </Route>
             <Route path="/worlds/:worldId/lore/suggestions" element={<SettingSuggestionsPage />} />
             <Route path="/coming-soon" element={<ComingSoonPage />} />
             <Route path="*" element={<NotFoundPage />} />

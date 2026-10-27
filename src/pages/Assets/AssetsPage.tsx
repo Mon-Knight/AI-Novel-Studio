@@ -113,10 +113,10 @@ function AssetsPage() {
       />
 
       {/* 作品选择器 */}
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      <div className="detail-card resource-gap-bottom-lg">
+        <div className="resource-card-title resource-gap-bottom">
           <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 15, fontWeight: 600 }}>选择作品</span>
+          <span>选择作品</span>
         </div>
         {library.loading && novels.length === 0 ? (
           <LoadingState text="正在读取作品…" />
@@ -133,11 +133,10 @@ function AssetsPage() {
           />
         ) : (
           <select
-            className="input"
+            className="input resource-fill"
             aria-label="选择作品"
             value={selectedNovelId}
             onChange={(e) => setSelectedNovelId(e.target.value)}
-            style={{ width: '100%' }}
           >
             {novels.map((n) => (
               <option key={n.id} value={n.id}>
@@ -162,32 +161,21 @@ function AssetsPage() {
               <button
                 type="button"
                 key={card.title}
-                className="detail-card detail-card--interactive"
+                className="detail-card detail-card--interactive resource-stat-card"
                 disabled={!card.path}
-                style={{
-                  cursor: card.path ? 'pointer' : 'default',
-                  textAlign: 'center',
-                  opacity: card.path ? 1 : 0.5,
-                }}
                 onClick={() => {
                   if (card.path) navigate(card.path);
                 }}
               >
-                <Icon aria-hidden="true" size={28} strokeWidth={1.8} style={{ marginBottom: 8 }} />
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{card.title}</div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    color: 'var(--color-primary)',
-                    marginBottom: 4,
-                  }}
-                >
-                  {card.count}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                  {card.desc}
-                </div>
+                <Icon
+                  aria-hidden="true"
+                  size={28}
+                  strokeWidth={1.8}
+                  className="resource-stat-icon"
+                />
+                <div className="resource-stat-title">{card.title}</div>
+                <div className="resource-stat-value">{card.count}</div>
+                <div className="resource-stat-desc">{card.desc}</div>
               </button>
             );
           })}

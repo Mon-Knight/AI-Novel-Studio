@@ -10,6 +10,11 @@
 // Security: the downstream (DSH) credential is ignored; the proxy holds the
 // upstream key exclusively. Normal runtime writes nothing to disk. Explicit
 // real-E2E runs may persist hash-only request evidence with no message content.
+//
+// Test-only upstream cap (unset in production): PROXY_UPSTREAM_REQUEST_BUDGET=6
+// plus PROXY_UPSTREAM_BUDGET_FILE, PROXY_FROZEN_UPSTREAM and PROXY_FROZEN_MODEL.
+// The file count is a non-resettable send total. The 7th claim returns before
+// fetch, redirects are rejected, and the frozen origin/model cannot change.
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -125,6 +130,119 @@ if (!UPSTREAM_KEY) {
   console.error('[model-proxy] set PROXY_UPSTREAM_KEY (or DEEPSEEK_API_KEY) for the proxy process');
   process.exit(2);
 }
+
+function readUpstreamBudget(env, upstream, model) {
+  const raw = String(env.PROXY_UPSTREAM_REQUEST_BUDGET ?? '').trim();
+  if (!raw) return undefined;
+  const file = String(env.PROXY_UPSTREAM_BUDGET_FILE ?? '').trim();
+  const frozenUpstream = String(env.PROXY_FROZEN_UPSTREAM ?? '').trim();
+  const frozenModel = String(env.PROXY_FROZEN_MODEL ?? '').trim();
+  const fileLower = file.toLowerCase();
+  if (
+    raw !== '6' ||
+    !file ||
+    !path.isAbsolute(file) ||
+    fileLower.includes('ai-novel-studio.db') ||
+    fileLower.includes('com.ainovelstudio.app') ||
+    !frozenUpstream ||
+    !frozenModel
+  ) {
+    console.error('[model-proxy] upstream budget rejected');
+    process.exit(2);
+  }
+  let frozen;
+  let actual;
+  try {
+    frozen = new URL(frozenUpstream);
+    actual = new URL(upstream);
+  } catch {
+    console.error('[model-proxy] upstream identity rejected');
+    process.exit(2);
+  }
+  const frozenPath = frozen.pathname.replace(/\/+$/u, '');
+  const actualPath = actual.pathname.replace(/\/+$/u, '');
+  if (
+    frozen.origin !== actual.origin ||
+    frozen.username ||
+    frozen.password ||
+    frozen.search ||
+    frozen.hash ||
+    frozenPath !== actualPath ||
+    frozenModel !== model
+  ) {
+    console.error('[model-proxy] upstream identity rejected');
+    process.exit(2);
+  }
+  return { limit: 6, file, frozenUpstream, frozenModel };
+}
+
+function frozenTargetAllowed(target, frozenUpstream) {
+  let frozen;
+  try {
+    frozen = new URL(frozenUpstream);
+  } catch {
+    return false;
+  }
+  const prefix = frozen.pathname.replace(/\/+$/u, '');
+  return (
+    target.origin === frozen.origin &&
+    !target.username &&
+    !target.password &&
+    !target.search &&
+    !target.hash &&
+    (!prefix || prefix === '/' || target.pathname.startsWith(prefix))
+  );
+}
+
+function claimUpstreamSend(budget) {
+  const lockPath = `${budget.file}.lock`;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    let fd;
+    try {
+      fd = fs.openSync(lockPath, 'wx');
+    } catch (error) {
+      if (error?.code !== 'EEXIST') return { ok: false, code: 'UPSTREAM_BUDGET_UNAVAILABLE' };
+      const until = Date.now() + 5;
+      while (Date.now() < until) {
+        // The proxy is single-flight; this only covers a crashed lock.
+      }
+      continue;
+    }
+    try {
+      let current = 0;
+      if (fs.existsSync(budget.file)) {
+        const text = fs.readFileSync(budget.file, 'utf8').trim();
+        if (!/^\d{1,9}$/u.test(text)) return { ok: false, code: 'UPSTREAM_BUDGET_UNAVAILABLE' };
+        current = Number(text);
+      }
+      if (current >= budget.limit) return { ok: false, code: 'UPSTREAM_BUDGET_EXCEEDED' };
+      fs.writeFileSync(budget.file, String(current + 1));
+      return { ok: true };
+    } finally {
+      fs.closeSync(fd);
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // The next claim fails closed if the lock cannot be cleared.
+      }
+    }
+  }
+  return { ok: false, code: 'UPSTREAM_BUDGET_UNAVAILABLE' };
+}
+
+async function refuseUpstreamSend(response, policyTicket, status, code) {
+  if (policyTicket) {
+    await policyCall('/settle', { ticket: policyTicket, outcome: 'failed' }).catch(() => undefined);
+  }
+  if (!response.headersSent && !response.destroyed) {
+    response.writeHead(status, { 'content-type': 'application/json' });
+  }
+  if (!response.destroyed) {
+    response.end(JSON.stringify({ error: { message: 'upstream send refused', code } }));
+  }
+}
+
+const UPSTREAM_BUDGET = readUpstreamBudget(process.env, UPSTREAM, PROXY_MODEL);
 
 async function policyCall(path, payload) {
   if (!POLICY_URL) return undefined;
@@ -545,14 +663,30 @@ const server = http.createServer(async (req, res) => {
     const upstreamBase = new URL(UPSTREAM);
     const upstreamPath = pathname.replace(/^\/v1(?=\/)/, '');
     const basePath = upstreamBase.pathname.replace(/\/+$/, '');
-    // Callers may provide either an origin or an OpenAI-compatible /v1 base.
-    // Avoid producing /v1/v1 when the downstream already includes the prefix.
-    const targetPath =
-      basePath.endsWith('/v1') && upstreamPath.startsWith('/v1/')
-        ? upstreamPath.slice(3)
-        : basePath + upstreamPath;
+    // Settings also accept a full chat completion endpoint. Recover its API
+    // prefix before appending the validated route so Responses bodies are never
+    // sent to the Chat endpoint. Preserve tenant prefixes and the origin route.
+    const apiBasePath = basePath.endsWith('/chat/completions')
+      ? basePath.slice(0, -'/chat/completions'.length)
+      : basePath;
+    const targetPath = apiBasePath + upstreamPath;
     upstreamBase.pathname = targetPath || '/';
     upstreamBase.search = requestUrl.search;
+    if (UPSTREAM_BUDGET) {
+      if (!frozenTargetAllowed(upstreamBase, UPSTREAM_BUDGET.frozenUpstream)) {
+        await refuseUpstreamSend(res, policyTicket, 409, 'UPSTREAM_IDENTITY_MISMATCH');
+        return;
+      }
+      if (model !== UPSTREAM_BUDGET.frozenModel) {
+        await refuseUpstreamSend(res, policyTicket, 409, 'UPSTREAM_MODEL_MISMATCH');
+        return;
+      }
+      const claim = claimUpstreamSend(UPSTREAM_BUDGET);
+      if (!claim.ok) {
+        await refuseUpstreamSend(res, policyTicket, 429, claim.code);
+        return;
+      }
+    }
     const upstream = await fetch(upstreamBase, {
       method: 'POST',
       headers: {
@@ -561,6 +695,7 @@ const server = http.createServer(async (req, res) => {
       },
       body,
       signal: upstreamAbort.signal,
+      ...(UPSTREAM_BUDGET ? { redirect: 'error' } : {}),
     });
     writeRealE2eProviderEvidence(providerRequestId, body, parsed);
     const upstreamContentType = upstream.headers.get('content-type') ?? 'application/json';

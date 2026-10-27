@@ -157,8 +157,10 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     }
   };
 
-  const handleUpdateChapter = async (id: string, input: UpdateChapterInput) => {
-    await chapterRepository.update(id, input);
+  const handleUpdateChapter = async (id: string, input: UpdateChapterInput, baseline: Chapter) => {
+    if (baseline.id !== id || baseline.novelId !== novelId)
+      throw new Error('章节编辑范围已变化，请重新打开。');
+    await chapterRepository.saveDetails(baseline, input);
     await loadData();
     setShowChapterForm(false);
     setEditingChapter(null);
@@ -397,6 +399,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       handleCreateChapter={handleCreateChapter}
       handleUpdateChapter={handleUpdateChapter}
       handleDeleteChapter={handleDeleteChapter}
+      refreshChapter={chapterRepository.getById}
     />
   );
 }

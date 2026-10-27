@@ -11,7 +11,7 @@ $manifest = Join-Path $repoRoot 'src-tauri\Cargo.toml'
 
 # Keep Cargo's normal stderr progress out of the captured pipeline; otherwise
 # Windows PowerShell can turn it into NativeCommandError under Stop.
-$listOutput = @(& cargo test --manifest-path $manifest $Filter -- --list)
+$listOutput = @(& cargo test --locked --manifest-path $manifest $Filter -- --list)
 $listExitCode = $LASTEXITCODE
 $listOutput | ForEach-Object { Write-Host $_ }
 if ($listExitCode -ne 0) {
@@ -27,7 +27,7 @@ if ($matchedCount -lt $MinimumCount) {
     exit 5
 }
 
-& cargo test --manifest-path $manifest $Filter -- --nocapture
+& cargo test --locked --manifest-path $manifest $Filter -- --nocapture --test-threads=1
 $testExitCode = $LASTEXITCODE
 if ($testExitCode -ne 0) {
     Write-Error "cargo test failed with exit code $testExitCode"

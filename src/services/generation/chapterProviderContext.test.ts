@@ -6,6 +6,7 @@ import type {
 } from '../../types/generationContext';
 import { CHAPTER_GENERATION_ALLOWED_SOURCE_TYPES } from '../ai/compilation/chapterGenerationSourcePolicy';
 import { buildChapterProviderContextSources } from './chapterProviderContext';
+import { compileAiContext } from '../ai/compilation/contextCompiler';
 
 function snapshot(sections: GenerationContextSection[]): ChapterGenerationSnapshot {
   return {
@@ -169,7 +170,10 @@ test('frozen snapshot sections become independent typed Provider sources', () =>
     assert.equal(byContent.get(content)?.required, true);
     assert.equal(byContent.get(content)?.requireFull, true);
   }
-  assert.equal(byContent.get('WORLD_CANARY')?.required, false);
+  // Active world material is a complete required projection: it may no longer be
+  // silently dropped from the Provider request for budget reasons.
+  assert.equal(byContent.get('WORLD_CANARY')?.required, true);
+  assert.equal(byContent.get('WORLD_CANARY')?.requireFull, true);
   assert.equal(
     sources.some(
       (source) =>
@@ -177,6 +181,39 @@ test('frozen snapshot sections become independent typed Provider sources', () =>
     ),
     false,
   );
+});
+
+test('long hard engineering and rule contexts fail before Provider dispatch instead of truncating canaries', async () => {
+  for (const section of [
+    { key: 'engineering', title: '工程', sourceTypes: ['chapter_engineering'] as const },
+    { key: 'novel', title: '规则', sourceTypes: ['rule_system'] as const },
+    { key: 'world_settings', title: '世界', sourceTypes: ['world_setting'] as const },
+  ]) {
+    const sources = buildChapterProviderContextSources({
+      snapshot: snapshot([
+        {
+          ...section,
+          sourceTypes: [...section.sourceTypes],
+          content: '长约束'.repeat(6000) + 'HARD_RULE_TAIL_CANARY',
+        },
+      ]),
+      requestSourceVersion: 'request',
+      requestInstruction: '写本章',
+    });
+    const projected = sources.find((source) => source.label === section.title)!;
+    assert.equal(projected.requireFull, true);
+    assert.equal(projected.required, true);
+    assert.ok(projected.content.endsWith('HARD_RULE_TAIL_CANARY'));
+    await assert.rejects(
+      compileAiContext({
+        sources,
+        modelContextTokens: 4096,
+        reservedOutputTokens: 1024,
+        fixedMessageTokens: 50,
+      }),
+      (error: unknown) => (error as { code?: string }).code === 'AI_CONTEXT_BUDGET_EXCEEDED',
+    );
+  }
 });
 
 test('source ordering and identities are deterministic and unique', () => {
@@ -248,6 +285,29 @@ test('repair draft remains an independent required source with its own version',
   assert.equal(draft?.required, true);
   assert.equal(draft?.origin, 'request');
   assert.equal(new Set(sources.map((source) => source.sourceId)).size, sources.length);
+});
+
+test('repair projection retains the original explicit candidate independently from the intermediate draft', () => {
+  const sources = buildChapterProviderContextSources({
+    snapshot: snapshot([]),
+    requestSourceVersion: 'repair-step',
+    requestInstruction: '修复当前稿',
+    currentDraft: { content: 'INTERMEDIATE_DRAFT', sourceVersion: 'intermediate-hash' },
+    revisionBase: { content: 'ORIGINAL_A_CANARY', sourceVersion: 'original-a-hash' },
+  });
+  const base = sources.find((source) => source.content === 'ORIGINAL_A_CANARY')!;
+  assert.equal(base.sourceVersion, 'original-a-hash');
+  assert.equal(base.required, true);
+  assert.equal(base.requireFull, true);
+  assert.ok(sources.some((source) => source.content === 'INTERMEDIATE_DRAFT'));
+  const identical = buildChapterProviderContextSources({
+    snapshot: snapshot([]),
+    requestSourceVersion: 'first-step',
+    requestInstruction: '修订原稿',
+    currentDraft: { content: 'ORIGINAL_A_CANARY', sourceVersion: 'original-a-hash' },
+    revisionBase: { content: 'ORIGINAL_A_CANARY', sourceVersion: 'original-a-hash' },
+  });
+  assert.equal(identical.filter((source) => source.content === 'ORIGINAL_A_CANARY').length, 1);
 });
 
 test('chapter generation registry accepts every projected Provider source type', () => {

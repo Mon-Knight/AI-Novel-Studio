@@ -4,6 +4,9 @@ use crate::services::conversation_service as service;
 use serde::Deserialize;
 use serde_json::Value;
 
+#[path = "chapter_workflow_stages.rs"]
+pub mod chapter_workflow_stages;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListConversationsInput {
@@ -68,12 +71,24 @@ pub fn list_task_conversations(
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     if input.archive.is_none() && input.query.is_none() && input.cursor.is_none() {
-        return service::list(&connection, input.novel_id.as_deref(), input.include_archived, input.limit.unwrap_or(100));
+        return service::list(
+            &connection,
+            input.novel_id.as_deref(),
+            input.include_archived,
+            input.limit.unwrap_or(100),
+        );
     }
     service::list_page(
         &connection,
         input.novel_id.as_deref(),
-        input.archive.as_deref().unwrap_or(if input.include_archived { "all" } else { "active" }),
+        input
+            .archive
+            .as_deref()
+            .unwrap_or(if input.include_archived {
+                "all"
+            } else {
+                "active"
+            }),
         input.query.as_deref().unwrap_or(""),
         input.limit.unwrap_or(100),
         input.cursor.as_ref(),
@@ -88,6 +103,38 @@ pub fn get_task_conversation(
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     service::get(&connection, &conversation_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRunningTaskTargetsInput {
+    pub novel_id: String,
+}
+
+#[tauri::command]
+pub fn get_task_conversation_window(
+    input: crate::repositories::conversation_repository::ConversationWindowInput,
+) -> Result<
+    Option<crate::repositories::conversation_repository::TaskConversationWindow>,
+    AppError,
+> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::get_conversation_window(&connection, input)
+}
+
+#[tauri::command]
+pub fn list_running_task_targets(
+    input: ListRunningTaskTargetsInput,
+) -> Result<Vec<crate::repositories::conversation_repository::RunningTaskTarget>, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::list_running_task_targets(
+        &connection,
+        &input.novel_id,
+    )
 }
 
 #[tauri::command]
