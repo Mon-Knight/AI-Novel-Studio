@@ -2,7 +2,7 @@
 
 ## 结论
 
-本次收尾提交已完成：提交 `6b5fb77` 已推送到 `origin/codex/v3.7.0-writing-subagent`。本地生产 EXE 已重建，路径为 `src-tauri/target/release/AI Novel Studio.exe`，大小 27,279,872 bytes，SHA-256 `4C5D5EC6A387612B1CBE7E19C654BB968E91ECAC8D7643B9816537DFCE74571C`。
+本次收尾提交已完成：提交 `2b3f515` 已推送到 `origin/codex/v3.7.0-writing-subagent`。本地生产 EXE 已按最终工作区重建，路径为 `src-tauri/target/release/AI Novel Studio.exe`，大小 27,282,944 bytes，SHA-256 `CF0912BEE3B94DB1A61B1EB4883FA8E58AECE5B3CD5D07C64E06E5A8F9A89EA2`。
 
 三万字真实桌面生成产物已有完整证据：`reports/desktop-real-novel-30000-2026-10-15.md` 记录真实模型在桌面界面中逐章生成、审阅、保存、确认采用和导出整本 TXT，共 10 章、正式采用 35,043 字（汉字 34,896 个），导出全文与采用稿逐章一致。该报告同时保留了质量问题台账，本轮不对小说质量做优化。
 
