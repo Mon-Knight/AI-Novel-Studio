@@ -352,10 +352,18 @@ pub fn delete_if_unreferenced(connection: &Connection, document_id: &str) -> Res
             |row| row.get(0),
         )
         .map_err(AppError::database)?;
+    let workflow_stage_references: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM chapter_workflow_stages WHERE result_document_id = ?1",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
     if draft_references == 0
         && recovery_references == 0
         && ai_references == 0
         && reference_library_references == 0
+        && workflow_stage_references == 0
     {
         connection
             .execute(

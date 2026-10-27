@@ -16,6 +16,9 @@ const tests = [
   'src/features/workspace/documentSafety.test.mjs',
   'src/utils/uniqueId.test.ts',
   'scripts/quality/test-ownership.test.mjs',
+  'scripts/e2e/run-writing-fault-injection.test.mjs',
+  'tests/real-acceptance/writing-subagent-fault-evidence.test.ts',
+  'scripts/dsh/mock-workbench-upstream.test.mjs',
 ];
 const commands = (plan, lane = 'all') =>
   verificationCommands(plan, { root, lane, source: () => nodeTest });

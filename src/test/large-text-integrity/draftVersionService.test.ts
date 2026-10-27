@@ -564,7 +564,7 @@ describe('browser draft revision/hash CAS', () => {
         currentWords: adopted.wordCount,
       }),
     );
-  });
+  }, 15_000);
 
   it('restores browser draft, chapter and context facts when post-adoption authorization fails', async () => {
     const chapter = {

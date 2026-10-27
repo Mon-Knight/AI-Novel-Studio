@@ -4,6 +4,9 @@ use crate::services::conversation_service as service;
 use serde::Deserialize;
 use serde_json::Value;
 
+#[path = "chapter_workflow_stages.rs"]
+pub mod chapter_workflow_stages;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListConversationsInput {

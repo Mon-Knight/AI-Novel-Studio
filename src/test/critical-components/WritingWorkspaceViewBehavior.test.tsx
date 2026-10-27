@@ -112,6 +112,10 @@ vi.mock('../../components/workspace/EditorArea', () => ({
   )),
 }));
 
+vi.mock('../../components/workspace/ChapterSummaryWorkflowNotice', () => ({
+  ChapterSummaryWorkflowNotice: () => <div data-testid="mock-chapter-summary-notice" />,
+}));
+
 vi.mock('../../components/workspace/StatusBar', () => ({
   default: () => <div data-testid="mock-status" />,
 }));

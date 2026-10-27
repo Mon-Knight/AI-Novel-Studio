@@ -66,6 +66,8 @@ pub mod retry;
 mod summary_scope;
 #[path = "task_runtime_word_target.rs"]
 mod word_target;
+#[path = "task_runtime_chapter_stage.rs"]
+mod chapter_stage;
 
 pub const DSH_SOURCE_COMMIT: &str = "47f943859bef60e4160492346772ded9b24f765a";
 pub const DSH_PROTOCOL: &str = "ans_task_session_v2";
@@ -197,9 +199,11 @@ fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
         )
         .to_string(),
         "chapter_summary" => concat!(
-            "candidateText JSON 须含 summary、keyEvents、factsMustRemember；按候选工具 schema 的 grounding v1 契约逐条提供当前完整采用稿的原文依据与确定性分类。",
+            "candidateText JSON 须含 summary、keyEvents、factsMustRemember、characterChanges 与 contextRecords；后两者必须为数组，确认无变化时用空数组，省略视为不完整。",
+            "按候选工具 schema 的 grounding v1 契约逐条提供当前完整采用稿的原文依据与确定性分类。",
             "采用稿缺失或 truncated=true 时停止。保留推测、待查和计划，不补写去向、原因、罪名或永久安排；重做以当前采用稿复核作者指出的问题。"
         ).to_string(),
+        "chapter_stage_write" => chapter_stage::instruction(),
         "chapter_write" | "chapter_polish" => {
             let mut instruction = if input.task_kind == "chapter_write" {
                 concat!(
@@ -404,6 +408,8 @@ fn turn_allowed_tools(input: &StartTaskTurnInput) -> &'static str {
         creative_dialogue::ALLOWED
     } else if is_canonical_only_turn(input) {
         CANONICAL_ALLOWED_TOOLS
+    } else if chapter_stage::is_stage_task(&input.task_kind) {
+        chapter_stage::ALLOWED_TOOLS
     } else if input.task_kind == "chapter_write" {
         CHAPTER_WRITE_ALLOWED_TOOLS
     } else if input.task_kind == "chapter_polish" {
@@ -434,6 +440,9 @@ fn workbench_system_prompt(input: &StartTaskTurnInput) -> &'static str {
 fn expected_contract_for_task_kind(
     task_kind: &str,
 ) -> Result<Option<(&'static str, &'static str)>, String> {
+    if let Some(contract) = chapter_stage::expected_contract(task_kind) {
+        return contract;
+    }
     match task_kind {
         "read" | "creative_dialogue" => Ok(None),
         "story_plan_generate" | "outline_generate" => Ok(Some(("generate_outline", "outline"))),
@@ -509,6 +518,12 @@ fn validate_turn_contract(input: &StartTaskTurnInput) -> Result<(), String> {
     }
 
     revision_source::validate_contract(input).map_err(|error| error.to_string())?;
+    chapter_stage::validate_contract(
+        &input.task_kind,
+        input.chapter_id.as_deref(),
+        input.expected_tool.as_deref(),
+        input.expected_artifact_type.as_deref(),
+    )?;
     let context_read_tools = turn_context_read_tools(input);
     let mut seen = HashSet::new();
     for tool in &input.required_read_tools {
@@ -1506,6 +1521,7 @@ fn project_session_event(
                 .and_then(Value::as_str)
                 .ok_or_else(|| "tool/call 缺少 name".to_string())?;
             let tool_name = authorize_projected_tool(raw_name, allowed_tools)?;
+            let stage_submission = tool_name == chapter_stage::TOOL_NAME;
             let arguments = event
                 .pointer("/data/arguments")
                 .and_then(Value::as_str)
@@ -1562,6 +1578,7 @@ fn project_session_event(
                 },
             )
             .map_err(|error| error.to_string())?;
+            let event_id = record.event_id.clone();
             conversation_service::update_tool_event(
                 &mut connection,
                 UpdateToolEventInput {
@@ -1574,6 +1591,9 @@ fn project_session_event(
                 },
             )
             .map_err(|error| error.to_string())?;
+            if stage_submission {
+                chapter_stage::remember_submission(&connection, &event_id, arguments)?;
+            }
             Some("tool")
         }
         "tool/result" => {
@@ -1594,7 +1614,7 @@ fn project_session_event(
                 return Ok(());
             }
             let content = tool_result_text(event);
-            let is_error = event
+            let mut is_error = event
                 .pointer("/data/message/content/0/isError")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
@@ -1603,11 +1623,19 @@ fn project_session_event(
                 .pointer("/data/error/code")
                 .and_then(Value::as_str)
                 .unwrap_or(if is_error { "DSH_TOOL_FAILED" } else { "" });
-            let error_message = if is_error {
+            let mut error_message = if is_error {
                 Some(tool_error_message(event, error_code))
             } else {
                 None
             };
+            if record.tool_name == chapter_stage::TOOL_NAME && !is_error {
+                if let Err(error) =
+                    chapter_stage::accept_submission(&mut connection, run_id, &record.event_id, &content)
+                {
+                    is_error = true;
+                    error_message = Some(error);
+                }
+            }
             let mut result = json!({
                 "callId":call_id,
                 "dshSequence":sequence,
@@ -2719,6 +2747,17 @@ fn provider_response_metadata(
     })
 }
 
+fn chapter_summary_snapshot_markers(artifact_type: &str) -> Value {
+    if artifact_type == "chapter_summary" {
+        json!({
+            "summaryGroundingVersion": crate::services::summary_grounding::VERSION,
+            "summaryCoverageVersion": crate::services::summary_coverage::VERSION,
+        })
+    } else {
+        json!({})
+    }
+}
+
 fn create_artifact_projection(
     connection: &mut rusqlite::Connection,
     input: &StartTaskTurnInput,
@@ -2776,9 +2815,11 @@ fn create_artifact_projection(
     let (mut context_manifest, compiled_context, context_budget, _generation_context) =
         build_context_evidence(connection, run_id)?;
     let mut payload_json = json!({"goal": input.goal, "conversationId": input.conversation_id});
-    if artifact_type == "chapter_summary" {
-        payload_json["summaryGroundingVersion"] =
-            json!(crate::services::summary_grounding::VERSION);
+    let summary_markers = chapter_summary_snapshot_markers(artifact_type);
+    if let Some(markers) = summary_markers.as_object() {
+        for (key, value) in markers {
+            payload_json[key.as_str()] = value.clone();
+        }
     }
     revision_source::freeze_snapshot_metadata(input, &mut payload_json, &mut context_manifest)?;
     let create = CreateAiTaskInput {

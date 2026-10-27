@@ -40,6 +40,14 @@ export interface ChapterSummaryGrounding {
   }>;
 }
 
+/** Parsed declaration state for the versioned summary coverage contract. */
+export type SummaryCoverageFieldState = 'explicit' | 'missing';
+
+export interface ChapterSummaryCoverage {
+  characterChanges: SummaryCoverageFieldState;
+  contextRecords: SummaryCoverageFieldState;
+}
+
 export interface ChapterCharacterChange {
   characterName: string;
   characterId?: string;
@@ -128,6 +136,10 @@ export interface CreateChapterSummaryInput {
 
 export interface ChapterSummarizeResult {
   grounding?: ChapterSummaryGrounding;
+  /** Set only by hosts/callers that use the covered summary contract. */
+  coverageVersion?: 1;
+  /** Parsed declaration state; `missing` is not an explicit empty array. */
+  coverage?: ChapterSummaryCoverage;
   summary: string;
   summaryTitle?: string;
   keyEvents: string[];

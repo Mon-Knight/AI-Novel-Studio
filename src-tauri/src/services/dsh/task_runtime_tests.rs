@@ -1879,6 +1879,29 @@ fn chapter_summary_contract_keeps_character_and_memory_reads_optional() {
 }
 
 #[test]
+fn chapter_summary_instruction_requires_explicit_coverage_arrays() {
+    let instruction = workbench_task_instruction(&chapter_summary_input());
+    for term in [
+        "characterChanges",
+        "contextRecords",
+        "空数组",
+        "省略视为不完整",
+    ] {
+        assert!(instruction.contains(term), "missing {term}: {instruction}");
+    }
+}
+
+#[test]
+fn chapter_summary_projection_snapshot_carries_coverage_version() {
+    let markers = chapter_summary_snapshot_markers("chapter_summary");
+    assert_eq!(markers["summaryGroundingVersion"], 1);
+    assert_eq!(markers["summaryCoverageVersion"], 1);
+    assert!(chapter_summary_snapshot_markers("chapter_text")
+        .as_object()
+        .is_some_and(serde_json::Map::is_empty));
+}
+
+#[test]
 fn read_turn_contract_requires_every_declared_context_read_to_succeed() {
     let mut input = api_input(
         OPENAI_COMPATIBLE_PROVIDER,

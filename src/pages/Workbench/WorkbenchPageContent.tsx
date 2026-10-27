@@ -20,6 +20,7 @@ import {
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
 import { WorkbenchChapterSummaryStatus } from './WorkbenchChapterSummaryStatus';
+import { WorkbenchChapterStageProgress } from './WorkbenchChapterStageProgress';
 import type { WorkbenchSidePanelState } from './hooks/useWorkbenchSidePanel';
 import type { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 
@@ -201,6 +202,16 @@ export function WorkbenchPageContent({
               onToggleFocus={toggleFocusMode}
               onOpenContext={() => openReference('context')}
               onOpenArtifacts={() => openReference('artifacts')}
+            />
+            <WorkbenchChapterStageProgress
+              novelId={selectedNovelId}
+              chapterId={selectedChapterId ?? chapterId}
+              chapterTitle={
+                chapters.find((chapter) => chapter.id === (selectedChapterId ?? chapterId))?.title
+              }
+              bundle={bundle}
+              bundleReady={bundleReady}
+              onLocateArtifact={onLocateArtifact}
             />
             <PanelErrorBoundary panelTitle="创作对话">
               {streamProps ? (

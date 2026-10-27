@@ -23,7 +23,7 @@ import {
   type CreativePlannedAction,
 } from '../conversation/taskGoalRouting';
 import { runHostGatedChapterTurn } from '../agents/writingSubAgentChapterGate';
-import { isWritingSubAgentDshEnabled } from '../agents/writingSubAgentContract';
+import { selectChapterWriteHost } from './chapterWriteRoute';
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { draftVersionService } from '../database/draftVersionService';
@@ -399,19 +399,15 @@ export const taskSessionAdapter = {
         : 'structured_write'
       : classifyTaskIntent(goal, revisionSource);
     if (intent === 'chapter_write') {
-      // Desktop API chapter writing uses candidate-only DSH; opt-out applies to new requests.
-      // Native retries keep their original host gate, frozen range and persistent attempt budget.
-      if (
-        isTauri() &&
-        input.chapterId &&
-        (Boolean(input.retrySourceRunId) ||
-          isWritingSubAgentDshEnabled({
-            isTauri: true,
-            modelRuntimeMode: (input.modelSnapshot ?? captureTaskModelSnapshot()).runtimeMode,
-          }))
-      ) {
-        return startWritingSubAgentTurn(input, onEvent);
-      }
+      const host = await selectChapterWriteHost({
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        retrySourceRunId: input.retrySourceRunId,
+        revisionSource: input.revisionSource,
+        workflowAction: input.workflowAction,
+        modelSnapshot: input.modelSnapshot ?? captureTaskModelSnapshot(),
+      });
+      if (host === 'dsh') return startWritingSubAgentTurn(input, onEvent);
       return taskRuntimeAdapter.start({ ...input, workerId: session.workerId }, onEvent);
     }
     if (!isTauri()) {

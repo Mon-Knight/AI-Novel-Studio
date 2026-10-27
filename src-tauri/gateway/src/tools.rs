@@ -12,6 +12,7 @@
 //! migrations or recovery. v3.2 should extract a shared read-only crate to
 //! remove the SQL drift risk versus the app repositories.
 
+use crate::tool_allowlist::filter_tool_list;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -441,7 +442,7 @@ fn legacy_tool_catalog() -> Vec<Value> {
         candidate_tool_schema(
             "summarize_chapter",
             "chapter_summary",
-            "接收并验证基于当前已采用章节正文生成的章节总结候选。提交前必须先用 chapter.read_outline 读取正文。candidateText 必须是 JSON 对象的字符串，至少包含 summary；应从正文提取 keyEvents、factsMustRemember，并在存在变化时提供 characterChanges 与 contextRecords。直接生成完整候选，不要要求用户填写 JSON；本工具不写入正式上下文。",
+            "接收并验证基于当前已采用章节正文生成的章节总结候选。提交前必须先用 chapter.read_outline 读取正文。candidateText 必须是 JSON 对象的字符串，至少包含 summary；应从正文提取 keyEvents、factsMustRemember，并必须提供 characterChanges 与 contextRecords 数组，没有变化时返回空数组。直接生成完整候选，不要要求用户填写 JSON；本工具不写入正式上下文。",
         ),
         json!({
             "name": "get_metadata",
@@ -582,24 +583,6 @@ fn list_tools_for_allowlist(allowed_tools: Result<Option<HashSet<String>>, Strin
     }
 }
 
-fn filter_tool_list(
-    tools: Vec<Value>,
-    allowed_tools: Result<Option<HashSet<String>>, String>,
-) -> Vec<Value> {
-    match allowed_tools {
-        Ok(Some(allowed)) => tools
-            .into_iter()
-            .filter(|tool| {
-                tool.get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| allowed.contains(name))
-            })
-            .collect(),
-        Ok(None) => tools,
-        Err(_) => Vec::new(),
-    }
-}
-
 /// Dispatches one `tools/call`.
 pub fn call_tool(connection: &Connection, name: &str, arguments: &Value) -> Result<Value, String> {
     call_tool_with_security_context(
@@ -621,7 +604,9 @@ fn call_tool_with_security_context(
         return Err("suspicious credential-like input rejected".to_string());
     }
     if let Some(allowed) = &security_context.allowed_tools {
-        let allowed_for_task = if allowlist_selects_canonical(allowed) {
+        let allowed_for_task = if allowlist_selects_canonical(allowed)
+            && !crate::stage_submission::is_tool(name)
+        {
             is_canonical_read_tool(name) && allowed.contains(name)
         } else {
             allowed.contains(name)
@@ -648,11 +633,20 @@ fn call_tool_with_security_context(
         if let Some(object) = novel_arguments.as_object_mut() { object.remove("chapterId"); }
         let novel_scope = security_context.scope.as_ref().map(|scope|TaskScope {novel_id:scope.novel_id.clone(),chapter_id:None});
         validate_task_scope(novel_scope.as_ref(), &novel_arguments)?;
+    } else if crate::stage_submission::is_tool(name)
+        && security_context.allowed_tools.as_ref().is_some_and(|allowed| allowed.contains(name))
+        && security_context.scope.as_ref().and_then(|scope| scope.chapter_id.as_deref()).is_none()
+    {
+        return Err(TASK_CHAPTER_SCOPE_REJECTED.to_string());
     } else {
         validate_task_scope(security_context.scope.as_ref(), arguments)?;
     }
     match name {
         "creative.plan_action" => creative_action::plan(connection, arguments),
+        "submit_chapter_stage" => crate::stage_submission::call(
+            arguments,
+            security_context.allowed_tools.as_ref(),
+        ),
         "novel.read" | "novel.read_context" => get_metadata(connection, arguments, false),
         "get_metadata" => get_metadata(connection, arguments, true),
         "structure.read" | "context.read" | "chapter.read_outline" | "get_chapter_context" => {

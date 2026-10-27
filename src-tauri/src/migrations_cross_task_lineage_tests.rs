@@ -511,12 +511,13 @@ fn lineage_upgrade_keeps_rows_ledger_dependents_and_enables_cross_task_revision(
     ]
     .map(|name| (name, lineage_object_sql(&connection, name)));
 
-    run_migrations(&mut connection).expect("upgrade to 039");
+    run_migrations(&mut connection).expect("upgrade through 040");
     assert_eq!(lineage_foreign_keys_pragma(&connection), 1);
     let applied = list_applied(&connection).expect("ledger");
     let lineage_index = lineage_released_migration_count();
-    assert_eq!(applied.len(), lineage_index + 1);
+    assert_eq!(applied.len(), EXPECTED_MIGRATION_CHECKSUMS.len());
     assert_eq!(applied[lineage_index].migration_id, LINEAGE_039);
+    assert_eq!(applied[lineage_index + 1].migration_id, "040_chapter_workflow_stages");
     assert_eq!(
         applied[lineage_index].checksum,
         EXPECTED_MIGRATION_CHECKSUMS[lineage_index].1
@@ -614,10 +615,12 @@ fn lineage_new_empty_and_prerelease_match_upgraded_fk_structure() {
         lineage_released_migration_count()
     );
     let sql_before = lineage_artifact_sql(&pre_release);
-    let version_before = lineage_schema_version(&pre_release);
-    run_migrations(&mut pre_release).expect("no-op 039 ledger insert");
+    run_migrations(&mut pre_release).expect("apply remaining 039/040 ledger facts");
     assert_eq!(lineage_artifact_sql(&pre_release), sql_before);
-    assert_eq!(lineage_schema_version(&pre_release), version_before);
+    assert_eq!(
+        list_applied(&pre_release).expect("ledger").len(),
+        EXPECTED_MIGRATION_CHECKSUMS.len()
+    );
     assert_eq!(lineage_schema_signature(&pre_release), expected);
 }
 

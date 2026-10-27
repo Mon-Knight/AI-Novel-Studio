@@ -4,7 +4,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
-const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 39] = [
+const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 40] = [
     (
         "001_schema_migrations",
         "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -160,6 +160,10 @@ const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 39] = [
     (
         "039_result_artifacts_cross_task_lineage",
         "0ccb6cd137c15169baa1e1e9dda456ea17aa9046cd7b3291df72c37b89307105",
+    ),
+    (
+        "040_chapter_workflow_stages",
+        "64771361d6918a3ddc86a3a311fc29d1de75664e31c1d77992e59ec85acbcad5",
     ),
 ];
 

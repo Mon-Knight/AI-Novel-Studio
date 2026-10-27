@@ -13,18 +13,25 @@
   width: 100%;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 5px 7px;
+  padding: 4px 8px;
   background: var(--color-bg-card);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .chapter-locator-current {
   flex: 0 0 auto;
   min-height: 28px;
   padding: 3px 6px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
+}
+.chapter-locator-current:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.chapter-locator-current:active:not(:disabled) {
+  background: var(--color-bg-active);
 }
 .chapter-locator-current:disabled {
   cursor: default;
@@ -49,17 +56,20 @@
   color: var(--color-text-primary);
   background: var(--color-bg-card);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 .chapter-locator-results button:hover {
   background: var(--color-bg-hover);
 }
+.chapter-locator-results button:active {
+  background: var(--color-bg-active);
+}
 .chapter-locator-count {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 .workspace-chapter-locator {
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--color-border);
 }

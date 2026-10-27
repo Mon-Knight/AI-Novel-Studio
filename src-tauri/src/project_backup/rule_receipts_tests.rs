@@ -151,7 +151,7 @@ fn project_backup_round_trips_rule_receipts_without_reauthorizing_new_project() 
     let (other, other_receipt) = applied_rule(&mut conn, "novel-other");
     let original = large_text::read_verified_document(&conn, &receipt_id).unwrap();
     let backup = export_project_backup_in_conn(&conn, &input.novel_id).unwrap();
-    assert_eq!(backup.schema_version, 11);
+    assert_eq!(backup.schema_version, 12);
     assert_eq!(backup.tables["artifact_decisions"].len(), 1);
     assert_eq!(backup.tables["rule_systems"].len(), 1);
     assert_eq!(

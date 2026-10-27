@@ -5,7 +5,7 @@
   padding: 12px 16px;
   margin-bottom: 12px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .guide-heading {
   display: flex;
@@ -25,6 +25,13 @@
   place-items: center;
   color: var(--color-text-secondary);
   cursor: pointer;
+}
+.guide-heading button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.guide-heading button:active {
+  background: var(--color-bg-active);
 }
 .guide-steps {
   display: flex;
@@ -48,14 +55,26 @@
   padding: 4px 0;
   min-height: 24px;
 }
+.first-time-guide summary:hover {
+  color: var(--color-text-primary);
+}
+.first-time-guide summary:active {
+  color: var(--color-primary);
+}
 .guide-full-steps {
   padding: 8px 0 0 20px;
   line-height: 1.9;
 }
 .guide-reopen {
   min-height: 28px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
   margin-bottom: 12px;
+}
+.guide-reopen:hover {
+  color: var(--color-text-primary);
+}
+.guide-reopen:active {
+  color: var(--color-primary);
 }

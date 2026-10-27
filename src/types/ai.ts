@@ -248,6 +248,9 @@ export type AiTaskType =
   | 'chapter_beat_repair'
   | 'chapter_scene_generate'
   | 'chapter_scene_plan_generate'
+  | 'chapter_scene_plan_v2_generate'
+  | 'chapter_beat_plan_generate'
+  | 'chapter_beat_state_extract'
   | 'chapter_rewrite'
   | 'chapter_polish'
   | 'quality_check'
@@ -314,6 +317,9 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   chapter_beat_repair: '单 Beat 外部修稿',
   chapter_scene_generate: '章节场景正文',
   chapter_scene_plan_generate: 'Scene/Beat 规划候选',
+  chapter_scene_plan_v2_generate: 'Scene-only v2 规划候选',
+  chapter_beat_plan_generate: '当前 Scene Beat 规划候选',
+  chapter_beat_state_extract: 'Beat 实际状态提取',
   chapter_rewrite: '章节重写',
   chapter_polish: '章节润色',
   quality_check: '质量检查',

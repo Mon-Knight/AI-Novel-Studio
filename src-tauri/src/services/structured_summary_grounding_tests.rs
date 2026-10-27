@@ -1,6 +1,14 @@
 // Included inside structured_artifact_apply_service::tests. These fixtures exercise
 // the real admission, source CAS, transaction and memory writes without user data.
 fn grounded_summary_fixture(mut payload: Value) -> Value {
+    // Newly admitted summaries always carry the coverage arrays. Empty means
+    // "checked, no change"; the fixture must not rely on omitted fields.
+    if payload.get("characterChanges").is_none() {
+        payload["characterChanges"] = json!([]);
+    }
+    if payload.get("contextRecords").is_none() {
+        payload["contextRecords"] = json!([]);
+    }
     let claims = crate::services::summary_grounding::assertion_targets(&payload)
         .keys()
         .map(|path| json!({"path":path,"status":"confirmed","quotes":[DRAFT_CONTENT]}))
@@ -154,4 +162,208 @@ fn summary_grounding_apply_rejects_adopted_text_changed_after_candidate_validati
     ] {
         assert_eq!(count(&db, table), 0, "stale source must not write {table}");
     }
+}
+
+fn coverage_markers() -> Value {
+    json!({"summaryGroundingVersion": 1, "summaryCoverageVersion": 1})
+}
+
+#[test]
+fn summary_coverage_new_candidates_require_explicit_arrays_at_admission() {
+    let mut db = connection();
+    // Grounding is complete for the summary itself, so only coverage is missing.
+    let payload = json!({
+        "summary": "林夏发现隐藏航线。",
+        "grounding": {
+            "version": 1,
+            "claims": [{"path": "/summary", "status": "confirmed", "quotes": [DRAFT_CONTENT]}]
+        }
+    });
+    let (conversation_id, bundle) = publish_draft_artifact_with_snapshot_extra(
+        &mut db,
+        "coverage-missing",
+        "chapter_summary",
+        payload,
+        coverage_markers(),
+    );
+    assert_eq!(bundle.artifact.processing_status, "invalid");
+    let codes = bundle
+        .issues
+        .iter()
+        .map(|issue| issue.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"SUMMARY_CHARACTER_CHANGES_MISSING"));
+    assert!(codes.contains(&"SUMMARY_CONTEXT_RECORDS_MISSING"));
+    let error = conversation_service::create_artifact_card(
+        &mut db,
+        conversation_service::CreateArtifactCardInput {
+            card_id: "invalid-coverage".to_string(),
+            conversation_id,
+            turn_id: None,
+            run_id: None,
+            artifact_id: Some(bundle.artifact.artifact_id.clone()),
+            artifact_type: "chapter_summary".to_string(),
+            title: "不完整总结不得进入应用".to_string(),
+            summary: "缺少覆盖数组".to_string(),
+            content: None,
+            status: "candidate".to_string(),
+            created_at: NOW.to_string(),
+        },
+    )
+    .expect_err("invalid candidate must not become a card");
+    assert_eq!(
+        error.code,
+        crate::errors::codes::DATABASE_TRANSACTION_FAILED
+    );
+}
+
+#[test]
+fn summary_coverage_explicit_empty_arrays_apply_without_inventing_character_state() {
+    let mut db = connection();
+    let (card, bundle) = publish_draft_based_with_snapshot_extra(
+        &mut db,
+        "coverage-empty",
+        "chapter_summary",
+        grounded_summary_fixture(json!({"summary": "林夏发现隐藏航线。"})),
+        coverage_markers(),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert!(decision.conflict_code.is_none());
+    assert_eq!(count(&db, "chapter_summaries"), 1);
+    // An explicit empty contextRecords still derives exactly one chapter_summary record.
+    assert_eq!(count(&db, "context_records"), 1);
+    assert_eq!(count(&db, "character_states"), 0);
+    let raw: String = db
+        .query_row(
+            "SELECT validation_result FROM chapter_summaries",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let result: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(result["coverageValidation"], "passed");
+    assert_eq!(result["summaryCoverageVersion"], 1);
+}
+
+#[test]
+fn summary_coverage_explicit_character_change_is_applied_under_new_contract() {
+    let mut db = connection();
+    db.execute(
+        "INSERT INTO characters (id,novel_id,name,is_active,created_at,updated_at)
+         VALUES (?1,?2,'林夏',1,?3,?3)",
+        params![SUMMARY_CHARACTER_ID, NOVEL_ID, NOW],
+    )
+    .unwrap();
+    let (card, bundle) = publish_draft_based_with_snapshot_extra(
+        &mut db,
+        "coverage-character",
+        "chapter_summary",
+        grounded_summary_fixture(json!({
+            "summary": "林夏发现隐藏航线。",
+            "characterChanges": [{"characterName": "林夏", "stateSummary": "掌握了隐藏航线"}],
+            "contextRecords": []
+        })),
+        coverage_markers(),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert!(decision.conflict_code.is_none());
+    assert_eq!(count(&db, "character_states"), 1);
+}
+
+#[test]
+fn summary_coverage_empty_character_changes_blocks_legacy_state_fallback() {
+    let mut db = connection();
+    let (card, bundle) = publish_draft_based_with_snapshot_extra(
+        &mut db,
+        "coverage-no-fallback",
+        "chapter_summary",
+        grounded_summary_fixture(json!({
+            "summary": "林夏发现隐藏航线。",
+            "importantCharacterChanges": [{"name": "林夏", "change": "已离开旧港"}],
+            "protagonistStateChange": "已离开旧港"
+        })),
+        coverage_markers(),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert!(decision.conflict_code.is_none());
+    assert_eq!(count(&db, "character_states"), 0);
+}
+
+#[test]
+fn summary_coverage_apply_rejects_incomplete_character_item() {
+    let mut db = connection();
+    let (card, bundle) = publish_draft_based_with_snapshot_extra(
+        &mut db,
+        "coverage-bad-character",
+        "chapter_summary",
+        grounded_summary_fixture(json!({
+            "summary": "林夏发现隐藏航线。",
+            "characterChanges": [{"characterName": "林夏"}],
+            "contextRecords": []
+        })),
+        coverage_markers(),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert_eq!(
+        decision.conflict_code.as_deref(),
+        Some("SUMMARY_COVERAGE_INCOMPLETE")
+    );
+    assert_eq!(count(&db, "chapter_summaries"), 0);
+    assert_eq!(count(&db, "character_states"), 0);
+}
+
+#[test]
+fn summary_coverage_apply_rejects_incomplete_context_record() {
+    let mut db = connection();
+    let (card, bundle) = publish_draft_based_with_snapshot_extra(
+        &mut db,
+        "coverage-bad-context",
+        "chapter_summary",
+        grounded_summary_fixture(json!({
+            "summary": "林夏发现隐藏航线。",
+            "characterChanges": [],
+            "contextRecords": [{"title": "隐藏航线"}]
+        })),
+        coverage_markers(),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert_eq!(
+        decision.conflict_code.as_deref(),
+        Some("SUMMARY_COVERAGE_INCOMPLETE")
+    );
+    assert_eq!(count(&db, "chapter_summaries"), 0);
+    assert_eq!(count(&db, "context_records"), 0);
+}
+
+#[test]
+fn summary_coverage_legacy_marker_absence_keeps_fallback_state_write() {
+    let mut db = connection();
+    db.execute(
+        "INSERT INTO characters (id,novel_id,name,is_active,created_at,updated_at)
+         VALUES (?1,?2,'林夏',1,?3,?3)",
+        params![SUMMARY_CHARACTER_ID, NOVEL_ID, NOW],
+    )
+    .unwrap();
+    let (card, bundle) = publish_draft_based(
+        &mut db,
+        "coverage-legacy",
+        "chapter_summary",
+        grounded_summary_fixture(json!({
+            "summary": "林夏发现隐藏航线。",
+            "importantCharacterChanges": [{"name": "林夏", "change": "已离开旧港"}]
+        })),
+    );
+    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
+    assert!(decision.conflict_code.is_none());
+    assert_eq!(count(&db, "character_states"), 1);
+    let raw: String = db
+        .query_row(
+            "SELECT validation_result FROM chapter_summaries",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let result: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(result["coverageValidation"], "legacy_not_required");
+    assert_eq!(result["summaryCoverageVersion"], Value::Null);
 }

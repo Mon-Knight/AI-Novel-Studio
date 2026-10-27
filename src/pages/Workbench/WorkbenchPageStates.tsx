@@ -75,7 +75,7 @@ export function WorkbenchEmptyProjects({ onOpenLibrary }: { onOpenLibrary: () =>
   return (
     <div className="workbench-empty-state" data-testid="workbench-no-projects">
       <h1>还没有小说项目</h1>
-      <p>工作台需要一个小说项目。</p>
+      <p>从一部作品开始：起一个名字，写一句简介，剩下的交给工作台。</p>
       <button
         type="button"
         className="btn btn-primary"
@@ -102,6 +102,7 @@ export function WorkbenchEmptyTasks({
   return (
     <div className="workbench-empty-state">
       <h2>当前项目还没有创作任务</h2>
+      <p>把这一章想解决的问题写进对话，或者先让工作台替你拆解大纲。</p>
       <div className="workbench-empty-actions">
         <button
           type="button"

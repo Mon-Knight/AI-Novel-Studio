@@ -1,8 +1,16 @@
 /**
  * AI Novel Studio - 创作工作台 ZCode 视觉层
  *
- * 在 workbench.css 之后加载，只覆盖视觉与布局形态：
- * 单列侧栏（快捷操作 + 项目/任务树 + 身份行）、居中对话流、悬浮输入卡片、
+ * 加载顺序：variables.css → workbench.css → workbench-zcode.css。
+ * 职责边界：
+ * - 本文件在 workbench.css 之后加载，只允许保留「视觉覆盖」：颜色、圆角、阴影、
+ *   关键字号与间距的最终值。
+ * - 新增规则必须注明它覆盖的是 workbench.css 的哪一条基线规则，或说明为纯增量
+ *   （例如基线未定义的按压态），不得再引入第二套结构真值。
+ * - 基线文件不得重复声明本文件已经改写的同属性值；同名选择器只允许在
+ *   媒体查询或容器查询内有条件覆盖。
+ *
+ * 形态：单列侧栏（快捷操作 + 项目/任务树 + 身份行）、居中对话流、悬浮输入卡片、
  * 右侧「打开标签页」面板。所有 data-testid 与交互契约保持不变。
  */
 
@@ -88,7 +96,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-revision-source > span {
@@ -125,7 +133,7 @@
 .workbench-fixed-model-details summary {
   list-style: none;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
@@ -137,7 +145,7 @@
   margin: 4px 0 0;
   max-width: 220px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.4;
   white-space: normal;
 }
@@ -198,7 +206,7 @@
 
 .workbench-tree-tools {
   gap: 6px;
-  padding: 4px 10px 10px;
+  padding: var(--space-1) var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--color-border-light);
 }
 
@@ -229,14 +237,16 @@
 }
 
 .workbench-project-row {
-  padding: 6px 8px;
+  padding: 6px var(--space-2);
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
 }
 
+/* 当前项：基线只保留文字色，选中底色由本层统一给 selected。 */
 .workbench-project-row.is-active {
+  background: var(--color-bg-selected);
   color: var(--color-text-primary);
 }
 
@@ -247,14 +257,14 @@
   border-radius: 5px;
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
 }
 
 .workbench-project-count {
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-task-row {
@@ -262,7 +272,7 @@
   padding: 4px 30px 4px 32px;
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .workbench-task-row.is-active {
@@ -284,7 +294,7 @@
 .workbench-task-copy time {
   flex: 0 0 auto;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 /* 状态用文字会拉宽行；ZCode 只保留颜色点，文字保留给可访问名称。 */
@@ -309,7 +319,7 @@
 }
 
 .workbench-tree-footer {
-  padding: 10px 12px;
+  padding: var(--space-3);
 }
 
 .workbench-library-link {
@@ -369,7 +379,7 @@
 }
 
 .workbench-task-header h2 {
-  font-size: 15px;
+  font-size: var(--font-size-lg);
 }
 
 .workbench-header-icon-button {
@@ -383,7 +393,7 @@
 
 .workbench-run-badge {
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-message-scroll {
@@ -397,12 +407,12 @@
 .workbench-turn-meta {
   margin-bottom: 6px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-turn-content {
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.8;
 }
 
@@ -424,7 +434,7 @@
 }
 
 .workbench-run-heading {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-run-state {
@@ -534,7 +544,7 @@
 
 .workbench-attach-section-title {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
 }
 
@@ -549,7 +559,7 @@
   border-radius: var(--radius-full);
   background: var(--color-bg-card);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
@@ -579,7 +589,7 @@
   flex-direction: column;
   min-height: 0;
   max-height: calc(var(--workbench-composer-height) - 24px);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-panel);
   background: var(--color-bg-composer);
   box-shadow: var(--shadow-composer);
 }
@@ -594,7 +604,7 @@
   border: 0;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.7;
   resize: none;
 }
@@ -608,7 +618,7 @@
   flex-wrap: wrap;
   gap: 6px;
   min-height: 44px;
-  padding: 4px 10px 10px 12px;
+  padding: var(--space-1) var(--space-3) var(--space-3);
 }
 
 .workbench-asset-scope-toggle {
@@ -619,7 +629,7 @@
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-asset-scope-toggle:hover:not(:disabled),
@@ -645,7 +655,7 @@
   border-radius: var(--radius-md);
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
@@ -710,7 +720,7 @@
   border-radius: var(--radius-full);
   background: var(--color-bg-card);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -789,13 +799,13 @@
   border: 0;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-composer-note {
   order: 2;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-model-control + .workbench-composer-note {
@@ -807,20 +817,34 @@
   width: 32px;
   height: 32px;
   margin-left: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
 }
 
+/* 禁用态只降低不透明度，保留主色底，且不参与按压位移。 */
 .workbench-send-button:disabled {
-  border-color: var(--color-border);
-  background: var(--color-bg-hover);
-  color: var(--color-text-muted);
-  opacity: 1;
+  opacity: 0.45;
 }
 
 .workbench-send-button.is-stop {
-  border-color: var(--color-text-primary);
-  background: var(--color-text-primary);
-  color: var(--color-bg-app);
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* 按压态：workbench.css 只定义了 hover，这里补 :active 的触觉反馈。 */
+.workbench-project-row:active,
+.workbench-task-row:active,
+.workbench-task-menu button:active:not(:disabled) {
+  background: var(--color-bg-active);
+}
+
+.workbench-header-icon-button:active:not(:disabled),
+.workbench-send-button:active:not(:disabled),
+.workbench-template-chip:active:not(:disabled),
+.workbench-icon-button:active,
+.workbench-library-link:active,
+.workbench-new-task:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 /* === 右侧：打开标签页 / 当前插件 === */
@@ -877,14 +901,14 @@
 .workbench-side-launcher-header h2 {
   margin: 0 0 4px;
   color: var(--color-text-primary);
-  font-size: 15px;
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
 }
 
 .workbench-side-launcher-header p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-side-launcher-list {
@@ -938,14 +962,14 @@
 }
 
 .workbench-side-launcher-label {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
 }
 
 .workbench-side-launcher-description {
   overflow: hidden;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -973,7 +997,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1040,7 +1064,7 @@
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.6;
 }
 
@@ -1096,14 +1120,14 @@
 
 .workbench-side-row-title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .workbench-side-row-meta {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-side-badge {
@@ -1112,7 +1136,7 @@
   border-radius: var(--radius-full);
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 
@@ -1182,7 +1206,7 @@
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .workbench-side-event > svg {

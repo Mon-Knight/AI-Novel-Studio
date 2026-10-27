@@ -53,7 +53,7 @@ export function ChapterSummaryWorkflowNotice({
         title={error || '返回本章来源会话'}
         onClick={() => (error ? void workflow.refresh() : void open())}
       >
-        <ArrowLeft aria-hidden="true" size={15} />
+        <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
         <span>{error ? '重新定位来源任务' : '返回本章任务'}</span>
       </button>
     );
@@ -104,9 +104,9 @@ export function ChapterSummaryWorkflowNotice({
               data-testid="chapter-summary-open-source"
             >
               {state.phase === 'unadopted' ? (
-                <ArrowLeft aria-hidden="true" size={14} />
+                <ArrowLeft aria-hidden="true" size={14} strokeWidth={1.8} />
               ) : (
-                <ClipboardList aria-hidden="true" size={14} />
+                <ClipboardList aria-hidden="true" size={14} strokeWidth={1.8} />
               )}
               {state.phase === 'unadopted'
                 ? '返回来源任务'
@@ -152,7 +152,7 @@ export function ChapterSummaryWorkflowNotice({
           onClick={() => void workflow.refresh()}
           disabled={loading}
         >
-          <RefreshCw aria-hidden="true" size={14} />
+          <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
           重新读取
         </button>
       )}

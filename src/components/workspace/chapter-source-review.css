@@ -7,7 +7,7 @@
 }
 .editor-source-review {
   margin: 8px 0;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 .source-review-columns {

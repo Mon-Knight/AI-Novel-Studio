@@ -21,6 +21,8 @@
 mod secret_guard;
 #[cfg(test)]
 mod sql_column_contract;
+mod stage_submission;
+mod tool_allowlist;
 mod tools;
 
 use rusqlite::{Connection, OpenFlags};

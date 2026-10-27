@@ -36,6 +36,11 @@ export function normalizeChapterSummarizeResult(
 ): ChapterSummarizeResult {
   return {
     grounding: preserveSummaryGrounding(result.grounding),
+    coverageVersion: result.coverageVersion === 1 ? 1 : undefined,
+    coverage: {
+      characterChanges: Array.isArray(result.characterChanges) ? 'explicit' : 'missing',
+      contextRecords: Array.isArray(result.contextRecords) ? 'explicit' : 'missing',
+    },
     summary: result.summary?.trim() || fallbackText.slice(0, 800) || '模型返回了空总结。',
     summaryTitle: result.summaryTitle?.trim() || undefined,
     keyEvents: stringArray(result.keyEvents),

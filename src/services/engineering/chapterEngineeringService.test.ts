@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createDefaultScenePlan,
+  isScenePlanV2,
   normalizeChapterEngineeringState,
   normalizeScenePlan,
+  normalizeScenePlanV2,
 } from './chapterEngineeringService';
 
 test('legacy ScenePlan fields are normalized into ordered scene-local Beats', () => {
@@ -80,6 +82,87 @@ test('SceneBeat order is sorted and normalized while optional metadata survives'
   assert.equal(scene.contextCapsule, '人物刚抵达门前。');
   assert.equal(scene.expectedEndState, '人物进入门内。');
   assert.equal(scene.targetCharacters, 600);
+});
+
+test('Scene-only v2 plans never legacy-back-fill Beats', () => {
+  const scenes = normalizeScenePlan([
+    {
+      id: 'v2-scene',
+      sceneNo: 1,
+      title: '城门盘查',
+      location: '城门',
+      characters: ['沈岚'],
+      goal: '通过盘查',
+      conflict: '守卫索要路引',
+      keyActions: ['递上路引', '被要求开箱'],
+      keyDialogue: '“打开箱子。”',
+      informationRelease: ['路引上的印章有异'],
+      result: '主角进入城内',
+      transition: '转入客栈',
+      contextCapsule: '沈岚带着一只不能示人的木匣抵达城门。',
+      constraints: ['保持第三人称限知'],
+      expectedEndState: '沈岚进入城门，但守卫记住了她的脸。',
+      targetCharacters: 900,
+      planVersion: 2,
+      beats: [],
+    },
+  ]);
+
+  assert.equal(scenes.length, 1);
+  assert.equal(scenes[0].planVersion, 2);
+  assert.equal(isScenePlanV2(scenes[0]), true);
+  assert.deepEqual(scenes[0].beats, []);
+  assert.equal(scenes[0].targetCharacters, 900);
+});
+
+test('Scene-only v2 normalizer forces the version marker on every Scene', () => {
+  const scenes = normalizeScenePlanV2([
+    { id: 'a', sceneNo: 2, title: '第二场', goal: '目标', beats: [] },
+    { id: 'b', sceneNo: 1, title: '第一场', goal: '目标', beats: [] },
+  ]);
+
+  assert.deepEqual(
+    scenes.map((scene) => scene.sceneNo),
+    [1, 2],
+  );
+  assert.deepEqual(
+    scenes.map((scene) => scene.planVersion),
+    [2, 2],
+  );
+  assert.deepEqual(
+    scenes.map((scene) => scene.beats),
+    [[], []],
+  );
+});
+
+test('Beat plan metadata survives normalization without weakening legacy plans', () => {
+  const [scene] = normalizeScenePlan([
+    {
+      id: 'beat-metadata',
+      sceneNo: 1,
+      title: '场景',
+      goal: '目标',
+      beats: [
+        {
+          id: 'b1',
+          order: 1,
+          text: '推门进入',
+          required: true,
+          startState: '门外无人',
+          stateChange: '进入室内',
+          targetCharacters: 700,
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(scene.beats[0].startState, '门外无人');
+  assert.equal(scene.beats[0].stateChange, '进入室内');
+  assert.equal(scene.beats[0].targetCharacters, 700);
+  assert.equal(scene.planVersion, undefined);
+
+  const [defaultScene] = createDefaultScenePlan({ title: '第一章', goal: '找到线索' });
+  assert.equal(isScenePlanV2(defaultScene), false);
 });
 
 test('default scene always carries a usable local Beat', () => {

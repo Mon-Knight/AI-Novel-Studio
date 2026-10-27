@@ -988,6 +988,12 @@ export function useWorkbenchTaskRunner(input: {
         );
       } catch (error) {
         const failure = classifyWorkbenchFailure(error);
+        // 预检失败后的资产重试被作用域/目标校验拒绝时，仍属原预检阶段；
+        // 保留原错误码，避免把“重试目标不匹配”误报成通用模型失败。
+        const preservesPreflightErrorCode =
+          retryOrchestration.errorCode === 'MODEL_TOOL_CALLING_NOT_VERIFIED' &&
+          (error instanceof PreflightAssetPreparationTurnError ||
+            (error instanceof Error && error.message.startsWith('无法重试资产准备：')));
         const message =
           error instanceof PreflightAssetPreparationTurnError
             ? error.message
@@ -1005,7 +1011,9 @@ export function useWorkbenchTaskRunner(input: {
                       preparationTurnId: retryOrchestration.preparationTurnId,
                     }
                   : {}),
-                errorCode: failure.code,
+                errorCode: preservesPreflightErrorCode
+                  ? (retryOrchestration.errorCode ?? failure.code)
+                  : failure.code,
                 error: message,
                 updatedAt: new Date().toISOString(),
               }

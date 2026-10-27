@@ -10,6 +10,7 @@ pub(super) fn collect_reference_ids(rows: &[BackupRow], ids: &mut Vec<String>) {
             "raw_content_ref_id",
             "display_content_ref_id",
             "structured_payload_ref_id",
+            "result_document_id",
         ] {
             if let Some(id) = row.get(column).and_then(JsonValue::as_str) {
                 ids.push(id.to_string());
