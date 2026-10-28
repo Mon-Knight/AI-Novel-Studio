@@ -1,0 +1,284 @@
+/**
+ * 创作工作台局部精修（2026-10-28）
+ *
+ * Loaded after workbench.css and workbench-zcode.css. The two legacy files are under a
+ * ratcheted line budget; all incremental row, tooltip-anchor and composer-gutter rules stay here.
+ */
+
+/* === 项目 / 任务树：单行、稳定前导槽与独立状态 === */
+.workbench-project-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-bottom: var(--space-1);
+  background: transparent;
+}
+
+.workbench-project-heading .workbench-project-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.workbench-project-collapse {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 0;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.workbench-project-collapse:hover:not(:disabled) {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.workbench-project-collapse:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.workbench-project-collapse:focus-visible,
+.workbench-project-row:focus-visible,
+.workbench-task-row:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.workbench-project-row {
+  min-height: 34px;
+  padding: 6px var(--space-2) 6px var(--space-5);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.workbench-project-row.is-active {
+  background: transparent;
+}
+
+.workbench-project-row:hover {
+  background: var(--color-bg-hover);
+}
+
+.workbench-project-heading.is-current .workbench-project-row {
+  color: var(--color-text-primary);
+}
+
+.workbench-project-heading.is-current .workbench-project-row.is-active {
+  font-weight: var(--font-weight-semibold);
+}
+
+.workbench-project-heading.is-current .workbench-project-count {
+  color: var(--color-text-secondary);
+}
+
+.workbench-project-heading.is-current .workbench-project-mark {
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.workbench-project-title,
+.workbench-task-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-project-title {
+  flex: 1;
+}
+
+.workbench-project-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.workbench-task-row {
+  min-height: 36px;
+  padding: 4px 30px 4px var(--space-5);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.workbench-task-row.is-active {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
+  box-shadow: inset 2px 0 0 var(--color-text-secondary);
+}
+
+.workbench-task-row.is-active .workbench-task-title {
+  font-weight: var(--font-weight-medium);
+}
+
+.workbench-task-row.is-active .workbench-task-copy time {
+  color: var(--color-text-secondary);
+}
+
+.workbench-task-copy {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.workbench-task-title {
+  flex: 1;
+  width: auto;
+  line-height: 1.35;
+}
+
+.workbench-task-copy time {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.workbench-status-dot {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.workbench-status-dot::after {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--workbench-status-color, transparent);
+  content: '';
+}
+
+.workbench-status-dot.is-running,
+.workbench-status-dot.is-waiting_user,
+.workbench-status-dot.is-failed,
+.workbench-status-dot.is-completed,
+.workbench-status-dot.is-archived {
+  background: transparent;
+}
+
+.workbench-status-dot.is-running {
+  --workbench-status-color: var(--color-primary);
+  animation: none;
+}
+
+.workbench-status-dot.is-running::after {
+  animation: workbench-status-pulse 1.4s ease-in-out infinite;
+}
+
+.workbench-status-dot.is-waiting_user {
+  --workbench-status-color: var(--color-warning);
+}
+
+.workbench-status-dot.is-failed {
+  --workbench-status-color: var(--color-error);
+}
+
+.workbench-status-dot.is-completed {
+  --workbench-status-color: var(--color-success);
+}
+
+.workbench-status-dot.is-archived {
+  --workbench-status-color: var(--color-text-muted);
+}
+
+.workbench-task-menu-trigger {
+  top: 50%;
+  transform: translateY(-50%);
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.workbench-task-search:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.workbench-task-search input:disabled {
+  cursor: wait;
+}
+
+.workbench-archive-switch button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* === Composer：统一 gutter 与稳定的辅助状态 === */
+.workbench-composer,
+.agent-console-composer {
+  --workbench-composer-gutter: var(--space-4);
+}
+
+.workbench-composer-extras {
+  scrollbar-gutter: auto;
+}
+
+.workbench-composer-surface > .workbench-template-undo {
+  margin: 6px var(--workbench-composer-gutter) 0;
+}
+
+.workbench-revision-source {
+  margin: 8px var(--workbench-composer-gutter);
+}
+
+.workbench-attach-menu {
+  margin: 10px var(--workbench-composer-gutter) 0;
+}
+
+.workbench-composer-surface textarea {
+  padding: 14px var(--workbench-composer-gutter) 6px;
+}
+
+.workbench-goal-brief {
+  margin: 8px var(--workbench-composer-gutter) 0;
+  padding-bottom: 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workbench-composer-extras > .workbench-inline-error,
+.workbench-composer-extras > .workbench-conflict-hint,
+.workbench-composer-extras > .workbench-readiness-hint:not(.workbench-model-status) {
+  margin: 8px var(--workbench-composer-gutter) 0;
+}
+
+.workbench-composer-toolbar {
+  flex-wrap: nowrap;
+}
+
+.workbench-model-status {
+  margin: 8px var(--workbench-composer-gutter) 0;
+}
+
+.workbench-composer-note {
+  flex: 0 1 auto;
+}

@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- **创作工作台左侧列表与 Composer 细节修复（2026-10-28，非版本任务）**：项目/任务树统一单行与 24px 前导槽，标题独立收缩并省略，普通任务不再渲染更新时间；仅当前任务显示时间，所有项目/任务通过新增的无依赖 portal Tooltip 在悬停或键盘聚焦时披露完整名称、状态和更新时间，提示层固定出现在侧栏右侧，Escape、滚动、缩放与失焦关闭。父项目不再使用与当前任务相同的整行填充，当前项目仅以字重/项目标记细边区分，展开仅旋转箭头；当前任务保留中性选中底色与 2px 内嵌强调边，悬停和 2px 焦点环各自独立。Composer 将章节目标说明、模型状态/错误提示和正文统一到 16px gutter，目标说明通过 `aria-describedby` 关联输入；模型刷新改为 Spinner + 明确操作文案，失败保留 sanitized 原因与重试/设置动作，正常目录状态不持续占位。未新增依赖、数据库字段或业务状态，选择、展开、重命名、归档、发送与快捷键不变。
+
+  验证：`Tooltip.test.tsx` 1、`WorkbenchNavigation.test.tsx` 3、`WorkbenchInputUX.test.tsx` 22、`WorkbenchComposer.test.tsx` + `workbenchModelAvailability.test.ts` 14、`WorkbenchPage.test.tsx` 71 通过；隔离生产构建浏览器视觉回归 4/4 通过（1440×900、1024×700、模型失败、悬停/键盘焦点/明暗主题与对比度）；真实 Windows Tauri 隔离 SQLite 专项 1/1 通过，覆盖长中文/英文/混排标题、父子层级、单行任务、当前任务时间、右侧 Tooltip、焦点与 Composer 对齐。`npm run build`、`lint:ci`、`test:component-size`、`test:style-budget`、`test:bundle-size`、`test:docs-sync`、`test:version-sync` 均通过。聚合 `verify:change --lane frontend` 的 coverage（2532 cases）、frontend-build、bundle-budget、component-size 通过；format 因工作树既有 `src-tauri/capabilities/{desktop,migrated}.json`、`src-tauri/tauri.conf.json` 不符合 Prettier 失败，聚合 lint 当时命中的临时诊断 spec 已移除后独立 lint 通过，未改动上述既有配置文件。
+
 - **安全审计依赖补丁（2026-10-27，非版本任务）**：按定时 `dependency-audit` 失败日志更新 `quinn-proto`、`rustls`、`rustls-webpki`、`webpki-roots` 与 `tokio` 的兼容补丁版本，生产 `npm audit --omit=dev` 仍为 0 个漏洞。Tauri 1.8.3 的更新器仍固定 `zip 0.6.6`，其 RustSec 0367/0368/0369 需要 Tauri 2.x 或等价破坏性迁移才能消除；本次不通过新增忽略项或降级审计阈值掩盖，工作流对该阻断保持失败关闭，待单独评估迁移。
 
 - **当前工作区收尾核对（2026-10-26，非版本任务）**：保留 Scene／Beat、阶段事实／备份及界面既有修改，复核当前生产接线与历史证据的区别，按变更选择器执行适用门禁并更新本地生产 EXE。原生阶段持久化、最终候选来源和跨重启闭环须以实际证据为准，不把内存检查点、结构校验或历史测试当成本批已验收；结果与未完成边界见[收尾核对](reports/closeout-2026-10-26.md)。不升级版本，不调用真实计费模型，不代表提交或发布。

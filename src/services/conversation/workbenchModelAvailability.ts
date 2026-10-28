@@ -188,7 +188,7 @@ export function getWorkbenchModelAvailability({
       options,
       selectedOption,
       canSend,
-      message: '模型列表刷新失败；仍可直接发送，调用失败会显示在对话中。',
+      message: `模型列表刷新失败：${refreshError}。仍可直接发送，调用失败会显示在对话中。`,
     };
   }
   if (credentialAvailable === false) {
@@ -207,7 +207,7 @@ export function getWorkbenchModelAvailability({
       canSend,
       message: runtimeFailure
         ? `模型列表不可用：${runtimeFailure}。仍可直接发送，调用失败会显示在对话中。`
-        : '可直接发送当前已配置模型，调用失败会显示在对话中。',
+        : '当前模型不在 Runtime 目录中；仍可直接发送，调用失败会显示在对话中。',
     };
   }
   return { status: 'available', options, selectedOption, canSend, message: '' };

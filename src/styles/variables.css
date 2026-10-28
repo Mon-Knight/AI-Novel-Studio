@@ -203,6 +203,7 @@
   --z-right-panel: 350;
   --z-overlay: 300;
   --z-modal: 400;
+  --z-tooltip: 500;
 }
 
 :root[data-effective-theme='dark'] {

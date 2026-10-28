@@ -26,6 +26,7 @@ import type { WorkbenchTaskTemplate } from './workbenchTaskTemplates';
 import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
 import { GrowingGoalTextarea } from './GrowingGoalTextarea';
 import { WorkbenchTemplateControls } from './WorkbenchTemplateControls';
+import { WorkbenchGoalBrief, WORKBENCH_GOAL_BRIEF_ID } from './WorkbenchGoalBrief';
 import {
   useWorkbenchWordPreview,
   type WorkbenchWordPreviewContext,
@@ -354,14 +355,11 @@ export function WorkbenchComposer({
           }}
         />
 
-        {wordPreview && (
-          <p className="text-sm text-muted" role="status" data-testid="workbench-word-preview">
-            {wordPreview}
-          </p>
-        )}
+        {wordPreview && <WorkbenchGoalBrief text={wordPreview} />}
         <GrowingGoalTextarea
           data-testid="workbench-composer-input"
           aria-label="创作目标"
+          aria-describedby={wordPreview ? WORKBENCH_GOAL_BRIEF_ID : undefined}
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {

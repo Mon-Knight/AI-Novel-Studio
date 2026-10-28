@@ -1,0 +1,46 @@
+{
+  "input": {
+    "bottom": 633,
+    "clientWidth": 726,
+    "height": 71,
+    "left": 273,
+    "right": 999,
+    "scrollWidth": 726,
+    "text": "继续生成本章正文，并保留当前章节目标。",
+    "top": 562,
+    "width": 726
+  },
+  "notice": {
+    "bottom": 540.5625,
+    "clientWidth": 689,
+    "height": 66,
+    "left": 283,
+    "right": 974,
+    "scrollWidth": 689,
+    "text": "可直接发送当前已配置模型，调用失败会显示在对话中。新建会话重试设置",
+    "top": 474.5625,
+    "width": 691
+  },
+  "retry": {
+    "bottom": 535.5625,
+    "clientWidth": 59,
+    "height": 26,
+    "left": 383,
+    "right": 444,
+    "scrollWidth": 59,
+    "text": "重试",
+    "top": 509.5625,
+    "width": 61
+  },
+  "settings": {
+    "bottom": 535.5625,
+    "clientWidth": 59,
+    "height": 26,
+    "left": 448,
+    "right": 509,
+    "scrollWidth": 59,
+    "text": "设置",
+    "top": 509.5625,
+    "width": 61
+  }
+}

@@ -166,6 +166,7 @@ test('directory state does not block sending a configured model or silently repl
   });
   assert.equal(failed.canSend, true);
   assert.match(failed.message, /刷新失败/);
+  assert.match(failed.message, /catalog failed/);
 
   const missing = getWorkbenchModelAvailability({
     plugins,
@@ -174,6 +175,7 @@ test('directory state does not block sending a configured model or silently repl
   });
   assert.equal(missing.canSend, true);
   assert.match(missing.message, /直接发送/);
+  assert.match(missing.message, /当前模型不在 Runtime 目录中/);
 
   const lockedMissing = getWorkbenchModelAvailability({
     plugins,
