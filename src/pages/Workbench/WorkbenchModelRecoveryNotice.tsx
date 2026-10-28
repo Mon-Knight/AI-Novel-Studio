@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { WorkbenchModelDirectoryStatus } from '../../services/conversation/workbenchModelAvailability';
-import { ChevronDown, CircleAlert, Plus, RefreshCw, Settings } from 'lucide-react';
+import { ChevronDown, CircleAlert, LoaderCircle, Plus, RefreshCw, Settings } from 'lucide-react';
 
 interface WorkbenchModelRecoveryNoticeProps {
   message: string;
@@ -27,9 +27,10 @@ export function WorkbenchModelRecoveryNotice({
   onCreateTask,
 }: WorkbenchModelRecoveryNoticeProps) {
   const [expanded, setExpanded] = useState(false);
-  if (!message) return null;
+  if (!message || status === 'available') return null;
 
   const unavailable = status === 'unavailable';
+  const refreshingStatus = status === 'refreshing';
 
   return (
     <div
@@ -39,12 +40,21 @@ export function WorkbenchModelRecoveryNotice({
       role={unavailable ? 'alert' : 'status'}
       aria-busy={refreshing}
     >
-      <CircleAlert
-        className="workbench-readiness-icon"
-        aria-hidden="true"
-        size={15}
-        strokeWidth={1.8}
-      />
+      {refreshingStatus ? (
+        <LoaderCircle
+          className="workbench-readiness-icon is-spinning"
+          aria-hidden="true"
+          size={15}
+          strokeWidth={1.8}
+        />
+      ) : (
+        <CircleAlert
+          className="workbench-readiness-icon"
+          aria-hidden="true"
+          size={15}
+          strokeWidth={1.8}
+        />
+      )}
       <span className="workbench-readiness-copy workbench-model-status-copy" title={message}>
         {message}
       </span>

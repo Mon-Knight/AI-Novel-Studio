@@ -231,3 +231,53 @@ test('composer keeps Stop as the running-state action', () => {
   assert.doesNotMatch(html, /data-testid="workbench-send-task"/u);
   assert.doesNotMatch(html, /data-testid="workbench-task-preparing"/u);
 });
+
+test('composer gives the chapter goal brief its own gutter and ties it to the textarea', () => {
+  const summary: WorkbenchAssetScopeSummary = {
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    items: [],
+    requiredMissingCount: 0,
+    unavailableCount: 0,
+  };
+  const html = renderComposer(summary, true, {
+    draft: '生成下一章',
+    wordPreviewContext: {
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+      chapterTarget: 3200,
+    },
+  });
+
+  assert.match(html, /class="workbench-goal-brief"/u);
+  assert.match(html, /data-testid="workbench-word-preview"[^>]*>写章目标 3200 字/u);
+  assert.match(
+    openingTag(html, 'textarea', 'workbench-composer-input'),
+    /aria-describedby="workbench-goal-brief"/u,
+  );
+});
+
+test('composer distinguishes model refresh from a failed model directory', () => {
+  const summary: WorkbenchAssetScopeSummary = {
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    items: [],
+    requiredMissingCount: 0,
+    unavailableCount: 0,
+  };
+  const refreshing = renderComposer(summary, true, {
+    pluginsLoading: true,
+  });
+  assert.match(refreshing, /data-status="refreshing"/u);
+  assert.match(refreshing, /lucide-loader-circle/u);
+  assert.doesNotMatch(refreshing, /data-status="unavailable"/u);
+
+  const failed = renderComposer(summary, true, {
+    pluginsError: 'Runtime 模型目录刷新失败',
+  });
+  assert.match(failed, /data-status="unavailable"/u);
+  assert.match(failed, /lucide-circle-alert/u);
+  assert.match(failed, /role="alert"/u);
+  assert.match(failed, /aria-label="重试模型目录"/u);
+  assert.match(failed, /aria-label="模型设置"/u);
+});

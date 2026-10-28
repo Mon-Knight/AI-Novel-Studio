@@ -48,6 +48,7 @@ const allSpecs = [
   'project-backup-boundary.spec.ts',
   'txt-import-atomic.spec.ts',
   'workbench-task-directory.spec.ts',
+  'workbench-ui-detail-refinement.spec.ts',
   'chapter-save.spec.ts',
   'large-text-save.spec.ts',
   'provider-pipeline-setting.spec.ts',
