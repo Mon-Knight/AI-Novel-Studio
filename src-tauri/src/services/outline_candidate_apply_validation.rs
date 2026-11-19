@@ -11,7 +11,10 @@ pub(super) struct SourceFacts {
 
 fn rows(connection: &Connection, sql: &str, scope: &str) -> Result<Value, String> {
     let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
-    let columns = statement.column_names().iter().map(|name| name.to_string()).collect::<Vec<_>>();
+    let columns = statement
+        .column_names()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let values = statement.query_map([scope], |row| {
         let mut value = serde_json::Map::new();
         for (index, column) in columns.iter().enumerate() {

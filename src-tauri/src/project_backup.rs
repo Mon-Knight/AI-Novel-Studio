@@ -706,8 +706,8 @@ fn query_rows(
     let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
     let column_names = statement
         .column_names()
-        .iter()
-        .map(|name| (*name).to_string())
+        .into_iter()
+        .map(str::to_string)
         .collect::<Vec<_>>();
     let mut result = statement
         .query(params![novel_id])
@@ -763,8 +763,8 @@ fn query_rows_by_ids(
         let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
         let column_names = statement
             .column_names()
-            .iter()
-            .map(|name| (*name).to_string())
+            .into_iter()
+            .map(str::to_string)
             .collect::<Vec<_>>();
         let values = batch
             .iter()
