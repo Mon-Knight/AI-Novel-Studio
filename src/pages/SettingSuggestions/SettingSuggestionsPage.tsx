@@ -6,12 +6,13 @@ import { Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import { SettingSuggestionEditDialog } from './SettingSuggestionEditDialog';
+import WorldRuleChangeConfirmation from '../../components/novel-detail/WorldRuleChangeConfirmation';
+import { useSettingSuggestionAdoption } from '../../features/settingSuggestions/useSettingSuggestionAdoption';
 import { novelRepository } from '../../services/database/novelRepository';
 import { settingSuggestionService } from '../../services/settingSuggestions/settingSuggestionService';
 import type { Novel } from '../../types/novel';
 import type {
   GenerateSettingSuggestionsInput,
-  SettingSuggestionPayload,
   SettingSuggestionRecord,
   SettingSuggestionStatus,
   SettingSuggestionType,
@@ -51,10 +52,6 @@ function SettingSuggestionsPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [editingRecord, setEditingRecord] = useState<SettingSuggestionRecord | null>(null);
-  const [editingJson, setEditingJson] = useState('');
-  const [editingBusy, setEditingBusy] = useState(false);
-  const editingInFlight = useRef(false);
   const generateAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
@@ -103,6 +100,25 @@ function SettingSuggestionsPage() {
   const refreshRecord = (record: SettingSuggestionRecord) => {
     setSuggestions((prev) => prev.map((item) => (item.id === record.id ? record : item)));
   };
+
+  const {
+    editingRecord,
+    editingJson,
+    editingBusy,
+    pendingAdoption,
+    handleAdopt,
+    confirmGovernedAdoption,
+    openEditAdopt,
+    confirmEditAdopt,
+    updateEditingJson,
+    closeEditor,
+    cancelPending,
+  } = useSettingSuggestionAdoption({
+    novelId: selectedNovelId,
+    onRecord: refreshRecord,
+    onMessage: setMessage,
+    onError: setError,
+  });
 
   const stopGenerate = () => {
     const controller = generateAbortRef.current;
@@ -163,17 +179,6 @@ function SettingSuggestionsPage() {
     }
   };
 
-  const handleAdopt = async (record: SettingSuggestionRecord) => {
-    setError('');
-    try {
-      const result = await settingSuggestionService.adopt(record.id);
-      refreshRecord(result.record);
-      setMessage(`已采纳到正式模块，目标 ${result.targetId?.slice(0, 8) || ''}`);
-    } catch (e: unknown) {
-      setError(describeUnknownError(e, '采纳失败'));
-    }
-  };
-
   const handleDiscard = async (record: SettingSuggestionRecord) => {
     setError('');
     try {
@@ -182,32 +187,6 @@ function SettingSuggestionsPage() {
       setMessage('候选已废弃，原始记录仍保留');
     } catch (e: unknown) {
       setError(describeUnknownError(e, '废弃失败'));
-    }
-  };
-
-  const openEditAdopt = (record: SettingSuggestionRecord) => {
-    setEditingRecord(record);
-    setEditingJson(JSON.stringify(record.item, null, 2));
-    setError('');
-  };
-
-  const confirmEditAdopt = async () => {
-    if (!editingRecord || editingInFlight.current) return;
-    editingInFlight.current = true;
-    setEditingBusy(true);
-    setError('');
-    try {
-      const parsed = JSON.parse(editingJson) as SettingSuggestionPayload;
-      const result = await settingSuggestionService.adopt(editingRecord.id, parsed);
-      refreshRecord(result.record);
-      setEditingRecord(null);
-      setEditingJson('');
-      setMessage(`已编辑后采纳，目标 ${result.targetId?.slice(0, 8) || ''}`);
-    } catch (e: unknown) {
-      setError(describeUnknownError(e, '编辑后采纳失败，请检查 JSON 格式'));
-    } finally {
-      editingInFlight.current = false;
-      if (mountedRef.current) setEditingBusy(false);
     }
   };
 
@@ -424,18 +403,22 @@ function SettingSuggestionsPage() {
                       <>
                         <button
                           className="btn btn-primary btn-sm"
+                          disabled={editingBusy}
+                          data-testid="setting-suggestion-adopt"
                           onClick={() => handleAdopt(record)}
                         >
                           采纳
                         </button>
                         <button
                           className="btn btn-secondary btn-sm"
+                          disabled={editingBusy}
                           onClick={() => openEditAdopt(record)}
                         >
                           编辑后采纳
                         </button>
                         <button
                           className="btn btn-secondary btn-sm"
+                          disabled={editingBusy}
                           onClick={() => handleDiscard(record)}
                         >
                           废弃
@@ -473,16 +456,28 @@ function SettingSuggestionsPage() {
         </section>
       </div>
 
-      {editingRecord && (
+      {editingRecord && !pendingAdoption && (
         <SettingSuggestionEditDialog
           value={editingJson}
-          onChange={setEditingJson}
+          onChange={updateEditingJson}
           busy={editingBusy}
           error={error}
-          onClose={() => setEditingRecord(null)}
+          onClose={closeEditor}
           onConfirm={() => void confirmEditAdopt()}
         />
       )}
+      <WorldRuleChangeConfirmation
+        previewedContent={
+          pendingAdoption
+            ? JSON.stringify(pendingAdoption.item ?? pendingAdoption.record.item, null, 2)
+            : undefined
+        }
+        preview={pendingAdoption?.preview}
+        busy={editingBusy}
+        error={error}
+        onConfirm={confirmGovernedAdoption}
+        onCancel={cancelPending}
+      />
     </div>
   );
 }

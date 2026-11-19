@@ -25,7 +25,7 @@ export const WORKSPACE_REVIEW_PANELS = [
   'generation-trace',
 ] as const;
 
-/** Desktop E2E keeps legacy rollback and AI surfaces testable after their production entry was removed. */
+/** Explicit compatibility specs can exercise retired surfaces in an E2E build. */
 export const WORKSPACE_E2E_PANELS = [
   'draft-history',
   'ai-generate',
@@ -49,9 +49,18 @@ export const RETIRED_WORKSPACE_AI_PANELS: ReadonlySet<Exclude<PanelType, null>> 
   'setting',
 ]);
 
+export function isE2eLegacyWorkspacePanelsEnabled(): boolean {
+  if (import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E !== '1') return false;
+  try {
+    return localStorage.getItem('ai_novel_studio_e2e_legacy_workspace_panels') === 'enabled';
+  } catch {
+    return false;
+  }
+}
+
 export function isWorkspaceAiPanelRetired(
   panel: PanelType,
-  e2eEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1',
+  e2eEnabled = isE2eLegacyWorkspacePanelsEnabled(),
 ): boolean {
   if (!panel || (WORKSPACE_REVIEW_PANELS as readonly string[]).includes(panel)) return false;
   if (e2eEnabled && (WORKSPACE_E2E_PANELS as readonly string[]).includes(panel)) return false;

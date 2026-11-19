@@ -1,6 +1,5 @@
 use crate::domain::context::{
-    SaveChapterContextBundleInput, SaveChapterSummaryInput, SaveCharacterStateInput,
-    SaveContextRecordInput,
+    SaveChapterContextBundleInput, SaveChapterSummaryInput, SaveContextRecordInput,
 };
 use crate::errors::AppError;
 use crate::repositories::{
@@ -8,15 +7,20 @@ use crate::repositories::{
     character_asset_repository, context_record_repository, draft_repository, novel_repository,
     world_setting_repository,
 };
-use crate::services::{ai_task_service, artifact_service, chapter_context_bundle_service};
+use crate::services::world_rule_governance::{
+    self as rule_governance, RuleChangeAuthorization, RuleChangePreview,
+};
+use crate::services::{
+    ai_task_service, artifact_service, chapter_context_bundle_service, structured_summary_apply,
+};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
-const MAX_ITEMS: usize = 200;
-const MAX_NAME_CHARS: usize = 240;
-const MAX_FIELD_CHARS: usize = 400_000;
+pub(super) const MAX_ITEMS: usize = 200;
+pub(super) const MAX_NAME_CHARS: usize = 240;
+pub(super) const MAX_FIELD_CHARS: usize = 400_000;
 const MAX_STORY_PLAN_BYTES: usize = 2_000_000;
 const MAX_STORY_PLAN_VOLUMES: usize = 50;
 const MAX_STORY_PLAN_CHAPTERS: usize = 200;
@@ -47,11 +51,22 @@ pub struct ApplyStructuredArtifactInput {
     pub chapter_id: Option<String>,
     #[serde(default)]
     pub base_revision: Option<String>,
+    #[serde(default)]
+    pub expected_rule_set_fingerprint: Option<String>,
+    #[serde(default)]
+    pub change_authorization: Option<RuleChangeAuthorization>,
     pub created_at: String,
 }
 
+#[path = "structured_rule_apply_receipt.rs"]
+mod rule_receipt;
+
+#[derive(Clone, Copy)]
+pub(crate) enum ApplicationAuthority<'a> { ManualReview, TaskPreauthorization { authorization_id: &'a str, receipt_id: &'a str } }
+
 enum DomainOutcome {
     Applied,
+    AppliedWithReceipt(String),
     Conflict(&'static str),
 }
 
@@ -99,6 +114,7 @@ struct SettingCandidate {
     target: SettingTarget,
     category: Option<String>,
     forbidden_rules: Option<String>,
+    structured_json: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -208,7 +224,7 @@ fn parse_loose_json(raw: &str) -> Option<Value> {
     })
 }
 
-fn trimmed_text(value: Option<&Value>, max_chars: usize) -> Option<String> {
+pub(super) fn trimmed_text(value: Option<&Value>, max_chars: usize) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
@@ -278,6 +294,13 @@ fn candidate_value(bundle: &artifact_service::ResultArtifactBundle) -> Option<Va
     parse_loose_json(&candidate_text(bundle)).or_else(|| structured.cloned())
 }
 
+pub(crate) fn preauthorized_plan_chapter_counts(bundle: &artifact_service::ResultArtifactBundle) -> Result<Option<Vec<i64>>, AppError> {
+    let Some(candidate) = candidate_value(bundle) else { return Ok(None); };
+    if candidate.get("planKind").and_then(Value::as_str) != Some("story_plan") { return Ok(None); }
+    let plan = parse_story_plan(&candidate).map_err(|code| AppError::new(code, "规划候选无效，未授予新建权限", false))?;
+    Ok(Some(plan.volumes.iter().map(|volume| volume.chapters.len() as i64).collect()))
+}
+
 fn candidate_items(value: &Value, keys: &[&str], identity_key: &str) -> Vec<Value> {
     if let Some(items) = value.as_array() {
         return items.clone();
@@ -301,7 +324,7 @@ fn optional_field(object: &Map<String, Value>, key: &str) -> Option<String> {
     trimmed_text(object.get(key), MAX_FIELD_CHARS)
 }
 
-fn stored_field(object: &Map<String, Value>, key: &str) -> Option<String> {
+pub(super) fn stored_field(object: &Map<String, Value>, key: &str) -> Option<String> {
     match object.get(key) {
         Some(Value::String(value)) => {
             let value = value.trim();
@@ -949,9 +972,21 @@ fn existing_decision(
         .map_err(AppError::database)
 }
 
-fn validate_static_scope(
+fn validate_static_scope(connection: &Connection, input: &ApplyStructuredArtifactInput) -> Result<artifact_service::ResultArtifactBundle, AppError> {
+    validate_static_scope_with_authority(connection, input, ApplicationAuthority::ManualReview)
+}
+
+pub(crate) fn validate_preauthorized_base(connection: &Connection, input: &ApplyStructuredArtifactInput, bundle: &artifact_service::ResultArtifactBundle) -> Result<(), AppError> {
+    if let Some(code) = validate_dynamic_base(connection, input, bundle)? {
+        return Err(AppError::new(code, "候选生成基线已变化，授权写入已停止", false));
+    }
+    Ok(())
+}
+
+fn validate_static_scope_with_authority(
     connection: &Connection,
     input: &ApplyStructuredArtifactInput,
+    authority: ApplicationAuthority<'_>,
 ) -> Result<artifact_service::ResultArtifactBundle, AppError> {
     for (value, field) in [
         (&input.decision_id, "decisionId"),
@@ -966,7 +1001,8 @@ fn validate_static_scope(
     ] {
         required(value, field)?;
     }
-    if input.actor != "user" || input.target_type != "asset" {
+    let expected_actor = match authority { ApplicationAuthority::ManualReview => "user", ApplicationAuthority::TaskPreauthorization { .. } => "task_preauthorized" };
+    if input.actor != expected_actor || input.target_type != "asset" {
         return Err(invalid_input("actorOrTargetType"));
     }
 
@@ -998,7 +1034,7 @@ fn validate_static_scope(
         || card_conversation_id != input.conversation_id
         || card_artifact_type != artifact.artifact_type
         || conversation_novel_id != input.novel_id
-        || artifact.source_novel_id != input.novel_id
+        || artifact.source_novel_id.as_deref() != Some(input.novel_id.as_str())
         || artifact.source_chapter_id != input.chapter_id
         || artifact.content_hash != input.artifact_hash
         || artifact.schema_version != 1
@@ -1048,6 +1084,18 @@ fn validate_existing_identity(
             false,
         ));
     }
+    if existing
+        .apply_transaction_id
+        .as_deref()
+        .is_some_and(|id| !id.starts_with("apply-rule-"))
+        && (input.change_authorization.is_some() || input.expected_rule_set_fingerprint.is_some())
+    {
+        return Err(AppError::new(
+            "STRUCTURED_APPLY_IDEMPOTENCY_CONFLICT",
+            "旧应用没有本次规则确认回执",
+            false,
+        ));
+    }
     Ok(())
 }
 
@@ -1059,6 +1107,28 @@ fn validate_dynamic_base(
     let artifact = &bundle.artifact;
     if input.base_revision.as_deref() != artifact.source_base_content_hash.as_deref() {
         return Ok(Some("STRUCTURED_BASE_REVISION_CONFLICT"));
+    }
+    // This gate precedes the no-chapter fast path: whole-book setting candidates
+    // depend on the complete rule set just as chapter-scoped candidates do.
+    let task = ai_task_service::get_task_detail(connection, &artifact.task_id)?;
+    if let Some(frozen) = task
+        .task
+        .target_hint_json
+        .as_ref()
+        .and_then(|hint| hint.get("nativeRuleSet"))
+    {
+        if let Err(error) =
+            rule_governance::validate_frozen_rule_set(connection, &input.novel_id, frozen)
+        {
+            if error.code == "RULE_SET_BASE_CONFLICT" {
+                return Ok(Some("RULE_SET_BASE_CONFLICT"));
+            }
+            return Err(error);
+        }
+    } else if artifact.artifact_type == "setting_candidates" {
+        // Pre-upgrade candidates remain inspectable, but must be regenerated. A new
+        // click cannot retroactively prove which rules the model actually saw.
+        return Ok(Some("RULE_SET_SNAPSHOT_REQUIRED"));
     }
     let Some(chapter_id) = input.chapter_id.as_deref() else {
         return Ok(None);
@@ -2180,158 +2250,24 @@ fn apply_events(
     Ok(DomainOutcome::Applied)
 }
 
-fn parse_settings(value: &Value) -> Result<Vec<SettingCandidate>, &'static str> {
-    let rows = candidate_items(value, &["settings", "candidates"], "name");
-    if rows.is_empty() {
-        return Err("EMPTY_CANDIDATE");
-    }
-    if rows.len() > MAX_ITEMS {
-        return Err("TOO_MANY_CANDIDATES");
-    }
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    for row in rows {
-        let object = row.as_object().ok_or("STRUCTURED_PAYLOAD_INVALID")?;
-        let name = trimmed_text(object.get("name"), MAX_NAME_CHARS)
-            .or_else(|| trimmed_text(object.get("title"), MAX_NAME_CHARS))
-            .ok_or("STRUCTURED_PAYLOAD_INVALID")?;
-        let raw_category = trimmed_text(object.get("category"), MAX_NAME_CHARS)
-            .map(|value| value.to_ascii_lowercase());
-        let explicit_target = trimmed_text(
-            object.get("targetType").or_else(|| object.get("target")),
-            MAX_NAME_CHARS,
-        )
-        .map(|value| value.to_ascii_lowercase());
-        let target = if explicit_target.as_deref() == Some("rule_system")
-            || explicit_target.as_deref() == Some("rule")
-            || matches!(
-                raw_category.as_deref(),
-                Some(
-                    "world_rules"
-                        | "world_rule"
-                        | "rule"
-                        | "rules"
-                        | "magic"
-                        | "technology"
-                        | "cultivation"
-                        | "combat"
-                        | "social"
-                )
-            ) {
-            SettingTarget::Rule
-        } else {
-            SettingTarget::World
-        };
-        let target_key = match target {
-            SettingTarget::World => "world",
-            SettingTarget::Rule => "rule",
-        };
-        if !seen.insert((target_key, name.clone())) {
-            continue;
-        }
-        let category = match raw_category.as_deref() {
-            Some("magic") => Some("magic".to_string()),
-            Some("technology") => Some("technology".to_string()),
-            Some("cultivation") => Some("cultivation".to_string()),
-            Some("combat") => Some("combat".to_string()),
-            Some("social") => Some("social".to_string()),
-            Some(_) if target == SettingTarget::Rule => Some("other".to_string()),
-            _ => None,
-        };
-        let mut sections = Vec::new();
-        if let Some(description) = trimmed_text(
-            object.get("description").or_else(|| object.get("content")),
-            MAX_FIELD_CHARS,
-        ) {
-            sections.push(description);
-        }
-        if let Some(usage) = optional_field(object, "usageInChapter") {
-            sections.push(format!("本章用途：{usage}"));
-        }
-        if let Some(risk) = optional_field(object, "risk") {
-            sections.push(format!("风险提示：{risk}"));
-        }
-        candidates.push(SettingCandidate {
-            content: if sections.is_empty() {
-                name.clone()
-            } else {
-                sections.join("\n")
-            },
-            name,
-            target,
-            category,
-            forbidden_rules: stored_field(object, "forbiddenRules"),
-        });
-    }
-    if candidates.is_empty() {
-        Err("EMPTY_CANDIDATE")
-    } else {
-        Ok(candidates)
-    }
-}
+#[path = "structured_setting_apply.rs"]
+mod setting_apply;
+use setting_apply::apply_settings;
+pub(crate) use setting_apply::preview_structured_rule_change_with;
 
-fn apply_settings(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    bundle: &artifact_service::ResultArtifactBundle,
-) -> Result<DomainOutcome, AppError> {
-    let value = candidate_value(bundle).ok_or_else(|| domain_failure("setting_payload"))?;
-    let candidates = match parse_settings(&value) {
-        Ok(candidates) => candidates,
-        Err(code) => return Ok(DomainOutcome::Conflict(code)),
-    };
-    let existing_world =
-        world_setting_repository::find_world_settings_by_novel(connection, &input.novel_id)
-            .map_err(|_| domain_failure("setting_read"))?;
-    let existing_world_names = existing_world
-        .into_iter()
-        .map(|setting| setting.title)
-        .collect::<HashSet<_>>();
-    let existing_rule_names =
-        world_setting_repository::find_rule_systems_by_novel(connection, &input.novel_id)
-            .map_err(|_| domain_failure("rule_setting_read"))?
-            .into_iter()
-            .map(|setting| setting.title)
-            .collect::<HashSet<_>>();
-    let candidates = candidates
-        .into_iter()
-        .filter(|candidate| match candidate.target {
-            SettingTarget::World => !existing_world_names.contains(&candidate.name),
-            SettingTarget::Rule => !existing_rule_names.contains(&candidate.name),
-        })
-        .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return Ok(DomainOutcome::Conflict(
-            "SETTING_CANDIDATES_ALREADY_APPLIED",
-        ));
-    }
-    for candidate in candidates {
-        match candidate.target {
-            SettingTarget::World => world_setting_repository::insert_world_setting(
-                connection,
-                &uuid::Uuid::new_v4().to_string(),
-                &input.novel_id,
-                &candidate.name,
-                &candidate.content,
-                true,
-                &input.created_at,
-            )
-            .map_err(|_| domain_failure("setting_insert"))?,
-            SettingTarget::Rule => world_setting_repository::insert_rule_system(
-                connection,
-                &uuid::Uuid::new_v4().to_string(),
-                &input.novel_id,
-                &candidate.name,
-                candidate.category.as_deref(),
-                &candidate.content,
-                candidate.forbidden_rules.as_deref(),
-                true,
-                &input.created_at,
-            )
-            .map_err(|_| domain_failure("rule_setting_insert"))?,
-        }
-    }
-    Ok(DomainOutcome::Applied)
+#[tauri::command]
+pub fn preview_structured_artifact_rule_change(
+    input: ApplyStructuredArtifactInput,
+) -> Result<Option<RuleChangePreview>, AppError> {
+    let mut connection = crate::db::get_connection()
+        .lock()
+        .map_err(|_| domain_failure("connection_lock"))?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(AppError::database)?;
+    let preview = preview_structured_rule_change_with(&transaction, &input)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(preview)
 }
 
 fn existing_context_record_id(
@@ -2419,6 +2355,9 @@ fn summary_context_records(
             });
         }
     }
+    // `contextRecords` lists additional long-term records. The chapter summary itself is
+    // always derived here when absent, so an explicit empty array means "no extra records",
+    // not "write no context record at all".
     if !records
         .iter()
         .any(|record| record.context_type == "chapter_summary")
@@ -2451,255 +2390,9 @@ fn summary_context_records(
     Ok(records)
 }
 
-fn resolve_summary_character_id(
-    connection: &Connection,
-    novel_id: &str,
-    object: &Map<String, Value>,
-) -> Result<Option<String>, AppError> {
-    if let Some(character_id) = trimmed_text(object.get("characterId"), MAX_NAME_CHARS) {
-        return connection
-            .query_row(
-                "SELECT id FROM characters
-                 WHERE id=?1 AND novel_id=?2 AND is_active=1 LIMIT 1",
-                params![character_id, novel_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(AppError::database);
-    }
-    let Some(name) = trimmed_text(
-        object.get("characterName").or_else(|| object.get("name")),
-        MAX_NAME_CHARS,
-    ) else {
-        return Ok(None);
-    };
-    connection
-        .query_row(
-            "SELECT id FROM characters
-             WHERE novel_id=?1 AND name=?2 AND is_active=1
-             ORDER BY is_protagonist DESC, protagonist_order, created_at, id LIMIT 1",
-            params![novel_id, name],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(AppError::database)
-}
-
-fn existing_character_state_id(
-    connection: &Connection,
-    novel_id: &str,
-    chapter_id: &str,
-    character_id: &str,
-) -> Result<Option<String>, AppError> {
-    connection
-        .query_row(
-            "SELECT id FROM character_states
-             WHERE novel_id=?1 AND chapter_id=?2 AND character_id=?3
-             ORDER BY created_at DESC, id DESC LIMIT 1",
-            params![novel_id, chapter_id, character_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(AppError::database)
-}
-
-fn summary_character_states(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    object: Option<&Map<String, Value>>,
-) -> Result<Vec<SaveCharacterStateInput>, AppError> {
-    let Some(chapter_id) = input.chapter_id.as_deref() else {
-        return Ok(Vec::new());
-    };
-    let mut changes = Vec::<Map<String, Value>>::new();
-    if let Some(items) = object
-        .and_then(|value| value.get("characterChanges"))
-        .and_then(Value::as_array)
-    {
-        changes.extend(
-            items
-                .iter()
-                .take(MAX_ITEMS)
-                .filter_map(Value::as_object)
-                .cloned(),
-        );
-    }
-    if let Some(items) = object
-        .and_then(|value| value.get("importantCharacterChanges"))
-        .and_then(Value::as_array)
-    {
-        for item in items.iter().take(MAX_ITEMS).filter_map(Value::as_object) {
-            let mut normalized = item.clone();
-            if normalized.get("characterName").is_none() {
-                if let Some(name) = normalized.get("name").cloned() {
-                    normalized.insert("characterName".to_string(), name);
-                }
-            }
-            if normalized.get("stateSummary").is_none() {
-                if let Some(change) = normalized.get("change").cloned() {
-                    normalized.insert("stateSummary".to_string(), change);
-                }
-            }
-            changes.push(normalized);
-        }
-    }
-    if let Some(protagonist_state) =
-        object.and_then(|value| trimmed_text(value.get("protagonistStateChange"), MAX_FIELD_CHARS))
-    {
-        let protagonist = connection
-            .query_row(
-                "SELECT id,name FROM characters
-                 WHERE novel_id=?1 AND is_active=1 AND is_protagonist=1
-                 ORDER BY protagonist_order, created_at, id LIMIT 1",
-                params![input.novel_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()
-            .map_err(AppError::database)?;
-        if let Some((character_id, character_name)) = protagonist {
-            let mut change = Map::new();
-            change.insert("characterId".to_string(), Value::String(character_id));
-            change.insert("characterName".to_string(), Value::String(character_name));
-            change.insert("stateSummary".to_string(), Value::String(protagonist_state));
-            changes.push(change);
-        }
-    }
-
-    let mut seen = HashSet::new();
-    let mut states = Vec::new();
-    for change in changes {
-        let Some(state_summary) = trimmed_text(change.get("stateSummary"), MAX_FIELD_CHARS) else {
-            continue;
-        };
-        let Some(character_id) =
-            resolve_summary_character_id(connection, &input.novel_id, &change)?
-        else {
-            continue;
-        };
-        if !seen.insert(character_id.clone()) {
-            continue;
-        }
-        let id =
-            existing_character_state_id(connection, &input.novel_id, chapter_id, &character_id)?
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        states.push(SaveCharacterStateInput {
-            id: Some(id),
-            novel_id: input.novel_id.clone(),
-            character_id,
-            chapter_id: Some(chapter_id.to_string()),
-            state_summary,
-            relationship_changes: stored_field(&change, "relationshipChanges"),
-            goal_changes: stored_field(&change, "goalChanges"),
-            location: stored_field(&change, "location"),
-            health_state: stored_field(&change, "healthState"),
-            knowledge_state: stored_field(&change, "knowledgeState"),
-        });
-    }
-    Ok(states)
-}
-
-fn apply_summary(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    bundle: &artifact_service::ResultArtifactBundle,
-) -> Result<DomainOutcome, AppError> {
-    let Some(chapter_id) = input.chapter_id.as_deref() else {
-        return Ok(DomainOutcome::Conflict("CHAPTER_TARGET_REQUIRED"));
-    };
-    let (volume_id, adopted_draft_id) = connection
-        .query_row(
-            "SELECT volume_id, adopted_draft_id FROM chapters
-             WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
-            params![chapter_id, input.novel_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
-        )
-        .map_err(AppError::database)?;
-    let Some(adopted_draft_id) = adopted_draft_id else {
-        return Ok(DomainOutcome::Conflict(
-            "CHAPTER_SUMMARY_ADOPTED_DRAFT_REQUIRED",
-        ));
-    };
-    if bundle.artifact.source_draft_id.as_deref() != Some(adopted_draft_id.as_str()) {
-        return Ok(DomainOutcome::Conflict(
-            "CHAPTER_SUMMARY_ADOPTED_DRAFT_MISMATCH",
-        ));
-    }
-    let value = candidate_value(bundle).unwrap_or_else(|| json!({}));
-    let object = value.as_object();
-    let summary = object
-        .and_then(|object| trimmed_text(object.get("summary"), MAX_FIELD_CHARS))
-        .unwrap_or_else(|| candidate_text(bundle).trim().to_string());
-    if summary.is_empty() || summary.chars().count() > MAX_FIELD_CHARS {
-        return Ok(DomainOutcome::Conflict("EMPTY_CANDIDATE"));
-    }
-    let draft_version = bundle.artifact.source_draft_version;
-    let input_summary = SaveChapterSummaryInput {
-        id: None,
-        novel_id: input.novel_id.clone(),
-        chapter_id: chapter_id.to_string(),
-        volume_id,
-        adopted_draft_id,
-        summary,
-        key_events: object.and_then(|value| stored_field(value, "keyEvents")),
-        character_changes: object.and_then(|value| stored_field(value, "characterChanges")),
-        relationship_changes: object.and_then(|value| stored_field(value, "relationshipChanges")),
-        new_foreshadows: object.and_then(|value| stored_field(value, "newForeshadows")),
-        resolved_foreshadows: object.and_then(|value| stored_field(value, "resolvedForeshadows")),
-        next_chapter_hints: object.and_then(|value| stored_field(value, "nextChapterHints")),
-        core_events: object.and_then(|value| stored_field(value, "coreEvents")),
-        protagonist_state_change: object
-            .and_then(|value| stored_field(value, "protagonistStateChange")),
-        important_character_changes: object
-            .and_then(|value| stored_field(value, "importantCharacterChanges")),
-        setting_changes: object.and_then(|value| stored_field(value, "settingChanges")),
-        new_locations: object.and_then(|value| stored_field(value, "newLocations")),
-        new_items_or_abilities: object.and_then(|value| stored_field(value, "newItemsOrAbilities")),
-        foreshadowing: object.and_then(|value| stored_field(value, "foreshadowing")),
-        unresolved_questions: object.and_then(|value| stored_field(value, "unresolvedQuestions")),
-        facts_must_remember: object.and_then(|value| stored_field(value, "factsMustRemember")),
-        next_chapter_hook: object.and_then(|value| stored_field(value, "nextChapterHook")),
-        validation_status: Some("passed".to_string()),
-        validation_result: None,
-        enabled: Some(true),
-        content_hash: bundle.artifact.source_base_content_hash.clone(),
-        draft_version,
-        ai_task_id: Some(bundle.artifact.task_id.clone()),
-    };
-    let context_records = summary_context_records(
-        connection,
-        input,
-        object,
-        input_summary.volume_id.as_deref(),
-        &input_summary.summary,
-        input_summary.content_hash.as_deref(),
-        input_summary.draft_version,
-    )?;
-    let character_states = summary_character_states(connection, input, object)?;
-    chapter_context_bundle_service::persist_chapter_context_bundle_in_transaction(
-        connection,
-        &SaveChapterContextBundleInput {
-            novel_id: input.novel_id.clone(),
-            chapter_id: chapter_id.to_string(),
-            adopted_draft_id: input_summary.adopted_draft_id.clone(),
-            summary: input_summary,
-            context_records,
-            character_states,
-        },
-        &input.created_at,
-    )
-    .map_err(|reason| {
-        domain_failure("summary_bundle_insert").with_details(json!({
-            "stage": "summary_bundle_insert",
-            "reason": reason,
-        }))
-    })?;
-    Ok(DomainOutcome::Applied)
-}
+#[path = "structured_summary_commit.rs"]
+mod summary_commit;
+use summary_commit::apply_summary;
 
 fn apply_context_compression(
     connection: &Connection,
@@ -2785,13 +2478,14 @@ fn apply_domain(
     connection: &Connection,
     input: &ApplyStructuredArtifactInput,
     bundle: &artifact_service::ResultArtifactBundle,
+    authority: ApplicationAuthority<'_>,
 ) -> Result<DomainOutcome, AppError> {
     match bundle.artifact.artifact_type.as_str() {
         "outline" => apply_outline(connection, input, bundle),
         "character_candidates" => apply_characters(connection, input, bundle),
         "event_candidates" => apply_events(connection, input, bundle),
         "setting_candidates" => apply_settings(connection, input, bundle),
-        "chapter_summary" => apply_summary(connection, input, bundle),
+        "chapter_summary" => apply_summary(connection, input, bundle, authority),
         "generic_json" => apply_context_compression(connection, input, bundle),
         _ => Ok(DomainOutcome::Conflict(
             "STRUCTURED_ARTIFACT_TYPE_UNSUPPORTED",
@@ -2806,9 +2500,24 @@ pub fn apply_structured_artifact(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(AppError::database)?;
-    let bundle = validate_static_scope(&transaction, &input)?;
+    let result = apply_in_transaction(&transaction, input, ApplicationAuthority::ManualReview)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(result)
+}
+
+pub(crate) fn apply_in_transaction(
+    transaction: &Connection,
+    input: ApplyStructuredArtifactInput,
+    authority: ApplicationAuthority<'_>,
+) -> Result<crate::repositories::conversation_repository::ArtifactDecisionRecord, AppError> {
+    let bundle = validate_static_scope_with_authority(transaction, &input, authority)?;
     if let Some(existing) = existing_decision(&transaction, &input)? {
         validate_existing_identity(&existing, &input)?;
+        if bundle.artifact.artifact_type == "setting_candidates"
+            && existing.apply_transaction_id.is_some()
+        {
+            rule_receipt::validate(&transaction, &existing, &input)?;
+        }
         crate::repositories::conversation_repository::reconcile_conversation_status(
             &transaction,
             &existing.conversation_id,
@@ -2819,7 +2528,9 @@ pub fn apply_structured_artifact(
             },
             &existing.created_at,
         )?;
-        transaction.commit().map_err(AppError::database)?;
+        if matches!(authority, ApplicationAuthority::ManualReview) && existing.apply_transaction_id.is_some() && existing.conflict_code.is_none() {
+            crate::services::dsh::task_runtime::record_manual_structured_application(transaction, &existing)?;
+        }
         return Ok(existing);
     }
 
@@ -2827,10 +2538,11 @@ pub fn apply_structured_artifact(
     let outcome = if let Some(conflict) = base_conflict {
         DomainOutcome::Conflict(conflict)
     } else {
-        apply_domain(&transaction, &input, &bundle)?
+        apply_domain(transaction, &input, &bundle, authority)?
     };
     let (apply_transaction_id, conflict_code) = match outcome {
-        DomainOutcome::Applied => (Some(format!("apply-{}", uuid::Uuid::new_v4())), None),
+        DomainOutcome::Applied => (Some(match authority { ApplicationAuthority::ManualReview => format!("apply-{}", uuid::Uuid::new_v4()), ApplicationAuthority::TaskPreauthorization { receipt_id, .. } => receipt_id.to_string() }), None),
+        DomainOutcome::AppliedWithReceipt(receipt_id) => (Some(receipt_id), None),
         DomainOutcome::Conflict(code) => (None, Some(code)),
     };
     let decision = insert_decision(
@@ -2849,7 +2561,9 @@ pub fn apply_structured_artifact(
         },
         &input.created_at,
     )?;
-    transaction.commit().map_err(AppError::database)?;
+    if matches!(authority, ApplicationAuthority::ManualReview) && decision.apply_transaction_id.is_some() && decision.conflict_code.is_none() {
+        crate::services::dsh::task_runtime::record_manual_structured_application(transaction, &decision)?;
+    }
     Ok(decision)
 }
 
@@ -2866,7 +2580,7 @@ mod tests {
     const SUMMARY_CHARACTER_ID: &str = "00000000-0000-4000-8000-000000000010";
     const NOW: &str = "2026-08-28T00:00:00Z";
     const CHAPTER_REVISION: &str = "2026-08-28T00:00:00Z";
-    const DRAFT_CONTENT: &str = "第一章采用稿正文";
+    const DRAFT_CONTENT: &str = "林夏发现了被隐藏的航线。航线只能在双月重合时显现。她掌握了隐藏航线的位置，知道双月重合是开启条件。林夏已取得航线坐标。";
 
     fn empty_connection() -> Connection {
         let mut connection = Connection::open_in_memory().expect("connection");
@@ -2970,36 +2684,6 @@ mod tests {
             Some("旧港档案馆幸存者")
         );
         assert_eq!(protagonist[0].arc.as_deref(), Some("从独自追查到信任同伴"));
-    }
-
-    #[test]
-    fn setting_candidate_parser_keeps_same_name_world_and_rule_as_distinct_assets() {
-        let candidates = parse_settings(&json!({
-            "settings": [
-                {"name":"雾城法则","description":"城市每夜删除一段记录"},
-                {
-                    "name":"雾城法则",
-                    "targetType":"rule_system",
-                    "description":"已删除记录不得直接恢复"
-                }
-            ]
-        }))
-        .expect("world and rule namespaces must remain distinct");
-        assert_eq!(candidates.len(), 2);
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.target == SettingTarget::World));
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.target == SettingTarget::Rule));
-
-        assert_eq!(
-            parse_settings(&json!({
-                "settings": vec![json!({"name":"设定"}); MAX_ITEMS + 1]
-            }))
-            .err(),
-            Some("TOO_MANY_CANDIDATES")
-        );
     }
 
     fn story_plan_payload() -> Value {
@@ -3168,21 +2852,34 @@ mod tests {
         publish_simple_in_conversation(connection, conversation_id, "outline", None, payload)
     }
 
-    fn publish_draft_based(
+    fn publish_draft_artifact(
         connection: &mut Connection,
         suffix: &str,
         artifact_type: &str,
         payload: Value,
-    ) -> (
-        conversation_service::ConversationArtifactCardRecord,
-        artifact_service::ResultArtifactBundle,
-    ) {
+    ) -> (String, artifact_service::ResultArtifactBundle) {
+        publish_draft_artifact_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            json!({}),
+        )
+    }
+
+    fn publish_draft_artifact_with_snapshot_extra(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+        snapshot_extra: Value,
+    ) -> (String, artifact_service::ResultArtifactBundle) {
         let conversation_id = create_conversation(connection, suffix);
         let raw = serde_json::to_string(&payload).expect("payload json");
         let mut task_input =
             ai_task_service::tests::system_task_input(&format!("apply-{suffix}"), artifact_type);
         task_input.task_type = "context_summarize".to_string();
-        task_input.novel_id = NOVEL_ID.to_string();
+        task_input.novel_id = Some(NOVEL_ID.to_string());
         task_input.chapter_id = Some(CHAPTER_ID.to_string());
         task_input.draft_id = Some(DRAFT_ID.to_string());
         task_input.scope_type = "draft".to_string();
@@ -3192,7 +2889,13 @@ mod tests {
             "baseChapterRevision": CHAPTER_REVISION,
         }));
         task_input.input_snapshot.input_type = "workbench_apply_test".to_string();
-        task_input.input_snapshot.payload_json = json!({"conversationId": conversation_id});
+        let mut snapshot_payload = json!({"conversationId": conversation_id});
+        if let Some(extra) = snapshot_extra.as_object() {
+            for (key, value) in extra {
+                snapshot_payload[key] = value.clone();
+            }
+        }
+        task_input.input_snapshot.payload_json = snapshot_payload;
         task_input.input_snapshot.body = raw.clone();
         task_input.input_snapshot.source_draft_id = Some(DRAFT_ID.to_string());
         task_input.input_snapshot.source_draft_version = Some(3);
@@ -3244,6 +2947,44 @@ mod tests {
             },
         )
         .expect("artifact");
+        (conversation_id, bundle)
+    }
+
+    fn publish_draft_based(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+    ) -> (
+        conversation_service::ConversationArtifactCardRecord,
+        artifact_service::ResultArtifactBundle,
+    ) {
+        publish_draft_based_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            json!({}),
+        )
+    }
+
+    fn publish_draft_based_with_snapshot_extra(
+        connection: &mut Connection,
+        suffix: &str,
+        artifact_type: &str,
+        payload: Value,
+        snapshot_extra: Value,
+    ) -> (
+        conversation_service::ConversationArtifactCardRecord,
+        artifact_service::ResultArtifactBundle,
+    ) {
+        let (conversation_id, bundle) = publish_draft_artifact_with_snapshot_extra(
+            connection,
+            suffix,
+            artifact_type,
+            payload,
+            snapshot_extra,
+        );
         let card = conversation_service::create_artifact_card(
             connection,
             conversation_service::CreateArtifactCardInput {
@@ -3291,9 +3032,16 @@ mod tests {
             novel_id: NOVEL_ID.to_string(),
             chapter_id: artifact.source_chapter_id.clone(),
             base_revision: artifact.source_base_content_hash.clone(),
+            expected_rule_set_fingerprint: None,
+            change_authorization: None,
             created_at: NOW.to_string(),
         }
     }
+
+    include!("structured_artifact_rule_governance_tests.rs");
+    include!("structured_setting_apply_tests.rs");
+    include!("structured_summary_grounding_tests.rs");
+    include!("structured_summary_character_reference_tests.rs");
 
     fn count(connection: &Connection, table: &str) -> i64 {
         connection
@@ -4299,7 +4047,7 @@ mod tests {
                 &mut connection,
                 "summary",
                 "chapter_summary",
-                json!({
+                grounded_summary_fixture(json!({
                     "summary":"林夏发现了被隐藏的航线。",
                     "keyEvents":["发现航线"],
                     "factsMustRemember":["航线只能在双月重合时显现"],
@@ -4314,14 +4062,16 @@ mod tests {
                         "content":"林夏已取得航线坐标。",
                         "importance":5
                     }]
-                }),
+                })),
             ),
         ];
 
         let mut decisions = Vec::new();
-        for (card, bundle) in &fixtures {
-            let decision = apply_structured_artifact(&mut connection, apply_input(card, bundle))
-                .expect("apply");
+        // Apply already-generated non-rule candidates before changing their frozen rule set.
+        for index in [0, 1, 2, 4, 3] {
+            let (card, bundle) = &fixtures[index];
+            let input = governed_setting_input(&connection, card, bundle);
+            let decision = apply_structured_artifact(&mut connection, input).expect("apply");
             assert!(decision.apply_transaction_id.is_some());
             assert!(decision.conflict_code.is_none());
             decisions.push(decision);
@@ -4748,10 +4498,12 @@ mod tests {
                  BEGIN SELECT RAISE(ABORT, 'forced decision failure'); END;",
             )
             .expect("failure trigger");
-        apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
+        let authorized = governed_setting_input(&connection, &card, &bundle);
+        apply_structured_artifact(&mut connection, authorized)
             .expect_err("decision failure must roll back");
         assert_eq!(count(&connection, "world_settings"), 0);
         assert_eq!(count(&connection, "rule_systems"), 0);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM large_text_documents WHERE field_name='world_rule_apply_receipt'",[],|row| row.get::<_,i64>(0)).unwrap(),0);
         assert_eq!(count(&connection, "artifact_decisions"), 0);
         connection
             .execute_batch("DROP TRIGGER fail_structured_decision;")
@@ -4826,13 +4578,13 @@ mod tests {
             &mut connection,
             "historical-summary-backfill",
             "chapter_summary",
-            json!({
+            grounded_summary_fixture(json!({
                 "summary":"回填第一章总结。",
                 "characterChanges":[{
                     "characterName":"林夏",
                     "stateSummary":"第一章后的历史状态"
                 }]
-            }),
+            })),
         );
 
         let decision = apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
@@ -4884,7 +4636,7 @@ mod tests {
             &mut connection,
             "summary-rollback",
             "chapter_summary",
-            json!({
+            grounded_summary_fixture(json!({
                 "summary":"不应残留的章节总结。",
                 "factsMustRemember":["不应残留的事实"],
                 "characterChanges":[{
@@ -4898,7 +4650,7 @@ mod tests {
                     "content":"事务失败后必须消失。",
                     "importance":5
                 }]
-            }),
+            })),
         );
         connection
             .execute_batch(

@@ -4,6 +4,9 @@ use crate::services::conversation_service as service;
 use serde::Deserialize;
 use serde_json::Value;
 
+#[path = "chapter_workflow_stages.rs"]
+pub mod chapter_workflow_stages;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListConversationsInput {
@@ -68,12 +71,24 @@ pub fn list_task_conversations(
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     if input.archive.is_none() && input.query.is_none() && input.cursor.is_none() {
-        return service::list(&connection, input.novel_id.as_deref(), input.include_archived, input.limit.unwrap_or(100));
+        return service::list(
+            &connection,
+            input.novel_id.as_deref(),
+            input.include_archived,
+            input.limit.unwrap_or(100),
+        );
     }
     service::list_page(
         &connection,
         input.novel_id.as_deref(),
-        input.archive.as_deref().unwrap_or(if input.include_archived { "all" } else { "active" }),
+        input
+            .archive
+            .as_deref()
+            .unwrap_or(if input.include_archived {
+                "all"
+            } else {
+                "active"
+            }),
         input.query.as_deref().unwrap_or(""),
         input.limit.unwrap_or(100),
         input.cursor.as_ref(),
@@ -88,6 +103,38 @@ pub fn get_task_conversation(
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     service::get(&connection, &conversation_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRunningTaskTargetsInput {
+    pub novel_id: String,
+}
+
+#[tauri::command]
+pub fn get_task_conversation_window(
+    input: crate::repositories::conversation_repository::ConversationWindowInput,
+) -> Result<
+    Option<crate::repositories::conversation_repository::TaskConversationWindow>,
+    AppError,
+> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::get_conversation_window(&connection, input)
+}
+
+#[tauri::command]
+pub fn list_running_task_targets(
+    input: ListRunningTaskTargetsInput,
+) -> Result<Vec<crate::repositories::conversation_repository::RunningTaskTarget>, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    crate::repositories::conversation_repository::list_running_task_targets(
+        &connection,
+        &input.novel_id,
+    )
 }
 
 #[tauri::command]
@@ -217,20 +264,27 @@ pub fn record_artifact_decision(
     let mut connection = get_connection()
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
-    service::record_artifact_decision(&mut connection, input)
+    let stop_pending = matches!(input.decision.as_str(), "reject" | "request_revision");
+    let decision = service::record_artifact_decision(&mut connection, input)?;
+    drop(connection);
+    if stop_pending {
+        crate::services::dsh::task_runtime::cancel_pending_after_decision(
+            &decision.conversation_id,
+        );
+    }
+    Ok(decision)
 }
 
 #[tauri::command]
-pub fn apply_structured_artifact(
+pub async fn apply_structured_artifact(
     input: crate::services::structured_artifact_apply_service::ApplyStructuredArtifactInput,
 ) -> Result<service::ArtifactDecisionRecord, AppError> {
-    let mut connection = get_connection()
-        .lock()
-        .map_err(|_| AppError::poisoned_lock())?;
-    crate::services::structured_artifact_apply_service::apply_structured_artifact(
-        &mut connection,
-        input,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let decision={let mut connection=get_connection().lock().map_err(|_|AppError::poisoned_lock())?;
+            crate::services::structured_artifact_apply_service::apply_structured_artifact(&mut connection,input)?};
+        if decision.apply_transaction_id.is_some(){super::task_authorization::reconcile_after_commit(&decision.conversation_id);}
+        Ok(decision)
+    }).await.map_err(|_|AppError::new("TASK_RECONCILIATION_FAILED","应用调用被中断，请按原操作身份核对结果",true))?
 }
 
 #[tauri::command]
@@ -282,13 +336,18 @@ pub fn ensure_chapter_summary_follow_up(
 }
 
 #[tauri::command]
-pub fn adopt_review_authorized_draft(
+pub async fn adopt_review_authorized_draft(
     input: service::AdoptReviewAuthorizedDraftInput,
 ) -> Result<service::AdoptReviewAuthorizedDraftResult, AppError> {
-    let mut connection = get_connection()
-        .lock()
-        .map_err(|_| AppError::poisoned_lock())?;
-    service::adopt_review_authorized_draft(&mut connection, input)
+    tauri::async_runtime::spawn_blocking(move || {
+        let (result,conversation_id)={let mut connection=get_connection().lock().map_err(|_|AppError::poisoned_lock())?;
+            let result=service::adopt_review_authorized_draft(&mut connection,input)?;
+            use rusqlite::OptionalExtension;
+            let conversation_id=connection.query_row("SELECT conversation_id FROM artifact_decisions WHERE decision_id=?1",[&result.authorization.decision_id],|r|r.get::<_,String>(0)).optional().ok().flatten();
+            (result,conversation_id)};
+        if let Some(id)=conversation_id{super::task_authorization::reconcile_after_commit(&id);}
+        Ok(result)
+    }).await.map_err(|_|AppError::new("TASK_RECONCILIATION_FAILED","采用调用被中断，请核对原授权与采用事实",true))?
 }
 
 #[cfg(test)]

@@ -277,7 +277,7 @@ export function AiGeneratePanelView({
         {selectedStyleId && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--color-text-muted)',
               marginTop: 6,
               lineHeight: 1.5,
@@ -324,7 +324,7 @@ export function AiGeneratePanelView({
         {contextSummary && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               lineHeight: 1.6,
               color: 'var(--color-text-secondary)',
               marginBottom: 6,
@@ -379,7 +379,7 @@ export function AiGeneratePanelView({
         {contextSummary && !contextSummary.chapterOutline?.trim() && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--color-warning)',
               marginTop: 4,
               display: 'flex',
@@ -396,7 +396,7 @@ export function AiGeneratePanelView({
           contextSummary.chapterOutline.trim().length < 30 && (
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: 'var(--color-warning)',
                 marginTop: 4,
                 display: 'flex',
@@ -411,7 +411,7 @@ export function AiGeneratePanelView({
         {contextSummary && (contextSummary.outlineKeyPoints?.length || 0) === 0 && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--color-warning)',
               marginTop: 4,
               display: 'flex',
@@ -434,7 +434,7 @@ export function AiGeneratePanelView({
             wordCount={wordCountDraft}
           />
         )}
-        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
           点击「查看上下文摘要」可预览 AI 将收到的全部配置信息
         </div>
       </div>

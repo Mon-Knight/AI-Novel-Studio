@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.7 及后续版本的桌面 E2E 基础设施
+> 适用版本：文档结构保留 v2.1.7 接入基线；Tauri 2 当前事实见 §1.1「当前 Tauri 2 迁移基线」。
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -9,7 +9,7 @@
 
 ## 1. 接入前只读审计
 
-### 1.1 版本基线
+### 1.1 版本基线（v2.1.x 接入时历史快照）
 
 以下版本来自 `package.json`、`package-lock.json`、`Cargo.toml`、`Cargo.lock` 和接入时的 Windows 验证机。带“安装”的版本是锁文件或本机实际解析结果，不只是 semver 声明。
 
@@ -32,7 +32,28 @@
 | `tauri-driver`        | 独立工具                       | `0.1.5`                    |
 | WebView2 / EdgeDriver | 主版本必须一致                 | 验证机均为 `150.0.4078.83` |
 
-`package-lock.json` 中的 `@vitest/*` 是 WebdriverIO 断言依赖的传递依赖。项目没有 `vitest` 命令、Vitest 配置或 Vitest 测试套件，不能把这些传递包视为已有 Vitest 覆盖。
+> 历史接入表保留当时的 React Router 6.30.3 记录；当前 v3.7.0 工作区已升级到 React Router 7.18.4，桌面 E2E 继续沿用 HashRouter 路由契约。
+
+#### 当前 Tauri 2 迁移基线（2026-10-28，非版本任务）
+
+上表是接入时的历史快照，保留原值，不用 Tauri 2 数据回填。当前分支的实际载体如下：
+
+| 项目                    | 当前事实                                                                 |
+| ----------------------- | ------------------------------------------------------------------------ |
+| 应用                    | `3.7.0`（非版本任务）                                                    |
+| Tauri Rust crate        | `2.12.5`                                                                 |
+| `tauri-build`           | `2.7.4`                                                                  |
+| `@tauri-apps/cli` / API | `2.12.4` / `2.12.4`                                                      |
+| 官方插件                | fs 2.7.1、shell 2.5.0、dialog 2.8.3、notification 2.7.0、updater 2.14.0  |
+| Rust MSRV / 构建工具链  | `1.90` / 固定 `1.95.0`                                                   |
+| 更新产物                | `bundle.createUpdaterArtifacts = "v1Compatible"`                         |
+| 窗口协议                | `app.windows[0].useHttpsScheme = true`                                   |
+| 权限模型                | `tauri.conf.json` 无 Tauri 1 `allowlist`；`capabilities/*.json` 最小授权 |
+| E2E driver              | 运行器仍固定 `tauri-driver 0.1.5`；EdgeDriver 必须匹配本机 WebView2      |
+
+当前桌面端已注册 fs / shell / dialog / notification / updater 插件；更新检查和安装只经 `app_update.rs` 的自有 IPC，未向 WebView 授予 `updater:default`。2026-10-29 实测 27/27 个 Windows 桌面规格通过；`tauri2-migration-regression.spec.ts` 4/4（HTTPS origin、最大化 ACL、Beta LocalStorage 跨刷新、HTTP→HTTPS 偏好迁移），`native-plugin-contract.spec.ts` 4/4（原生打开/保存对话框、FS scope 拒绝、Windows toast）。
+
+> 接入时历史判断：`package-lock.json` 中的 `@vitest/*` 只是 WebdriverIO 断言依赖的传递依赖，当时项目没有 `vitest` 命令、Vitest 配置或 Vitest 测试套件。当前仓库已配置 Vitest，测试入口见 [测试策略](testing.md)；这段历史审计结论不描述当前状态。
 
 ### 1.2 原有测试与构建入口
 
@@ -61,7 +82,7 @@
 - 正式单实例和窗口状态：`%APPDATA%\com.ainovelstudio.app`。
 - 浏览器开发模式的数据回退到 LocalStorage；真实 Tauri 模式通过 Rust IPC 使用 SQLite。
 - AI 设置默认是本地 Mock 模式；API Key 和其他本机设置保存在本地，不来自仓库环境文件。
-- Tauri 配置没有 updater 插件或自动更新端点，因此当前应用没有需要在 E2E 中额外关闭的自动更新任务。
+- 接入时 Tauri 配置没有 updater 插件或自动更新端点，因此当时的应用没有需要在 E2E 中额外关闭的自动更新任务。当前 Tauri 2 载体已集成 updater 插件与 `app_update` 自有 IPC；E2E 配置使用占位公钥，更新能力报告为未配置，且测试不点击更新检查或安装（见上文当前基线与 §6.2）。
 
 ### 1.4 稳定选择器缺口
 
@@ -118,6 +139,8 @@ tests/e2e/
   restart-task-recovery.spec.ts
   quality-history-replay.spec.ts
   chapter-context-persistence.spec.ts
+  tauri2-migration-regression.spec.ts
+  native-plugin-contract.spec.ts
   helpers.ts
   wdio.conf.ts
 scripts/e2e/run-e2e.ts
@@ -146,7 +169,7 @@ src-tauri/src/runtime.rs
 
 1. Windows 10 或 11，已安装 Microsoft Edge WebView2 Runtime。
 2. Node.js `>=22.6.0`，执行过 `npm install`。
-3. Rust stable、Cargo、MSVC target 和 Visual Studio C++ Build Tools 可用于 Tauri 构建。
+3. 固定 Rust `1.95.0`（MSRV 为 `1.90`）、Cargo、MSVC target 和 Visual Studio C++ Build Tools 可用于 Tauri 构建。CI 从仓库 `rust-toolchain.toml` 读取并安装该固定工具链，不依赖浮动的 `stable`。
 4. 安装 `tauri-driver 0.1.5`：
 
 ```powershell
@@ -163,12 +186,15 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 
 运行器优先使用显式环境变量，其次扫描 `.e2e-tools`，最后搜索 `PATH`。驱动下载和 `npm install` 可能需要网络，但测试运行本身不依赖互联网。
 
+6. 从**非提权（Medium integrity）终端**运行。WebView2 Runtime 150+ 会在宿主进程以管理员（High integrity）运行时丢弃 `WEBVIEW2_*` 环境变量覆盖，msedgedriver 依赖该覆盖注入 `--remote-debugging-port`，因此提权终端中的每个 spec 都会在创建 WebDriver 会话时超时（约 2 分钟）。运行器启动时用 `whoami /groups` 检测 `S-1-16-12288`/`S-1-16-16384` 并立即失败并给出说明；只有当宿主已通过 HKLM 策略等方式允许提权自动化时，才设置 `AI_NOVEL_STUDIO_E2E_ALLOW_ELEVATED=1` 跳过该检查。
+
 ### 3.1 Windows CI
 
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
-- Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行十一个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- Pull Request：质量作业先用 `verify:change --dry-run --github-output` 判定变更归属，以 `--lane native` 运行 Rust、文档与版本归属检查；桌面作业在未涉及桌面行为时输出 `NOT_APPLICABLE`，涉及时以 `--lane desktop` 只运行归属的真实桌面场景（migration、DSH、打包或工作流变更时扩大为完整套件）。Rust 步骤使用仓库固定的 `1.95.0` 工具链与 `--locked` 依赖，MSRV 另按 `1.90` 声明维护。
+- `main` 分支 push、`v*` 发布标签、每周定时和手工触发：运行版本/文档同步、Rust check / 完整串行 workspace test（主应用和 Gateway）与无安装包的生产 Tauri 构建，再执行全部真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。Linux `ci.yml` 执行同一行为矩阵但不套用 Windows 覆盖率阈值；Windows/Node 24 对 main、完整验收和选择器要求 coverage 的 PR 执行校准阈值。
+- DSH、写章契约、生产载体及完整门禁还执行 `npm run test:e2e:writing-faults`：新鲜构建无 E2E feature 的生产载体，在隔离 profile 中运行固定回环模型故障规格，不访问正式配置或云模型。PR 由共享选择器选中，其他完整运行显式执行；失败向上返回非零。默认使用测试 target 缓存而不覆盖用户 release EXE，显式 `--skip-build --app <fresh-exe>` 仅用于复用本轮已构建的确定产物，载体/Gateway 哈希仍必须通过验证。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -178,13 +204,13 @@ CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下�
 
 ## 4. 运行命令
 
-### 4.1 启动冒烟测试
+### 4.1 日常冒烟：启动 + 生产界面写作场景
 
 ```powershell
 npm run test:e2e:smoke
 ```
 
-只运行 `app-start.spec.ts`，验证窗口、`app-shell`、首页、前端异常、迁移和 SQLite 诊断。
+运行 `app-start.spec.ts` 与 `workbench-writing-smoke.spec.ts`：前者验证窗口、`app-shell`、前端异常、迁移和 SQLite 诊断；后者经生产界面完成创建作品和章节 → 创建工作台任务 → 生成候选 → 请求修订 → 显式进入审阅 → 编辑保存 → 确认采用 → 真正重启进程 → 核对正文、采用记录和授权状态。只替换模型响应；界面、业务服务、Tauri 与 SQLite 使用真实实现，夹具仅准备前置资产。
 
 ### 4.2 全部桌面流程
 
@@ -192,17 +218,18 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；十一个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；`scripts/e2e/run-e2e.ts` 中 `allSpecs` 列出的全部 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
-### 4.3 定向单场景复测
+### 4.3 定向复测一个或多个场景
 
-单独复测一个场景时可传入清单中的 spec 名称，扩展名可省略：
+传入清单中的 spec 名称，扩展名可省略；`--spec` 可重复多次，运行器统一构建一次并保留逐场景数据库隔离和进程清理：
 
 ```powershell
 npm run test:e2e -- --spec candidate-review-apply
+npm run test:e2e -- --spec chapter-save --spec leave-guard --spec workbench-writing-smoke
 ```
 
-`--spec` 只能出现一次，不能与 `--smoke` 同时使用；未知名称会在启动应用前失败。
+`--spec` 不能与 `--smoke` 同时使用；未知或重复名称会在启动应用前失败（重复名称去重后只运行一次）。默认所有场景使用生产界面；已从生产移除的旧右侧 AI 面板与草稿回滚入口只在 `scripts/e2e/spec-selection.ts` 的 `legacyPanelSpecs` 列出的兼容性用例中，由运行器通过 `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS=1` 与 `wdio.conf.ts` 写入的显式 localStorage 开关启用。
 
 ### 4.4 连续稳定性检查
 
@@ -230,25 +257,27 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 正常使用只需运行 npm 命令。以下变量用于 CI、驱动位置或故障定位：
 
-| 变量                                   | 作用                                                                                   |
-| -------------------------------------- | -------------------------------------------------------------------------------------- |
-| `AI_NOVEL_STUDIO_E2E=1`                | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝                                     |
-| `VITE_AI_NOVEL_STUDIO_E2E=1`           | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置                                    |
-| `AI_NOVEL_STUDIO_E2E_DATA_DIR`         | 单个 spec 已存在的绝对临时目录；由运行器生成                                           |
-| `AI_NOVEL_STUDIO_E2E_RUN_ID`           | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成                      |
-| `AI_NOVEL_STUDIO_E2E_APP`              | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建                                              |
-| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠        |
-| `AI_NOVEL_STUDIO_E2E_DRIVER`           | `tauri-driver` 可执行文件名或路径                                                      |
-| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`    | `msedgedriver.exe` 路径                                                                |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST`      | driver 地址，默认 `127.0.0.1`                                                          |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`      | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000` |
-| `AI_NOVEL_STUDIO_E2E_ARTIFACTS`        | 运行诊断产物根目录，默认 `test-results/e2e`                                            |
-| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1`      | 即使成功也保留临时 SQLite / WebView2 数据                                              |
-| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`     | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE                                                |
-| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT`     | 单个 WDIO 进程总超时，默认 10 分钟                                                     |
-| `AI_NOVEL_STUDIO_E2E_TIMEOUT`          | Mocha 测试超时，默认 120 秒                                                            |
-| `AI_NOVEL_STUDIO_E2E_WAIT`             | WebDriver 显式等待默认值，默认 15 秒                                                   |
-| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL`        | WebdriverIO 日志级别，默认 `warn`                                                      |
+| 变量                                   | 作用                                                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `AI_NOVEL_STUDIO_E2E=1`                | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝                                                                               |
+| `VITE_AI_NOVEL_STUDIO_E2E=1`           | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置                                                                              |
+| `AI_NOVEL_STUDIO_E2E_DATA_DIR`         | 单个 spec 已存在的绝对临时目录；由运行器生成                                                                                     |
+| `AI_NOVEL_STUDIO_E2E_RUN_ID`           | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成                                                                |
+| `AI_NOVEL_STUDIO_E2E_LEGACY_PANELS`    | 运行器按 `spec-selection.ts` 的兼容性清单设为 `1`/`0`；`wdio.conf.ts` 据此写入或清除旧面板的显式 localStorage 开关，默认生产界面 |
+| `AI_NOVEL_STUDIO_E2E_ALLOW_ELEVATED=1` | 跳过提权终端检测；仅在宿主已配置允许提权自动化时使用，否则会话创建必然超时                                                       |
+| `AI_NOVEL_STUDIO_E2E_APP`              | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建                                                                                        |
+| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠                                                  |
+| `AI_NOVEL_STUDIO_E2E_DRIVER`           | `tauri-driver` 可执行文件名或路径                                                                                                |
+| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`    | `msedgedriver.exe` 路径                                                                                                          |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST`      | driver 地址，默认 `127.0.0.1`                                                                                                    |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`      | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000`                                           |
+| `AI_NOVEL_STUDIO_E2E_ARTIFACTS`        | 运行诊断产物根目录，默认 `test-results/e2e`                                                                                      |
+| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1`      | 即使成功也保留临时 SQLite / WebView2 数据                                                                                        |
+| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`     | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE                                                                                          |
+| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT`     | 单个 WDIO 进程总超时，默认 10 分钟                                                                                               |
+| `AI_NOVEL_STUDIO_E2E_TIMEOUT`          | Mocha 测试超时，默认 120 秒                                                                                                      |
+| `AI_NOVEL_STUDIO_E2E_WAIT`             | WebDriver 显式等待默认值，默认 15 秒                                                                                             |
+| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL`        | WebdriverIO 日志级别，默认 `warn`                                                                                                |
 
 不要手工设置 `AI_NOVEL_STUDIO_E2E_DATA_DIR` 或 `AI_NOVEL_STUDIO_E2E_RUN_ID`。Rust 要求数据目录已存在、规范化后是操作系统临时目录的专用子目录、不是文件系统根或正式 `%LOCALAPPDATA%\AI Novel Studio`，并要求 marker 内容与 run-id 完全一致；任一条件不满足都会在数据库初始化前拒绝启动。
 
@@ -284,6 +313,10 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 成功 spec 默认删除临时目录。失败 spec 保留临时目录并把路径写入运行元数据，便于只读检查；`AI_NOVEL_STUDIO_E2E_KEEP_DATA=1` 可显式保留全部数据。`.e2e-tools/` 和 `test-results/e2e/` 均被 Git 忽略。
 
+要保留上次桌面证据，把 `AI_NOVEL_STUDIO_E2E_ARTIFACTS` 设为新的运行目录。UX Round 2、交互修复和工作台 UI 细节规格的截图与观测 JSON 随各自的 spec 写入该目录，不覆盖历史报告。任务授权规格分别验证默认一次耗尽，以及仍有额度时经 UI 撤销；两条路径均重启后读回原生回执。
+
+任务目录的跨页规格通过 UI 创建、命名一个任务，再经正常备份导入为隔离测试作品补齐 100 个空会话。夹具不生成 100 次模型回合；测试检查 SQLite 行数、原作品不变、分页边界、按导入后实际 ID 搜索与选择，并重启核对选中状态。
+
 ### 6.2 Mock AI 与网络阻断
 
 - `VITE_AI_NOVEL_STUDIO_E2E=1` 会让 AI 设置读取器无条件返回 `runtimeMode: "mock"` / `provider: "mock"`；即使隔离 profile 中出现意外设置，也不能把 E2E 切到真实 Provider。
@@ -293,7 +326,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 - guard 只记录 transport、protocol、时间和计数，不记录 URL、query、header 或 body；因此诊断不会泄漏 API Key、Authorization 或完整 prompt。
 - 即使前端错误进入真实 API 路径，Rust `ai_chat_completion` 也会在创建或发送 HTTP 请求之前检查 E2E 模式并返回错误。
 - 测试不配置 API Base URL、Authorization Header、代理或真实账号。
-- 当前 Tauri 应用未集成自动更新器；因此 E2E 中不会触发更新检查。
+- 当前 Tauri 2 载体已集成 updater 插件，但没有启动时自动检查任务；更新检查与安装只在设置页显式经 `app_update` IPC 触发。E2E 构建的 `plugins.updater.pubkey` 仍是 `UPDATER_PUBLIC_KEY_REPLACED_IN_RELEASE_CI` 占位值，`get_app_update_capabilities` 会报告 `updaterConfigured: false`，测试不会触发或冒充签名更新验收。
 
 `networkBlocked: true` 证明 Rust AI IPC 阻断已启用；`webviewNetwork.installed: true` 和 `total: 0` 证明前端 guard 已安装且场景没有尝试外部请求。WDIO 每个测试后固定写出 `frontend-diagnostics.json`，运行器再独立解析它：文件缺失、无法解析、前端 console error、未处理异常、guard 未安装或任一外部网络尝试都会把 spec 改判为失败，即使 WDIO 原始退出码为 0。该机制不是操作系统级防火墙；WebDriver 仍使用本机 loopback 端口。测试运行本身不依赖互联网。
 
@@ -324,19 +357,21 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 ## 8. 自动化覆盖
 
-| Spec                                  | 真实流程与主要断言                                                                                                                                                                                                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app-start.spec.ts`                   | Tauri 窗口和 `app-shell` 可见；首页可访问；前端无未处理异常；E2E 桥存在；SQLite 完整性、外键、Schema 和空库计数正常                                                                                                                        |
-| `project-create-open.spec.ts`         | 从 UI 新建作品、输入名称、保存、回到列表并打开；断言名称、作品 ID、详情路由和 SQLite 记录                                                                                                                                                  |
-| `project-edit-save.spec.ts`           | 打开设置并修改名称；限定时间内完成保存；按钮恢复；成功提示出现；导航后重新读取仍正确；独立只读 SQLite 连接看见已提交标题 / 新更新时间，且数据库仅有一条对应作品                                                                            |
-| `chapter-save.spec.ts`                | 显式创建卷和章节；在编辑器输入、保存、切换页面并重新打开；断言正文完整、卷章归属和 SQLite 草稿记录                                                                                                                                         |
-| `large-text-save.spec.ts`             | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换                                               |
-| `candidate-review-apply.spec.ts`      | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用             |
-| `leave-guard.spec.ts`                 | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖                                                                                                  |
-| `generation-job-cancel.spec.ts`       | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
-| `restart-task-recovery.spec.ts`       | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI                             |
-| `quality-history-replay.spec.ts`      | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致                                                          |
-| `chapter-context-persistence.spec.ts` | 从 UI 采用正文并原子保存章节上下文；重启后逐值核对总结及上下文稳定 ID；采用新正文触发总结和关联记录原子过期，再次重启后断言生成上下文计数为零                                                                                              |
+| Spec                                  | 真实流程与主要断言                                                                                                                                                                                                                                                               |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-start.spec.ts`                   | Tauri 窗口和 `app-shell` 可见；首页可访问；前端无未处理异常；E2E 桥存在；SQLite 完整性、外键、Schema 和空库计数正常                                                                                                                                                              |
+| `project-create-open.spec.ts`         | 从 UI 新建作品、输入名称、保存、回到列表并打开；断言名称、作品 ID、详情路由和 SQLite 记录                                                                                                                                                                                        |
+| `project-edit-save.spec.ts`           | 打开设置并修改名称；限定时间内完成保存；按钮恢复；成功提示出现；导航后重新读取仍正确；独立只读 SQLite 连接看见已提交标题 / 新更新时间，且数据库仅有一条对应作品                                                                                                                  |
+| `chapter-save.spec.ts`                | 显式创建卷和章节；在编辑器输入、保存、切换页面并重新打开；断言正文完整、卷章归属和 SQLite 草稿记录                                                                                                                                                                               |
+| `large-text-save.spec.ts`             | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换                                                                                     |
+| `candidate-review-apply.spec.ts`      | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用                                                   |
+| `leave-guard.spec.ts`                 | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖                                                                                                                                        |
+| `generation-job-cancel.spec.ts`       | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态                                       |
+| `restart-task-recovery.spec.ts`       | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI                                                                   |
+| `quality-history-replay.spec.ts`      | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致                                                                                                |
+| `chapter-context-persistence.spec.ts` | 从 UI 采用正文并原子保存章节上下文；重启后逐值核对总结及上下文稳定 ID，并断言 `validation_status=passed` 与非阻断 advisory 仍持久化/可见；采用新正文触发总结和关联记录原子过期，再次重启后断言生成上下文计数为零                                                                 |
+| `tauri2-migration-regression.spec.ts` | 真实窗口读取 Tauri 2 生产 origin 为 `https://tauri.localhost`；点击最大化并回读 ACL/状态；预置 Beta 更新通道后真实刷新，断言 LocalStorage 与设置页选择仍为 Beta 且不触发网络更新检查；从 HTTP origin 写入偏好后重启，断言缺失偏好迁移到 HTTPS origin、旧 origin 清理且不覆盖新值 |
+| `native-plugin-contract.spec.ts`      | 真实打开并取消 Windows 文件打开/保存对话框；经 Tauri fs 插件读取隔离目录外文件被 ACL 拒绝；经 notification 插件提交 Windows toast 并确认权限 granted，不落入 DOM Toast 回退                                                                                                      |
 
 这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
 
@@ -345,7 +380,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 尚未覆盖：
 
 - 不确定 AI 步骤的自动续跑、旧 `ai_task_records` 跨重启恢复，以及旧 AI 面板和其他独立 AI 工具的通用请求取消；
-- Windows 安装程序、原生文件选择器、系统托盘、Windows 通知；
+- MSI 安装器、系统托盘、通知在 Action Center 的视觉呈现；
 - OCR、截图识别、屏幕坐标、多显示器；
 - Tauri 原生窗口 close-request 的完整恢复式离开保护；
 - 浏览器 LocalStorage 与 SQLite 之间的跨存储原子性；
@@ -435,6 +470,7 @@ v2.1.7 的质量历史场景确认了三类真实一致性缺陷：报告先标�
 
 ### 12.2 `session not created`、`DevToolsActivePort` 或窗口一闪而退
 
+- 确认终端不是以管理员身份运行：WebView2 Runtime 150+ 在提权宿主中忽略 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`，表现为应用正常启动、Rust 日志正常，但 `webview2\EBWebView\DevToolsActivePort` 始终不存在，wdio 依次报 `Chrome instance exited` / `DevToolsActivePort file doesn't exist` / `failed to write prefs file` 后超时。运行器现已在启动前拒绝提权终端；改用普通用户终端重跑即可。
 - 检查 WebView2 Runtime 与 `msedgedriver.exe` 主版本一致。
 - 使用 `msedgedriver.exe --version` 查看驱动版本，并在 Windows“应用”或 WebView2 注册信息中确认 Runtime 版本。
 - 显式设置 `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`，避免扫描到另一个旧驱动。
@@ -497,13 +533,20 @@ npm run test:e2e
 npm run test
 npm run lint
 npm run build
-cd src-tauri
-cargo check
-cargo test
-cd ..
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 npm run tauri:build
 git diff --check
 git status --short
 ```
 
 最终报告必须逐条记录真实结果。E2E 通过不能替代 Node / Rust 测试、lint、类型检查和生产构建；反之，编译通过也不能替代真实 Windows 桌面流程。
+
+### 13.1 当前未验证边界
+
+以下项目没有因 Tauri 2 迁移文档整理而获得通过结论：
+
+- 使用正式发布密钥与正式 GitHub 通道路由的签名更新；独立测试产品的真实签名下载、安装、版本切换、错误签名拒绝与保留安装包回滚已另行验收；
+- 浏览器开发模式 LocalStorage 回退与 SQLite 之间的跨存储一致性；
+
+签名发布使用 `npm run tauri:build:release`，需要 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 与发布配置注入的公钥；普通 `npm run tauri:build` 只生成本地 MSI/NSIS，不构成签名更新验收。

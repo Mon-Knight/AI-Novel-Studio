@@ -163,7 +163,7 @@ describe('writing workspace layout', () => {
       expect(layout.workspace.right).toBeLessThanOrEqual(layout.viewport.width + 1);
       expect(layout.chapterTree.width).toBeGreaterThanOrEqual(239);
       expect(layout.chapterTree.width).toBeLessThanOrEqual(241);
-      expect(layout.editor.width).toBeGreaterThanOrEqual(viewport.width - 56 - 240 - 48 - 1);
+      expect(layout.editor.width).toBeGreaterThanOrEqual(viewport.width - 56 - 240 - 56 - 1);
       expect(layout.topbar.height).toBeGreaterThanOrEqual(43);
       expect(layout.topbar.height).toBeLessThanOrEqual(45);
       expect(layout.paper.width).toBeLessThanOrEqual(922);
@@ -516,9 +516,12 @@ describe('writing workspace layout', () => {
     expect(bodySave.label).toContain('已保存');
     const persisted = await browser.execute(() => {
       const editor = document.querySelector<HTMLTextAreaElement>('[data-testid="chapter-editor"]')!;
-      const drafts = JSON.parse(
+      const draftStore = JSON.parse(
         localStorage.getItem(`ai_novel_studio_drafts_list_${editor.dataset.chapterId}`) ?? '[]',
-      ) as Array<{ id: string; content: string }>;
+      ) as
+        | Array<{ id: string; content: string }>
+        | { drafts?: Array<{ id: string; content: string }> };
+      const drafts = Array.isArray(draftStore) ? draftStore : (draftStore.drafts ?? []);
       return {
         editor: editor.value,
         draft: drafts.find((draft) => draft.id === editor.dataset.draftId)?.content,

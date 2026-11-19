@@ -12,6 +12,13 @@ import { protagonistRepository } from '../database/protagonistRepository';
 import { settingRepository } from '../database/settingRepository';
 import { chapterAssetReadinessService } from '../conversation/chapterAssetReadiness';
 import { chapterOutlineService } from '../outlines/outlineService';
+import {
+  chapterEngineeringService,
+  createDefaultChapterCard,
+  createDefaultGenerationConstraints,
+  createDefaultQualityRules,
+  normalizeScenePlanV2,
+} from '../engineering/chapterEngineeringService';
 
 export interface E2eChapterCoreAssetSeedInput {
   novelId: string;
@@ -36,6 +43,24 @@ export interface E2eChapterCoreAssetSeedInput {
     outline: string;
     targetWordCount: number;
   }>;
+  appliedScenePlan?: {
+    chapterId: string;
+    scene: {
+      id: string;
+      sceneNo: number;
+      title: string;
+      goal: string;
+      location: string;
+      characters: string[];
+      conflict: string;
+      contextCapsule: string;
+      constraints: string[];
+      expectedEndState: string;
+      targetCharacters: number;
+      planVersion: 2;
+      beats: [];
+    };
+  };
 }
 
 export interface E2eChapterCoreAssetSeedEvidence {
@@ -45,6 +70,7 @@ export interface E2eChapterCoreAssetSeedEvidence {
   ruleSystemId: string;
   protagonistId: string;
   chapterOutlineIds: string[];
+  appliedEngineeringStateId?: string;
   readiness: Array<{
     chapterId: string;
     ready: boolean;
@@ -57,12 +83,15 @@ interface E2eChapterCoreAssetFixtureDependencies {
   getNovel?: typeof novelRepository.getById;
   getChapter?: typeof chapterRepository.getById;
   updateChapter?: typeof chapterRepository.update;
+  previewWorldRuleChange?: typeof settingRepository.previewWorldRuleChange;
   saveWorldSetting?: typeof settingRepository.saveWorldSetting;
   saveRuleSystem?: typeof settingRepository.saveRuleSystem;
   saveProtagonist?: typeof protagonistRepository.save;
   saveChapterOutline?: typeof chapterOutlineService.save;
   setActiveChapterOutline?: typeof chapterOutlineService.setActive;
   inspectReadiness?: typeof chapterAssetReadinessService.inspect;
+  saveEngineeringDraft?: typeof chapterEngineeringService.saveDraft;
+  activateEngineeringState?: typeof chapterEngineeringService.activate;
 }
 
 function required(value: string, field: string): string {
@@ -111,6 +140,8 @@ export async function seedE2eChapterCoreAssets(
   );
 
   const updateChapter = dependencies.updateChapter ?? chapterRepository.update;
+  const previewWorldRuleChange =
+    dependencies.previewWorldRuleChange ?? settingRepository.previewWorldRuleChange;
   const saveWorldSetting = dependencies.saveWorldSetting ?? settingRepository.saveWorldSetting;
   const saveRuleSystem = dependencies.saveRuleSystem ?? settingRepository.saveRuleSystem;
   const saveProtagonist = dependencies.saveProtagonist ?? protagonistRepository.save;
@@ -129,28 +160,67 @@ export async function seedE2eChapterCoreAssets(
     }),
   );
 
-  const [worldSetting, ruleSystem, protagonist] = await Promise.all([
-    saveWorldSetting(null, {
-      novelId,
-      title: required(input.worldSetting.title, 'worldSetting.title'),
-      content: required(input.worldSetting.content, 'worldSetting.content'),
+  // Only authorized isolated E2E setup uses these guards. Tested business decisions still use UI.
+  // A successful world insertion changes the rule-set fingerprint; never race both previews.
+  const worldInput = {
+    novelId,
+    title: required(input.worldSetting.title, 'worldSetting.title'),
+    content: required(input.worldSetting.content, 'worldSetting.content'),
+    isActive: true,
+  };
+  const worldPreview = await previewWorldRuleChange(novelId, [
+    {
+      targetType: 'world_setting',
+      title: worldInput.title,
+      content: worldInput.content,
       isActive: true,
-    }),
-    saveRuleSystem(null, {
-      novelId,
-      title: required(input.ruleSystem.title, 'ruleSystem.title'),
-      content: required(input.ruleSystem.content, 'ruleSystem.content'),
-      forbiddenRules: input.ruleSystem.forbiddenRules?.trim() || undefined,
-      isActive: true,
-    }),
-    saveProtagonist(null, {
-      novelId,
-      name: required(input.protagonist.name, 'protagonist.name'),
-      identity: required(input.protagonist.identity, 'protagonist.identity'),
-      personality: required(input.protagonist.personality, 'protagonist.personality'),
-      goal: required(input.protagonist.goal, 'protagonist.goal'),
-    }),
+    },
   ]);
+  if (worldPreview.blockingConflicts.length)
+    throw new Error('E2E core-asset fixture world preview has blocking dependencies.');
+  const worldSetting = await saveWorldSetting(null, {
+    ...worldInput,
+    expectedRuleSetFingerprint: worldPreview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: worldPreview.previewHash,
+      intent: 'confirm_change',
+      notes: '已授权的隔离 E2E 前置资产；不代替被测生产 UI 决定。',
+    },
+  });
+  const ruleInput = {
+    novelId,
+    title: required(input.ruleSystem.title, 'ruleSystem.title'),
+    content: required(input.ruleSystem.content, 'ruleSystem.content'),
+    forbiddenRules: input.ruleSystem.forbiddenRules?.trim() || undefined,
+    isActive: true,
+  };
+  const rulePreview = await previewWorldRuleChange(novelId, [
+    {
+      targetType: 'rule_system',
+      title: ruleInput.title,
+      content: ruleInput.content,
+      forbiddenRules: ruleInput.forbiddenRules,
+      isActive: true,
+    },
+  ]);
+  if (rulePreview.blockingConflicts.length)
+    throw new Error('E2E core-asset fixture rule preview has blocking dependencies.');
+  const ruleSystem = await saveRuleSystem(null, {
+    ...ruleInput,
+    expectedRuleSetFingerprint: rulePreview.ruleSetFingerprint,
+    changeAuthorization: {
+      previewHash: rulePreview.previewHash,
+      intent: 'confirm_change',
+      notes: '已授权的隔离 E2E 前置资产；不代替被测生产 UI 决定。',
+    },
+  });
+  const protagonist = await saveProtagonist(null, {
+    novelId,
+    name: required(input.protagonist.name, 'protagonist.name'),
+    identity: required(input.protagonist.identity, 'protagonist.identity'),
+    personality: required(input.protagonist.personality, 'protagonist.personality'),
+    goal: required(input.protagonist.goal, 'protagonist.goal'),
+  });
 
   const chapterOutlineIds: string[] = [];
   for (let index = 0; index < input.chapters.length; index += 1) {
@@ -165,6 +235,43 @@ export async function seedE2eChapterCoreAssets(
     });
     await setActiveChapterOutline(outline.id, novelId);
     chapterOutlineIds.push(outline.id);
+  }
+
+  let appliedEngineeringStateId: string | undefined;
+  if (input.appliedScenePlan) {
+    const scenePlanInput = input.appliedScenePlan;
+    const chapter = input.chapters.find((item) => item.chapterId === scenePlanInput.chapterId);
+    if (!chapter) {
+      throw new Error('E2E applied Scene plan references an unknown chapter.');
+    }
+    const seed = {
+      title: chapter.title,
+      outline: chapter.outline,
+      goal: scenePlanInput.scene.goal,
+      targetWordCount: scenePlanInput.scene.targetCharacters,
+    };
+    const scenePlan = normalizeScenePlanV2([scenePlanInput.scene], seed);
+    if (scenePlan.length !== 1 || scenePlan[0].planVersion !== 2 || scenePlan[0].beats.length) {
+      throw new Error('E2E applied Scene plan must be a single Scene-only v2 plan.');
+    }
+    const saveDraft = dependencies.saveEngineeringDraft ?? chapterEngineeringService.saveDraft;
+    const activate = dependencies.activateEngineeringState ?? chapterEngineeringService.activate;
+    const draft = await saveDraft(
+      {
+        novelId,
+        chapterId: scenePlanInput.chapterId,
+        chapterCard: createDefaultChapterCard(seed),
+        scenePlan,
+        generationConstraints: createDefaultGenerationConstraints(seed),
+        qualityRules: createDefaultQualityRules(),
+      },
+      seed,
+    );
+    const active = await activate(draft.id, scenePlanInput.chapterId, seed);
+    if (active.status !== 'active') {
+      throw new Error('E2E applied Scene plan did not become the active engineering state.');
+    }
+    appliedEngineeringStateId = active.id;
   }
 
   const readiness = await Promise.all(
@@ -192,6 +299,7 @@ export async function seedE2eChapterCoreAssets(
     ruleSystemId: ruleSystem.id,
     protagonistId: protagonist.id,
     chapterOutlineIds,
+    appliedEngineeringStateId,
     readiness,
   };
 }

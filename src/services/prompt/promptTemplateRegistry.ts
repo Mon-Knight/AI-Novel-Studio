@@ -11,7 +11,9 @@ import type {
  * 自动识别模型家族分类
  */
 export function detectModelFamily(modelName = ''): ModelFamily {
-  const normalized = String(modelName || '').toLowerCase().trim();
+  const normalized = String(modelName || '')
+    .toLowerCase()
+    .trim();
   if (normalized.includes('qwen')) {
     return 'qwen';
   }
@@ -34,10 +36,7 @@ export function detectModelFamily(modelName = ''): ModelFamily {
 /**
  * 模板字符串替换与条件块渲染引擎
  */
-export function renderTemplateString(
-  template: string,
-  variables: Record<string, string>,
-): string {
+export function renderTemplateString(template: string, variables: Record<string, string>): string {
   let result = template;
 
   // 1. 处理反向条件块 {{^var}}...{{/var}} (当变量为空时保留)
@@ -116,8 +115,7 @@ export class PromptTemplateRegistry {
 
     const isStrict = options.strict !== false;
     const modelFamily: ModelFamily =
-      options.modelFamily ||
-      (options.modelName ? detectModelFamily(options.modelName) : 'generic');
+      options.modelFamily || (options.modelName ? detectModelFamily(options.modelName) : 'generic');
 
     // 检查并准备变量
     const renderedVariables: Record<string, string> = {};
@@ -128,9 +126,7 @@ export class PromptTemplateRegistry {
       } else if (v.defaultValue !== undefined) {
         renderedVariables[v.name] = v.defaultValue;
       } else if (v.required && isStrict) {
-        throw new Error(
-          `渲染模板 [${templateId}] 失败：必填变量 [${v.name}] 缺失且无默认值。`,
-        );
+        throw new Error(`渲染模板 [${templateId}] 失败：必填变量 [${v.name}] 缺失且无默认值。`);
       } else {
         renderedVariables[v.name] = '';
       }
@@ -147,8 +143,7 @@ export class PromptTemplateRegistry {
     const baseUserPrompt = renderTemplateString(template.templateText, renderedVariables);
 
     // 获取模型适配规则
-    const adaptation =
-      template.adaptations?.[modelFamily] || template.adaptations?.generic;
+    const adaptation = template.adaptations?.[modelFamily] || template.adaptations?.generic;
 
     const systemParts: string[] = [];
     if (adaptation?.systemInstructionPrefix) {
@@ -166,7 +161,9 @@ export class PromptTemplateRegistry {
     const userPrompt = userParts.join('\n\n').trim();
 
     const hash = createHash('sha256')
-      .update(`${template.templateId}:${template.version}:${modelFamily}:${systemPrompt}:::${userPrompt}`)
+      .update(
+        `${template.templateId}:${template.version}:${modelFamily}:${systemPrompt}:::${userPrompt}`,
+      )
       .digest('hex');
 
     return {
@@ -196,7 +193,12 @@ export class PromptTemplateRegistry {
         { name: 'novelTitle', required: true, description: '小说书名' },
         { name: 'genre', required: false, defaultValue: '通俗长篇小说', description: '题材流派' },
         { name: 'povName', required: true, description: '视点角色姓名' },
-        { name: 'povEmotion', required: false, defaultValue: '警惕专注', description: '视点角色心境' },
+        {
+          name: 'povEmotion',
+          required: false,
+          defaultValue: '警惕专注',
+          description: '视点角色心境',
+        },
         { name: 'sceneGoal', required: true, description: '本场核心目标' },
         { name: 'memoryContext', required: false, description: '长中期记忆与世界状态包络' },
         { name: 'beatList', required: true, description: '分镜 Beat 规划清单' },
@@ -236,10 +238,8 @@ export class PromptTemplateRegistry {
         },
         claude: {
           modelFamily: 'claude',
-          systemInstructionPrefix:
-            '你是一位注重文学质感、心理细微变化与宏大世界观一致性的作家。',
-          outputConstraints:
-            '【Claude 写作规范】运用丰富感官细节与克制笔触，保持高文学水准。',
+          systemInstructionPrefix: '你是一位注重文学质感、心理细微变化与宏大世界观一致性的作家。',
+          outputConstraints: '【Claude 写作规范】运用丰富感官细节与克制笔触，保持高文学水准。',
         },
         generic: {
           modelFamily: 'generic',

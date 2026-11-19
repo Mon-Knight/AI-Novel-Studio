@@ -205,7 +205,10 @@ test('composer exposes preparation without locking or replacing the draft', () =
   assert.doesNotMatch(textarea, /\sdisabled(?:=|\s|>)/u);
   assert.match(html, new RegExp(`>${draft}</textarea>`, 'u'));
   assert.match(openingTag(html, 'button', 'workbench-template-generate-chapter'), /\sdisabled/u);
-  assert.match(openingTag(html, 'select', 'workbench-model-select'), /\sdisabled/u);
+  // Preparing freezes this run, not the task's lifetime; the selector remains visible but disabled.
+  const modelSelector = openingTag(html, 'select', 'workbench-model-select');
+  assert.match(modelSelector, /data-model-locked="true"/u);
+  assert.match(modelSelector, /\sdisabled/u);
   assert.match(openingTag(html, 'button', 'workbench-send-task'), /\sdisabled/u);
   assert.doesNotMatch(html, /data-testid="workbench-stop-task"/u);
 });
@@ -227,4 +230,54 @@ test('composer keeps Stop as the running-state action', () => {
   assert.match(html, /data-testid="workbench-stop-task"/u);
   assert.doesNotMatch(html, /data-testid="workbench-send-task"/u);
   assert.doesNotMatch(html, /data-testid="workbench-task-preparing"/u);
+});
+
+test('composer gives the chapter goal brief its own gutter and ties it to the textarea', () => {
+  const summary: WorkbenchAssetScopeSummary = {
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    items: [],
+    requiredMissingCount: 0,
+    unavailableCount: 0,
+  };
+  const html = renderComposer(summary, true, {
+    draft: '生成下一章',
+    wordPreviewContext: {
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+      chapterTarget: 3200,
+    },
+  });
+
+  assert.match(html, /class="workbench-goal-brief"/u);
+  assert.match(html, /data-testid="workbench-word-preview"[^>]*>写章目标 3200 字/u);
+  assert.match(
+    openingTag(html, 'textarea', 'workbench-composer-input'),
+    /aria-describedby="workbench-goal-brief"/u,
+  );
+});
+
+test('composer distinguishes model refresh from a failed model directory', () => {
+  const summary: WorkbenchAssetScopeSummary = {
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    items: [],
+    requiredMissingCount: 0,
+    unavailableCount: 0,
+  };
+  const refreshing = renderComposer(summary, true, {
+    pluginsLoading: true,
+  });
+  assert.match(refreshing, /data-status="initializing"/u);
+  assert.match(refreshing, /lucide-loader-circle/u);
+  assert.doesNotMatch(refreshing, /data-status="unavailable"/u);
+
+  const failed = renderComposer(summary, true, {
+    pluginsError: 'Runtime 模型目录刷新失败',
+  });
+  assert.match(failed, /data-status="error"/u);
+  assert.match(failed, /lucide-circle-alert/u);
+  assert.match(failed, /role="alert"/u);
+  assert.match(failed, /aria-label="重试模型目录"/u);
+  assert.match(failed, /aria-label="模型设置"/u);
 });

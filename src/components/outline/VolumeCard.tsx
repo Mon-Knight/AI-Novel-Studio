@@ -87,7 +87,7 @@ function VolumeCard({
             </span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 8px',
                 borderRadius: 10,
                 background: 'var(--color-bg-active)',
@@ -174,7 +174,7 @@ function VolumeCard({
               <span style={{ flex: 1, fontSize: 14 }}>{ch.title}</span>
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   padding: '1px 8px',
                   borderRadius: 10,
                   marginRight: 8,

@@ -1,5 +1,5 @@
 import { appLogger } from '../observability/appLogger';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 
 type TauriWindow = Window & {
   __TAURI__?: unknown;

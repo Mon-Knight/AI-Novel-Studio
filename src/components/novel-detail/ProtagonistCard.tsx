@@ -101,17 +101,10 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
 
   return (
     <div className="detail-card">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="detail-card-header">
+        <div className="detail-card-title">
           <UserRound aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>主角设定</span>
+          <span>主角设定</span>
         </div>
         {!editing && (
           <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
@@ -122,11 +115,11 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
       </div>
 
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="detail-form detail-form--tight">
           {/* 主角模式选择 */}
           <div>
             <label className="panel-field-label">主角模式</label>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <div className="detail-inline-actions detail-inline-actions--loose">
               <button
                 className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setMode('single')}
@@ -156,15 +149,14 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
 
           {message && (
             <div
-              style={{
-                fontSize: 13,
-                color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)',
-              }}
+              className={`detail-save-status detail-save-status--inline${
+                message === '保存成功' ? ' is-ok' : ''
+              }`}
             >
               {message}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="detail-form-actions">
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => {

@@ -95,10 +95,7 @@ test('CreativeAgentHarness E2E: 端到端自主章节生产全流程 (Observe ->
 
   // 4. 验证 Memory 版本增量与演进
   const updatedVersions = novelMemoryManager.listMemoryVersions(novelId);
-  assert.ok(
-    updatedVersions.length > initialVersionCount,
-    '记忆层必须产生新的不可变版本快照',
-  );
+  assert.ok(updatedVersions.length > initialVersionCount, '记忆层必须产生新的不可变版本快照');
 
   const updatedChar = novelMemoryManager.getCharacterState(novelId, 'char-protagonist');
   assert.ok(updatedChar);

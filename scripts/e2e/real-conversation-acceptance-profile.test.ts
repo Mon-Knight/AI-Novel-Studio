@@ -1038,7 +1038,7 @@ test('sparse-idea scenario uses one minimal ordinary brief without prewriting st
   assert.equal(profile.scenario, 'sparse-idea');
   assert.equal(shouldPreseedRealAcceptanceStoryAssets(profile), false);
   assert.deepEqual(instructions, [REAL_ACCEPTANCE_SPARSE_IDEA, '继续写', '继续写', '继续写']);
-  assert.equal(instructions[0], '写个六万字左右的悬疑故事。');
+  assert.equal(instructions[0], '写个三万字左右的悬疑故事。');
   assert.ok(!instructions[0].includes('15章'));
   assert.ok(instructions[0].length < 20);
   assert.ok(!instructions[0].includes('世界背景'));

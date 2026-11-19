@@ -21,12 +21,33 @@ pub struct SaveWorldSettingInput {
     pub novel_id: String,
     pub title: String,
     pub content: String,
+    pub structured_json: Option<String>,
+    pub expected_updated_at: Option<String>,
+    pub expected_rule_set_fingerprint: Option<String>,
+    pub change_authorization: Option<WorldRuleChangeAuthorizationInput>,
     #[serde(default = "default_true")]
     pub is_active: bool,
 }
 
 pub fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldRuleChangeAuthorizationInput {
+    pub preview_hash: String,
+    pub intent: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteRuleSystemInput {
+    pub novel_id: String,
+    pub expected_updated_at: Option<String>,
+    pub expected_rule_set_fingerprint: Option<String>,
+    pub change_authorization: Option<WorldRuleChangeAuthorizationInput>,
 }
 
 // ==================== Rule System ====================
@@ -54,6 +75,10 @@ pub struct SaveRuleSystemInput {
     pub category: Option<String>,
     pub content: String,
     pub forbidden_rules: Option<String>,
+    pub structured_json: Option<String>,
+    pub expected_updated_at: Option<String>,
+    pub expected_rule_set_fingerprint: Option<String>,
+    pub change_authorization: Option<WorldRuleChangeAuthorizationInput>,
     #[serde(default = "default_true")]
     pub is_active: bool,
 }
@@ -152,6 +177,24 @@ pub struct UpdateCharacterInput {
     pub current_state: Option<String>,
     pub is_protagonist: Option<bool>,
     pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveCharacterProfileInput {
+    pub novel_id: String,
+    pub character_id: String,
+    pub expected_updated_at: String,
+    pub expected_source: String,
+    pub name: String,
+    pub role_type: String,
+    pub identity: String,
+    pub faction: String,
+    pub relation_to_protagonist: String,
+    pub goal: String,
+    pub personality: String,
+    pub behavior_limits: String,
+    pub forbidden_behaviors: String,
 }
 
 // ==================== Chapter Character ====================

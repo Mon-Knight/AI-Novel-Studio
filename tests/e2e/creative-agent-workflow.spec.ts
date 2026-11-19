@@ -52,7 +52,9 @@ describe('creative agent autonomous workflow e2e', () => {
 
     // 6. 验证 📝 Quality Review 质量审查卡片
     const qualityCard = await waitForTestId('agent-quality-review-card');
-    expect(await qualityCard.getText()).toMatch(/(Quality Review|人物一致性|剧情推进|文风匹配|连贯性)/);
+    expect(await qualityCard.getText()).toMatch(
+      /(Quality Review|人物一致性|剧情推进|文风匹配|连贯性)/,
+    );
     const qualityBadge = await waitForTestId('agent-quality-overall-badge');
     expect(await qualityBadge.getText()).toMatch(/\d+\/100/);
 

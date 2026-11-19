@@ -2,32 +2,24 @@
  * AI Novel Studio - 大纲编辑器组件
  * 支持：手动编辑、AI 生成、保存、版本管理、设置为采用版本
  */
-import { useState, useEffect, useCallback } from 'react';
-import { cancelLoadingOperation, runWithLoading } from '../../lib/runWithLoading';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { runWithLoading } from '../../lib/runWithLoading';
 import {
   masterOutlineService,
   volumeOutlineService,
   chapterOutlineService,
-  loadOutlineContext,
 } from '../../services/outlines/outlineService';
-import { createAiClient, aiSettingsService } from '../../services/ai/aiClient';
-import { aiTaskService } from '../../services/ai/aiTaskService';
-import {
-  buildOutlineGeneratePrompt,
-  buildVolumeOutlineGeneratePrompt,
-  buildChapterOutlineGeneratePrompt,
-} from '../../services/ai/promptBuilder';
-import type { OutlineGenerationContext, OutlineType } from '../../types/outline';
-import type {
-  OutlineGeneratePromptContext,
-  VolumeOutlineGeneratePromptContext,
-  ChapterOutlineGeneratePromptContext,
-} from '../../services/ai/promptBuilder';
-import type { AiGenerateResponse } from '../../types/ai';
-import { throwIfAiRequestCancelled } from '../../services/ai/aiCancellation';
-import { settleAiTaskError } from '../../services/ai/aiTaskCancellation';
+import type { MasterOutline, OutlineGenerationContext, OutlineType } from '../../types/outline';
 import { reportAndPresentError } from '../../utils/reportAndPresentError';
 import { OutlineEditorView } from './OutlineEditorView';
+import { useOutlineEditorGeneration } from './useOutlineEditorGeneration';
+import { isTauri } from '../../services/database/db';
+import {
+  applyNativeOutlineCandidate,
+  outlineSourceFromSnapshot,
+} from '../../services/outlines/outlineCandidateApplicationService';
+import type { OutlineGenerationEvidence } from '../../types/outlineGeneration';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 interface OutlineEditorProps {
   projectId: string;
@@ -39,26 +31,10 @@ interface OutlineEditorProps {
   onSaved?: () => void;
 }
 
-/** 构建章节大纲 AI 生成 Prompt 上下文 */
-function buildChapterPromptContext(
-  base: OutlineGenerationContext,
-  chapterTitle?: string,
-): ChapterOutlineGeneratePromptContext {
-  return {
-    novelTitle: base.novelTitle,
-    novelGenre: base.novelGenre,
-    worldBackground: base.worldBackground,
-    protagonist:
-      [base.protagonistName, base.protagonistIdentity].filter(Boolean).join('；') || undefined,
-    specialAbility: base.protagonistAbility,
-    existingChapters: base.existingChapters,
-    volumeTitle: chapterTitle,
-    chapterCount: 6,
-    activeMasterOutline: base.activeMasterOutline,
-    activeVolumeOutline: base.activeVolumeOutline,
-    styleSummary: base.styleSummary,
-  };
-}
+type OutlineVersion = Pick<
+  MasterOutline,
+  'id' | 'version' | 'isActive' | 'title' | 'content' | 'contextSnapshot' | 'sourceType'
+>;
 
 function OutlineEditor({
   projectId,
@@ -74,205 +50,90 @@ function OutlineEditor({
   const [isDirty, setIsDirty] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<number>(0);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [versions, setVersions] = useState<{ id: string; version: number; isActive: boolean }[]>(
-    [],
-  );
+  const [versions, setVersions] = useState<OutlineVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [context, setContext] = useState<OutlineGenerationContext | null>(null);
   const [showContext, setShowContext] = useState(false);
+  const [candidateSource, setCandidateSource] = useState<OutlineGenerationEvidence | null>(null);
+  const scopeKey = JSON.stringify([projectId, outlineType, targetId]);
+  const scopeRef = useRef(scopeKey);
+  scopeRef.current = scopeKey;
+  const liveContent = useRef(content);
+  liveContent.current = content;
+  const liveTitle = useRef(title);
+  liveTitle.current = title;
 
   const typeLabel =
     outlineType === 'master' ? '总纲' : outlineType === 'volume' ? '分卷大纲' : '章节大纲';
 
+  const { handleAiGenerate } = useOutlineEditorGeneration({
+    projectId,
+    outlineType,
+    targetId,
+    targetTitle,
+    targetIndex,
+    parentOutlineId,
+    typeLabel,
+    scopeRef,
+    setContext,
+    setContent,
+    setCandidateSource,
+    setIsDirty,
+  });
+
   // 加载当前大纲
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      let result;
-      if (outlineType === 'master') {
-        result = await masterOutlineService.getActive(projectId);
-      } else if (outlineType === 'volume') {
-        result = await volumeOutlineService.getActive(projectId, targetId);
-      } else {
-        result = await chapterOutlineService.getActive(projectId, targetId);
+  const load = useCallback(
+    async (preferred?: OutlineVersion) => {
+      const requestedScope = JSON.stringify([projectId, outlineType, targetId]);
+      setLoading(true);
+      try {
+        let result;
+        if (outlineType === 'master') {
+          result = await masterOutlineService.getActive(projectId);
+        } else if (outlineType === 'volume') {
+          result = await volumeOutlineService.getActive(projectId, targetId);
+        } else {
+          result = await chapterOutlineService.getActive(projectId, targetId);
+        }
+        // 加载版本列表
+        let versionList;
+        if (outlineType === 'master') {
+          versionList = await masterOutlineService.getVersions(projectId);
+        } else if (outlineType === 'volume') {
+          versionList = await volumeOutlineService.getVersions(projectId, targetId);
+        } else {
+          versionList = await chapterOutlineService.getVersions(projectId, targetId);
+        }
+        if (scopeRef.current !== requestedScope) return;
+        setVersions(versionList);
+        setCandidateSource(null);
+        const selected =
+          versionList.find((version) => version.id === preferred?.id) || preferred || result;
+        setContent(selected?.content || '');
+        setTitle(selected?.title || '');
+        setCurrentVersion(selected?.version || 0);
+        setCurrentId(selected?.id || null);
+        setIsDirty(false);
+      } catch (error) {
+        if (scopeRef.current !== requestedScope) return;
+        await reportAndPresentError({
+          event: 'OUTLINE_EDITOR_LOAD_FAILED',
+          error,
+          fallbackMessage: '大纲及版本记录加载失败，请重试。',
+          title: '大纲加载失败',
+          testId: 'outline-load-error',
+          context: { projectId, outlineType, targetId },
+        });
+      } finally {
+        if (scopeRef.current === requestedScope) setLoading(false);
       }
-      if (result) {
-        setContent(result.content);
-        setTitle(result.title);
-        setCurrentVersion(result.version);
-        setCurrentId(result.id);
-      } else {
-        setContent('');
-        setCurrentVersion(0);
-        setCurrentId(null);
-      }
-      // 加载版本列表
-      let versionList;
-      if (outlineType === 'master') {
-        versionList = await masterOutlineService.getVersions(projectId);
-      } else if (outlineType === 'volume') {
-        versionList = await volumeOutlineService.getVersions(projectId, targetId);
-      } else {
-        versionList = await chapterOutlineService.getVersions(projectId, targetId);
-      }
-      setVersions(versionList.map((v) => ({ id: v.id, version: v.version, isActive: v.isActive })));
-    } catch (error) {
-      await reportAndPresentError({
-        event: 'OUTLINE_EDITOR_LOAD_FAILED',
-        error,
-        fallbackMessage: '大纲及版本记录加载失败，请重试。',
-        title: '大纲加载失败',
-        testId: 'outline-load-error',
-        context: { projectId, outlineType, targetId },
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, outlineType, targetId]);
+    },
+    [projectId, outlineType, targetId],
+  );
 
   useEffect(() => {
     load();
   }, [load]);
-
-  // AI 生成大纲
-  const handleAiGenerate = async () => {
-    try {
-      await runWithLoading(
-        {
-          title: `AI 正在生成${typeLabel}`,
-          initialMessage:
-            outlineType === 'volume'
-              ? '正在读取当前采用总纲……'
-              : outlineType === 'chapter'
-                ? '正在读取当前采用分卷大纲和总纲……'
-                : '正在读取作品设定、主角背景和世界设定……',
-          successMessage: `${typeLabel}生成完成，请检查并保存`,
-          errorMessage: `${typeLabel}生成失败`,
-          cancelable: true,
-        },
-        async ({ setMessage, setStage, signal, operationId }) => {
-          setStage('正在构建完整上下文……');
-          setMessage('正在读取世界背景、主角设定、已有大纲……');
-          const ctx = await loadOutlineContext(projectId);
-          setContext(ctx);
-
-          // 显示缺失信息提示
-          const warnings: string[] = [];
-          if (!ctx.protagonistName) warnings.push('缺少主角设定');
-          if (!ctx.worldBackground) warnings.push('缺少世界背景');
-          if (outlineType === 'volume' && !ctx.activeMasterOutline)
-            warnings.push('缺少总纲（建议先生成总纲）');
-          if (outlineType === 'chapter') {
-            if (!ctx.activeMasterOutline) warnings.push('缺少总纲');
-            if (!ctx.activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
-          }
-          if (warnings.length > 0) {
-            setStage(`${warnings.join('、')}，将生成简化版`);
-          }
-
-          setStage('正在调用 AI 生成……');
-          setMessage('AI 正在组织内容结构，请稍候……');
-
-          const settings = aiSettingsService.getSettings();
-
-          let request;
-          if (outlineType === 'master') {
-            const promptCtx: OutlineGeneratePromptContext = {
-              novelTitle: ctx.novelTitle,
-              novelGenre: ctx.novelGenre,
-              description: ctx.description || undefined,
-              worldBackground: ctx.worldBackground,
-              ruleSystems: ctx.ruleSystems || undefined,
-              protagonist:
-                [ctx.protagonistName, ctx.protagonistIdentity].filter(Boolean).join('；') ||
-                undefined,
-              specialAbility: ctx.protagonistAbility,
-              existingVolumes: ctx.existingVolumes || undefined,
-              existingChapters: ctx.existingChapters || undefined,
-            };
-            request = buildOutlineGeneratePrompt(promptCtx);
-          } else if (outlineType === 'volume') {
-            const promptCtx: VolumeOutlineGeneratePromptContext = {
-              novelTitle: ctx.novelTitle,
-              novelGenre: ctx.novelGenre,
-              worldBackground: ctx.worldBackground,
-              protagonist:
-                [ctx.protagonistName, ctx.protagonistIdentity].filter(Boolean).join('；') ||
-                undefined,
-              specialAbility: ctx.protagonistAbility,
-              existingVolumes: ctx.existingVolumes || undefined,
-              volumeTitle: targetTitle,
-              activeMasterOutline: ctx.activeMasterOutline,
-              styleSummary: ctx.styleSummary,
-            };
-            request = buildVolumeOutlineGeneratePrompt(promptCtx);
-          } else {
-            const promptCtx = buildChapterPromptContext(ctx, targetTitle);
-            request = buildChapterOutlineGeneratePrompt(promptCtx);
-          }
-
-          const task = await aiTaskService
-            .create(
-              outlineType === 'master'
-                ? 'outline_generate'
-                : outlineType === 'volume'
-                  ? 'volume_outline_generate'
-                  : 'chapter_outline_generate',
-              {
-                novelId: projectId,
-                runtimeMode: settings.runtimeMode,
-                provider: settings.provider,
-                modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-                inputSummary: `生成${typeLabel}：${targetTitle || ctx.novelTitle}`,
-              },
-            )
-            .catch(() => null);
-          const releaseCancellation = task
-            ? aiTaskService.registerActiveExecution(task.id, () =>
-                cancelLoadingOperation(operationId),
-              )
-            : () => {};
-
-          let response: AiGenerateResponse;
-          try {
-            const client = createAiClient(settings);
-            response = await client.generate(request, {
-              signal,
-              cancel: () => cancelLoadingOperation(operationId),
-            });
-            throwIfAiRequestCancelled(signal);
-
-            if (task) {
-              await aiTaskService.markSucceeded(task.id, {
-                resultText: response.text,
-                tokenInput: response.tokenInput,
-                tokenOutput: response.tokenOutput,
-                tokenTotal: response.tokenTotal,
-              });
-            }
-          } catch (error: unknown) {
-            await settleAiTaskError({
-              taskId: task?.id,
-              error,
-              signal,
-              fallbackMessage: `${typeLabel}生成失败`,
-            });
-            throw error;
-          } finally {
-            releaseCancellation();
-          }
-
-          setContent(response.text);
-          setIsDirty(true);
-
-          setStage('生成完成');
-          setMessage(`AI 已生成${typeLabel}，请检查内容后保存`);
-        },
-      );
-    } catch {
-      // 错误已在弹窗显示
-    }
-  };
 
   // 保存大纲
   const handleSave = useCallback(
@@ -290,18 +151,49 @@ function OutlineEditor({
           async () => {
             const contextSnapshot = context ? JSON.stringify(context).slice(0, 10000) : undefined;
             const sourceType = 'manual';
-
-            if (outlineType === 'master') {
+            // The existing save command updates the active version; edits of a historical
+            // version must stay separate until the user explicitly adopts them.
+            const saveAsNewVersion =
+              saveAsNew ||
+              Boolean(currentId && !versions.find((v) => v.id === currentId)?.isActive);
+            let saved: OutlineVersion;
+            const requestedScope = scopeRef.current;
+            const savedVersion = versions.find((version) => version.id === currentId);
+            const nativeSource = isTauri()
+              ? (candidateSource ?? outlineSourceFromSnapshot(savedVersion?.contextSnapshot))
+              : null;
+            if (nativeSource) {
+              if (
+                nativeSource.novelId !== projectId ||
+                nativeSource.request.outlineType !== outlineType ||
+                nativeSource.request.targetId !== targetId
+              )
+                throw new Error('OUTLINE_SOURCE_SCOPE_MISMATCH: 当前编辑范围已变化，正文已保留。');
+              const result = await applyNativeOutlineCandidate(nativeSource, {
+                kind: 'outline_version',
+                outlineType,
+                targetId,
+                parentOutlineId,
+                targetIndex,
+                title: title || targetTitle || typeLabel,
+                content,
+                saveAsNewVersion,
+              });
+              if (!result.outline)
+                throw new Error(
+                  'OUTLINE_APPLICATION_RECEIPT_INVALID: 原生保存已返回回执，但缺少版本，请读取权威事实。',
+                );
+              saved = result.outline;
+            } else if (outlineType === 'master') {
               const result = await masterOutlineService.save({
                 projectId,
                 title: title || '作品总纲',
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             } else if (outlineType === 'volume') {
               const result = await volumeOutlineService.save({
                 projectId,
@@ -312,10 +204,9 @@ function OutlineEditor({
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             } else {
               const result = await chapterOutlineService.save({
                 projectId,
@@ -326,14 +217,22 @@ function OutlineEditor({
                 content,
                 sourceType,
                 contextSnapshot,
-                saveAsNewVersion: saveAsNew,
+                saveAsNewVersion,
               });
-              setCurrentId(result.id);
-              setCurrentVersion(result.version);
+              saved = result;
             }
 
-            setIsDirty(false);
-            await load();
+            if (scopeRef.current !== requestedScope) return;
+            setCurrentId(saved.id);
+            setCurrentVersion(saved.version);
+            setVersions((previous) => [saved, ...previous.filter((v) => v.id !== saved.id)]);
+            if (liveContent.current === content && liveTitle.current === title) {
+              setContent(saved.content);
+              setTitle(saved.title);
+              setCandidateSource(null);
+              setIsDirty(false);
+              await load(saved);
+            }
             onSaved?.();
           },
         );
@@ -343,7 +242,9 @@ function OutlineEditor({
     },
     [
       content,
+      candidateSource,
       context,
+      currentId,
       load,
       onSaved,
       outlineType,
@@ -354,14 +255,40 @@ function OutlineEditor({
       targetTitle,
       title,
       typeLabel,
+      versions,
     ],
   );
 
   // 设为采用版本
   const handleSetActive = async () => {
-    if (!currentId) return;
+    if (!currentId || isDirty) return;
     try {
-      if (outlineType === 'master') {
+      const selected = versions.find((version) => version.id === currentId);
+      const source = isTauri() ? outlineSourceFromSnapshot(selected?.contextSnapshot) : null;
+      if (source && selected) {
+        if (
+          source.novelId !== projectId ||
+          source.request.outlineType !== outlineType ||
+          source.request.targetId !== targetId
+        )
+          throw new Error('OUTLINE_SOURCE_SCOPE_MISMATCH');
+        const current = versions.find((version) => version.isActive);
+        await applyNativeOutlineCandidate(source, {
+          kind: 'adopt_outline_version',
+          outlineType,
+          targetId,
+          outlineId: selected.id,
+          expectedVersion: selected.version,
+          expectedContentHash: await computeContentSha256(selected.content),
+          expectedActive: current
+            ? {
+                id: current.id,
+                version: current.version,
+                contentHash: await computeContentSha256(current.content),
+              }
+            : null,
+        });
+      } else if (outlineType === 'master') {
         await masterOutlineService.setActive(currentId, projectId);
       } else if (outlineType === 'volume') {
         await volumeOutlineService.setActive(currentId, projectId);
@@ -408,6 +335,14 @@ function OutlineEditor({
       onAiGenerate={handleAiGenerate}
       onSave={handleSave}
       onSetActive={handleSetActive}
+      onSelectVersion={(id) => {
+        const selected = versions.find((version) => version.id === id);
+        if (!selected || isDirty) return;
+        setContent(selected.content);
+        setTitle(selected.title);
+        setCurrentId(selected.id);
+        setCurrentVersion(selected.version);
+      }}
       onToggleContext={() => setShowContext((visible) => !visible)}
       onTitleChange={(nextTitle) => {
         setTitle(nextTitle);

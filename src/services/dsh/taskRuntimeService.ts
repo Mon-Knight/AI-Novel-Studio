@@ -11,6 +11,8 @@ import type {
   TaskModelSnapshot,
   TaskRun,
 } from '../../types/conversation';
+import type { ArtifactRevisionSource } from '../../types/artifactRevision';
+import type { TaskDomainEntry } from '../../types/taskDomainEntry';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { CANONICAL_TOOL_IDS } from '../capabilities/canonical/canonicalToolTypes';
@@ -21,9 +23,11 @@ import {
   type ContextReadToolName,
   type DshTaskKind,
   type DshTurnContract,
+  type CreativePlannedAction,
 } from '../conversation/taskGoalRouting';
 
 export const DSH_TASK_PROJECTION_EVENT = 'ans://task-runtime-projection';
+export const DSH_PLUGIN_PROBE_CONVERSATION_ID = '__ans_plugin_probe__';
 
 export interface DshTaskProjectionNotice {
   conversationId: string;
@@ -34,24 +38,75 @@ export interface DshTaskProjectionNotice {
 
 export interface DshTaskRuntimeInput {
   conversationId: string;
-  novelId: string;
+  /** `null` is the explicit desktop library scope; Rust requires its library entry. */
+  novelId?: string | null;
   turnId: string;
   goal: string;
+  retrySourceRunId?: string;
   chapterId?: string;
   modelSnapshot: TaskModelSnapshot;
+  /** Native root configuration; requests cannot mint phase, child or apply authority. */
+  unifiedRuntime?: {
+    version: 1;
+    entry?: TaskDomainEntry;
+    localCommand?: {
+      kind: 'task_word_target';
+      targetWordCount: number;
+      wordRange: { target: number; minimum: number; maximum: number };
+    };
+    writingPreferences?: {
+      targetWordCount?: number;
+      wordRangePercents: {
+        hardMinimumPercent: number;
+        hardMaximumPercent: number;
+      };
+    };
+  };
+  /** Renderer-only; stripped before IPC and checked after credential loading. */
+  cancellationSignal?: AbortSignal;
   taskKind: DshTaskKind;
   expectedTool?: CandidateToolName;
   expectedArtifactType?: string;
   requiredReadTools: ContextReadToolName[];
   /**
-   * Read-intent turns request the Canonical-only tool allowlist.
-   * Structured write/audit omit this field so DSH keeps the legacy allowlist.
+   * Dialogue uses optional reads plus creative.plan_action; explicit Canonical reads
+   * and Writing SubAgent turns retain their own fixed allowlists.
    */
   allowedTools?: readonly string[];
+  /** Writing SubAgent turns: the host enforces this word range on the chapter candidate. */
+  chapterWordRange?: { target: number; minimum: number; maximum: number };
+  /** Untrusted identity, never client-verified content or adoption authorization. */
+  revisionSource?: ArtifactRevisionSource;
+  /** Previous-chapter id and full-text hash. The body is never sent. */
+  continuityClaim?: { previousChapterId: string; sourceHash: string };
+  /**
+   * Host gate for chapter candidates. `draft` withholds the artifact; `admit`
+   * re-reads that exact run and does not call the provider.
+   */
+  chapterHostGate?: {
+    phase: 'draft' | 'admit';
+    sourceRunId?: string;
+    contentHash?: string;
+    issueCodes?: string[];
+    issueSeverities?: Array<'error' | 'warning'>;
+    maxIntegrityRepairs?: number;
+    /** Previous draft in the same native budget epoch. Absence must not open a new epoch. */
+    continuesRunId?: string;
+    /** Explicit user retry. The native host opens the epoch; this is not a remaining-count. */
+    explicitRetry?: boolean;
+  };
 }
 
 /** Canonical-only tools requested by desktop read-intent DSH turns. */
 export const CANONICAL_READ_ALLOWED_TOOLS: readonly string[] = [...CANONICAL_TOOL_IDS];
+
+export const CREATIVE_DIALOGUE_ALLOWED_TOOLS: readonly string[] = [
+  'novel.read_context',
+  'chapter.read_outline',
+  'get_character_states',
+  'search_memory',
+  'creative.plan_action',
+];
 
 export type DshTaskStartContract = DshTurnContract & {
   allowedTools?: readonly string[];
@@ -62,9 +117,13 @@ export type DshTaskStartContract = DshTurnContract & {
  * Read intent requests Canonical-only tools; structured_write/audit stay on the
  * legacy DSH allowlist. chapter_write never reaches this helper.
  */
-export function buildDshTaskStartContract(goal: string, chapterId?: string): DshTaskStartContract {
-  const contract = buildDshTurnContract(goal, chapterId);
-  if (classifyTaskIntent(goal) === 'read') {
+export function buildDshTaskStartContract(
+  goal: string,
+  chapterId?: string,
+  revisionSource?: ArtifactRevisionSource,
+): DshTaskStartContract {
+  const contract = buildDshTurnContract(goal, chapterId, revisionSource);
+  if (classifyTaskIntent(goal, revisionSource) === 'read') {
     return {
       ...contract,
       allowedTools: [...CANONICAL_READ_ALLOWED_TOOLS],
@@ -78,11 +137,24 @@ export interface DshTaskRuntimeResult {
   sessionId: string;
   agentId: string;
   workerId: string;
-  runtime: 'dsh-headless-persistent';
+  runtime: 'dsh-headless-persistent' | 'ans-native-local-command';
   assistantText?: string;
   artifactId?: string;
+  /** Only a successful, scope-validated creative.plan_action tool may provide this. */
+  plannedAction?: CreativePlannedAction;
   sessionLifecycle?: 'created' | 'continued' | 'resumed';
-  modelToolAttestation: ModelToolCallingAttestation;
+  /** Historical diagnostic evidence only; actual turns do not run a model probe. */
+  modelToolAttestation?: ModelToolCallingAttestation;
+  /** Present only while a length-valid chapter draft is withheld from admission. */
+  pendingChapterCandidate?: {
+    runId: string;
+    contentHash: string;
+    text: string;
+    wordCount: number;
+    previousChapterText?: string;
+    previousChapterId?: string;
+    previousSourceHash?: string;
+  };
 }
 
 export interface DshTaskRuntimeStatus {
@@ -96,6 +168,10 @@ export interface DshTaskRuntimeStatus {
 }
 
 const active = new Set<string>();
+// Temporary transport cancellation: remove this seam once native code creates the
+// Run before hydrating its exact credentials. No automatic retries are owned here.
+// Entries are removed before dsh_start_task_turn; no Run, phase or budget is stored here.
+const pendingDispatches = new Map<string, AbortController>();
 
 export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
   if (modelSnapshot.runtimeMode !== 'api') return '';
@@ -165,6 +241,25 @@ export async function resolveDshTaskApiKeyAsync(modelSnapshot: TaskModelSnapshot
   return apiKey;
 }
 
+async function credentialForDispatch(
+  snapshot: TaskModelSnapshot,
+  signal: AbortSignal,
+): Promise<string> {
+  signal.throwIfAborted();
+  let onAbort!: () => void;
+  const stopped = new Promise<string>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    // Credential errors still reach the native Run as an empty exact key. Abort
+    // is raced separately so it cannot be mistaken for missing credentials.
+    return await Promise.race([resolveDshTaskApiKeyAsync(snapshot).catch(() => ''), stopped]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 export const dshTaskRuntimeService = {
   async start(
     input: DshTaskRuntimeInput,
@@ -175,7 +270,20 @@ export const dshTaskRuntimeService = {
     }
     active.add(input.conversationId);
     let unlisten: UnlistenFn | undefined;
+    let dispatched = false;
+    const preparation = new AbortController();
+    pendingDispatches.set(input.conversationId, preparation);
+    const onAbort = () => {
+      preparation.abort(input.cancellationSignal?.reason);
+      if (!dispatched) return;
+      // Do not synthesize a cancelled result: only the native terminal receipt
+      // decides whether cancellation or an already-committed result won the race.
+      void dshTaskRuntimeService.cancel(input.conversationId).catch(() => undefined);
+    };
+    input.cancellationSignal?.addEventListener('abort', onAbort, { once: true });
+    if (input.cancellationSignal?.aborted) onAbort();
     try {
+      preparation.signal.throwIfAborted();
       if (onProjection) {
         unlisten = await listen<DshTaskProjectionNotice>(
           DSH_TASK_PROJECTION_EVENT,
@@ -186,10 +294,18 @@ export const dshTaskRuntimeService = {
       }
       const settings = getAiSettings();
       const modelSnapshot = hydrateTaskModelSnapshotRuntime(input.modelSnapshot);
-      const apiKey = await resolveDshTaskApiKeyAsync(modelSnapshot);
+      // Missing exact credentials fail inside the native Run; never substitute a scope.
+      const apiKey = input.unifiedRuntime?.localCommand
+        ? ''
+        : await credentialForDispatch(modelSnapshot, preparation.signal);
+      preparation.signal.throwIfAborted();
+      const { cancellationSignal, ...nativeInput } = input;
+      void cancellationSignal;
+      pendingDispatches.delete(input.conversationId);
+      dispatched = true;
       return await tauriInvoke<DshTaskRuntimeResult>('dsh_start_task_turn', {
         input: {
-          ...input,
+          ...nativeInput,
           modelSnapshot,
           apiKey,
           requestPolicy: {
@@ -198,17 +314,31 @@ export const dshTaskRuntimeService = {
             dailyTokenBudget: settings.dailyTokenBudget,
             dailyCostBudgetUsd: settings.dailyCostBudgetUsd,
             warningPercent: settings.budgetWarningPercent ?? 80,
-            timeoutSeconds: settings.timeoutSeconds ?? 120,
+            timeoutSeconds: modelSnapshot.options.timeoutSeconds ?? settings.timeoutSeconds ?? 120,
           },
         },
       });
     } finally {
+      input.cancellationSignal?.removeEventListener('abort', onAbort);
+      pendingDispatches.delete(input.conversationId);
       active.delete(input.conversationId);
       unlisten?.();
     }
   },
 
   cancel(conversationId: string): Promise<DshTaskRuntimeStatus> {
+    const pending = pendingDispatches.get(conversationId);
+    if (pending) {
+      pending.abort();
+      return Promise.resolve({
+        conversationId,
+        runId: '',
+        sessionId: '',
+        workerId: '',
+        status: 'cancel_requested',
+        runtime: 'ans-task-ingress',
+      });
+    }
     return tauriInvoke<DshTaskRuntimeStatus>('dsh_cancel_task_run', { conversationId });
   },
 
@@ -221,6 +351,11 @@ export const dshTaskRuntimeService = {
 
   isRunning(conversationId: string): boolean {
     return active.has(conversationId);
+  },
+
+  /** Transport occupancy only; persisted lifecycle state still comes from listStatuses. */
+  listInFlightConversationIds(): string[] {
+    return [...active];
   },
 
   getStatus(conversationId: string): Promise<DshTaskRuntimeStatus | null> {
@@ -256,5 +391,21 @@ export const dshTaskRuntimeService = {
       modelSnapshot: probeSnapshot ?? null,
       apiKey,
     });
+  },
+
+  /**
+   * Synchronize one saved API model with the pinned Runtime.  This is a
+   * registration/initialization probe only; it does not send a user turn or
+   * manufacture a healthy model row.  The native command validates the exact
+   * route, endpoint and credential before publishing health.
+   */
+  async initializeConfiguredModel(
+    modelSnapshot: TaskModelSnapshot,
+  ): Promise<Record<string, unknown>[]> {
+    if (modelSnapshot.runtimeMode !== 'api') return [];
+    return dshTaskRuntimeService.listCurrentPlugins(
+      DSH_PLUGIN_PROBE_CONVERSATION_ID,
+      modelSnapshot,
+    );
   },
 };

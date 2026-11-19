@@ -3,9 +3,11 @@ import type {
   ConversationArtifactCard,
   ConversationTurn,
   TaskConversationBundle,
+  TaskModelSnapshot,
   TaskRun,
 } from '../../types/conversation';
 import {
+  buildCoreAssetGenerationGoal,
   chapterAssetReadinessService,
   isCoreAssetGenerationGoal,
   type ChapterAssetOrchestration,
@@ -146,6 +148,57 @@ export async function resolvePreflightAssetPreparationRetryTurn(
     throw new PreflightAssetPreparationTurnError('无法复用自动准备回合：该回合已经存在运行记录。');
   }
   return turn;
+}
+
+/** A new preparation uses the selected model; a retry belongs to its original Run. */
+export async function resolveChapterAssetPreparationModel(
+  recovery: ChapterAssetRecovery,
+  selectedModel: TaskModelSnapshot,
+  deps: RecoveryPersistenceDependencies = {},
+): Promise<TaskModelSnapshot> {
+  const { orchestration } = recovery;
+  if (orchestration.phase !== 'failed') return selectedModel;
+  const fallback = recovery.modelSnapshot ?? selectedModel;
+  if (!orchestration.preparationRunId && !orchestration.preparationTurnId) return fallback;
+  const bundle = await (deps.getConversation ?? taskConversationService.get)(
+    recovery.conversationId,
+  );
+  if (
+    !bundle ||
+    bundle.conversation.conversationId !== recovery.conversationId ||
+    bundle.conversation.novelId !== recovery.novelId
+  ) {
+    throw new Error('无法重试资产准备：原任务作用域不匹配。');
+  }
+  const runs = bundle.runs.filter((run) =>
+    orchestration.preparationRunId
+      ? run.runId === orchestration.preparationRunId
+      : run.turnId === orchestration.preparationTurnId,
+  );
+  const run = orchestration.preparationRunId
+    ? runs.length === 1
+      ? runs[0]
+      : undefined
+    : latestByCreatedAt(runs, (item) => item.createdAt);
+  const turn = bundle.turns.find(
+    (item) => item.turnId === (run?.turnId ?? orchestration.preparationTurnId),
+  );
+  if (
+    (orchestration.preparationRunId && !run) ||
+    (run && run.conversationId !== recovery.conversationId) ||
+    (run && orchestration.preparationTurnId && run.turnId !== orchestration.preparationTurnId) ||
+    !turn ||
+    turn.conversationId !== recovery.conversationId ||
+    turn.role !== 'user' ||
+    decodeWorkbenchTurnContent(turn.content).origin !== 'workbench_asset_preparation' ||
+    resolvePreparationAsset(turn) !== orchestration.asset ||
+    !orchestration.asset ||
+    decodeWorkbenchTurnContent(turn.content).content.trim() !==
+      buildCoreAssetGenerationGoal(orchestration.asset, recovery.originalGoal).trim()
+  ) {
+    throw new Error('无法重试资产准备：原运行或准备回合作用域不匹配。');
+  }
+  return run?.modelSnapshot ?? fallback; // Preflight failed before a Run.
 }
 
 export function findLatestRecoverableChapterGoal(
@@ -374,7 +427,7 @@ export function rebuildChapterAssetRecoveryFromBundle(input: {
     originalGoal: input.source.goal,
     missingAssets: input.readiness.missingAssets,
     sourceTurnId: input.source.turn.turnId,
-    modelSnapshot: input.bundle.conversation.defaultModel ?? latestPreparationRun?.modelSnapshot,
+    modelSnapshot: latestPreparationRun?.modelSnapshot ?? input.bundle.conversation.defaultModel,
     orchestration: rebuildOrchestration({
       bundle: input.bundle,
       sourceTurn: input.source.turn,

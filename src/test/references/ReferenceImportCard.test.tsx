@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const sourcePath = 'C:\\Users\\Writer\\reference.txt';
 const sourceBytes = new TextEncoder().encode('第一章 开始\n可信原始字节🙂');
 const open = vi.fn();
-const readBinaryFile = vi.fn();
+const readFile = vi.fn();
 const inspectDuplicates = vi.fn();
 const importReference = vi.fn();
 
-vi.mock('@tauri-apps/api/dialog', () => ({ open }));
-vi.mock('@tauri-apps/api/fs', () => ({ readBinaryFile }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open }));
+vi.mock('@tauri-apps/plugin-fs', () => ({ readFile }));
 vi.mock('../../services/database/db', () => ({
   generateId: () => 'operation-fallback',
   isTauri: () => true,
@@ -27,7 +27,7 @@ const { default: ReferenceImportCard } =
 describe('ReferenceImportCard desktop source-byte trust boundary', () => {
   beforeEach(() => {
     open.mockReset().mockResolvedValue(sourcePath);
-    readBinaryFile.mockReset().mockResolvedValue(sourceBytes);
+    readFile.mockReset().mockResolvedValue(sourceBytes);
     inspectDuplicates.mockReset().mockResolvedValue({
       novelId: 'novel-1',
       sourceHash: '',
@@ -59,7 +59,7 @@ describe('ReferenceImportCard desktop source-byte trust boundary', () => {
     expect(open).toHaveBeenCalledWith(
       expect.objectContaining({ multiple: false, directory: false }),
     );
-    expect(readBinaryFile).toHaveBeenCalledWith(sourcePath);
+    expect(readFile).toHaveBeenCalledWith(sourcePath);
     fireEvent.click(screen.getByRole('button', { name: '确认导入' }));
 
     await waitFor(() => expect(importReference).toHaveBeenCalledTimes(1));

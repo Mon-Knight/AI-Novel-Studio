@@ -1,6 +1,8 @@
 import { useLayoutEffect } from 'react';
 import { Plus } from 'lucide-react';
 import '../../styles/workbench.css';
+import '../../styles/workbench-zcode.css';
+import '../../styles/workbench-refinement.css';
 
 function markOnce(name: string): void {
   if (performance.getEntriesByName(name).length === 0) performance.mark(name);

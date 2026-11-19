@@ -45,6 +45,7 @@ pub struct DshLaunchConfig {
     /// Optional host-owned validation profile for an automatic candidate turn.
     /// This is process-scoped so the model cannot weaken the policy in tool args.
     pub candidate_policy: Option<String>,
+    pub task_budget_url: Option<String>,
 }
 
 /// Spawns the DSH runtime process for one launch config.
@@ -156,6 +157,7 @@ impl DshRuntimeLauncher for NodeDshRuntime {
             .env_remove("ANS_TASK_NOVEL_ID")
             .env_remove("ANS_TASK_CHAPTER_ID")
             .env_remove("ANS_CANDIDATE_POLICY")
+            .env_remove("ANS_TASK_BUDGET_URL")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -171,6 +173,7 @@ impl DshRuntimeLauncher for NodeDshRuntime {
         if let Some(candidate_policy) = &config.candidate_policy {
             command.env("ANS_CANDIDATE_POLICY", candidate_policy);
         }
+        if let Some(url)=&config.task_budget_url {command.env("ANS_TASK_BUDGET_URL",url);}
         command.spawn()
     }
 }

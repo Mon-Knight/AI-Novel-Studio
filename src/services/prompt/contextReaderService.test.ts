@@ -9,7 +9,11 @@ import { chapterSummaryService } from '../context/chapterSummaryService';
 import { contextRecordService } from '../context/contextRecordService';
 import { chapterRepository } from '../database/chapterRepository';
 import { volumeRepository } from '../database/volumeRepository';
-import { buildContextPromptSection, getContextForChapterTask } from './contextReaderService';
+import {
+  buildContextPromptSection,
+  getContextForChapterTask,
+  getContextForVolumeTask,
+} from './contextReaderService';
 
 const NOVEL_ID = 'novel-timeline';
 const CREATED_AT = '2026-08-28T00:00:00.000Z';
@@ -127,6 +131,49 @@ async function withReaderData(
     contextRecordService.getByNovelId = originalGetRecords;
   }
 }
+
+test('known blocking persisted summaries are excluded immediately while manual records remain available', async () => {
+  const previous = chapter({ id: 'previous', volumeId: 'volume', chapterNumber: 1, orderIndex: 0 });
+  const current = chapter({ id: 'current', volumeId: 'volume', chapterNumber: 2, orderIndex: 1 });
+  const unsafe = {
+    ...summary(previous.id, '不应注入的错误角色总结'),
+    validationStatus: 'passed' as const,
+    validationResult: {
+      passed: false,
+      safeToContext: true,
+      score: 76,
+      problems: [{ type: 'character_error' as const, message: '角色不在正文' }],
+    },
+  };
+  await withReaderData(
+    {
+      chapters: [previous, current],
+      volumes: [volume('volume', 0)],
+      summaries: { previous: unsafe },
+      records: [contextRecord('manual', '作者独立确认的手动事实', previous.id)],
+      summaryReads: [],
+    },
+    async () => {
+      const chapterResult = await getContextForChapterTask({
+        novelId: NOVEL_ID,
+        chapterId: current.id,
+        taskType: 'chapter_generate',
+      });
+      assert.equal(chapterResult.chapterSummaries.length, 0);
+      assert.doesNotMatch(buildContextPromptSection(chapterResult), /不应注入的错误角色总结/);
+      assert.match(buildContextPromptSection(chapterResult), /作者独立确认的手动事实/);
+      assert.ok(chapterResult.warnings.some((warning) => warning.includes('阻断性错误')));
+      const volumeResult = await getContextForVolumeTask({
+        novelId: NOVEL_ID,
+        volumeId: 'volume',
+        taskType: 'volume_summary',
+      });
+      assert.equal(volumeResult.chapterSummaries.length, 0);
+      assert.doesNotMatch(buildContextPromptSection(volumeResult), /不应注入的错误角色总结/);
+      assert.equal(unsafe.enabled, true);
+    },
+  );
+});
 
 test('chapter context injects only prior persisted summaries across a volume boundary', async () => {
   const oldest = chapter({

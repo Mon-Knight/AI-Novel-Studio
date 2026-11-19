@@ -1,0 +1,44 @@
+.editor-source-review,
+.source-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.editor-source-review {
+  margin: 8px 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.source-review-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.source-review-columns > div {
+  min-width: 0;
+}
+.source-review-excerpts pre,
+.source-review-asset pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.7;
+}
+.source-review-excerpts pre {
+  max-height: 260px;
+  overflow: auto;
+}
+.source-review-assets {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.source-review-asset {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 12px;
+}
+.source-review-heading {
+  margin-bottom: 8px;
+}

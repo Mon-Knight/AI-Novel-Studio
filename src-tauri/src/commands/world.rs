@@ -6,8 +6,31 @@ use crate::domain::world::{
     UpdateCharacterInput, WorldSettingDto,
 };
 use crate::services::{chapter_event_service, character_asset_service, world_setting_service};
+use rusqlite::TransactionBehavior;
 
 // ==================== World Setting ====================
+
+#[tauri::command]
+pub fn preview_world_rule_change(
+    novel_id: String,
+    changes: Vec<crate::services::world_rule_governance::RuleChange>,
+) -> Result<crate::services::world_rule_governance::RuleChangePreview, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    // The rule-set snapshot, dependency evidence and affected-chapter projections must come
+    // from one read version. The governance helper keeps taking &Connection and never nests
+    // a transaction, so the Deferred reader stays the only scope here.
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(|e| e.to_string())?;
+    let preview = crate::services::world_rule_governance::preview_rule_change(
+        &transaction,
+        &novel_id,
+        &changes,
+    )
+    .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(preview)
+}
 
 #[tauri::command]
 pub fn get_world_settings(novel_id: String) -> Result<Vec<WorldSettingDto>, String> {
@@ -42,9 +65,12 @@ pub fn save_rule_system(
 }
 
 #[tauri::command]
-pub fn delete_rule_system(id: String) -> Result<(), String> {
+pub fn delete_rule_system(
+    id: String,
+    input: Option<crate::domain::world::DeleteRuleSystemInput>,
+) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    world_setting_service::delete_rule_system(&conn, &id)
+    world_setting_service::delete_rule_system(&conn, &id, input)
 }
 
 // ==================== Protagonist ====================
@@ -111,6 +137,14 @@ pub fn create_character(input: CreateCharacterInput) -> Result<CharacterDto, Str
 pub fn update_character(id: String, input: UpdateCharacterInput) -> Result<CharacterDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     character_asset_service::update_character(&conn, &id, input)
+}
+
+#[tauri::command]
+pub fn save_character_profile(
+    input: crate::domain::world::SaveCharacterProfileInput,
+) -> Result<CharacterDto, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    crate::services::character_profile_service::save_character_profile(&mut conn, input)
 }
 
 #[tauri::command]

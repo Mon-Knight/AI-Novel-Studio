@@ -51,23 +51,31 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_CHANNEL: ${{ needs.release-context.outputs.channel }}
+      VERIFIED_SHA: ${{ needs.desktop-gate.outputs.verified_sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Select stable Rust
+      - name: Select pinned Rust
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          $toolchain = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          if (-not $toolchain) { throw 'Unable to read the pinned Rust toolchain.' }
+          rustup toolchain install $toolchain --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default $toolchain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: npm ci
       - run: npm run test:version-sync
-      - run: npm run lint:ci
-      - run: npm run test:all
-      - run: npm run build
-      - run: npm run test:bundle-size
+      - name: Require evidence for the exact release commit
+        shell: pwsh
+        run: |
+          $actualSha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $env:VERIFIED_SHA -or $actualSha -ne $env:VERIFIED_SHA) {
+            throw 'The successful full desktop gate does not verify this release commit.'
+          }
 
       - name: Checkout pinned DSH runtime source
         uses: actions/checkout@v4
@@ -91,19 +99,16 @@ jobs:
       - name: Build current novel-domain gateway
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
 
-      - name: Run Rust tests
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
-
       - name: Prepare signed updater configuration
         shell: pwsh
         env:
           TAURI_PUBLIC_KEY: ${{ secrets.TAURI_PUBLIC_KEY }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAURI_PUBLIC_KEY)) {
             throw 'Missing repository secret TAURI_PUBLIC_KEY.'
           }
-          if ([string]::IsNullOrWhiteSpace($env:TAURI_PRIVATE_KEY)) {
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
             throw 'Missing repository secret TAURI_PRIVATE_KEY.'
           }
 
@@ -112,14 +117,13 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match package version v$version."
           }
 
-          $stableEndpoint = 'https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-stable/latest.json'
+          $channelEndpoint = "https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-$env:RELEASE_CHANNEL/latest.json"
           $releaseConfig = @{
-            tauri = @{
+            plugins = @{
               updater = @{
-                active = $true
-                dialog = $false
-                endpoints = @($stableEndpoint)
+                endpoints = @($channelEndpoint)
                 pubkey = $env:TAURI_PUBLIC_KEY
+                requireSignedVersion = $true
                 windows = @{
                   installMode = 'passive'
                   installerArgs = @()
@@ -134,28 +138,31 @@ jobs:
       - name: Build installers and signed updater archives
         shell: pwsh
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-        # Tauri 1's Windows bundler supports MSI plus the signed updater archive.
+          # Tauri 2 reads the TAURI_SIGNING_* variables. Repository secrets keep
+          # their historical names so existing environments do not need to be renamed.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        # MSI remains the signed updater source so existing installs keep a
+        # stable update URL. NSIS adds the user-facing *-setup.exe installer.
         run: npm run tauri:build:release -- --config "$env:TAURI_RELEASE_CONFIG"
 
-      - name: Verify signed Windows artifacts
+      - name: Enforce signed build bundle budgets
+        run: npm run test:bundle-size
+
+      - name: Verify Tauri 2 v1Compatible artifacts and signatures
         shell: pwsh
         run: |
-          $bundleRoot = 'src-tauri/target/release/bundle'
-          $msi = @(Get-ChildItem $bundleRoot -Recurse -File | Where-Object { $_.Extension -eq '.msi' })
-          $updaters = @(Get-ChildItem $bundleRoot -Recurse -File | Where-Object { $_.Name -match '\.msi\.zip$' })
-          if ($msi.Count -eq 0) { throw 'No MSI installer was produced.' }
-          if ($updaters.Count -eq 0) { throw 'No Tauri updater archive was produced.' }
-          foreach ($updater in $updaters) {
-            $signature = "$($updater.FullName).sig"
-            if (-not (Test-Path -LiteralPath $signature)) {
-              throw "Missing updater signature for $($updater.Name)."
-            }
-            if ((Get-Item -LiteralPath $signature).Length -eq 0) {
-              throw "Updater signature is empty for $($updater.Name)."
-            }
-          }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $json = node scripts/release/select-release-artifacts.mjs `
+            --bundle-root 'src-tauri/target/release/bundle' `
+            --config 'src-tauri/tauri.conf.json' `
+            --version $version | Out-String
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri 2 v1Compatible artifact selection failed.' }
+          $selection = $json | ConvertFrom-Json
+          $selection | ConvertTo-Json -Depth 6
+          "RELEASE_UPDATER_PATH=$($selection.updater.path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_UPDATER_SIGNATURE_PATH=$($selection.updater.signaturePath)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_INSTALLER_PATH=$($selection.installer.path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build Tauri channel and rollback manifests
         shell: pwsh
@@ -163,19 +170,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $bundleRoot = 'src-tauri/target/release/bundle'
-          $updaterBundle = Get-ChildItem $bundleRoot -Recurse -File |
-            Where-Object { $_.Name -match '\.msi\.zip$' } |
-            Sort-Object FullName |
-            Select-Object -First 1
-          if (-not $updaterBundle) { throw 'No updater bundle is available for the manifest.' }
-          $signature = "$($updaterBundle.FullName).sig"
-
-          $installer = Get-ChildItem $bundleRoot -Recurse -File |
-            Where-Object { $_.Extension -eq '.msi' } |
-            Sort-Object FullName |
-            Select-Object -First 1
-          if (-not $installer) { throw 'No matching rollback installer was produced.' }
+          $updaterBundle = $env:RELEASE_UPDATER_PATH
+          $signature = $env:RELEASE_UPDATER_SIGNATURE_PATH
+          $installer = $env:RELEASE_INSTALLER_PATH
+          foreach ($value in @($updaterBundle, $signature, $installer)) {
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw 'Verified release artifact paths are missing.'
+            }
+          }
 
           $previousJson = node scripts/release/publish-channel.mjs --previous
           if ($LASTEXITCODE -ne 0) { throw 'Failed to verify the current channel and rollback target.' }
@@ -185,9 +187,9 @@ jobs:
             'scripts/release/build-release-manifest.mjs',
             '--version', $version,
             '--channel', $env:RELEASE_CHANNEL,
-            '--artifact', $updaterBundle.FullName,
+            '--artifact', $updaterBundle,
             '--signature', $signature,
-            '--installer', $installer.FullName
+            '--installer', $installer
           )
           $notesFile = "dist-release/release-notes-v$version.md"
           node scripts/release/extract-release-notes.mjs --version $version --output $notesFile

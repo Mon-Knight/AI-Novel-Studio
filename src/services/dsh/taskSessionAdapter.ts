@@ -7,25 +7,33 @@ import {
 import type { TaskModelSnapshot, TaskRun } from '../../types/conversation';
 import {
   buildDshTaskStartContract,
+  CREATIVE_DIALOGUE_ALLOWED_TOOLS,
   dshTaskRuntimeService,
   type DshTaskProjectionNotice,
+  type DshTaskRuntimeInput,
 } from './taskRuntimeService';
 import { captureTaskModelSnapshot } from '../conversation/taskModelSnapshot';
 import { taskConversationService } from '../conversation/taskConversationService';
+import { verifyArtifactRevisionSource } from '../conversation/artifactRevisionSourceService';
+import { observeTurnRunProjection } from '../conversation/turnRunProjection';
 import {
   assertTaskGoalExecutable,
-  classifyTaskIntent,
   isConversationalGoal,
+  buildCreativeWorkflowContract,
+  type CreativePlannedAction,
 } from '../conversation/taskGoalRouting';
+import {
+  getChapterWordRangePercents,
+  resolveChapterWordRange,
+} from '../conversation/chapterWordRangePolicy';
+import { isTaskWordTargetSetting, parseTaskWordTarget } from '../conversation/taskWordTarget';
+import { restoreDshRetry } from './taskRetryRecovery';
+import { planWritingSubAgentTurn, toDshTaskStartContract } from '../agents/writingSubAgentContract';
 
 export const WORKBENCH_CONVERSATIONAL_REPLY =
-  '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
+  '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。可直接说“本任务目标字数设为3200字”设置后续每章目标，或说“生成下一章，目标3200字”仅覆盖本次。问候、能力询问与单独设置字数不会调用生成工具。';
 
-/**
- * Stable ANS boundary for the pinned DSH headless carrier. Cordis/DSH objects
- * never cross this adapter; the workbench only sees task/session identifiers
- * and the event projection owned by ANS.
- */
+/** Stable ANS boundary; the pinned carrier is not upgraded by lifecycle convergence. */
 export const DSH_SOURCE_COMMIT = '47f943859bef60e4160492346772ded9b24f765a';
 export const DSH_REFERENCE_COMMIT = '141eb6fef83422698aef7a981029e843e8161534';
 
@@ -38,15 +46,47 @@ export interface TaskSession {
   createdAt: string;
 }
 
+// Session identity projection only. Native code owns active state, phases and children.
 const sessions = new Map<string, TaskSession>();
 
-export function isActiveDshTaskRuntimeStatus(status: string): boolean {
+/** All desktop models enter the same model-led host. This is not a Provider router. */
+export function isModelLedCreativeTurn(
+  input: Pick<
+    TaskRuntimeInput,
+    'goal' | 'modelSnapshot' | 'revisionSource' | 'workflowAction' | 'retryExecution'
+  >,
+): boolean {
   return (
-    status === 'attesting' ||
-    status === 'queued' ||
-    status === 'running' ||
-    status === 'cancel_requested'
+    isTauri() &&
+    !input.revisionSource &&
+    !input.workflowAction &&
+    (!input.retryExecution || input.retryExecution.taskKind === 'creative_dialogue') &&
+    !isTaskWordTargetSetting(input.goal)
   );
+}
+
+export function creativeWorkflowGoal(action: CreativePlannedAction): string {
+  const directives: Record<CreativePlannedAction['action'], string> = {
+    prepare_settings: '生成世界与规则设定候选',
+    prepare_characters: '生成主角候选',
+    generate_outline: action.chapterId ? '生成本章大纲候选' : '生成全书规划候选',
+    generate_chapter: '生成本章正文',
+    polish_chapter: '润色本章正文',
+    summarize_chapter: '总结本章',
+    check_quality: '检查本章质量',
+    suggest_events: '生成本章事件候选',
+  };
+  if (
+    !Object.prototype.hasOwnProperty.call(directives, action.action) ||
+    !action.instruction?.trim()
+  ) {
+    throw new Error('创作工具请求缺少有效动作或说明。');
+  }
+  return `${directives[action.action]}\n${action.instruction}`;
+}
+
+export function isActiveDshTaskRuntimeStatus(status: string): boolean {
+  return ['attesting', 'queued', 'running', 'cancel_requested'].includes(status);
 }
 
 export function captureLocalConversationalSnapshot(): TaskModelSnapshot {
@@ -66,26 +106,29 @@ export function captureLocalConversationalSnapshot(): TaskModelSnapshot {
   };
 }
 
-async function completeConversationalTurn(
+/** Restricted browser development response; desktop local commands remain native executions. */
+async function completeBrowserConversationalTurn(
   input: TaskRuntimeInput,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
-  const modelSnapshot = captureLocalConversationalSnapshot();
+  const target = parseTaskWordTarget(input.goal);
+  const wordRange = target && resolveChapterWordRange(target.target, getChapterWordRangePercents());
+  const reply =
+    target?.settingOnly && wordRange
+      ? `已将本任务每章目标字数设为 ${target.target} 字（当前候选硬区间 ${wordRange.hardMinimum}～${wordRange.hardMaximum} 字）。仅对本任务后续写章生效，未修改章节卡片、未调用模型、未生成或采用正文。接下来可发送“生成下一章”；仅本次覆盖可发送“生成下一章，目标3200字”。`
+      : WORKBENCH_CONVERSATIONAL_REPLY;
   const run = await taskConversationService.createRun(
     input.conversationId,
     input.turnId,
-    modelSnapshot,
+    captureLocalConversationalSnapshot(),
     `worker-ans-local-${input.conversationId}`,
     input.chapterId,
   );
-  const startedAt = new Date().toISOString();
-  let currentRun = await taskConversationService.updateRun(run.runId, 'running', { startedAt });
+  let currentRun = await taskConversationService.updateRun(run.runId, 'running', {
+    startedAt: new Date().toISOString(),
+  });
   onEvent?.({ run: currentRun });
-  await taskConversationService.appendTurn(
-    input.conversationId,
-    'assistant',
-    WORKBENCH_CONVERSATIONAL_REPLY,
-  );
+  await taskConversationService.appendTurn(input.conversationId, 'assistant', reply);
   currentRun = await taskConversationService.updateRun(run.runId, 'completed', {
     finishedAt: new Date().toISOString(),
   });
@@ -96,17 +139,96 @@ async function completeConversationalTurn(
 function sessionFor(input: TaskRuntimeInput): TaskSession {
   const existing = sessions.get(input.conversationId);
   if (existing) return existing;
-  const createdAt = new Date().toISOString();
   const session: TaskSession = {
     sessionId: `session-${input.conversationId}`,
     conversationId: input.conversationId,
     agentId: `agent-${input.conversationId}`,
     workerId: `worker-${input.conversationId}`,
     runtime: isTauri() ? 'dsh-headless-persistent' : 'ans-provider-fallback',
-    createdAt,
+    createdAt: new Date().toISOString(),
   };
   sessions.set(input.conversationId, session);
   return session;
+}
+
+/**
+ * One desktop request, including master planning, child writing and candidate admission.
+ * Renderer callbacks, Provider mode and applied plans cannot select another lifecycle.
+ * Native code revalidates the persisted user turn, model, scope and phase at dispatch.
+ */
+export function buildDesktopTaskRuntimeInput(input: TaskRuntimeInput): DshTaskRuntimeInput {
+  const novelId = input.novelId;
+  const wordRangePercents = getChapterWordRangePercents();
+  const parsedTarget = parseTaskWordTarget(input.goal);
+  const wordRange = parsedTarget && resolveChapterWordRange(parsedTarget.target, wordRangePercents);
+  const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
+  const writing =
+    input.workflowAction === 'generate_chapter' ||
+    input.workflowAction === 'polish_chapter' ||
+    input.revisionSource?.artifactType === 'chapter_text';
+  const writingContract =
+    writing && input.chapterId && novelId
+      ? toDshTaskStartContract(
+          planWritingSubAgentTurn({
+            novelId,
+            chapterId: input.chapterId,
+            goal: input.goal,
+            mode:
+              input.workflowAction === 'generate_chapter' && !input.revisionSource
+                ? 'generate'
+                : 'polish',
+            modelSnapshot,
+            targetWordCount: parsedTarget?.target,
+            wordRangePercents,
+            ...(input.revisionSource ? { revisionSource: input.revisionSource } : {}),
+          }),
+        )
+      : undefined;
+  const explicitContract =
+    input.retryExecution ??
+    writingContract ??
+    (input.workflowAction
+      ? buildCreativeWorkflowContract(input.workflowAction, input.chapterId)
+      : input.revisionSource
+        ? buildDshTaskStartContract(input.goal, input.chapterId, input.revisionSource)
+        : undefined);
+  return {
+    conversationId: input.conversationId,
+    ...(novelId ? { novelId } : {}),
+    turnId: input.turnId,
+    chapterId: input.chapterId,
+    goal: input.goal,
+    modelSnapshot,
+    cancellationSignal: input.cancellationSignal,
+    ...(input.retrySourceRunId ? { retrySourceRunId: input.retrySourceRunId } : {}),
+    ...(input.revisionSource ? { revisionSource: input.revisionSource } : {}),
+    ...(explicitContract ?? {
+      taskKind: 'creative_dialogue' as const,
+      requiredReadTools: [],
+      allowedTools: CREATIVE_DIALOGUE_ALLOWED_TOOLS,
+    }),
+    unifiedRuntime: {
+      version: 1,
+      ...(input.domainEntry ? { entry: input.domainEntry } : {}),
+      writingPreferences: {
+        ...(parsedTarget ? { targetWordCount: parsedTarget.target } : {}),
+        wordRangePercents,
+      },
+      ...(parsedTarget?.settingOnly && wordRange
+        ? {
+            localCommand: {
+              kind: 'task_word_target' as const,
+              targetWordCount: parsedTarget.target,
+              wordRange: {
+                target: wordRange.target,
+                minimum: wordRange.hardMinimum,
+                maximum: wordRange.hardMaximum,
+              },
+            },
+          }
+        : {}),
+    },
+  };
 }
 
 export const taskSessionAdapter = {
@@ -125,91 +247,85 @@ export const taskSessionAdapter = {
     return sessionFor(input);
   },
 
-  startTurn(
+  async startTurn(
     input: TaskRuntimeInput,
     onEvent?: (event: TaskRuntimeEvent) => void,
   ): Promise<TaskRun> {
-    try {
-      assertTaskGoalExecutable(input.goal);
-    } catch (error) {
-      return Promise.reject(error);
-    }
-    if (isConversationalGoal(input.goal)) {
-      return completeConversationalTurn(input, onEvent);
-    }
-    const session = sessionFor(input);
-    const intent = classifyTaskIntent(input.goal);
-    // Chapter write goes through the ANS writer, not the DSH candidate sink.
-    if (!isTauri() || intent === 'chapter_write') {
-      return taskRuntimeAdapter.start({ ...input, workerId: session.workerId }, onEvent);
-    }
+    input.cancellationSignal?.throwIfAborted();
     if (isTauri()) {
-      const contract = buildDshTaskStartContract(input.goal, input.chapterId);
-      return dshTaskRuntimeService
-        .start(
-          {
-            ...input,
-            ...contract,
-            modelSnapshot: input.modelSnapshot ?? captureTaskModelSnapshot(),
-          },
-          (notice) => {
-            void taskConversationService
-              .get(input.conversationId, { hydrateArtifacts: false })
-              .then((bundle) => {
-                const run = bundle?.runs.find((item) => item.runId === notice.runId);
-                if (run) onEvent?.({ run });
-              });
-          },
-        )
-        .then((result) => {
-          onEvent?.({ run: result.run });
-          return result.run;
-        });
+      if (input.retrySourceRunId) input = await restoreDshRetry(input);
+      if (input.revisionSource) {
+        if (!input.novelId) throw new Error('DSH_NOVEL_SCOPE_REQUIRED: 章节修订必须绑定明确作品。');
+        await verifyArtifactRevisionSource({ ...input, novelId: input.novelId });
+        assertTaskGoalExecutable(input.goal, input.revisionSource);
+      }
+      input.cancellationSignal?.throwIfAborted();
+      const result = await dshTaskRuntimeService.start(
+        buildDesktopTaskRuntimeInput(input),
+        (notice) =>
+          observeTurnRunProjection(input.conversationId, input.turnId, notice.runId, onEvent),
+      );
+      if (result.plannedAction || result.pendingChapterCandidate) {
+        throw new Error(
+          'DSH_UNIFIED_RUNTIME_INCOMPLETE: 原生任务尚未完成阶段交接或候选准入，渲染进程不会另起工作流。',
+        );
+      }
+      if (result.run.conversationId !== input.conversationId) {
+        throw new Error('DSH_TASK_SCOPE_MISMATCH: 原生运行回执不属于当前任务。');
+      }
+      onEvent?.({ run: result.run });
+      return result.run;
     }
-    return taskRuntimeAdapter.start({ ...input, workerId: session.workerId }, onEvent);
+    // Browser compatibility is deliberately not desktop-equivalent verification.
+    if (input.revisionSource) {
+      if (!input.novelId)
+        throw new Error('DSH_NOVEL_SCOPE_REQUIRED: 浏览器章节修订必须绑定明确作品。');
+      await verifyArtifactRevisionSource({ ...input, novelId: input.novelId });
+    }
+    assertTaskGoalExecutable(input.goal, input.revisionSource);
+    if (isConversationalGoal(input.goal)) return completeBrowserConversationalTurn(input, onEvent);
+    return taskRuntimeAdapter.start({ ...input, workerId: sessionFor(input).workerId }, onEvent);
   },
 
   async cancel(conversationId: string): Promise<boolean> {
-    if (taskRuntimeAdapter.isRunning(conversationId)) {
-      return taskRuntimeAdapter.cancel(conversationId);
-    }
     if (isTauri()) {
-      // A WebView reload clears the renderer-local active Set while the Rust
-      // worker remains alive. Always ask the process-authoritative runtime.
       const status = await dshTaskRuntimeService.cancel(conversationId);
-      return status.status === 'cancel_requested';
+      // Acceptance can halt a parked task's future stages while keeping its
+      // completed Run and committed receipts unchanged. Idle alone is not proof.
+      return (
+        status.status === 'cancel_requested' ||
+        (status.status === 'idle' && status.error?.startsWith('DSH_TASK_CANCELLED:') === true)
+      );
     }
-    return false;
+    return taskRuntimeAdapter.cancel(conversationId);
   },
 
   subscribeToRuntimeProjections(
     onProjection: (notice: DshTaskProjectionNotice) => void,
   ): Promise<() => void> {
-    if (!isTauri()) return Promise.resolve(() => undefined);
-    return dshTaskRuntimeService.subscribe(onProjection);
+    return isTauri()
+      ? dshTaskRuntimeService.subscribe(onProjection)
+      : Promise.resolve(() => undefined);
   },
 
   async isRunningAuthoritatively(conversationId: string): Promise<boolean> {
-    if (taskRuntimeAdapter.isRunning(conversationId)) return true;
-    if (!isTauri()) return false;
+    if (!isTauri()) return taskRuntimeAdapter.isRunning(conversationId);
+    if (dshTaskRuntimeService.isRunning(conversationId)) return true;
     const status = await dshTaskRuntimeService.getStatus(conversationId);
     return Boolean(status && isActiveDshTaskRuntimeStatus(status.status));
   },
 
   isRunning(conversationId: string): boolean {
-    return (
-      taskRuntimeAdapter.isRunning(conversationId) ||
-      (isTauri() && dshTaskRuntimeService.isRunning(conversationId))
-    );
+    return isTauri()
+      ? dshTaskRuntimeService.isRunning(conversationId)
+      : taskRuntimeAdapter.isRunning(conversationId);
   },
 
   async listRunningConversationIds(): Promise<string[]> {
-    const ids = new Set(taskRuntimeAdapter.listRunningConversationIds());
-    if (isTauri()) {
-      const statuses = await dshTaskRuntimeService.listStatuses();
-      statuses
-        .filter((item) => isActiveDshTaskRuntimeStatus(item.status))
-        .forEach((item) => ids.add(item.conversationId));
+    if (!isTauri()) return taskRuntimeAdapter.listRunningConversationIds();
+    const ids = new Set(dshTaskRuntimeService.listInFlightConversationIds());
+    for (const status of await dshTaskRuntimeService.listStatuses()) {
+      if (isActiveDshTaskRuntimeStatus(status.status)) ids.add(status.conversationId);
     }
     return [...ids];
   },

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
-import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
+import { aiSettingsService } from '../../../services/ai/aiClient';
 import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { showToast } from '../../../utils/toast';
@@ -230,7 +230,6 @@ function AiGeneratePanel({
 
           setStage('正在组装修正提示词……');
           setPercent(25);
-          const client = createAiClient(settings);
           const response = await reviseChapterByOutline(
             {
               originalDraft: latest.content,
@@ -241,7 +240,7 @@ function AiGeneratePanel({
               requiredCharacters: ctx.requiredCharacters,
               targetWordCount: ctx.targetWordCount || wordCountDraft,
             },
-            client,
+            settings,
             {
               signal,
               cancel: () => cancelLoadingOperation(operationId),

@@ -4,6 +4,12 @@
  */
 import { dbCall, lsGet, lsSet, isTauri, generateId, nowISO } from '../database/db';
 import type { Character, CreateCharacterInput } from '../../types/character';
+import {
+  characterProfileValues,
+  hasProtagonistBinding,
+  requireCharacterProfileBaseline,
+  type SaveCharacterProfileInput,
+} from './characterProfile';
 
 const KEY = 'ai_novel_studio_characters';
 
@@ -59,6 +65,8 @@ interface LocalProtagonistRecord {
 
 interface LocalNovelRecord {
   id?: string;
+  deletedAt?: string;
+  deleted_at?: string;
   mainCharacter?: string;
   main_character?: string;
   protagonistAbility?: string;
@@ -88,7 +96,7 @@ function mapToCharacter(dto: CharacterDto): Character {
     id: dto.id,
     novelId: readRequiredDtoString(dto.novelId, dto.novel_id, 'novelId'),
     name: dto.name,
-    roleType: dto.roleType ?? dto.role_type,
+    roleType: dto.roleType || dto.role_type || undefined,
     identity: dto.identity,
     faction: dto.faction,
     relationToProtagonist: dto.relationToProtagonist ?? dto.relation_to_protagonist,
@@ -293,6 +301,46 @@ export const characterService = {
     list[idx] = { ...list[idx], ...input, updatedAt: nowISO() };
     saveAllLocal(list);
     return list[idx];
+  },
+
+  /** Explicit profile editing preserves identity, provenance, chapter links and state. */
+  async saveProfile(input: SaveCharacterProfileInput): Promise<Character> {
+    if (!input.name.trim()) throw new Error('角色名称不能为空。');
+    if (!['', 'protagonist', 'supporting', 'antagonist', 'neutral'].includes(input.roleType))
+      throw new Error('角色类型无效。');
+    if (isTauri()) {
+      const saved = mapToCharacter(await dbCall<CharacterDto>('save_character_profile', { input }));
+      if (
+        saved.id !== input.characterId ||
+        saved.novelId !== input.novelId ||
+        saved.source !== input.expectedSource ||
+        !saved.isActive
+      )
+        throw new Error('人物保存结果范围不匹配，请刷新核对正式版本。');
+      return saved;
+    }
+    const novels = lsGet<LocalNovelRecord[]>('ai_novel_studio_novels') ?? [];
+    if (
+      !novels.some((novel) => novel.id === input.novelId && !novel.deletedAt && !novel.deleted_at)
+    )
+      throw new Error('CHARACTER_PROFILE_CONFLICT: 作品已删除或不可读取。');
+    const list = getAllLocal();
+    const index = list.findIndex((item) => item.id === input.characterId);
+    const current = list[index];
+    requireCharacterProfileBaseline(current, input);
+    if (hasProtagonistBinding(current) && input.roleType !== 'protagonist')
+      throw new Error('CHARACTER_PROFILE_BOUND_ROLE: 已绑定主角设定的角色须保持主角类型。');
+    const updated = {
+      ...current,
+      ...characterProfileValues(input),
+      name: input.name.trim(),
+      roleType: input.roleType || undefined,
+      isProtagonist: input.roleType === 'protagonist',
+      updatedAt: nowISO(),
+    };
+    list[index] = updated;
+    saveAllLocal(list);
+    return updated;
   },
 
   async remove(id: string): Promise<void> {

@@ -77,6 +77,10 @@ export const config = {
           'react-dom/client',
           'react/jsx-dev-runtime',
           'react/jsx-runtime',
+          // React Router's dev server-runtime imports named exports from these
+          // CommonJS packages; prebundle them so Chromium sees ESM exports.
+          'cookie',
+          'set-cookie-parser',
         ],
       },
       server: {
@@ -103,8 +107,16 @@ async function waitForVite(): Promise<void> {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(baseUrl, { redirect: 'manual' });
-      if (response.ok) return;
-      lastError = new Error(`Vite returned HTTP ${response.status}.`);
+      if (response.ok) {
+        // Warm Vite's dependency graph before WebDriver opens the page. A cold
+        // runner can otherwise race dependency optimization and leave the
+        // startup splash visible for the first browser spec.
+        const entry = await fetch(`${baseUrl}/src/main.tsx?browser-e2e-prewarm=1`, {
+          cache: 'no-store',
+        });
+        if (entry.ok) return;
+        lastError = new Error(`Vite entry returned HTTP ${entry.status}.`);
+      } else lastError = new Error(`Vite returned HTTP ${response.status}.`);
     } catch (error) {
       lastError = error;
     }

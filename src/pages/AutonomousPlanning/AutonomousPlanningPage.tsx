@@ -1,4 +1,3 @@
-import { appLogger } from '../../services/observability/appLogger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
@@ -73,27 +72,8 @@ function AutonomousPlanningPage() {
         draftVersionService.getAdoptedByChapterId(chapterId).catch(() => null),
       markAdopted: (draft) => autonomousPostChapterService.markAdopted(draft),
     });
-    if (reconciliation.draftsRequiringAnalysis.length > 0 && !analysisAbortRef.current) {
-      const controller = new AbortController();
-      analysisAbortRef.current = controller;
-      void (async () => {
-        for (const adopted of reconciliation.draftsRequiringAnalysis) {
-          await runAutonomousPostChapterAnalysis(
-            reconciliation.plan.planId,
-            adopted,
-            controller.signal,
-          );
-        }
-      })()
-        .catch((reason) => {
-          if (!controller.signal.aborted && !isAiRequestCancelled(reason)) {
-            appLogger.warn('[AutonomousCreation] 恢复章节分析失败', reason);
-          }
-        })
-        .finally(() => {
-          if (analysisAbortRef.current === controller) analysisAbortRef.current = null;
-        });
-    }
+    // Reload only reconciles committed adoption facts. Unknown or interrupted
+    // analysis requires an explicit user action or the still-owning native root.
     return reconciliation.plan;
   }, []);
 
@@ -349,7 +329,10 @@ function AutonomousPlanningPage() {
 
   const stopChapterAnalysis = () => {
     analysisAbortRef.current?.abort();
-    if (activePlan) cancelAutonomousPostChapterAnalysis(activePlan.planId);
+    if (activePlan)
+      void cancelAutonomousPostChapterAnalysis(activePlan.planId).catch((reason) =>
+        setError(errorText(reason)),
+      );
   };
 
   const confirmChapterAnalysis = async (run: AutonomousChapterRun) => {

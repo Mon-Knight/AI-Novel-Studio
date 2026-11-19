@@ -445,7 +445,7 @@ pub struct CreateAiTaskInput {
     pub request_hash: Option<String>,
     pub trace_id: Option<String>,
     pub task_type: String,
-    pub novel_id: String,
+    pub novel_id: Option<String>,
     pub chapter_id: Option<String>,
     pub draft_id: Option<String>,
     pub scope_type: String,
@@ -748,7 +748,7 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
                 return Err(compilation_error("设定补充包含未授权 Context source type"));
             }
             if source_type == "novel"
-                && source_id == input.novel_id
+                && Some(source_id) == input.novel_id.as_deref()
                 && matches!(status, "included" | "truncated")
             {
                 has_novel = true;
@@ -1055,7 +1055,7 @@ fn validate_create_input(
             false,
         ));
     }
-    if !is_supported_scope(&input.scope_type) {
+    if input.scope_type != "library" && !is_supported_scope(&input.scope_type) {
         return Err(AppError::new(
             codes::AI_TASK_INPUT_INVALID,
             "AI Task scopeType 无效",
@@ -1072,9 +1072,22 @@ fn validate_create_input(
             false,
         ));
     }
-    if input.scope_type == "system" {
+    if input.scope_type == "library" {
+        if !dsh_projection_validated
+            || input.novel_id.is_some()
+            || input.chapter_id.is_some()
+            || input.draft_id.is_some()
+            || input.task_type != "style_analyze"
+            || input.expected_artifact_type != "style_analysis"
+            || input.input_snapshot.source_draft_id.is_some()
+            || input.input_snapshot.source_draft_version.is_some()
+            || input.input_snapshot.base_content_hash.is_some()
+        {
+            return Err(compilation_error("library scope 仅允许原生受控风格候选"));
+        }
+    } else if input.scope_type == "system" {
         if input.task_type != "connection_test"
-            || input.novel_id != "system"
+            || input.novel_id.as_deref() != Some("system")
             || input.chapter_id.is_some()
             || input.draft_id.is_some()
         {
@@ -1085,7 +1098,14 @@ fn validate_create_input(
             ));
         }
     } else {
-        ai_fact_security::validate_identifier(&input.novel_id, "novelId", 160)?;
+        ai_fact_security::validate_identifier(
+            input
+                .novel_id
+                .as_deref()
+                .ok_or_else(|| compilation_error("作品任务必须声明 novelId"))?,
+            "novelId",
+            160,
+        )?;
     }
     match input.scope_type.as_str() {
         "system" | "novel" if input.chapter_id.is_some() || input.draft_id.is_some() => {
@@ -1169,127 +1189,9 @@ fn validate_create_input(
     Ok(())
 }
 
-fn validate_dsh_projection_input(
-    input: &CreateAiTaskInput,
-    run_id: &str,
-    turn_id: &str,
-    conversation_id: &str,
-) -> Result<(), AppError> {
-    let expected_pair = match input.task_type.as_str() {
-        "chapter_generate" => "chapter_text",
-        "outline_generate" => "outline",
-        "character_generate" => "character_candidates",
-        "event_suggest" => "event_candidates",
-        "setting_expand" => "setting_candidates",
-        "quality_check" => "quality_report",
-        "chapter_summary" => "chapter_summary",
-        _ => return Err(compilation_error("DSH 投影包含未授权 Task 类型")),
-    };
-    if input.expected_artifact_type != expected_pair || input.expected_artifact_schema_version != 1
-    {
-        return Err(compilation_error("DSH 投影的 Task/Artifact 契约不匹配"));
-    }
-    if run_id.trim().is_empty()
-        || turn_id.trim().is_empty()
-        || conversation_id.trim().is_empty()
-        || input.operation_id != format!("workbench-{run_id}")
-    {
-        return Err(compilation_error(
-            "DSH 投影 operation/run/turn/conversation 身份无效",
-        ));
-    }
-
-    let target_hint = input
-        .target_hint_json
-        .as_ref()
-        .and_then(Value::as_object)
-        .ok_or_else(|| compilation_error("DSH 投影缺少 target hint"))?;
-    if target_hint.get("runId").and_then(Value::as_str) != Some(run_id)
-        || target_hint.get("turnId").and_then(Value::as_str) != Some(turn_id)
-        || target_hint.get("conversationId").and_then(Value::as_str) != Some(conversation_id)
-    {
-        return Err(compilation_error("DSH 投影 target hint 身份不匹配"));
-    }
-
-    let input_snapshot = &input.input_snapshot;
-    if input_snapshot.schema_version != 1
-        || input_snapshot.input_type != "workbench_dsh_messages_v1"
-        || input_snapshot
-            .payload_json
-            .get("conversationId")
-            .and_then(Value::as_str)
-            != Some(conversation_id)
-        || input_snapshot
-            .payload_json
-            .get("goal")
-            .and_then(Value::as_str)
-            .map_or(true, |goal| goal.trim().is_empty())
-    {
-        return Err(compilation_error("DSH 投影 Input Snapshot 身份无效"));
-    }
-
-    let context = &input.context_snapshot;
-    let manifest = context
-        .source_manifest_json
-        .as_object()
-        .ok_or_else(|| compilation_error("DSH 投影 Context manifest 必须是对象"))?;
-    let sources = manifest
-        .get("sources")
-        .and_then(Value::as_array)
-        .ok_or_else(|| compilation_error("DSH 投影 Context sources 必须是数组"))?;
-    let compiled_hash = manifest
-        .get("compiledContextHash")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if context.schema_version != 1
-        || context.compiler_version != "workbench_dsh_context_evidence_v1"
-        || manifest.get("contractVersion").and_then(Value::as_str)
-            != Some("workbench_dsh_context_evidence_v1")
-        || manifest.get("compilerVersion").and_then(Value::as_str)
-            != Some("workbench_dsh_context_evidence_v1")
-        || !valid_sha256(compiled_hash)
-        || large_text_repository::sha256(&context.compiled_context) != compiled_hash
-    {
-        return Err(compilation_error(
-            "DSH 投影 Context evidence 身份或 hash 无效",
-        ));
-    }
-    let budget = context
-        .budget_json
-        .as_object()
-        .ok_or_else(|| compilation_error("DSH 投影 Context budget 必须是对象"))?;
-    if budget.get("compiledContextChars").and_then(Value::as_i64)
-        != Some(context.compiled_context.chars().count() as i64)
-        || budget.get("compiledContextBytes").and_then(Value::as_i64)
-            != Some(context.compiled_context.len() as i64)
-        || budget.get("includedSourceCount").and_then(Value::as_i64) != Some(sources.len() as i64)
-        || budget.get("truncatedSourceCount").and_then(Value::as_i64) != Some(0)
-        || budget.get("omittedSourceCount").and_then(Value::as_i64) != Some(0)
-    {
-        return Err(compilation_error(
-            "DSH 投影 Context budget 与 evidence 不一致",
-        ));
-    }
-
-    let constraint = &input.constraint_snapshot;
-    if constraint.schema_version != 1
-        || constraint.prompt_template_id != format!("workbench/{}", input.expected_artifact_type)
-        || constraint.prompt_template_version != "1"
-        || constraint
-            .payload_json
-            .get("candidateOnly")
-            .and_then(Value::as_bool)
-            != Some(true)
-        || constraint
-            .payload_json
-            .get("mayWriteBusinessData")
-            .and_then(Value::as_bool)
-            != Some(false)
-    {
-        return Err(compilation_error("DSH 投影 Constraint 身份或候选边界无效"));
-    }
-    Ok(())
-}
+#[path = "ai_task_dsh_projection.rs"]
+mod dsh_projection;
+use dsh_projection::validate_dsh_projection_input;
 
 fn read_draft_content(
     connection: &Connection,
@@ -1325,6 +1227,9 @@ fn read_draft_content(
 }
 
 fn validate_target(connection: &Connection, input: &CreateAiTaskInput) -> Result<(), AppError> {
+    if input.scope_type == "library" {
+        return crate::services::library_task_service::validate_ai_task_scope(connection, input);
+    }
     if input.scope_type == "system" {
         return Ok(());
     }
@@ -1347,7 +1252,10 @@ fn validate_target(connection: &Connection, input: &CreateAiTaskInput) -> Result
     } else {
         draft_repository::validate_target(
             connection,
-            &input.novel_id,
+            input
+                .novel_id
+                .as_deref()
+                .ok_or_else(|| compilation_error("章节目标缺少 novelId"))?,
             input
                 .chapter_id
                 .as_deref()
@@ -1371,7 +1279,7 @@ fn validate_target(connection: &Connection, input: &CreateAiTaskInput) -> Result
     let draft_id = input.draft_id.as_deref().expect("validated draft target");
     let draft = draft_repository::find_draft(connection, draft_id)?
         .ok_or_else(|| AppError::new(codes::TARGET_DRAFT_NOT_FOUND, "目标草稿不存在", false))?;
-    if draft.novel_id != input.novel_id
+    if Some(draft.novel_id.as_str()) != input.novel_id.as_deref()
         || Some(draft.chapter_id.as_str()) != input.chapter_id.as_deref()
         || input.input_snapshot.source_draft_id.as_deref() != Some(draft_id)
         || input.input_snapshot.source_draft_version != Some(draft.version_no)
@@ -1447,175 +1355,26 @@ pub(crate) fn create_dsh_projected_task(
     turn_id: &str,
     conversation_id: &str,
 ) -> Result<ai_task_repository::AiTaskRecord, AppError> {
-    merge_authoritative_book_word_goal(connection, &mut input, conversation_id)?;
+    if input.scope_type != "library" {
+        merge_authoritative_book_word_goal(connection, &mut input, conversation_id)?;
+    }
     validate_dsh_projection_input(&input, run_id, turn_id, conversation_id)?;
+    if input.task_type == "domain_candidate" {
+        crate::services::dsh::task_runtime::validate_domain_projection(
+            connection,
+            &input,
+            run_id,
+            turn_id,
+            conversation_id,
+        )?;
+    }
     validate_create_input(&input, true)?;
     create_task_after_validation(connection, input)
 }
 
-fn create_task_after_validation(
-    connection: &mut Connection,
-    input: CreateAiTaskInput,
-) -> Result<ai_task_repository::AiTaskRecord, AppError> {
-    let body_hash = large_text_repository::sha256(&input.input_snapshot.body);
-    let compiled_hash = large_text_repository::sha256(&input.context_snapshot.compiled_context);
-    let actual_template_hash =
-        large_text_repository::sha256(&input.constraint_snapshot.prompt_template_body);
-    if input.constraint_snapshot.prompt_template_hash != actual_template_hash {
-        return Err(AppError::new(
-            codes::DOCUMENT_HASH_MISMATCH,
-            "Prompt 模板正文与声明 hash 不一致",
-            false,
-        ));
-    }
-    let input_hash = input_snapshot_hash(&input.input_snapshot, &body_hash)?;
-    let context_hash = context_snapshot_hash(&input.context_snapshot, &compiled_hash)?;
-    let constraint_hash =
-        constraint_snapshot_hash(&input.constraint_snapshot, &actual_template_hash)?;
-    let calculated_request_hash =
-        request_hash(&input, &input_hash, &context_hash, &constraint_hash)?;
-    if input
-        .request_hash
-        .as_deref()
-        .is_some_and(|provided| provided != calculated_request_hash)
-    {
-        return Err(AppError::new(
-            codes::OPERATION_PAYLOAD_CONFLICT,
-            "requestHash 与服务器规范化请求不一致",
-            false,
-        ));
-    }
-
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(AppError::database)?;
-    if let Some(existing) =
-        ai_task_repository::find_task_by_operation(&transaction, &input.operation_id)?
-    {
-        if existing.request_hash_version != REQUEST_HASH_VERSION
-            || existing.request_hash != calculated_request_hash
-        {
-            return Err(AppError::new(
-                codes::OPERATION_PAYLOAD_CONFLICT,
-                "同一 operationId 对应不同 AI Task 请求",
-                false,
-            ));
-        }
-        commit_transaction(transaction, Some(&existing.operation_id))?;
-        get_task_detail(connection, &existing.task_id)?;
-        return Ok(existing);
-    }
-    validate_target(&transaction, &input)?;
-
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let input_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let context_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let constraint_snapshot_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = input
-        .trace_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(&task_id)
-        .to_string();
-    ai_fact_security::validate_identifier(&trace_id, "traceId", 128)?;
-    let now = Utc::now().to_rfc3339();
-    let (body_ref_id, inserted_body_hash) = insert_snapshot_document(
-        &transaction,
-        &input_snapshot_id,
-        "input_body",
-        &input.input_snapshot.body,
-        &now,
-    )?;
-    let (compiled_context_ref_id, inserted_compiled_hash) = insert_snapshot_document(
-        &transaction,
-        &context_snapshot_id,
-        "compiled_context",
-        &input.context_snapshot.compiled_context,
-        &now,
-    )?;
-    let (prompt_template_ref_id, inserted_template_hash) = insert_snapshot_document(
-        &transaction,
-        &constraint_snapshot_id,
-        "prompt_template",
-        &input.constraint_snapshot.prompt_template_body,
-        &now,
-    )?;
-    debug_assert_eq!(body_hash, inserted_body_hash);
-    debug_assert_eq!(compiled_hash, inserted_compiled_hash);
-    debug_assert_eq!(actual_template_hash, inserted_template_hash);
-
-    let target_hint_json = input
-        .target_hint_json
-        .as_ref()
-        .map(canonical_json)
-        .transpose()?;
-    ai_task_repository::insert_task(
-        &transaction,
-        &ai_task_repository::NewTask {
-            task_id: &task_id,
-            task_type: &input.task_type,
-            novel_id: &input.novel_id,
-            chapter_id: input.chapter_id.as_deref(),
-            draft_id: input.draft_id.as_deref(),
-            scope_type: &input.scope_type,
-            input_snapshot_id: &input_snapshot_id,
-            context_snapshot_id: &context_snapshot_id,
-            constraint_snapshot_id: &constraint_snapshot_id,
-            trace_id: &trace_id,
-            operation_id: &input.operation_id,
-            request_hash_version: REQUEST_HASH_VERSION,
-            request_hash: &calculated_request_hash,
-            expected_artifact_type: &input.expected_artifact_type,
-            expected_artifact_schema_version: input.expected_artifact_schema_version,
-            target_hint_json: target_hint_json.as_deref(),
-            now: &now,
-        },
-    )?;
-    ai_task_repository::insert_input_snapshot(
-        &transaction,
-        &input_snapshot_id,
-        &task_id,
-        input.input_snapshot.schema_version,
-        &input.input_snapshot.input_type,
-        &canonical_json(&input.input_snapshot.payload_json)?,
-        &body_ref_id,
-        input.input_snapshot.source_draft_id.as_deref(),
-        input.input_snapshot.source_draft_version,
-        input.input_snapshot.base_content_hash.as_deref(),
-        &input_hash,
-        &now,
-    )?;
-    ai_task_repository::insert_context_snapshot(
-        &transaction,
-        &context_snapshot_id,
-        &task_id,
-        input.context_snapshot.schema_version,
-        &canonical_json(&input.context_snapshot.source_manifest_json)?,
-        &compiled_context_ref_id,
-        &canonical_json(&input.context_snapshot.budget_json)?,
-        &input.context_snapshot.compiler_version,
-        &context_hash,
-        &now,
-    )?;
-    ai_task_repository::insert_constraint_snapshot(
-        &transaction,
-        &constraint_snapshot_id,
-        &task_id,
-        input.constraint_snapshot.schema_version,
-        &canonical_json(&input.constraint_snapshot.payload_json)?,
-        &input.constraint_snapshot.prompt_template_id,
-        &input.constraint_snapshot.prompt_template_version,
-        &actual_template_hash,
-        &prompt_template_ref_id,
-        &canonical_json(&input.constraint_snapshot.provider_options_json)?,
-        &constraint_hash,
-        &now,
-    )?;
-    let created = ai_task_repository::find_task(&transaction, &task_id)?
-        .ok_or_else(|| AppError::new(codes::AI_TASK_NOT_FOUND, "AI Task 创建失败", false))?;
-    commit_transaction(transaction, Some(&created.operation_id))?;
-    Ok(created)
-}
+#[path = "ai_task_creation.rs"]
+mod creation;
+use creation::create_task_after_validation;
 
 pub fn queue_attempt(
     connection: &mut Connection,
@@ -2236,7 +1995,7 @@ pub(crate) mod tests {
             request_hash: None,
             trace_id: Some(format!("trace-{operation_id}")),
             task_type: "connection_test".to_string(),
-            novel_id: "system".to_string(),
+            novel_id: Some("system".to_string()),
             chapter_id: None,
             draft_id: None,
             scope_type: "system".to_string(),
@@ -2386,7 +2145,7 @@ pub(crate) mod tests {
 
         let mut input = system_task_input(operation_id, "setting_candidates");
         input.task_type = "setting_expand".to_string();
-        input.novel_id = novel_id.to_string();
+        input.novel_id = Some(novel_id.to_string());
         input.scope_type = "novel".to_string();
         input.input_snapshot = InputSnapshotInput {
             schema_version: 2,
@@ -2549,7 +2308,7 @@ pub(crate) mod tests {
         let mut input = system_task_input(operation_id, "outline");
         input.operation_id = operation_id.to_string();
         input.task_type = "outline_generate".to_string();
-        input.novel_id = "book-goal-novel".to_string();
+        input.novel_id = Some("book-goal-novel".to_string());
         input.scope_type = "novel".to_string();
         input.target_hint_json = Some(serde_json::json!({
             "conversationId": conversation_id,
@@ -2600,6 +2359,8 @@ pub(crate) mod tests {
         };
         input
     }
+
+    include!("ai_task_rule_snapshot_tests.rs");
 
     #[test]
     fn book_word_goal_parser_accepts_supported_sparse_chinese_expressions() {
@@ -2689,6 +2450,19 @@ pub(crate) mod tests {
             large_text_repository::sha256(&expected_input.context_snapshot.compiled_context);
         let expected_template_hash =
             large_text_repository::sha256(&expected_input.constraint_snapshot.prompt_template_body);
+        // Creation freezes the native rule snapshot into the target hint before hashing, so the
+        // expected identity must include the same trusted snapshot instead of a client-shaped hint.
+        {
+            let hint = expected_input
+                .target_hint_json
+                .get_or_insert_with(|| serde_json::json!({}));
+            hint["nativeRuleSet"] =
+                serde_json::to_value(crate::services::world_rule_governance::rule_set_snapshot(
+                    &connection,
+                    expected_input.novel_id.as_deref().expect("novel test fixture"),
+                )?)
+                .map_err(|error| AppError::new("REQUEST_HASH_INVALID", error.to_string(), false))?;
+        }
         let expected_request_hash = request_hash(
             &expected_input,
             &input_snapshot_hash(&expected_input.input_snapshot, &expected_body_hash)?,
@@ -3110,7 +2884,7 @@ pub(crate) mod tests {
         )?;
         let mut input = system_task_input("operation-draft", "chapter_text");
         input.task_type = "chapter_rewrite".to_string();
-        input.novel_id = "novel-a".to_string();
+        input.novel_id = Some("novel-a".to_string());
         input.chapter_id = Some("chapter-a".to_string());
         input.draft_id = Some("draft-a".to_string());
         input.scope_type = "draft".to_string();

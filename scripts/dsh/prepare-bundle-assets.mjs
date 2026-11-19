@@ -1,16 +1,22 @@
 // Builds the read-only gateway, creates a relocatable pinned DSH carrier and
 // verifies a real unpack before Tauri release packaging starts.
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
+  readSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -83,8 +89,77 @@ function capture(command, args, options = {}) {
   return result.stdout.trim();
 }
 
+function sha256(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function isZip(file) {
+  const fd = openSync(file, 'r');
+  try {
+    const header = Buffer.alloc(4);
+    return readSync(fd, header, 0, 4, 0) === 4 && header.equals(Buffer.from([0x50, 0x4b, 3, 4]));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function writeGatewayHash(root) {
+  const matrixPath = path.join(root, 'VERSION_MATRIX.json');
+  const matrix = JSON.parse(readFileSync(matrixPath, 'utf8'));
+  matrix.gatewaySha256 = sha256(gateway);
+  writeFileSync(matrixPath, JSON.stringify(matrix, null, 2) + '\n');
+}
+
+function stageBundleResources(gatewaySha256) {
+  cpSync(
+    path.join(root, 'scripts', 'dsh', 'unpack-payload.mjs'),
+    path.join(binDir, 'unpack-payload.mjs'),
+    { force: true },
+  );
+  writeFileSync(path.join(binDir, 'gateway-sha256.txt'), gatewaySha256 + '\n');
+  rmSync(verifyDir, { recursive: true, force: true });
+  console.log('[dsh-assets] verifying staged unpacker and relocation');
+  run('node', [path.join(binDir, 'unpack-payload.mjs'), zip, verifyDir], { cwd: root });
+  // Keep this independently unpacked, verified carrier for isolated desktop
+  // gates. The assembly staging tree may be absent or old in ZIP-reuse mode.
+}
+
+function refreshLegacyCarrier() {
+  const refreshRoot = path.join(staging, `.legacy-refresh-${process.pid}`);
+  const refreshedZip = `${zip}.fresh-${process.pid}.zip`;
+  rmSync(refreshRoot, { recursive: true, force: true });
+  rmSync(refreshedZip, { force: true });
+  mkdirSync(refreshRoot, { recursive: true });
+  try {
+    run(resolveTar(), ['-xf', path.resolve(zip), '-C', refreshRoot], { cwd: srcTauri });
+    const extractedPayload = path.join(refreshRoot, 'dsh-runtime');
+    const matrixPath = path.join(extractedPayload, 'VERSION_MATRIX.json');
+    const matrix = JSON.parse(readFileSync(matrixPath, 'utf8'));
+    if (matrix.sourceCommit !== pinnedCommit) {
+      throw new Error('reusable DSH carrier source commit does not match the pinned source');
+    }
+    const currentGatewaySha256 = sha256(gateway);
+    if (matrix.gatewaySha256?.toLowerCase() !== currentGatewaySha256 || !isZip(zip)) {
+      mkdirSync(path.join(extractedPayload, 'gateway'), { recursive: true });
+      cpSync(gateway, path.join(extractedPayload, 'gateway', 'novel-domain-gateway.exe'), {
+        force: true,
+      });
+      matrix.gatewaySha256 = currentGatewaySha256;
+      writeFileSync(matrixPath, JSON.stringify(matrix, null, 2) + '\n');
+      run(resolveTar(), ['-a', '-c', '-f', refreshedZip, '-C', refreshRoot, 'dsh-runtime'], {
+        cwd: srcTauri,
+      });
+      renameSync(refreshedZip, zip);
+      console.log('[dsh-assets] refreshed legacy carrier Gateway and VERSION_MATRIX');
+    }
+  } finally {
+    rmSync(refreshRoot, { recursive: true, force: true });
+    rmSync(refreshedZip, { force: true });
+  }
+}
+
 console.log('[dsh-assets] building read-only gateway');
-run('cargo', ['build', '--release', '-p', 'novel-domain-gateway'], { cwd: srcTauri });
+run('cargo', ['build', '--locked', '--release', '-p', 'novel-domain-gateway'], { cwd: srcTauri });
 if (!existsSync(gateway) || statSync(gateway).size === 0) {
   throw new Error('gateway binary missing after release build: ' + gateway);
 }
@@ -92,11 +167,15 @@ if (!existsSync(gateway) || statSync(gateway).size === 0) {
 const zip = path.join(binDir, 'dsh-runtime.zip');
 if (!checkout || !existsSync(path.join(checkout, 'pnpm-lock.yaml'))) {
   if (existsSync(zip) && statSync(zip).size > 1_000_000) {
-    const gatewaySha256 = verifyReusableCarrier({
-      zip,
-      currentGateway: gateway,
-      pinnedCommit,
-    });
+    let gatewaySha256;
+    try {
+      gatewaySha256 = verifyReusableCarrier({ zip, currentGateway: gateway, pinnedCommit });
+      if (!isZip(zip)) refreshLegacyCarrier();
+    } catch {
+      refreshLegacyCarrier();
+      gatewaySha256 = verifyReusableCarrier({ zip, currentGateway: gateway, pinnedCommit });
+    }
+    stageBundleResources(gatewaySha256);
     console.log('[dsh-assets] using verified pinned DSH carrier zip; gateway=' + gatewaySha256);
     process.exit(0);
   }
@@ -132,6 +211,7 @@ for (const required of ['VERSION_MATRIX.json', 'JUNCTIONS.json']) {
     throw new Error('runtime carrier is missing ' + required);
   }
 }
+writeGatewayHash(payload);
 
 mkdirSync(binDir, { recursive: true });
 rmSync(zip, { force: true });
@@ -152,16 +232,5 @@ const gatewaySha256 = verifyReusableCarrier({
   pinnedCommit,
 });
 console.log('[dsh-assets] verified carrier Gateway SHA-256: ' + gatewaySha256);
-cpSync(
-  path.join(root, 'scripts', 'dsh', 'unpack-payload.mjs'),
-  path.join(binDir, 'unpack-payload.mjs'),
-  { force: true },
-);
-
-rmSync(verifyDir, { recursive: true, force: true });
-console.log('[dsh-assets] verifying relocation and extraction');
-run('node', [path.join(root, 'scripts', 'dsh', 'unpack-payload.mjs'), zip, verifyDir], {
-  cwd: root,
-});
-rmSync(verifyDir, { recursive: true, force: true });
+stageBundleResources(gatewaySha256);
 console.log('[dsh-assets] release resources ready: ' + binDir);

@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
+mod startup_recovery;
+
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -133,25 +135,7 @@ pub fn init_database() {
     create_tables(&mut connection).expect("Failed to create tables");
     record_e2e_startup_timing("database", "schema", phase_started_at, total_started_at);
 
-    phase_started_at = Instant::now();
-    crate::services::agent_plan_service::recover_interrupted_plans(&mut connection)
-        .expect("Failed to recover interrupted Agent Plans");
-    record_e2e_startup_timing(
-        "database",
-        "agent_plan_recovery",
-        phase_started_at,
-        total_started_at,
-    );
-
-    phase_started_at = Instant::now();
-    crate::services::autonomous_scheduler_service::recover_interrupted_runs(&mut connection)
-        .expect("Failed to recover interrupted autonomous book runs");
-    record_e2e_startup_timing(
-        "database",
-        "autonomous_recovery",
-        phase_started_at,
-        total_started_at,
-    );
+    startup_recovery::recover_interrupted_work(&mut connection, total_started_at);
 
     phase_started_at = Instant::now();
     DB.set(Mutex::new(connection))

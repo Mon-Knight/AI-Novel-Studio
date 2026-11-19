@@ -74,7 +74,7 @@ test('targets the current settings model only while creating a task', () => {
   );
 });
 
-test('requires an exact provider and model match', () => {
+test('normalizes provider aliases but still requires an exact model match', () => {
   const plugins = [plugin({ id: 'model:deepseek-official:deepseek-chat', name: 'DeepSeek Chat' })];
 
   assert.equal(
@@ -84,13 +84,12 @@ test('requires an exact provider and model match', () => {
     }).pluginId,
     'model:deepseek-official:deepseek-chat',
   );
-  assert.throws(
-    () =>
-      assertWorkbenchModelAvailable(plugins, {
-        providerId: 'deepseek',
-        modelId: 'deepseek-chat',
-      }),
-    WorkbenchModelUnavailableError,
+  assert.equal(
+    assertWorkbenchModelAvailable(plugins, {
+      providerId: 'deepseek',
+      modelId: 'deepseek-chat',
+    }).pluginId,
+    'model:deepseek-official:deepseek-chat',
   );
   assert.throws(
     () =>
@@ -139,7 +138,7 @@ test('allows Mock only through the explicit loaded browser fallback projection',
   );
 });
 
-test('fails closed while the directory refreshes, fails, or misses the selection', () => {
+test('directory state does not block sending a configured model or silently replace it', () => {
   const plugins = [plugin({ id: 'model:openai:gpt-5', name: 'GPT-5' })];
   const selectedModel = { providerId: 'openai', modelId: 'gpt-5' };
 
@@ -150,11 +149,11 @@ test('fails closed while the directory refreshes, fails, or misses the selection
       refreshing: true,
     }),
     {
-      status: 'refreshing',
+      status: 'initializing',
       options: listAvailableWorkbenchModels(plugins),
       selectedOption: listAvailableWorkbenchModels(plugins)[0],
-      canSend: false,
-      message: '正在刷新 Runtime 模型目录；可以继续编辑，完成后即可发送依赖模型的创作任务。',
+      canSend: true,
+      message: '正在刷新模型列表',
     },
   );
 
@@ -164,16 +163,20 @@ test('fails closed while the directory refreshes, fails, or misses the selection
     refreshing: false,
     refreshError: 'catalog failed',
   });
-  assert.equal(failed.canSend, false);
+  assert.equal(failed.canSend, true);
+  assert.equal(failed.status, 'error');
   assert.match(failed.message, /刷新失败/);
+  assert.match(failed.message, /catalog failed/);
 
   const missing = getWorkbenchModelAvailability({
     plugins,
     selectedModel: { providerId: 'openai', modelId: 'gpt-4' },
     refreshing: false,
   });
-  assert.equal(missing.canSend, false);
-  assert.match(missing.message, /未进入/);
+  assert.equal(missing.canSend, true);
+  assert.equal(missing.status, 'not_registered');
+  assert.match(missing.message, /直接发送/);
+  assert.match(missing.message, /尚未注册/);
 
   const lockedMissing = getWorkbenchModelAvailability({
     plugins,
@@ -181,10 +184,8 @@ test('fails closed while the directory refreshes, fails, or misses the selection
     refreshing: false,
     selectionLocked: true,
   });
-  assert.equal(lockedMissing.canSend, false);
-  assert.match(lockedMissing.message, /当前任务固定模型 openai_compatible:legacy-model/);
-  assert.match(lockedMissing.message, /新建任务/);
-  assert.doesNotMatch(lockedMissing.message, /请选择已加载模型/);
+  assert.equal(lockedMissing.canSend, true);
+  assert.match(lockedMissing.message, /直接发送/);
 
   const localFallback = getWorkbenchModelAvailability({
     plugins: [
@@ -201,8 +202,7 @@ test('fails closed while the directory refreshes, fails, or misses the selection
   });
   assert.equal(localFallback.canSend, true);
   assert.equal(localFallback.selectedOption, undefined);
-  assert.equal(localFallback.fallbackOption?.key, 'deepseek-official:deepseek-chat');
-  assert.match(localFallback.message, /本地模型当前不可用/);
+  assert.equal(localFallback.fallbackOption, undefined);
 
   const localCredentialFallback = getWorkbenchModelAvailability({
     plugins: [
@@ -216,8 +216,8 @@ test('fails closed while the directory refreshes, fails, or misses the selection
   });
   assert.equal(localCredentialFallback.canSend, true);
   assert.equal(localCredentialFallback.selectedOption?.key, 'local_llama_cpp:qwen-local');
-  assert.equal(localCredentialFallback.fallbackOption?.key, 'deepseek-official:deepseek-chat');
-  assert.match(localCredentialFallback.message, /本地模型的匹配凭据不可用/);
+  assert.equal(localCredentialFallback.fallbackOption, undefined);
+  assert.match(localCredentialFallback.message, /匹配凭据/);
 
   const fixedTaskModel = getWorkbenchModelAvailability({
     plugins: localFallback.options.map((option) =>
@@ -226,9 +226,9 @@ test('fails closed while the directory refreshes, fails, or misses the selection
     selectedModel: { providerId: 'local_llama_cpp', modelId: 'qwen-local' },
     refreshing: false,
   });
-  assert.equal(fixedTaskModel.canSend, false);
+  assert.equal(fixedTaskModel.canSend, true);
   assert.equal(fixedTaskModel.fallbackOption, undefined);
-  assert.match(fixedTaskModel.message, /未进入/);
+  assert.match(fixedTaskModel.message, /直接发送/);
 
   const available = getWorkbenchModelAvailability({
     plugins,
@@ -236,7 +236,7 @@ test('fails closed while the directory refreshes, fails, or misses the selection
     refreshing: false,
   });
   assert.equal(available.canSend, true);
-  assert.equal(available.status, 'available');
+  assert.equal(available.status, 'ready');
 });
 
 test('surfaces the sanitized runtime probe reason when the model directory is empty', () => {
@@ -258,11 +258,11 @@ test('surfaces the sanitized runtime probe reason when the model directory is em
     refreshing: false,
   });
 
-  assert.equal(unavailable.canSend, false);
+  assert.equal(unavailable.canSend, true);
   assert.match(unavailable.message, /AssignProcessToJobObject failed/);
 });
 
-test('marks a matching remote model unavailable when its session credential is gone', () => {
+test('missing exact credentials remain advisory until the submitted run reports the error', () => {
   const selectedModel = {
     providerId: 'openai_compatible',
     modelId: 'gpt-5.6-luna',
@@ -280,10 +280,10 @@ test('marks a matching remote model unavailable when its session credential is g
     selectionLocked: true,
   });
   assert.equal(locked.status, 'unavailable');
-  assert.equal(locked.canSend, false);
+  assert.equal(locked.canSend, true);
   assert.equal(locked.selectedOption?.key, 'openai_compatible:gpt-5.6-luna');
-  assert.match(locked.message, /匹配凭据不可用/);
-  assert.match(locked.message, /新建任务/);
+  assert.match(locked.message, /匹配凭据/);
+  assert.match(locked.message, /对话/);
 
   const unlocked = getWorkbenchModelAvailability({
     plugins: availableDirectory,
@@ -292,7 +292,7 @@ test('marks a matching remote model unavailable when its session credential is g
     credentialAvailable: false,
   });
   assert.equal(unlocked.status, 'unavailable');
-  assert.equal(unlocked.canSend, false);
+  assert.equal(unlocked.canSend, true);
   assert.doesNotMatch(unlocked.message, /新建任务/);
 });
 
@@ -317,7 +317,7 @@ test('preserves credential recovery when the probe returns no usable model rows'
   });
 
   assert.equal(unavailable.status, 'unavailable');
-  assert.equal(unavailable.canSend, false);
-  assert.match(unavailable.message, /匹配凭据不可用/);
+  assert.equal(unavailable.canSend, true);
+  assert.match(unavailable.message, /匹配凭据/);
   assert.match(unavailable.message, /相同 Provider、Endpoint 与模型重新填写/);
 });

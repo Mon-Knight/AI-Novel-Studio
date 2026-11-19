@@ -10,6 +10,7 @@ mod db;
 mod domain;
 mod errors;
 mod large_text_save;
+mod legacy_local_storage;
 mod migrations;
 mod outline_commands;
 mod project_backup;
@@ -18,6 +19,8 @@ mod runtime;
 mod services;
 mod session_credentials;
 mod system_accent;
+mod startup_paths;
+use startup_paths::get_app_data_dir;
 mod window_state;
 
 use tauri::Manager;
@@ -32,6 +35,14 @@ macro_rules! generate_app_handler {
             runtime::get_e2e_large_text_draft_state,
             runtime::corrupt_e2e_large_text_chunk,
             runtime::get_e2e_agent_closed_loop_state,
+            legacy_local_storage::seed_e2e_legacy_local_storage,
+            legacy_local_storage::take_e2e_legacy_storage_seed_request,
+            legacy_local_storage::finish_e2e_legacy_storage_seed,
+            legacy_local_storage::get_e2e_legacy_storage_seed_state,
+            legacy_local_storage::probe_e2e_legacy_local_storage,
+            legacy_local_storage::take_e2e_legacy_storage_probe_request,
+            legacy_local_storage::finish_e2e_legacy_storage_probe,
+            legacy_local_storage::get_e2e_legacy_storage_probe_entries,
         ]
     };
 }
@@ -41,30 +52,6 @@ macro_rules! generate_app_handler {
     ($($command:path),* $(,)?) => {
         tauri::generate_handler![$($command),*]
     };
-}
-
-/// Native Feel P1: 获取应用数据目录
-fn get_app_data_dir() -> std::path::PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let dir = std::path::PathBuf::from(appdata).join("com.ainovelstudio.app");
-            let _ = std::fs::create_dir_all(&dir);
-            return dir;
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            let dir = std::path::PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("com.ainovelstudio.app");
-            let _ = std::fs::create_dir_all(&dir);
-            return dir;
-        }
-    }
-    std::path::PathBuf::from(".")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -98,52 +85,8 @@ where
 }
 
 #[cfg(test)]
-mod startup_tests {
-    use super::{run_instance_guarded_startup, InstanceStartup};
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    #[test]
-    fn secondary_instance_requests_focus_without_initializing_database() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                false
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Secondary);
-        assert_eq!(events.into_inner(), ["instance-check", "focus-request"]);
-    }
-
-    #[test]
-    fn primary_instance_initializes_database_after_acquiring_lock() {
-        let events = RefCell::new(Vec::new());
-        let app_data_dir = PathBuf::from("test-app-data");
-
-        let result = run_instance_guarded_startup(
-            &app_data_dir,
-            |_| {
-                events.borrow_mut().push("instance-check");
-                true
-            },
-            |_| events.borrow_mut().push("focus-request"),
-            || events.borrow_mut().push("database-initialization"),
-        );
-
-        assert_eq!(result, InstanceStartup::Primary);
-        assert_eq!(
-            events.into_inner(),
-            ["instance-check", "database-initialization"]
-        );
-    }
-}
+#[path = "main_startup_tests.rs"]
+mod startup_tests;
 
 fn main() {
     let startup_at = std::time::Instant::now();
@@ -222,10 +165,25 @@ fn main() {
     let saved_state = window_state::load_window_state(&app_data_dir);
     let state_for_close = app_data_dir.clone();
     let focus_watch_dir = app_data_dir.clone();
+    let legacy_storage_migration =
+        legacy_local_storage::LegacyStorageMigrationState::new(app_data_dir.clone());
+    let legacy_storage_migration_for_setup = legacy_storage_migration.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(session_credentials::SessionCredentialVault::from_app_data_dir(&app_data_dir))
+        .manage(legacy_storage_migration)
         .invoke_handler(generate_app_handler![
+            legacy_local_storage::stage_legacy_local_storage,
+            legacy_local_storage::get_legacy_local_storage_migration_snapshot,
+            legacy_local_storage::complete_legacy_local_storage_migration,
+            legacy_local_storage::get_legacy_local_storage_probe_status,
+            legacy_local_storage::fail_legacy_local_storage_probe,
+            legacy_local_storage::close_legacy_local_storage_probe,
             session_credentials::set_session_model_credential,
             session_credentials::resolve_session_model_credential,
             commands::get_all_novels,
@@ -240,8 +198,10 @@ fn main() {
             commands::delete_novel,
             commands::delete_novel_cascade,
             commands::repair_database,
+            commands::import_txt_novel,
             commands::get_world_settings,
             commands::save_world_setting,
+            commands::world::preview_world_rule_change,
             commands::get_rule_systems,
             commands::save_rule_system,
             commands::delete_rule_system,
@@ -256,6 +216,7 @@ fn main() {
             commands::get_chapters_by_volume_id,
             commands::get_chapter_by_id,
             commands::create_chapter,
+            commands::save_chapter_details,
             commands::update_chapter,
             commands::delete_chapter,
             commands::get_drafts_by_chapter_id,
@@ -287,6 +248,7 @@ fn main() {
             commands::agent_plans::cancel_agent_plan,
             commands::agent_plans::recover_interrupted_agent_plans,
             commands::artifacts::create_result_artifact,
+            commands::artifacts::create_chapter_revision_artifact,
             commands::artifacts::get_result_artifact,
             commands::artifacts::list_result_artifacts_for_task,
             commands::placements::prepare_placement_proposal,
@@ -327,12 +289,17 @@ fn main() {
             commands::content_transactions::list_faction_assets,
             commands::content_transactions::get_location_asset,
             commands::content_transactions::list_location_assets,
+            commands::library_tasks::create_initialized_library_task,
+            services::outline_candidate_apply::apply_outline_candidate,
             commands::conversations::create_task_conversation,
             commands::conversations::create_initialized_task_conversation,
             commands::conversations::recover_task_runs,
             commands::conversations::list_task_conversations,
             commands::conversations::get_task_conversation,
+            commands::conversations::get_task_conversation_window,
+            commands::conversations::list_running_task_targets,
             commands::conversations::get_task_turn_run_projection,
+            commands::conversations::chapter_workflow_stages::list_chapter_workflow_stages,
             commands::conversations::update_task_conversation_model,
             commands::conversations::rename_task_conversation,
             commands::conversations::set_task_conversation_archived,
@@ -345,6 +312,16 @@ fn main() {
             commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
             commands::conversations::apply_structured_artifact,
+            services::structured_artifact_apply_service::preview_structured_artifact_rule_change,
+            commands::task_authorization::get_review_authorization_renewal,
+            commands::task_authorization::get_review_authorization_resume,
+            commands::task_authorization::preview_review_authorization_renewal,
+            commands::task_authorization::renew_review_authorization,
+            commands::task_authorization::issue_task_authorization,
+            commands::task_authorization::list_task_authorizations,
+            commands::task_authorization::revoke_task_authorization,
+            commands::task_authorization::apply_task_authorization,
+            commands::task_authorization::list_task_authorization_receipts,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
             commands::conversations::get_review_authorization,
@@ -386,6 +363,7 @@ fn main() {
             ai::ai_chat_completion_stream,
             ai::check_local_chapter_model,
             ai::check_local_chapter_model_availability,
+            ai::list_cloud_models,
             ai::cancel_ai_request,
             runtime::get_e2e_diagnostics,
             runtime::get_e2e_novel_commit_state,
@@ -415,6 +393,24 @@ fn main() {
             commands::output_profiles::save_output_profile,
             commands::output_profiles::set_default_output_profile,
             commands::output_profiles::delete_output_profile,
+            commands::local_assets::list_imported_assets,
+            commands::local_assets::save_imported_asset,
+            commands::local_assets::delete_imported_asset,
+            commands::local_assets::list_polish_records,
+            commands::local_assets::get_polish_record,
+            commands::local_assets::create_polish_record,
+            commands::local_assets::update_polish_record,
+            commands::local_assets::delete_polish_record,
+            commands::user_templates::list_user_templates,
+            commands::user_templates::save_user_template,
+            commands::user_templates::delete_user_template,
+            commands::setting_suggestions::list_setting_suggestions,
+            commands::setting_suggestions::get_setting_suggestion,
+            commands::setting_suggestions::save_setting_suggestions,
+            commands::setting_suggestions::decide_setting_suggestion,
+            commands::setting_suggestions::adopt_setting_suggestion,
+            commands::setting_suggestions::preview_setting_suggestion_adoption,
+            commands::setting_suggestions::get_world_rule_set_snapshot,
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,
@@ -439,6 +435,7 @@ fn main() {
             commands::list_characters,
             commands::create_character,
             commands::update_character,
+            commands::save_character_profile,
             commands::delete_character,
             commands::add_chapter_character,
             commands::list_chapter_characters,
@@ -485,6 +482,7 @@ fn main() {
             services::dsh::commands::dsh_prepare_chapter,
             services::dsh::commands::get_dsh_preparation_summary,
             services::dsh::commands::dsh_start_task_turn,
+            services::dsh::commands::dsh_resolve_task_retry,
             services::dsh::commands::dsh_cancel_task_run,
             services::dsh::commands::dsh_get_task_runtime_status,
             services::dsh::commands::dsh_list_task_runtime_status,
@@ -492,6 +490,10 @@ fn main() {
             services::dsh::commands::dsh_list_current_plugins,
         ])
         .setup(move |app| {
+            legacy_local_storage::initialize_runtime(
+                app.handle().clone(),
+                legacy_storage_migration_for_setup.clone(),
+            );
             runtime::append_e2e_log(&format!(
                 "startup: tauri setup ready elapsed_ms={}",
                 startup_at.elapsed().as_millis()
@@ -510,12 +512,12 @@ fn main() {
                 })),
             });
             // Native Feel P1.1: 恢复窗口状态
-            if let Some(window) = app.get_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
                 window_state::apply_window_state(&window, &saved_state);
             }
 
             // Native Feel P1.1: 后台监听聚焦请求（单实例第二启动时聚焦已有窗口）
-            let handle = app.handle();
+            let handle = app.handle().clone();
             let watch_dir = focus_watch_dir.clone();
             std::thread::spawn(move || {
                 let focus_req_path = watch_dir.join("focus.request");
@@ -523,7 +525,7 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     if focus_req_path.exists() {
                         // 聚焦已有窗口
-                        if let Some(window) = handle.get_window("main") {
+                        if let Some(window) = handle.get_webview_window("main") {
                             let _ = window.unminimize();
                             let _ = window.set_focus();
                         }
@@ -534,11 +536,13 @@ fn main() {
 
             Ok(())
         })
-        .on_window_event(move |event| {
+        .on_window_event(move |window, event| {
             // Native Feel P1: 关闭时保存窗口状态并释放单实例锁
-            if let tauri::WindowEvent::Destroyed = event.event() {
-                window_state::save_window_state(event.window(), &state_for_close);
-                window_state::release_instance_lock(&state_for_close);
+            if let tauri::WindowEvent::Destroyed = event {
+                if window.label() == "main" {
+                    window_state::save_window_state(window, &state_for_close);
+                    window_state::release_instance_lock(&state_for_close);
+                }
             }
         })
         .run(tauri::generate_context!())

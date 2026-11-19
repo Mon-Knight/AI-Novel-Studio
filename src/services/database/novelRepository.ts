@@ -9,7 +9,7 @@ import type {
   ProtagonistProfile,
   UpdateNovelInput,
 } from '../../types/novel';
-import { dbCall, getDbMode, lsGet, lsSet, generateId, nowISO } from './db';
+import { dbCall, getDbMode, lsGet, lsRemove, lsSet, generateId, nowISO } from './db';
 import { mockNovels } from '../../features/novels/mockNovels';
 import {
   getDefaultDualProtagonistRelation,
@@ -21,6 +21,64 @@ import {
 import { toIsoDateOrNow } from '../../utils/date';
 
 const NOVELS_KEY = 'ai_novel_studio_novels';
+const REFERENCE_LIBRARY_KEY = 'ai_novel_studio_reference_library_v1';
+const RECOVERY_KEY_PREFIX = 'ai_novel_studio_workspace_recovery_';
+const CHAPTER_SCOPED_KEY_PREFIXES = [
+  'ai_novel_studio_drafts_list_',
+  'ai_novel_studio_draft_',
+  'ai_novel_studio_chapter_engineering_states_',
+  'ai_novel_studio_chapter_generation_snapshots_',
+  'ai_novel_studio_unsaved_chapter_outline_',
+] as const;
+const JOB_SCOPED_KEY_PREFIX = 'ai_novel_studio_generation_steps_';
+
+type StorageRecord = Record<string, unknown>;
+
+function isStorageRecord(value: unknown): value is StorageRecord {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stringField(value: StorageRecord, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    if (typeof value[key] === 'string' && value[key]) return value[key] as string;
+  }
+  return undefined;
+}
+
+function rowBelongsToNovel(
+  value: unknown,
+  novelId: string,
+  chapterIds: ReadonlySet<string>,
+  volumeIds: ReadonlySet<string>,
+  jobIds: ReadonlySet<string>,
+): boolean {
+  if (!isStorageRecord(value)) return false;
+  const owner = stringField(value, 'novelId', 'novel_id', 'projectId', 'project_id');
+  if (owner === novelId) return true;
+  const chapterId = stringField(value, 'chapterId', 'chapter_id', 'currentChapterId');
+  if (chapterId && chapterIds.has(chapterId)) return true;
+  const volumeId = stringField(value, 'volumeId', 'volume_id', 'currentVolumeId');
+  if (volumeId && volumeIds.has(volumeId)) return true;
+  const jobId = stringField(value, 'jobId', 'job_id');
+  return Boolean(jobId && jobIds.has(jobId));
+}
+
+function scopedIds(key: string, novelId: string): Set<string> {
+  const rows = lsGet<unknown>(key);
+  if (!Array.isArray(rows)) return new Set();
+  return new Set(
+    rows.flatMap((row) => {
+      if (
+        !isStorageRecord(row) ||
+        !rowBelongsToNovel(row, novelId, new Set(), new Set(), new Set())
+      ) {
+        return [];
+      }
+      const id = stringField(row, 'id', 'jobId', 'job_id');
+      return id ? [id] : [];
+    }),
+  );
+}
 
 export interface NovelRepairResult {
   before: number;
@@ -260,19 +318,17 @@ export const novelRepository = {
       return;
     }
 
+    const chapterIds = scopedIds('ai_novel_studio_chapters', novelId);
+    const volumeIds = scopedIds('ai_novel_studio_volumes', novelId);
+    const jobIds = scopedIds('ai_novel_studio_generation_jobs', novelId);
+
     const purge = (key: string) => {
-      try {
-        const data = lsGet<unknown>(key);
-        if (Array.isArray(data)) {
-          const filtered = data.filter((item: unknown) => {
-            if (!item || typeof item !== 'object') return true;
-            return (item as Record<string, unknown>).novelId !== novelId;
-          });
-          if (filtered.length !== data.length) lsSet(key, filtered);
-        }
-      } catch {
-        /* ignore */
-      }
+      const data = lsGet<unknown>(key);
+      if (!Array.isArray(data)) return;
+      const filtered = data.filter(
+        (item: unknown) => !rowBelongsToNovel(item, novelId, chapterIds, volumeIds, jobIds),
+      );
+      if (filtered.length !== data.length) lsSet(key, filtered);
     };
 
     const keys = [
@@ -288,6 +344,7 @@ export const novelRepository = {
       'ai_novel_studio_context_records',
       'ai_novel_studio_character_states',
       'ai_novel_studio_ai_task_records',
+      'ai_novel_studio_ai_tasks',
       'ai_novel_studio_style_profiles',
       'ai_novel_studio_output_profiles',
       'ai_novel_studio_polish_records',
@@ -298,6 +355,98 @@ export const novelRepository = {
       'ai_novel_studio_autonomous_story_plans',
     ];
     for (const key of keys) purge(key);
+
+    // Reference data is stored as one object rather than a row collection.
+    // Remove the complete work/import/section lineage for this novel while
+    // preserving references belonging to every other novel.
+    const referenceState = lsGet<unknown>(REFERENCE_LIBRARY_KEY);
+    if (isStorageRecord(referenceState)) {
+      const works = Array.isArray(referenceState.works) ? referenceState.works : [];
+      const imports = Array.isArray(referenceState.imports) ? referenceState.imports : [];
+      const sections = Array.isArray(referenceState.sections) ? referenceState.sections : [];
+      const workIds = new Set(
+        works
+          .filter((work) => rowBelongsToNovel(work, novelId, chapterIds, volumeIds, jobIds))
+          .flatMap((work) => {
+            const id = isStorageRecord(work) ? stringField(work, 'id') : undefined;
+            return id ? [id] : [];
+          }),
+      );
+      const importIds = new Set(
+        imports
+          .filter((item) => {
+            if (rowBelongsToNovel(item, novelId, chapterIds, volumeIds, jobIds)) return true;
+            if (!isStorageRecord(item)) return false;
+            return workIds.has(stringField(item, 'workId', 'reference_work_id') ?? '');
+          })
+          .flatMap((item) => {
+            const id = isStorageRecord(item) ? stringField(item, 'id') : undefined;
+            return id ? [id] : [];
+          }),
+      );
+      const nextWorks = works.filter(
+        (work) => !workIds.has(stringField((work ?? {}) as StorageRecord, 'id') ?? ''),
+      );
+      const nextImports = imports.filter(
+        (item) =>
+          !importIds.has(stringField((item ?? {}) as StorageRecord, 'id') ?? '') &&
+          !workIds.has(
+            stringField((item ?? {}) as StorageRecord, 'workId', 'reference_work_id') ?? '',
+          ),
+      );
+      const nextSections = sections.filter((section) => {
+        if (rowBelongsToNovel(section, novelId, chapterIds, volumeIds, jobIds)) return false;
+        if (!isStorageRecord(section)) return true;
+        return !importIds.has(stringField(section, 'importId', 'reference_import_id') ?? '');
+      });
+      const operations = isStorageRecord(referenceState.operations)
+        ? Object.fromEntries(
+            Object.entries(referenceState.operations).filter(([, operation]) => {
+              if (!isStorageRecord(operation)) return true;
+              if (rowBelongsToNovel(operation, novelId, chapterIds, volumeIds, jobIds))
+                return false;
+              return !workIds.has(stringField(operation, 'workId', 'reference_work_id') ?? '');
+            }),
+          )
+        : {};
+      if (
+        nextWorks.length !== works.length ||
+        nextImports.length !== imports.length ||
+        nextSections.length !== sections.length ||
+        Object.keys(operations).length !==
+          (isStorageRecord(referenceState.operations)
+            ? Object.keys(referenceState.operations).length
+            : 0)
+      ) {
+        lsSet(REFERENCE_LIBRARY_KEY, {
+          ...referenceState,
+          works: nextWorks,
+          imports: nextImports,
+          sections: nextSections,
+          operations,
+        });
+      }
+    }
+
+    // Chapter/job caches use dynamic keys and therefore are not covered by
+    // the collection purge above. Capture IDs before deleting their rows.
+    for (const chapterId of chapterIds) {
+      for (const prefix of CHAPTER_SCOPED_KEY_PREFIXES) lsRemove(`${prefix}${chapterId}`);
+    }
+    for (const jobId of jobIds) lsRemove(`${JOB_SCOPED_KEY_PREFIX}${jobId}`);
+    const encodedNovelId = encodeURIComponent(novelId);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(RECOVERY_KEY_PREFIX)) continue;
+      if (key.startsWith(`${RECOVERY_KEY_PREFIX}${encodedNovelId}_`)) {
+        lsRemove(key);
+        continue;
+      }
+      const snapshot = lsGet<unknown>(key);
+      if (isStorageRecord(snapshot) && stringField(snapshot, 'novelId', 'novel_id') === novelId) {
+        lsRemove(key);
+      }
+    }
     try {
       const taskState = lsGet<{
         bundles?: Array<{ conversation?: { novelId?: string } }>;

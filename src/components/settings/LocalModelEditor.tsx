@@ -39,7 +39,7 @@ export function LocalModelEditor({ draft, onChange, onSave, onCancel }: LocalMod
           placeholder="qwen35-9b-novel-v3"
         />
       </label>
-      <label className="settings-field" style={{ gridColumn: '1 / -1' }}>
+      <label className="settings-field settings-span-full">
         <span>OpenAI-Compatible Base URL（仅限本机回环地址）</span>
         <input
           className="form-input"
@@ -48,7 +48,7 @@ export function LocalModelEditor({ draft, onChange, onSave, onCancel }: LocalMod
           placeholder="http://127.0.0.1:8080/v1"
         />
       </label>
-      <label className="settings-field" style={{ gridColumn: '1 / -1' }}>
+      <label className="settings-field settings-span-full">
         <span>本地 API Key（通常无需真实密钥）</span>
         <input
           className="form-input"
@@ -62,7 +62,7 @@ export function LocalModelEditor({ draft, onChange, onSave, onCancel }: LocalMod
           {getCredentialStorageCopy().localKeyHelp}
         </span>
       </label>
-      <div className="settings-card-actions" style={{ gridColumn: '1 / -1' }}>
+      <div className="settings-card-actions settings-span-full">
         <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel}>
           取消
         </button>

@@ -23,124 +23,42 @@ export function UserTemplateCard({
   onDelete,
 }: UserTemplateCardProps) {
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-border)',
-        borderRadius: 10,
-        padding: 16,
-        background: 'var(--color-bg-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-      }}
-    >
+    <div className="resource-card resource-card--interactive">
       <div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 8,
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--color-text-primary)' }}>
-            {template.name}
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <span
-              style={{
-                fontSize: 12,
-                padding: '1px 8px',
-                borderRadius: 10,
-                background: 'var(--color-primary-light)',
-                color: 'var(--color-primary)',
-                fontWeight: 500,
-              }}
-            >
+        <div className="resource-card-header">
+          <span className="resource-card-title">{template.name}</span>
+          <div className="resource-pill-row resource-shrink">
+            <span className="resource-pill resource-pill--primary">
               {TemplateTypeLabels[template.type] ?? template.type}
             </span>
-            <span
-              style={{
-                fontSize: 12,
-                padding: '1px 8px',
-                borderRadius: 10,
-                background: 'var(--color-bg-hover)',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
+            <span className="resource-pill">
               {template.source === 'user_imported' ? '导入' : '自建'}
             </span>
           </div>
         </div>
 
-        <div
-          style={{
-            fontSize: 13,
-            color: 'var(--color-text-secondary)',
-            marginTop: 8,
-            lineHeight: 1.6,
-          }}
-        >
+        <div className="resource-card-description">
           {template.description || template.content.slice(0, 70)}
           {template.content.length > 70 && !template.description ? '...' : ''}
         </div>
 
         {template.tags.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          <div className="resource-pill-row resource-gap-top">
             {template.tags.map((tag, index) => (
-              <span
-                key={`${tag}-${index}`}
-                style={{
-                  fontSize: 12,
-                  padding: '1px 7px',
-                  borderRadius: 6,
-                  background: 'var(--color-bg-hover)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
+              <span key={`${tag}-${index}`} className="resource-pill">
                 #{tag}
               </span>
             ))}
           </div>
         )}
 
-        {expanded && (
-          <div
-            style={{
-              fontSize: 12,
-              whiteSpace: 'pre-wrap',
-              background: 'var(--color-bg-app, #f8fafc)',
-              padding: 10,
-              borderRadius: 6,
-              marginTop: 10,
-              maxHeight: 200,
-              overflowY: 'auto',
-              color: 'var(--color-text-secondary)',
-              fontFamily: 'monospace',
-              border: '1px solid var(--color-border)',
-              lineHeight: 1.5,
-            }}
-          >
-            {template.content}
-          </div>
-        )}
+        {expanded && <div className="resource-pre">{template.content}</div>}
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          marginTop: 14,
-          paddingTop: 10,
-          borderTop: '1px solid var(--color-border-light, #f1f5f9)',
-        }}
-      >
+      <div className="resource-footer">
         <button
           type="button"
-          className="btn btn-primary btn-sm"
-          style={{ flex: 1 }}
+          className="btn btn-primary btn-sm resource-grow"
           onClick={() => onUse(template.content, template.name)}
         >
           <Clipboard aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -170,8 +88,7 @@ export function UserTemplateCard({
         </button>
         <button
           type="button"
-          className="btn btn-secondary btn-sm"
-          style={{ color: 'var(--color-error)' }}
+          className="btn btn-secondary btn-sm resource-text-error"
           onClick={() => onDelete(template)}
           title="删除模板"
           aria-label={`删除模板 ${template.name}`}
@@ -197,103 +114,25 @@ export function BuiltInTemplateCard({
   onUse,
 }: BuiltInTemplateCardProps) {
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-border)',
-        borderRadius: 10,
-        padding: 16,
-        background: 'var(--color-bg-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-      }}
-    >
+    <div className="resource-card resource-card--interactive">
       <div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 8,
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--color-text-primary)' }}>
-            {template.title}
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <span
-              style={{
-                fontSize: 12,
-                padding: '1px 8px',
-                borderRadius: 10,
-                background: 'var(--color-bg-hover)',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              {template.type}
-            </span>
-            <span
-              style={{
-                fontSize: 12,
-                padding: '1px 8px',
-                borderRadius: 10,
-                background: 'var(--color-bg-hover)',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              {template.genre}
-            </span>
+        <div className="resource-card-header">
+          <span className="resource-card-title">{template.title}</span>
+          <div className="resource-pill-row resource-shrink">
+            <span className="resource-pill">{template.type}</span>
+            <span className="resource-pill">{template.genre}</span>
           </div>
         </div>
 
-        <div
-          style={{
-            fontSize: 13,
-            color: 'var(--color-text-secondary)',
-            marginTop: 8,
-            lineHeight: 1.6,
-          }}
-        >
-          {template.description}
-        </div>
+        <div className="resource-card-description">{template.description}</div>
 
-        {expanded && (
-          <div
-            style={{
-              fontSize: 12,
-              whiteSpace: 'pre-wrap',
-              background: 'var(--color-bg-app, #f8fafc)',
-              padding: 10,
-              borderRadius: 6,
-              marginTop: 10,
-              maxHeight: 200,
-              overflowY: 'auto',
-              color: 'var(--color-text-secondary)',
-              fontFamily: 'monospace',
-              border: '1px solid var(--color-border)',
-              lineHeight: 1.5,
-            }}
-          >
-            {template.content}
-          </div>
-        )}
+        {expanded && <div className="resource-pre">{template.content}</div>}
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          marginTop: 14,
-          paddingTop: 10,
-          borderTop: '1px solid var(--color-border-light, #f1f5f9)',
-        }}
-      >
+      <div className="resource-footer">
         <button
           type="button"
-          className="btn btn-primary btn-sm"
-          style={{ flex: 1 }}
+          className="btn btn-primary btn-sm resource-grow"
           onClick={() => onUse(template.content, template.title)}
         >
           <Clipboard aria-hidden="true" size={14} strokeWidth={1.8} />

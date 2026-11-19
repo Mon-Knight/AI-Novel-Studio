@@ -13,6 +13,11 @@ use rusqlite::{Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[path = "placement_source.rs"]
+mod placement_source;
+
+use self::placement_source::{ensure_source_novel_exists, required_source_novel_id};
+
 const PROPOSAL_TYPE: &str = "create_world_setting";
 const TARGET_TYPE: &str = "world_setting";
 const MAX_TITLE_CHARS: usize = 200;
@@ -169,7 +174,6 @@ fn candidate_from_artifact(
             bundle.artifact.processing_status.as_str(),
             "valid" | "valid_with_warnings"
         )
-        || bundle.artifact.source_novel_id == "system"
     {
         return Err(AppError::new(
             codes::PLACEMENT_NOT_SUPPORTED,
@@ -177,6 +181,7 @@ fn candidate_from_artifact(
             false,
         ));
     }
+    required_source_novel_id(bundle.artifact.source_novel_id.as_deref())?;
     let structured = bundle.structured_payload_json.ok_or_else(|| {
         AppError::new(
             codes::PLACEMENT_PROPOSAL_INVALID,
@@ -356,15 +361,15 @@ fn validate_bundle(
     }
     let (artifact, candidate, candidate_json) =
         candidate_from_artifact(connection, &proposal.artifact_id, proposal.candidate_index)?;
+    let novel_id = required_source_novel_id(artifact.source_novel_id.as_deref())?;
     let candidate_hash = ai_fact_security::canonical_hash(&candidate_json)?;
     let expected_absent_hash = absent_target_hash(&proposal.target_id)?;
-    let expected_effect =
-        effect_payload(&proposal.target_id, &artifact.source_novel_id, &candidate);
+    let expected_effect = effect_payload(&proposal.target_id, novel_id, &candidate);
     let expected_proposal_hash = proposal_hash(
         &proposal.artifact_id,
         proposal.candidate_index,
         &candidate_hash,
-        &artifact.source_novel_id,
+        novel_id,
         &proposal.target_id,
         &expected_absent_hash,
         &expected_effect,
@@ -377,7 +382,7 @@ fn validate_bundle(
         &expected_absent_hash,
         &expected_effect,
     )?;
-    if artifact.source_novel_id != proposal.target_novel_id
+    if novel_id != proposal.target_novel_id.as_str()
         || candidate_hash != proposal.candidate_hash
         || expected_absent_hash != proposal.expected_target_hash
         || expected_effect != proposal.effect_payload_json
@@ -440,26 +445,14 @@ pub fn prepare_placement(
         commit_transaction(transaction, Some(&output.plan.operation_id))?;
         return Ok(output);
     }
-    let novel_exists: i64 = transaction
-        .query_row(
-            "SELECT COUNT(*) FROM novels WHERE id=?1 AND deleted_at IS NULL",
-            [&artifact.source_novel_id],
-            |row| row.get(0),
-        )
-        .map_err(AppError::database)?;
-    if novel_exists != 1 {
-        return Err(AppError::new(
-            codes::TARGET_NOVEL_NOT_FOUND,
-            "Artifact 所属作品不存在",
-            false,
-        ));
-    }
+    let novel_id = required_source_novel_id(artifact.source_novel_id.as_deref())?;
+    ensure_source_novel_exists(&transaction, novel_id)?;
     let proposal_id = uuid::Uuid::new_v4().to_string();
     let plan_id = uuid::Uuid::new_v4().to_string();
     let target_id = uuid::Uuid::new_v4().to_string();
     let operation_id = format!("apply-placement:{plan_id}");
     let expected_target_hash = absent_target_hash(&target_id)?;
-    let effect = effect_payload(&target_id, &artifact.source_novel_id, &candidate);
+    let effect = effect_payload(&target_id, novel_id, &candidate);
     ai_fact_security::validate_metadata(&effect, "Placement effect")?;
     let effect_json = ai_fact_security::canonical_json(&effect)?;
     let candidate_hash = ai_fact_security::canonical_hash(&candidate_json)?;
@@ -467,7 +460,7 @@ pub fn prepare_placement(
         &artifact.artifact_id,
         input.candidate_index,
         &candidate_hash,
-        &artifact.source_novel_id,
+        novel_id,
         &target_id,
         &expected_target_hash,
         &effect,
@@ -490,7 +483,7 @@ pub fn prepare_placement(
             candidate_hash: &candidate_hash,
             proposal_type: PROPOSAL_TYPE,
             target_type: TARGET_TYPE,
-            target_novel_id: &artifact.source_novel_id,
+            target_novel_id: novel_id,
             target_id: &target_id,
             expected_target_version: 0,
             expected_target_hash: &expected_target_hash,

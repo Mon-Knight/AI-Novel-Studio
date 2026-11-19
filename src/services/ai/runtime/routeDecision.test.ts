@@ -252,4 +252,3 @@ test('available local writer takes priority over remote writer', () => {
   assert.equal(decision.reason, 'local_available');
   assert.equal(decision.fallbackUsed, false);
 });
-

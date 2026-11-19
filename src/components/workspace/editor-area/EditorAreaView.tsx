@@ -7,10 +7,14 @@ import type { EditorAreaProps, EditorDocumentState } from './editorAreaTypes';
 import type { EditorDocumentController } from './useEditorDocumentController';
 import type { ChapterOutlineEditor } from './useChapterOutlineEditor';
 import { EditorChapterContext } from './EditorChapterContext';
+import { ChapterSourceReview } from '../ChapterSourceReview';
+import { ReviewAuthorizationRenewalDialog } from '../ReviewAuthorizationRenewalDialog';
+import { formatChapterHeading } from '../../../utils/chapterHeading';
 
 interface EditorAreaViewProps {
   chapter?: Chapter;
   currentDraft?: ChapterDraft | null;
+  originalCandidateContent?: string;
   documentState: EditorDocumentState;
   document: EditorDocumentController;
   outline: ChapterOutlineEditor;
@@ -34,6 +38,7 @@ const DRAFT_SOURCE_LABELS: Record<string, string> = {
 export default function EditorAreaView({
   chapter,
   currentDraft,
+  originalCandidateContent,
   documentState,
   document,
   outline,
@@ -56,15 +61,14 @@ export default function EditorAreaView({
     );
   }
   const ready = documentState === 'ready';
-  const busy = document.saving || document.adopting;
+  const busy = document.saving || document.adopting || document.reviewRenewal.busy;
   return (
     <div className="editor-content" data-document-state={documentState}>
-      <h1 className="editor-chapter-title">
-        第{chapter.chapterNumber}章：{chapter.title}
-      </h1>
-
       {ready && currentDraft && (
-        <details className="editor-document-metadata" key={`${chapter.id}:${currentDraft.id}`}>
+        <details
+          className="editor-document-metadata"
+          key={`metadata:${chapter.id}:${currentDraft.id}`}
+        >
           <summary>
             <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
             草稿信息 · v{currentDraft.versionNo}
@@ -123,9 +127,54 @@ export default function EditorAreaView({
                   重试采用
                 </button>
               )}
+              {document.reviewRenewal.canRenew && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy}
+                  onClick={() => void document.reviewRenewal.begin()}
+                >
+                  {document.reviewRenewal.uncertain
+                    ? '核对重新授权结果'
+                    : document.isDirty
+                      ? '保存当前修改并预览重新授权'
+                      : '预览重新授权当前草稿'}
+                </button>
+              )}
             </div>
           )}
         </div>
+      )}
+
+      {ready && document.reviewRenewal.resumedDraftChanged && (
+        <p role="status">
+          当前显示上次重新授权后又经人工保存、且本次原生已核验的草稿版本；采用仍需明确确认。
+        </p>
+      )}
+      {document.reviewRenewal.notice && <p role="status">{document.reviewRenewal.notice}</p>}
+      {document.reviewRenewal.open && (
+        <ReviewAuthorizationRenewalDialog
+          preview={document.reviewRenewal.preview}
+          savedContent={document.reviewRenewal.savedContent}
+          formalContent={document.reviewRenewal.formalContent}
+          busy={document.reviewRenewal.busy}
+          committing={document.reviewRenewal.committing}
+          error={document.reviewRenewal.error}
+          uncertain={document.reviewRenewal.uncertain}
+          onConfirm={() => void document.reviewRenewal.confirm()}
+          onLookup={() => void document.reviewRenewal.lookup()}
+          onDismiss={document.reviewRenewal.dismiss}
+        />
+      )}
+
+      {ready && currentDraft && (
+        <ChapterSourceReview
+          key={`source-review:${chapter.id}:${currentDraft.id}`}
+          chapter={chapter}
+          draft={currentDraft}
+          original={originalCandidateContent}
+          disabled={busy || document.isDirty}
+        />
       )}
 
       {ready ? (
@@ -142,15 +191,22 @@ export default function EditorAreaView({
       )}
 
       {ready && document.effectiveContentState?.status === 'unavailable' ? (
-        <ContentUnavailableState
-          state={document.effectiveContentState}
-          retrying={retryingContent}
-          onRetry={() => onRetryContent?.()}
-          onOpenHistory={onOpenDraftHistory}
-          onBackToChapters={onBackToChapters}
-        />
+        // 正文不可用时纸面不渲染，标题需要保留在桌面上，否则用户会失去当前章节的定位。
+        <>
+          <h1 className="editor-chapter-title editor-chapter-title--detached">
+            {formatChapterHeading(chapter)}
+          </h1>
+          <ContentUnavailableState
+            state={document.effectiveContentState}
+            retrying={retryingContent}
+            onRetry={() => onRetryContent?.()}
+            onOpenHistory={onOpenDraftHistory}
+            onBackToChapters={onBackToChapters}
+          />
+        </>
       ) : (
         <div className="editor-paper">
+          <h1 className="editor-chapter-title">{formatChapterHeading(chapter)}</h1>
           {ready && reviewLocked && (
             <div className="editor-review-banner" data-testid="chapter-review-lock">
               <span>当前为审阅模式：打开不等于保存，保存不等于采用。</span>
@@ -162,6 +218,17 @@ export default function EditorAreaView({
               >
                 进入编辑
               </button>
+              {document.canAdoptReadOnlyCandidate && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-testid="chapter-review-adopt-original"
+                  disabled={busy}
+                  onClick={() => void document.handleAdoptCurrent()}
+                >
+                  采用未修改候选
+                </button>
+              )}
             </div>
           )}
           <textarea
@@ -191,6 +258,13 @@ export default function EditorAreaView({
             }
             spellCheck={false}
           />
+          <div className="editor-paper-folio" aria-hidden="true">
+            <span>第 {chapter.chapterNumber} 章</span>
+            <span>
+              {countTextWords(document.content)} 字
+              {chapter.targetWords ? ` · 目标 ${chapter.targetWords}` : ''}
+            </span>
+          </div>
         </div>
       )}
     </div>

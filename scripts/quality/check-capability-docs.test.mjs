@@ -6,7 +6,7 @@ import {
 } from './check-capability-docs.mjs';
 
 const identities = ['context.read@1', 'memory.search@1', 'novel.read@1', 'structure.read@1'];
-const facts = `<!-- ans-current-canonical:start -->\n${identities.map((identity) => `\`${identity}\``).join('、')}\n\`canonical-only\`；\`deterministic-writer\`；\`NOT_VERIFIED\`\n<!-- ans-current-canonical:end -->`;
+const facts = `<!-- ans-current-canonical:start -->\n${identities.map((identity) => `\`${identity}\``).join('、')}\n\`canonical-only\`；\`writing-subagent\`；\`deterministic-writer\`；\`NOT_VERIFIED\`\n<!-- ans-current-canonical:end -->`;
 function fixture() {
   return {
     manifest: {
@@ -20,7 +20,7 @@ function fixture() {
       })),
     },
     hostSource:
-      'const CANONICAL_ALLOWED_TOOLS: &str = "novel.read,structure.read,context.read,memory.search";\nfn is_canonical_only_turn(input: &Input) -> bool { input.task_kind == "read" }\nfn turn_allowed_tools(input: &Input) -> &str { if is_canonical_only_turn(input) { CANONICAL_ALLOWED_TOOLS } else { ALLOWED_TOOLS } }',
+      'const CANONICAL_ALLOWED_TOOLS: &str = "novel.read,structure.read,context.read,memory.search";\nfn is_canonical_only_turn(input: &Input) -> bool { input.task_kind == "read" }\nfn turn_allowed_tools(input: &Input) -> &str { if is_canonical_only_turn(input) { return CANONICAL_ALLOWED_TOOLS; } ALLOWED_TOOLS }',
     documents: Object.fromEntries(
       Object.entries(CURRENT_CAPABILITY_DOCUMENTS).map(([file, numbers]) => [
         file,
@@ -58,8 +58,8 @@ test('detects identity, exposure, health and host read-allowlist drift independe
     },
     (input) => {
       input.hostSource = input.hostSource.replace(
-        'if is_canonical_only_turn(input) { CANONICAL_ALLOWED_TOOLS }',
-        'if is_canonical_only_turn(input) { ALLOWED_TOOLS }',
+        'return CANONICAL_ALLOWED_TOOLS;',
+        'return ALLOWED_TOOLS;',
       );
     },
   ]) {
@@ -74,6 +74,7 @@ test('detects missing or repeated blocks and false live-verified statements in t
     '',
     `${facts}\n${facts}`,
     facts.replace('NOT_VERIFIED', 'VERIFIED'),
+    facts.replace('writing-subagent', 'legacy-writer'),
     facts.replace('memory.search@1', 'memory.other@1'),
   ]) {
     const input = fixture();

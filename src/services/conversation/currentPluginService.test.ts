@@ -187,6 +187,14 @@ test('E2E build exposes deterministic Mock only after the exact storage opt-in',
       capabilities: ['conversation_turn', 'chapter_generate'],
     });
     assert.equal(rows.filter((row) => row.id === 'model:mock:Mock').length, 1);
+    assert.deepEqual(
+      rows.find((row) => row.id === 'model:mock:Mock-Alternate'),
+      {
+        ...deterministic!,
+        id: 'model:mock:Mock-Alternate',
+        name: 'Mock-Alternate',
+      },
+    );
     assert.equal(rows.find((row) => row.id === 'model:browser-fallback:Mock')?.status, 'loaded');
   } finally {
     await vite.close();
@@ -282,6 +290,35 @@ test('healthy runtime rows load provider, model, composition and workbench scope
   );
   assert.equal(rows.find((row) => row.id === 'dsh-composition:sessions')?.health, 'healthy');
   assert.doesNotMatch(JSON.stringify(rows), /must-never-project/);
+});
+
+test('runtime model aliases project to the canonical Workbench identity', () => {
+  const rows = buildCurrentPluginProjection({
+    desktop: true,
+    settings: settings({
+      runtimeMode: 'api',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-chat',
+      mockMode: false,
+    }),
+    manifest: manifest(),
+    runtimeRows: [
+      runtimeRow({
+        id: 'model:DEEPSEEK:deepseek-chat',
+        name: 'DeepSeek Chat',
+        category: 'model',
+        status: 'loaded',
+        initialization: 'initialized',
+        health: 'unknown',
+      }),
+    ],
+  });
+
+  assert.equal(
+    rows.find((row) => row.category === 'model' && row.name === 'DeepSeek Chat')?.id,
+    'model:deepseek-official:deepseek-chat',
+  );
 });
 
 test('malformed runtime rows are ignored and cannot manufacture loaded state', () => {

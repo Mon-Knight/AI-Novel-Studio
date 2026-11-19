@@ -11,12 +11,13 @@ use serde_json::{json, Value};
 pub use repository::{
     AdoptReviewAuthorizedDraftInput, AdoptReviewAuthorizedDraftResult, AppendToolEventInput,
     AppendTurnInput, ArtifactDecisionRecord, ChapterSummaryFollowUp,
-    ConsumeReviewAuthorizationInput, ConversationArtifactCardRecord, ConversationTurnRecord,
-    CreateArtifactCardInput, CreateConversationInput, CreateInitializedConversationInput,
-    CreateRunInput, InitializedTaskConversation, RecordArtifactDecisionInput, RecoverRunsInput,
-    RenameConversationInput, ReviewAuthorizationRecord, SetConversationArchivedInput,
-    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, TaskTurnRunProjection, ConversationListCursor,
-    ToolCallEventRecord, UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
+    ConsumeReviewAuthorizationInput, ConversationArtifactCardRecord, ConversationListCursor,
+    ConversationTurnRecord, CreateArtifactCardInput, CreateConversationInput,
+    CreateInitializedConversationInput, CreateRunInput, InitializedTaskConversation,
+    RecordArtifactDecisionInput, RecoverRunsInput, RenameConversationInput,
+    ReviewAuthorizationRecord, SetConversationArchivedInput, TaskConversationBundle,
+    TaskConversationRecord, TaskRunRecord, TaskTurnRunProjection, ToolCallEventRecord,
+    UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
 };
 
 fn required(value: &str, field: &str) -> Result<(), AppError> {
@@ -355,7 +356,7 @@ pub fn publish_structured_candidate(
             request_hash: None,
             trace_id: None,
             task_type: "context_summarize".to_string(),
-            novel_id: input.novel_id.clone(),
+            novel_id: Some(input.novel_id.clone()),
             chapter_id: input.chapter_id.clone(),
             draft_id: None,
             scope_type: if input.chapter_id.is_some() {

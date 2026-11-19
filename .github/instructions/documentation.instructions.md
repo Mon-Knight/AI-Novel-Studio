@@ -10,15 +10,16 @@
 
 ### 1.1 必须更新的文档
 
-| 变更类型       | 必须更新                       |
-| -------------- | ------------------------------ |
-| 新功能         | README + CHANGELOG             |
-| 架构变更       | docs/project-architecture.md   |
-| 数据模型变更   | docs/data-model.md             |
-| UI 方向调整    | docs/ui-reference.md           |
-| 新版本发布     | CHANGELOG + version-roadmap.md |
-| 开发规则变更   | docs/development-rules.md      |
-| Agent 基础设施 | AGENTS.md + 相关 instructions  |
+| 变更类型       | 必须更新                         |
+| -------------- | -------------------------------- |
+| 新功能         | README + CHANGELOG               |
+| 架构变更       | docs/project-architecture.md     |
+| 数据模型变更   | docs/data-model.md               |
+| UI 方向调整    | docs/ui-reference.md             |
+| UI 实现规范    | docs/ui-development-framework.md |
+| 新版本发布     | CHANGELOG + version-roadmap.md   |
+| 开发规则变更   | docs/development-rules.md        |
+| Agent 基础设施 | AGENTS.md + 相关 instructions    |
 
 ### 1.2 文档原则
 

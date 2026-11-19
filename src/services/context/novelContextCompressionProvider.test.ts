@@ -38,6 +38,44 @@ class MemoryStorage {
   }
 }
 
+test('compression excludes a known blocking summary before resave and preserves independent manual facts', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+  const key = 'ai_novel_studio_chapter_summaries';
+  const persisted = JSON.stringify([
+    {
+      id: 'unsafe-summary',
+      novelId: 'novel-001',
+      chapterId: 'old-chapter',
+      adoptedDraftId: 'draft',
+      summary: '阻断错误角色不得进入压缩',
+      enabled: true,
+      isExpired: false,
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      validationResult: {
+        passed: false,
+        safeToContext: true,
+        score: 76,
+        problems: [{ type: 'character_error', message: '不存在的角色' }],
+      },
+    },
+  ]);
+  localStorage.setItem(key, persisted);
+  await contextRecordService.create({
+    novelId: 'novel-001',
+    contextType: 'plot_progress',
+    title: '手动事实',
+    content: '作者独立确认的有效事实',
+    importance: 4,
+  });
+  const candidate = await novelContextCompressionProvider.propose('novel-001', 4000);
+  assert.doesNotMatch(candidate.compressedText, /阻断错误角色不得进入压缩/);
+  assert.match(candidate.compressedText, /作者独立确认的有效事实/);
+  assert.equal(localStorage.getItem(key), persisted);
+});
+
 test('compression source includes formal settings, outlines and active generation profiles', async () => {
   (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
     new MemoryStorage() as unknown as Storage;

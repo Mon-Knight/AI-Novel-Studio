@@ -43,9 +43,8 @@ export async function executeChapterSceneGeneration(
   if (input.novelId) {
     try {
       const { novelMemoryManager } = await import('../memory/novelMemoryManager');
-      const { formatSceneMemoryForCompilation } = await import(
-        '../memory/retrieval/novelMemoryRetriever'
-      );
+      const { formatSceneMemoryForCompilation } =
+        await import('../memory/retrieval/novelMemoryRetriever');
       const sceneId =
         typeof taskInput.sceneId === 'string'
           ? taskInput.sceneId

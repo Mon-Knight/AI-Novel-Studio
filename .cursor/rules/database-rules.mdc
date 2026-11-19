@@ -1,7 +1,7 @@
 ---
 description: AI Novel Studio 数据库规则 - Schema 安全、迁移约束、Agent 预留
 globs: src-tauri/src/**/*.rs,src/services/database/**/*
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Database Rules

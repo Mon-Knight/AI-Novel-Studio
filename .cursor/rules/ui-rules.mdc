@@ -1,10 +1,12 @@
 ---
 description: AI Novel Studio UI 规则 - 对话式创作工作台、章节审阅编辑器与桌面视觉标准
 globs: src/**/*.tsx,src/**/*.css
-alwaysApply: true
+alwaysApply: false
 ---
 
 # UI Rules
+
+完整实现规范见 [`docs/ui-development-framework.md`](../../docs/ui-development-framework.md)。本规则只保留编辑器内必须即时遵守的摘要。
 
 ## 总体风格
 
@@ -48,6 +50,14 @@ BottomStatusBar
 - 边框：极淡灰 (#e5e7eb)
 - 字体：Microsoft YaHei, Segoe UI, Arial, sans-serif
 - 阴影：克制使用，卡片 0 1px 3px rgba(0,0,0,0.08)
+
+## 组件与测试底线
+
+- 优先复用语义 Token 和 `src/components/common/` primitive；组件不得直接调用 AI、SQLite、文件或 IPC。
+- 交互组件必须定义 loading / error / empty / disabled / focus 等状态，并保持 `aria-*` 与 `data-state` 一致。
+- 键盘、Escape、焦点返回、IME 组合态和 `prefers-reduced-motion` 属于交互契约。
+- 测试优先使用 `getByRole`、`getByLabelText` 和用户可见文本；`data-testid` 只用于稳定的 E2E 边界。
+- 一次 UI 变更只处理一个用户可理解目标，并同步组件测试、真实桌面场景和文档。
 
 ## 2K 适配
 

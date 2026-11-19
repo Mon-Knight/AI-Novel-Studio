@@ -26,7 +26,7 @@ export const PRODUCTION_FORBIDDEN_MARKERS = Object.freeze([
 
 const DEFAULT_DIST_DIR = 'dist';
 const MANIFEST_RELATIVE_PATH = '.vite/manifest.json';
-const EXPECTED_ENTRY_KEY = 'index.html';
+export const EXPECTED_ENTRY_KEYS = Object.freeze(['index.html', 'legacy-storage-migration.html']);
 
 export class BundleSizeError extends Error {
   constructor(message, options) {
@@ -157,11 +157,18 @@ export async function inspectBundle({
   distDir = DEFAULT_DIST_DIR,
   limits = BUNDLE_LIMITS,
   requiredVendorChunks = REQUIRED_VENDOR_CHUNKS,
-  expectedEntryKey = EXPECTED_ENTRY_KEY,
+  expectedEntryKeys = EXPECTED_ENTRY_KEYS,
 } = {}) {
   assertLimits(limits);
   if (!Array.isArray(requiredVendorChunks) || requiredVendorChunks.length === 0) {
     throw new BundleSizeError('At least one required vendor chunk must be configured.');
+  }
+  if (
+    !Array.isArray(expectedEntryKeys) ||
+    expectedEntryKeys.length === 0 ||
+    new Set(expectedEntryKeys).size !== expectedEntryKeys.length
+  ) {
+    throw new BundleSizeError('Expected entry keys must be a unique non-empty list.');
   }
 
   const distDirectory = path.resolve(distDir);
@@ -198,15 +205,16 @@ export async function inspectBundle({
   }
 
   const entryRecords = manifestRecords.filter(([, record]) => record?.isEntry === true);
-  if (entryRecords.length !== 1) {
+  if (entryRecords.length !== expectedEntryKeys.length) {
     throw new BundleSizeError(
-      `Expected exactly one JavaScript entry in ${manifestPath}; found ${entryRecords.length}.`,
+      `Expected ${expectedEntryKeys.length} JavaScript entries in ${manifestPath}; found ${entryRecords.length}.`,
     );
   }
-  const [entryKey, entryRecord] = entryRecords[0];
-  if (entryKey !== expectedEntryKey) {
+  const entryKeys = entryRecords.map(([key]) => key).sort();
+  const expectedEntryKeySet = [...expectedEntryKeys].sort();
+  if (JSON.stringify(entryKeys) !== JSON.stringify(expectedEntryKeySet)) {
     throw new BundleSizeError(
-      `Expected manifest entry ${JSON.stringify(expectedEntryKey)}; found ${JSON.stringify(entryKey)}.`,
+      `Expected manifest entries ${expectedEntryKeySet.map((key) => JSON.stringify(key)).join(', ')}; found ${entryKeys.map((key) => JSON.stringify(key)).join(', ')}.`,
     );
   }
 
@@ -236,11 +244,15 @@ export async function inspectBundle({
     }
   }
 
-  const entryFile = normalizeManifestFile(entryRecord.file, entryKey);
-  if (!entryFile.endsWith('.js')) {
-    throw new BundleSizeError(
-      `Manifest entry ${JSON.stringify(entryKey)} is not JavaScript: ${entryFile}`,
-    );
+  const entryFiles = new Map();
+  for (const [entryKey, entryRecord] of entryRecords) {
+    const entryFile = normalizeManifestFile(entryRecord.file, entryKey);
+    if (!entryFile.endsWith('.js')) {
+      throw new BundleSizeError(
+        `Manifest entry ${JSON.stringify(entryKey)} is not JavaScript: ${entryFile}`,
+      );
+    }
+    entryFiles.set(entryKey, entryFile);
   }
 
   for (const vendorChunk of requiredVendorChunks) {
@@ -267,13 +279,23 @@ export async function inspectBundle({
   const chunks = await Promise.all(
     manifestJavaScriptFiles.map((file) => inspectJavaScriptFile(canonicalDistDirectory, file)),
   );
-  const entry = chunks.find((chunk) => chunk.file === entryFile);
-  if (entry === undefined) {
-    throw new BundleSizeError(`Manifest entry file was not measured: ${entryFile}`);
+  const entries = [];
+  for (const [entryKey, entryFile] of entryFiles) {
+    const entry = chunks.find((chunk) => chunk.file === entryFile);
+    if (entry === undefined) {
+      throw new BundleSizeError(
+        `Manifest entry ${JSON.stringify(entryKey)} was not measured: ${entryFile}`,
+      );
+    }
+    assertWithinLimit(entry.bytes, 'entry raw', limits.entryBytes, `Entry ${entry.file}`);
+    assertWithinLimit(
+      entry.gzipBytes,
+      'entry gzip-9',
+      limits.entryGzipBytes,
+      `Entry ${entry.file}`,
+    );
+    entries.push(entry);
   }
-
-  assertWithinLimit(entry.bytes, 'entry raw', limits.entryBytes, `Entry ${entry.file}`);
-  assertWithinLimit(entry.gzipBytes, 'entry gzip-9', limits.entryGzipBytes, `Entry ${entry.file}`);
   for (const chunk of chunks) {
     assertWithinLimit(chunk.bytes, 'per-chunk raw', limits.chunkBytes, `Chunk ${chunk.file}`);
     assertWithinLimit(
@@ -289,7 +311,8 @@ export async function inspectBundle({
   return {
     distDirectory: canonicalDistDirectory,
     manifestPath,
-    entry,
+    entries,
+    entry: entries.find((entry) => entry.file === entryFiles.get('index.html')),
     largestRaw: byRawSize[0],
     largestGzip: byGzipSize[0],
     chunks,
@@ -314,9 +337,11 @@ function printResult(result) {
   console.log(
     `[bundle-size] limits: entry raw ${formatBytes(result.limits.entryBytes)}, entry gzip-9 ${formatBytes(result.limits.entryGzipBytes)}, any chunk raw ${formatBytes(result.limits.chunkBytes)}, any chunk gzip-9 ${formatBytes(result.limits.chunkGzipBytes)}`,
   );
-  console.log(
-    `[bundle-size] entry: ${result.entry.file} — raw ${formatBytes(result.entry.bytes)}, gzip-9 ${formatBytes(result.entry.gzipBytes)}`,
-  );
+  for (const entry of result.entries) {
+    console.log(
+      `[bundle-size] entry: ${entry.file} — raw ${formatBytes(entry.bytes)}, gzip-9 ${formatBytes(entry.gzipBytes)}`,
+    );
+  }
   console.log(
     `[bundle-size] largest raw: ${result.largestRaw.file} — ${formatBytes(result.largestRaw.bytes)}`,
   );

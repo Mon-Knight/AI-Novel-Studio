@@ -51,6 +51,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     reviewAuthorizationId: props.reviewAuthorizationId,
     reviewArtifactId: props.reviewArtifactId,
     reviewLocked: props.reviewLocked,
+    onReviewAuthorizationRenewed: props.onReviewAuthorizationRenewed,
   });
   const outline = useChapterOutlineEditor({
     chapter: props.chapter,
@@ -101,6 +102,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     <EditorAreaView
       chapter={props.chapter}
       currentDraft={props.currentDraft}
+      originalCandidateContent={props.reviewCandidate?.content}
       documentState={documentState}
       document={document}
       outline={outline}

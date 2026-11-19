@@ -1,13 +1,42 @@
+#[path = "conversation_review_authorization.rs"]
+mod review_authorization;
+#[path = "conversation_window.rs"]
+mod conversation_window;
+pub use conversation_window::{
+    get_conversation_window, list_running_task_targets, ConversationWindowInput, RunningTaskTarget,
+    TaskConversationWindow,
+};
+use review_authorization::validate_review_chapter_baseline;
+pub(crate) use review_authorization::{validate_review_rule_baseline, issue_review_authorization_in_transaction};
+pub use review_authorization::{issue_review_authorization, consume_review_authorization, get_review_authorization};
+#[cfg(test)]
+#[path = "conversation_authorization_baseline_tests.rs"]
+mod authorization_baseline_tests;
+#[cfg(test)]
+#[path = "conversation_lifecycle_tests.rs"]
+mod lifecycle_tests;
+#[cfg(test)]
+#[path = "conversation_model_selection_tests.rs"]
+mod model_selection_tests;
+
 use crate::errors::AppError;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
+pub enum TaskScope {
+    Novel { novel_id: String },
+    Library { source_id: String, source_hash: String },
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskConversationRecord {
     pub conversation_id: String,
-    pub novel_id: String,
+    pub novel_id: Option<String>,
+    pub scope: TaskScope,
     pub title: String,
     pub status: String,
     pub default_model: Option<Value>,
@@ -42,7 +71,11 @@ pub struct TaskRunRecord {
     pub updated_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_id: Option<String>,
 }
+
+const TASK_RUN_COLUMNS: &str = "run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at, chapter_id";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +108,8 @@ pub struct ConversationArtifactCardRecord {
     pub content: String,
     pub status: String,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_ordinal: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,6 +169,10 @@ pub struct ReviewAuthorizationRecord {
     pub issued_at: String,
     pub consumed_at: Option<String>,
     pub consumed_by_draft_id: Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub renewed_from_authorization_id:Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub review_draft_binding:Option<crate::services::task_authorization_contract::ReviewSavedDraft>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,6 +239,10 @@ pub struct CreateRunInput {
     pub turn_id: String,
     pub model_snapshot: Value,
     pub worker_id: String,
+    /// Frozen chapter target of this run. Persisted so a failed run can be retried
+    /// against the same chapter even when it never reached a tool call or artifact.
+    #[serde(default)]
+    pub chapter_id: Option<String>,
     pub created_at: String,
 }
 
@@ -379,7 +422,7 @@ fn model_lock_matches(locked: &Value, candidate: &Value) -> bool {
 
 fn upgrade_legacy_model_lock_endpoint(locked: &Value, candidate: &Value) -> Option<Value> {
     let locked_projection = model_lock_projection(locked);
-    if locked_projection.get("baseUrl").is_some() {
+    if locked_projection.get("baseUrl").is_some() || !model_lock_matches(locked, candidate) {
         return None;
     }
     let candidate_base_url = model_lock_projection(candidate)
@@ -450,6 +493,12 @@ fn has_unresolved_artifact_candidate(
                     decision.decision_id IS NULL
                     OR (
                       decision.decision = 'confirm'
+                       AND NOT EXISTS(
+                         SELECT 1 FROM result_artifacts AS artifact
+                         WHERE artifact.artifact_id = card.artifact_id
+                           AND artifact.artifact_type = card.artifact_type
+                           AND artifact.artifact_type IN ('quality_report', 'style_analysis')
+                       )
                       AND NOT EXISTS(
                         SELECT 1
                         FROM review_authorizations AS authorization
@@ -532,23 +581,58 @@ pub(crate) fn reconcile_conversation_status(
     Ok(())
 }
 
-fn decision_fallback_status(decision: &ArtifactDecisionRecord) -> &'static str {
+fn decision_fallback_status(
+    connection: &Connection,
+    decision: &ArtifactDecisionRecord,
+) -> Result<&'static str, AppError> {
     if decision.conflict_code.is_some() {
-        "failed"
-    } else {
-        match decision.decision.as_str() {
-            "reject" | "request_revision" => "idle",
-            "request_apply" if decision.apply_transaction_id.is_some() => "completed",
-            "confirm" | "request_apply" => "waiting_user",
-            _ => "idle",
+        return Ok("failed");
+    }
+    if decision.decision == "confirm" {
+        let acknowledged_report: bool = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM conversation_artifact_cards AS card
+                    JOIN result_artifacts AS artifact ON artifact.artifact_id = card.artifact_id
+                    WHERE card.card_id=?1 AND card.conversation_id=?2
+                      AND card.artifact_id=?3 AND artifact.artifact_type = card.artifact_type
+                      AND artifact.artifact_type IN ('quality_report', 'style_analysis')
+                )",
+                params![decision.card_id, decision.conversation_id, decision.artifact_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if acknowledged_report {
+            return Ok("completed");
         }
     }
+    Ok(match decision.decision.as_str() {
+        "reject" | "request_revision" => "idle",
+        "request_apply" if decision.apply_transaction_id.is_some() => "completed",
+        "confirm" | "request_apply" => "waiting_user",
+        _ => "idle",
+    })
 }
 
 fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskConversationRecord> {
+    let novel_id: Option<String> = row.get(1)?;
+    let scope_type: String = row.get(8)?;
+    let scope = match (scope_type.as_str(), novel_id.as_ref()) {
+        ("novel", Some(id)) => TaskScope::Novel { novel_id: id.clone() },
+        ("library", None) => {
+            let raw: String = row.get(9)?;
+            let source: Value = serde_json::from_str(&raw).map_err(|error| rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(error)))?;
+            TaskScope::Library {
+                source_id: source["sourceId"].as_str().ok_or(rusqlite::Error::InvalidQuery)?.to_string(),
+                source_hash: source["sourceHash"].as_str().ok_or(rusqlite::Error::InvalidQuery)?.to_string(),
+            }
+        }
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
     Ok(TaskConversationRecord {
         conversation_id: row.get(0)?,
-        novel_id: row.get(1)?,
+        novel_id,
+        scope,
         title: row.get(2)?,
         status: row.get(3)?,
         default_model: parse_json(row.get(4)?),
@@ -584,6 +668,7 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRunRecord> {
         updated_at: row.get(8)?,
         started_at: row.get(9)?,
         finished_at: row.get(10)?,
+        chapter_id: row.get(11)?,
     })
 }
 
@@ -619,6 +704,7 @@ fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationAr
         content: row.get(8)?,
         status: row.get(9)?,
         created_at: row.get(10)?,
+        candidate_ordinal: None,
     })
 }
 
@@ -668,7 +754,7 @@ pub fn create_initialized_conversation(
         .map_err(AppError::database)?;
     let conversation = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -690,7 +776,14 @@ pub fn list_conversations(
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
-    list_conversations_page(connection, novel_id, if include_archived { "all" } else { "active" }, "", limit, None)
+    list_conversations_page(
+        connection,
+        novel_id,
+        if include_archived { "all" } else { "active" },
+        "",
+        limit,
+        None,
+    )
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -710,24 +803,40 @@ pub fn list_conversations_page(
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
     if !["active", "archived", "all"].contains(&archive)
         || query.trim().chars().count() > 200
-        || cursor.is_some_and(|value| value.updated_at.is_empty() || value.conversation_id.is_empty())
+        || cursor
+            .is_some_and(|value| value.updated_at.is_empty() || value.conversation_id.is_empty())
     {
-        return Err(AppError::new("CONVERSATION_INPUT_INVALID", "任务搜索或分页参数无效", false));
+        return Err(AppError::new(
+            "CONVERSATION_INPUT_INVALID",
+            "任务搜索或分页参数无效",
+            false,
+        ));
     }
-    let mut statement = connection.prepare(
-        "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
-                c.created_at, c.updated_at, c.archived_at
+    let mut statement = connection
+        .prepare(
+            "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
+                c.created_at, c.updated_at, c.archived_at, c.scope_type, c.source_snapshot_json
          FROM task_conversations c JOIN novels n ON n.id=c.novel_id
          WHERE (?1 IS NULL OR c.novel_id=?1)
            AND (?2='all' OR (?2='active' AND c.archived_at IS NULL AND c.status<>'archived')
                 OR (?2='archived' AND (c.archived_at IS NOT NULL OR c.status='archived')))
            AND (?3='' OR instr(lower(c.title || ' ' || n.title), lower(?3))>0)
            AND (?4 IS NULL OR c.updated_at<?4 OR (c.updated_at=?4 AND c.conversation_id<?5))
-         ORDER BY c.updated_at DESC, c.conversation_id DESC LIMIT ?6"
-    ).map_err(AppError::database)?;
-    let rows = statement.query_map(params![novel_id, archive, query.trim(),
-        cursor.map(|value| value.updated_at.as_str()),
-        cursor.map(|value| value.conversation_id.as_str()), limit.clamp(1, 501)], conversation_from_row)
+         ORDER BY c.updated_at DESC, c.conversation_id DESC LIMIT ?6",
+        )
+        .map_err(AppError::database)?;
+    let rows = statement
+        .query_map(
+            params![
+                novel_id,
+                archive,
+                query.trim(),
+                cursor.map(|value| value.updated_at.as_str()),
+                cursor.map(|value| value.conversation_id.as_str()),
+                limit.clamp(1, 501)
+            ],
+            conversation_from_row,
+        )
         .map_err(AppError::database)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(AppError::database)
@@ -737,7 +846,7 @@ pub fn get_conversation(
     connection: &Connection,
     id: &str,
 ) -> Result<Option<TaskConversationRecord>, AppError> {
-    connection.query_row("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1", params![id], conversation_from_row).optional().map_err(AppError::database)
+    connection.query_row("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1", params![id], conversation_from_row).optional().map_err(AppError::database)
 }
 
 pub fn validate_task_runtime_scope(
@@ -758,12 +867,12 @@ pub fn validate_task_runtime_scope(
         .query_row(
             "SELECT novel_id FROM task_conversations WHERE conversation_id=?1",
             params![conversation_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()
         .map_err(AppError::database)?
         .ok_or_else(&scope_mismatch)?;
-    if authoritative_novel_id != novel_id {
+    if authoritative_novel_id.as_deref() != Some(novel_id) {
         return Err(scope_mismatch());
     }
     let authoritative_goal = connection
@@ -798,38 +907,36 @@ pub fn update_conversation_model(
     connection: &mut Connection,
     input: UpdateConversationModelInput,
 ) -> Result<TaskConversationRecord, AppError> {
-    let current = get_conversation(connection, &input.conversation_id)?
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let current = get_conversation(&transaction, &input.conversation_id)?
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?;
-    if let Some(current_model) = current.default_model.as_ref() {
-        if current_model == &input.default_model {
-            return Ok(current);
-        }
+    if current.archived_at.is_some() || current.status == "archived" {
         return Err(AppError::new(
-            "CONVERSATION_MODEL_LOCKED",
-            "任务模型已在创建时固定，当前会话结束前不能更换",
+            "CONVERSATION_ARCHIVED",
+            "归档任务不能更换模型，请先恢复任务",
             false,
         ));
     }
-    let has_facts: bool = connection
+    let has_active_run: bool = transaction
         .query_row(
             "SELECT EXISTS(
-                SELECT 1 FROM conversation_turns WHERE conversation_id=?1
-                UNION ALL
                 SELECT 1 FROM task_runs WHERE conversation_id=?1
+                AND status IN ('queued', 'running', 'cancel_requested')
             )",
             params![input.conversation_id],
             |row| row.get(0),
         )
         .map_err(AppError::database)?;
-    if has_facts {
+    if current.status == "running" || has_active_run {
         return Err(AppError::new(
-            "CONVERSATION_MODEL_LOCKED",
-            "任务模型必须在首个回合前固定",
+            "CONVERSATION_RUNNING",
+            "运行中的任务不能更换模型，请等待完成或停止任务",
             false,
         ));
     }
     let model = json_text(&input.default_model)?;
-    let changed = connection
+    let changed = transaction
         .execute(
             "UPDATE task_conversations SET default_model_json=?2, updated_at=?3 WHERE conversation_id=?1",
             params![input.conversation_id, model, input.updated_at],
@@ -842,8 +949,10 @@ pub fn update_conversation_model(
             false,
         ));
     }
-    get_conversation(connection, &input.conversation_id)?
-        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话更新后无法读取", false))
+    let updated = get_conversation(&transaction, &input.conversation_id)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话更新后无法读取", false))?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(updated)
 }
 
 pub fn rename_conversation(
@@ -874,7 +983,7 @@ pub fn set_conversation_archived(
     let transaction = connection.transaction().map_err(AppError::database)?;
     let current = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -914,7 +1023,7 @@ pub fn set_conversation_archived(
 
     let updated = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -1060,7 +1169,7 @@ pub fn create_run(
     }
     let snapshot = json_text(&input.model_snapshot)?;
     let transaction = connection.transaction().map_err(AppError::database)?;
-    let locked_model = transaction
+    let current_model = transaction
         .query_row(
             "SELECT default_model_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
@@ -1070,37 +1179,18 @@ pub fn create_run(
         .map_err(AppError::database)?
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
-    let local_conversational_model = input
-        .model_snapshot
-        .get("providerId")
-        .and_then(Value::as_str)
-        == Some("ans-local")
-        && input
-            .model_snapshot
-            .get("runtime")
-            .and_then(|runtime| runtime.get("adapterProtocol"))
-            .and_then(Value::as_str)
-            == Some("ans_local_conversation_v1");
-    if let Some(locked_model) = locked_model {
-        if !local_conversational_model && !model_lock_matches(&locked_model, &input.model_snapshot)
+    if let Some(current_model) = current_model {
+        // Only hydrate a legacy selection for this same identity. A retry's frozen
+        // model must never replace a different selection made for later turns.
+        if let Some(upgraded) =
+            upgrade_legacy_model_lock_endpoint(&current_model, &input.model_snapshot)
         {
-            return Err(AppError::new(
-                "TASK_RUN_MODEL_MISMATCH",
-                "运行模型与任务创建时固定的模型不一致",
-                false,
-            ));
-        }
-        if !local_conversational_model {
-            if let Some(upgraded) =
-                upgrade_legacy_model_lock_endpoint(&locked_model, &input.model_snapshot)
-            {
-                transaction
-                    .execute(
-                        "UPDATE task_conversations SET default_model_json=?2 WHERE conversation_id=?1",
-                        params![input.conversation_id, json_text(&upgraded)?],
-                    )
-                    .map_err(AppError::database)?;
-            }
+            transaction
+                .execute(
+                    "UPDATE task_conversations SET default_model_json=?2 WHERE conversation_id=?1",
+                    params![input.conversation_id, json_text(&upgraded)?],
+                )
+                .map_err(AppError::database)?;
         }
     }
     let scoped_turn: bool = transaction
@@ -1120,8 +1210,39 @@ pub fn create_run(
             false,
         ));
     }
+    let chapter_id = input
+        .chapter_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(chapter_id) = chapter_id.as_deref() {
+        // The frozen chapter must be a live chapter of the conversation's novel; a run
+        // bound to another book (or a deleted chapter) must not exist at all.
+        let scoped_chapter: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM chapters AS chapter
+                    JOIN task_conversations AS conversation
+                      ON conversation.novel_id = chapter.novel_id
+                    WHERE chapter.id=?1
+                      AND conversation.conversation_id=?2
+                      AND chapter.deleted_at IS NULL
+                )",
+                params![chapter_id, input.conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !scoped_chapter {
+            return Err(AppError::new(
+                "TASK_RUN_CHAPTER_SCOPE_MISMATCH",
+                "任务运行绑定的章节不属于当前作品或已删除",
+                false,
+            ));
+        }
+    }
     transaction
-        .execute("INSERT INTO task_runs (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?6)", params![input.run_id, input.conversation_id, input.turn_id, snapshot, input.worker_id, input.created_at])
+        .execute("INSERT INTO task_runs (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at, chapter_id) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?6, ?7)", params![input.run_id, input.conversation_id, input.turn_id, snapshot, input.worker_id, input.created_at, chapter_id])
         .map_err(AppError::database)?;
     transaction
         .execute("UPDATE task_conversations SET status='running', updated_at=?2 WHERE conversation_id=?1", params![input.conversation_id, input.created_at])
@@ -1133,7 +1254,14 @@ pub fn create_run(
 }
 
 pub fn get_run(connection: &Connection, id: &str) -> Result<Option<TaskRunRecord>, AppError> {
-    connection.query_row("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE run_id=?1", params![id], run_from_row).optional().map_err(AppError::database)
+    connection
+        .query_row(
+            &format!("SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE run_id=?1"),
+            params![id],
+            run_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)
 }
 
 pub fn get_turn_run_projection(
@@ -1155,13 +1283,12 @@ pub fn get_turn_run_projection(
         return Ok(None);
     };
     let runs = connection
-        .prepare(
-            "SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id,
-                    error, created_at, updated_at, started_at, finished_at
+        .prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS}
              FROM task_runs
              WHERE conversation_id=?1 AND turn_id=?2
-             ORDER BY created_at, rowid",
-        )
+             ORDER BY created_at, rowid"
+        ))
         .map_err(AppError::database)?
         .query_map(params![conversation_id, turn_id], run_from_row)
         .map_err(AppError::database)?
@@ -1597,6 +1724,9 @@ pub(crate) fn decision_from_row(
 }
 
 fn authorization_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewAuthorizationRecord> {
+    let raw:Option<String>=row.get(10)?;
+    let preview=raw.map(|raw|serde_json::from_str::<crate::services::task_authorization_contract::ReviewRenewalPreview>(&raw)
+        .map_err(|e|rusqlite::Error::FromSqlConversionFailure(10,rusqlite::types::Type::Text,Box::new(e)))).transpose()?;
     Ok(ReviewAuthorizationRecord {
         authorization_id: row.get(0)?,
         artifact_id: row.get(1)?,
@@ -1607,6 +1737,8 @@ fn authorization_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewAut
         issued_at: row.get(6)?,
         consumed_at: row.get(7)?,
         consumed_by_draft_id: row.get(8)?,
+        renewed_from_authorization_id:row.get(9)?,
+        review_draft_binding:preview.and_then(|preview|preview.saved_draft),
     })
 }
 
@@ -1658,7 +1790,7 @@ pub fn record_artifact_decision(
         reconcile_conversation_status(
             &transaction,
             &existing.conversation_id,
-            decision_fallback_status(&existing),
+            decision_fallback_status(&transaction, &existing)?,
             &existing.created_at,
         )?;
         transaction.commit().map_err(AppError::database)?;
@@ -1700,14 +1832,14 @@ pub fn record_artifact_decision(
     reconcile_conversation_status(
         &transaction,
         &decision.conversation_id,
-        decision_fallback_status(&decision),
+        decision_fallback_status(&transaction, &decision)?,
         &decision.created_at,
     )?;
     transaction.commit().map_err(AppError::database)?;
     Ok(decision)
 }
 
-fn validate_review_decision_scope(
+pub(crate) fn validate_review_decision_scope(
     connection: &Connection,
     decision_id: &str,
     artifact_id: &str,
@@ -1794,7 +1926,7 @@ fn validate_review_decision_scope(
             artifact.processing_status.as_str(),
             "valid" | "valid_with_warnings"
         )
-        || artifact.source_novel_id != novel_id
+        || artifact.source_novel_id.as_deref() != Some(novel_id)
         || artifact.source_chapter_id.as_deref() != Some(chapter_id)
         || artifact.content_hash != decision.artifact_hash
     {
@@ -1952,7 +2084,7 @@ pub fn ensure_chapter_summary_follow_up_for_authorization(
     let transaction = connection.transaction().map_err(AppError::database)?;
     let authorization = transaction
         .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
              FROM review_authorizations WHERE authorization_id=?1",
             params![authorization_id],
             authorization_from_row,
@@ -2024,145 +2156,15 @@ pub fn ensure_chapter_summary_follow_up_for_authorization(
     Ok(follow_up)
 }
 
-pub fn issue_review_authorization(
-    connection: &mut Connection,
-    authorization_id: &str,
-    decision_id: &str,
-    artifact_id: &str,
-    novel_id: &str,
-    chapter_id: &str,
-    issued_at: &str,
-) -> Result<ReviewAuthorizationRecord, AppError> {
-    let existing = connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE decision_id=?1",
-            params![decision_id],
-            authorization_from_row,
-        )
-        .optional()
-        .map_err(AppError::database)?;
-    if let Some(existing) = existing {
-        if existing.authorization_id != authorization_id
-            || existing.artifact_id != artifact_id
-            || existing.novel_id != novel_id
-            || existing.chapter_id != chapter_id
-        {
-            return Err(AppError::new(
-                "REVIEW_AUTHORIZATION_IDENTITY_CONFLICT",
-                "既有审阅授权与当前请求身份不一致",
-                false,
-            ));
-        }
-        validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
-        return Ok(existing);
-    }
-    validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
-    connection
-        .execute(
-            "INSERT INTO review_authorizations (
-                authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at
-             ) VALUES (?1,?2,?3,?4,?5,'issued',?6)",
-            params![
-                authorization_id,
-                artifact_id,
-                chapter_id,
-                novel_id,
-                decision_id,
-                issued_at
-            ],
-        )
-        .map_err(AppError::database)?;
-    connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)
-}
-
-pub fn consume_review_authorization(
-    connection: &mut Connection,
-    input: ConsumeReviewAuthorizationInput,
-) -> Result<ReviewAuthorizationRecord, AppError> {
-    let current = connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![input.authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)?;
-    if current.status == "consumed" {
-        if current.consumed_by_draft_id.as_deref() == Some(input.draft_id.as_str()) {
-            return Ok(current);
-        }
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_CONSUMED",
-            "审阅授权已被其他草稿消费",
-            false,
-        ));
-    }
-    if current.status != "issued" {
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_EXPIRED",
-            "审阅授权已失效",
-            false,
-        ));
-    }
-    let updated = connection
-        .execute(
-            "UPDATE review_authorizations
-             SET status='consumed', consumed_at=?2, consumed_by_draft_id=?3
-             WHERE authorization_id=?1 AND status='issued'",
-            params![input.authorization_id, input.consumed_at, input.draft_id],
-        )
-        .map_err(AppError::database)?;
-    if updated != 1 {
-        return Err(AppError::new(
-            "REVIEW_AUTHORIZATION_CONFLICT",
-            "审阅授权消费冲突",
-            false,
-        ));
-    }
-    connection
-        .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-             FROM review_authorizations WHERE authorization_id=?1",
-            params![input.authorization_id],
-            authorization_from_row,
-        )
-        .map_err(AppError::database)
-}
-
-pub fn get_review_authorization(
-    connection: &Connection,
-    authorization_id: &str,
-) -> Result<Option<ReviewAuthorizationRecord>, AppError> {
-    let result = connection.query_row(
-        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
-         FROM review_authorizations WHERE authorization_id=?1",
-        params![authorization_id],
-        authorization_from_row,
-    );
-    match result {
-        Ok(record) => Ok(Some(record)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(err) => Err(AppError::database(err)),
-    }
-}
-
 pub fn adopt_review_authorized_draft(
     connection: &mut Connection,
     input: AdoptReviewAuthorizedDraftInput,
 ) -> Result<AdoptReviewAuthorizedDraftResult, AppError> {
     let now = chrono::Utc::now().to_rfc3339();
-    let transaction = connection.transaction().map_err(AppError::database)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(AppError::database)?;
 
     let authorization = match transaction.query_row(
-        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
          FROM review_authorizations WHERE authorization_id=?1",
         params![&input.authorization_id],
         authorization_from_row,
@@ -2257,12 +2259,10 @@ pub fn adopt_review_authorized_draft(
             complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
             let summary_follow_up =
                 ensure_chapter_summary_follow_up(&transaction, &authorization, &draft.id, &now)?;
+            let result = AdoptReviewAuthorizedDraftResult { authorization, adopted_draft: draft, summary_follow_up };
+            crate::services::dsh::task_runtime::record_manual_adoption(&transaction, &result)?;
             transaction.commit().map_err(AppError::database)?;
-            return Ok(AdoptReviewAuthorizedDraftResult {
-                authorization,
-                adopted_draft: draft,
-                summary_follow_up,
-            });
+            return Ok(result);
         }
         return Err(AppError::new(
             "REVIEW_AUTHORIZATION_CONSUMED",
@@ -2278,6 +2278,10 @@ pub fn adopt_review_authorized_draft(
         ));
     }
 
+    validate_review_chapter_baseline(&transaction, &authorization.authorization_id, &authorization.novel_id, &authorization.chapter_id)?;
+    validate_review_rule_baseline(&transaction, &authorization.artifact_id, &authorization.novel_id)?;
+    crate::services::dsh::task_runtime::staged::validate_application_artifact(&transaction, &authorization.artifact_id)?;
+    crate::services::task_authorization_service::validate_review_draft_binding(&transaction, &authorization, &input.draft_id)?;
     let adopted_draft = crate::services::chapter_service::adopt_chapter_draft_in_transaction(
         &transaction,
         &input.draft_id,
@@ -2317,20 +2321,17 @@ pub fn adopt_review_authorized_draft(
 
     let updated_auth = transaction
         .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
              FROM review_authorizations WHERE authorization_id=?1",
             params![&input.authorization_id],
             authorization_from_row,
         )
         .map_err(AppError::database)?;
 
+    let result = AdoptReviewAuthorizedDraftResult { authorization: updated_auth, adopted_draft, summary_follow_up };
+    crate::services::dsh::task_runtime::record_manual_adoption(&transaction, &result)?;
     transaction.commit().map_err(AppError::database)?;
-
-    Ok(AdoptReviewAuthorizedDraftResult {
-        authorization: updated_auth,
-        adopted_draft,
-        summary_follow_up,
-    })
+    Ok(result)
 }
 
 pub fn get_bundle(
@@ -2342,7 +2343,7 @@ pub fn get_bundle(
         None => return Ok(None),
     };
     let mut turns = connection.prepare("SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at FROM conversation_turns WHERE conversation_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![id], turn_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-    let runs = connection.prepare("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE conversation_id=?1 ORDER BY created_at, rowid").map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+    let runs = connection.prepare(&format!("SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE conversation_id=?1 ORDER BY created_at, rowid")).map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     let mut tool_events = Vec::new();
     for run in &runs {
         let events = connection.prepare("SELECT event_id, run_id, sequence, tool_name, arguments_summary_json, status, duration_ms, error, result_json, created_at, finished_at, call_id FROM tool_call_events WHERE run_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![run.run_id], event_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
@@ -2350,7 +2351,7 @@ pub fn get_bundle(
     }
     let artifacts = connection.prepare("SELECT card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at FROM conversation_artifact_cards WHERE conversation_id=?1 ORDER BY created_at").map_err(AppError::database)?.query_map(params![id], artifact_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     let decisions = connection.prepare("SELECT decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision, idempotency_key, actor, target_type, target_id, base_revision, apply_transaction_id, conflict_code, created_at FROM artifact_decisions WHERE conversation_id=?1 ORDER BY created_at").map_err(AppError::database)?.query_map(params![id], decision_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-    let authorizations = connection.prepare("SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id FROM review_authorizations WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE conversation_id=?1) ORDER BY issued_at").map_err(AppError::database)?.query_map(params![id], authorization_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+    let authorizations = connection.prepare("SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json FROM review_authorizations WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE conversation_id=?1) ORDER BY issued_at").map_err(AppError::database)?.query_map(params![id], authorization_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     turns.shrink_to_fit();
     Ok(Some(TaskConversationBundle {
         conversation,
@@ -2369,7 +2370,7 @@ mod tests {
     use rusqlite::Connection;
     use serde_json::json;
 
-    fn connection() -> Connection {
+    pub(super) fn connection() -> Connection {
         let mut connection = Connection::open_in_memory().expect("connection");
         connection
             .execute_batch("PRAGMA foreign_keys=ON;")
@@ -2383,7 +2384,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_model_lock_accepts_hydrated_endpoint_but_new_locks_remain_strict() {
+    fn legacy_model_selection_hydrates_only_a_matching_endpoint_identity() {
         let legacy = json!({
             "providerId": "deepseek",
             "modelId": "deepseek-chat",
@@ -2461,6 +2462,7 @@ mod tests {
                 turn_id: first_turn.turn_id,
                 model_snapshot: hydrated,
                 worker_id: "legacy-worker-1".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
@@ -2479,41 +2481,36 @@ mod tests {
                 .and_then(Value::as_str),
             Some("https://api.deepseek.com/v1")
         );
-        let second_turn = append_turn(
-            &mut connection,
-            AppendTurnInput {
-                turn_id: "legacy-turn-2".to_string(),
-                conversation_id: conversation.conversation_id.clone(),
-                role: "user".to_string(),
-                content: "再继续".to_string(),
-                created_at: "2026-08-20T00:00:04Z".to_string(),
-            },
-        )
-        .expect("second legacy turn");
-        let mismatch = create_run(
-            &mut connection,
-            CreateRunInput {
-                run_id: "legacy-run-2".to_string(),
-                conversation_id: conversation.conversation_id,
-                turn_id: second_turn.turn_id,
-                model_snapshot: different_endpoint,
-                worker_id: "legacy-worker-2".to_string(),
-                created_at: "2026-08-20T00:00:05Z".to_string(),
-            },
-        )
-        .expect_err("upgraded legacy endpoint must remain locked");
-        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
     }
 
-    fn insert_valid_chapter_artifact(
+    pub(super) fn insert_valid_chapter_artifact(
+        connection: &Connection, artifact_id: &str, novel_id: &str, chapter_id: &str, content: &str,
+    ) -> String {
+        insert_valid_artifact_with_type(connection, artifact_id, novel_id, chapter_id, content, "chapter_text")
+    }
+
+    pub(super) fn insert_valid_artifact_with_type(
         connection: &Connection,
         artifact_id: &str,
         novel_id: &str,
         chapter_id: &str,
         content: &str,
+        artifact_type: &str,
     ) -> String {
         let content_hash = crate::repositories::large_text_repository::sha256(content);
         let task_id = format!("task-{artifact_id}");
+        // The task target trigger requires an owned, non-deleted chapter; make the fixture
+        // self-sufficient instead of depending on each caller having seeded one.
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+                 SELECT ?1, ?2, '夹具章节', 1, 'drafted', 0, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z'
+                 WHERE NOT EXISTS (SELECT 1 FROM chapters WHERE id = ?1)",
+                params![chapter_id, novel_id],
+            )
+            .expect("fixture chapter");
+        let frozen_rules = crate::services::world_rule_governance::rule_set_snapshot(connection, novel_id).expect("fixture frozen rules");
+        let target_hint = serde_json::json!({"nativeRuleSet": frozen_rules}).to_string();
         connection
             .execute_batch(
                 "PRAGMA foreign_keys=OFF;
@@ -2526,9 +2523,9 @@ mod tests {
                 task_id, task_type, novel_id, chapter_id, scope_type, status,
                 input_snapshot_id, context_snapshot_id, constraint_snapshot_id,
                 trace_id, operation_id, request_hash_version, request_hash,
-                expected_artifact_type, expected_artifact_schema_version, created_at, updated_at
+                expected_artifact_type, expected_artifact_schema_version, target_hint_json, created_at, updated_at
              ) VALUES (?1, 'chapter_generate', ?2, ?3, 'chapter', 'completed', ?4, ?5, ?6,
-                ?7, ?8, 1, ?9, 'chapter_text', 1, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
+                ?7, ?8, 1, ?9, ?10, 1, ?11, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
                 params![
                     &task_id,
                     novel_id,
@@ -2539,6 +2536,8 @@ mod tests {
                     format!("trace-{artifact_id}"),
                     format!("operation-{artifact_id}"),
                     "0".repeat(64),
+                    artifact_type,
+                    target_hint,
                 ],
             )
             .expect("insert artifact task fixture");
@@ -2548,7 +2547,7 @@ mod tests {
                 artifact_id, task_id, attempt_id, source_input_snapshot_id, artifact_type,
                 schema_version, raw_content_ref_id, source_novel_id, source_chapter_id,
                 content_hash, content_length, processing_status, created_at
-             ) VALUES (?1, ?2, ?3, ?4, 'chapter_text', 1, ?5, ?6, ?7, ?8, ?9, 'valid',
+             ) VALUES (?1, ?2, ?3, ?4, ?10, 1, ?5, ?6, ?7, ?8, ?9, 'valid',
                 '2026-08-21T00:00:00Z')",
                 params![
                     artifact_id,
@@ -2560,6 +2559,7 @@ mod tests {
                     chapter_id,
                     &content_hash,
                     content.chars().count() as i64,
+                    artifact_type,
                 ],
             )
             .expect("insert result artifact fixture");
@@ -2569,7 +2569,7 @@ mod tests {
         content_hash
     }
 
-    fn conversation_status(connection: &Connection, conversation_id: &str) -> String {
+    pub(super) fn conversation_status(connection: &Connection, conversation_id: &str) -> String {
         connection
             .query_row(
                 "SELECT status FROM task_conversations WHERE conversation_id=?1",
@@ -2577,6 +2577,136 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("conversation status")
+    }
+
+    #[test]
+    fn create_run_persists_the_frozen_chapter_and_rejects_foreign_or_deleted_chapters() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "INSERT INTO novels (id, title, outline, created_at, updated_at)
+                 VALUES ('novel-other', '其他小说', '', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                [],
+            )
+            .expect("other novel");
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at, deleted_at)
+                 VALUES ('chapter-owned', 'novel-conversation-test', '本书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL),
+                        ('chapter-deleted', 'novel-conversation-test', '已删章节', 2, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', '2026-08-21T00:00:00Z'),
+                        ('chapter-other', 'novel-other', '他书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL)",
+                [],
+            )
+            .expect("chapters");
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-chapter-binding".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "章节绑定".to_string(),
+                default_model: None,
+                created_at: "2026-08-20T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        let run_input = |run_id: &str, turn_id: &str, chapter_id: Option<&str>| CreateRunInput {
+            run_id: run_id.to_string(),
+            conversation_id: "conversation-chapter-binding".to_string(),
+            turn_id: turn_id.to_string(),
+            model_snapshot: json!({"providerId":"mock","modelId":"Mock","runtimeMode":"mock"}),
+            worker_id: "worker-binding".to_string(),
+            chapter_id: chapter_id.map(str::to_string),
+            created_at: "2026-08-20T00:00:01Z".to_string(),
+        };
+        let append_user_turn = |connection: &mut Connection, turn_id: &str| {
+            append_turn(
+                connection,
+                AppendTurnInput {
+                    turn_id: turn_id.to_string(),
+                    conversation_id: "conversation-chapter-binding".to_string(),
+                    role: "user".to_string(),
+                    content: "生成本章正文".to_string(),
+                    created_at: "2026-08-20T00:00:00Z".to_string(),
+                },
+            )
+            .expect("user turn")
+        };
+
+        append_user_turn(&mut connection, "turn-binding-1");
+        let foreign = create_run(
+            &mut connection,
+            run_input("run-foreign", "turn-binding-1", Some("chapter-other")),
+        )
+        .expect_err("another book's chapter must be rejected");
+        assert_eq!(foreign.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let deleted = create_run(
+            &mut connection,
+            run_input("run-deleted", "turn-binding-1", Some("chapter-deleted")),
+        )
+        .expect_err("a deleted chapter must be rejected");
+        assert_eq!(deleted.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let missing = create_run(
+            &mut connection,
+            run_input("run-missing", "turn-binding-1", Some("chapter-missing")),
+        )
+        .expect_err("an unknown chapter must be rejected");
+        assert_eq!(missing.code, "TASK_RUN_CHAPTER_SCOPE_MISMATCH");
+        let run_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM task_runs WHERE conversation_id='conversation-chapter-binding'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(run_count, 0, "rejected runs must not exist");
+
+        let bound = create_run(
+            &mut connection,
+            run_input("run-bound", "turn-binding-1", Some("  chapter-owned ")),
+        )
+        .expect("owned chapter");
+        assert_eq!(bound.chapter_id.as_deref(), Some("chapter-owned"));
+        let bundle = get_bundle(&connection, "conversation-chapter-binding")
+            .expect("bundle")
+            .expect("conversation exists");
+        assert_eq!(bundle.runs.len(), 1);
+        assert_eq!(bundle.runs[0].chapter_id.as_deref(), Some("chapter-owned"));
+        let serialized = serde_json::to_value(&bundle.runs[0]).expect("serialize run");
+        assert_eq!(
+            serialized.get("chapterId").and_then(Value::as_str),
+            Some("chapter-owned")
+        );
+        assert!(
+            connection
+                .execute(
+                    "UPDATE task_runs SET chapter_id='chapter-other' WHERE run_id='run-bound'",
+                    [],
+                )
+                .is_err(),
+            "the frozen chapter is part of the immutable run identity"
+        );
+        update_run(
+            &mut connection,
+            UpdateRunInput {
+                run_id: "run-bound".to_string(),
+                status: "failed".to_string(),
+                error: Some("上游失败".to_string()),
+                updated_at: "2026-08-20T00:00:02Z".to_string(),
+                started_at: None,
+                finished_at: Some("2026-08-20T00:00:02Z".to_string()),
+            },
+        )
+        .expect("fail run");
+
+        append_user_turn(&mut connection, "turn-binding-2");
+        let unbound = create_run(
+            &mut connection,
+            run_input("run-unbound", "turn-binding-2", Some("   ")),
+        )
+        .expect("blank chapter id means no binding");
+        assert_eq!(unbound.chapter_id, None);
+        let serialized = serde_json::to_value(&unbound).expect("serialize run");
+        assert!(serialized.get("chapterId").is_none());
     }
 
     #[test]
@@ -2721,16 +2851,6 @@ mod tests {
                 .and_then(Value::as_str),
             Some("deepseek-chat")
         );
-        let locked_error = update_conversation_model(
-            &mut connection,
-            UpdateConversationModelInput {
-                conversation_id: conversation.conversation_id.clone(),
-                default_model: json!({"providerId":"mock","modelId":"Mock"}),
-                updated_at: "2026-08-20T00:00:01Z".to_string(),
-            },
-        )
-        .expect_err("frozen model replacement must fail");
-        assert_eq!(locked_error.code, "CONVERSATION_MODEL_LOCKED");
         let turn = append_turn(
             &mut connection,
             AppendTurnInput {
@@ -2742,27 +2862,15 @@ mod tests {
             },
         )
         .expect("turn");
-        let mismatch = create_run(
-            &mut connection,
-            CreateRunInput {
-                run_id: "run-model-mismatch".to_string(),
-                conversation_id: conversation.conversation_id.clone(),
-                turn_id: turn.turn_id.clone(),
-                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
-                worker_id: "worker-model-mismatch".to_string(),
-                created_at: "2026-08-20T00:00:03Z".to_string(),
-            },
-        )
-        .expect_err("mismatched run model must fail");
-        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
         let run = create_run(
             &mut connection,
             CreateRunInput {
                 run_id: "run-1".to_string(),
                 conversation_id: conversation.conversation_id.clone(),
                 turn_id: turn.turn_id,
-                model_snapshot: conversation.default_model.clone().expect("locked model"),
+                model_snapshot: conversation.default_model.clone().expect("selected model"),
                 worker_id: "worker-1".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
@@ -2880,6 +2988,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-status".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-28T00:00:02Z".to_string(),
             },
         )
@@ -2957,6 +3066,7 @@ mod tests {
                     turn_id,
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: "worker-status".to_string(),
+                    chapter_id: None,
                     created_at: format!("2026-08-28T00:02:0{}Z", suffix.len() % 10),
                 },
             )
@@ -2998,6 +3108,7 @@ mod tests {
                 turn_id: recovery_turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-status".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-28T00:04:01Z".to_string(),
             },
         )
@@ -3241,6 +3352,7 @@ mod tests {
                     turn_id: turn.turn_id.clone(),
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: "worker-run-order".to_string(),
+                    chapter_id: None,
                     created_at: "2026-08-28T02:00:02.000Z".to_string(),
                 },
             )
@@ -3334,6 +3446,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-recovery".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-20T00:01:02Z".to_string(),
             },
         )
@@ -3442,6 +3555,7 @@ mod tests {
                     turn_id: turn_id.to_string(),
                     model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                     worker_id: format!("worker-{run_id}"),
+                    chapter_id: None,
                     created_at: "2026-08-20T01:00:02Z".to_string(),
                 },
             )
@@ -3542,6 +3656,7 @@ mod tests {
                 turn_id: turn.turn_id,
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-decision".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-21T00:00:02Z".to_string(),
             },
         )
@@ -4271,18 +4386,31 @@ mod tests {
     fn conversation_directory_filters_before_limit_and_pages_tied_timestamps() {
         let mut connection = connection();
         for index in 0..251 {
-            create_conversation(&mut connection, CreateConversationInput {
-                conversation_id: format!("page-{index:04}"),
-                novel_id: "novel-conversation-test".to_string(),
-                title: if index == 0 { "旧的待处理任务 100%".to_string() } else { format!("归档任务 {index}") },
-                default_model: None,
-                created_at: "2026-09-05T00:00:00Z".to_string(),
-            }).expect("create directory fixture");
+            create_conversation(
+                &mut connection,
+                CreateConversationInput {
+                    conversation_id: format!("page-{index:04}"),
+                    novel_id: "novel-conversation-test".to_string(),
+                    title: if index == 0 {
+                        "旧的待处理任务 100%".to_string()
+                    } else {
+                        format!("归档任务 {index}")
+                    },
+                    default_model: None,
+                    created_at: "2026-09-05T00:00:00Z".to_string(),
+                },
+            )
+            .expect("create directory fixture");
             if index > 0 {
-                set_conversation_archived(&mut connection, SetConversationArchivedInput {
-                    conversation_id: format!("page-{index:04}"), archived: true,
-                    updated_at: "2026-09-05T00:00:00Z".to_string(),
-                }).expect("archive fixture");
+                set_conversation_archived(
+                    &mut connection,
+                    SetConversationArchivedInput {
+                        conversation_id: format!("page-{index:04}"),
+                        archived: true,
+                        updated_at: "2026-09-05T00:00:00Z".to_string(),
+                    },
+                )
+                .expect("archive fixture");
             }
         }
         let active = list_conversations_page(&connection, None, "active", "", 100, None).unwrap();
@@ -4294,15 +4422,30 @@ mod tests {
         let mut cursor = None;
         let mut ids = std::collections::HashSet::new();
         loop {
-            let page = list_conversations_page(&connection, None, "all", "", 100, cursor.as_ref()).unwrap();
-            for row in &page { assert!(ids.insert(row.conversation_id.clone())); }
-            let Some(last) = page.last() else { break; };
-            cursor = Some(ConversationListCursor { updated_at: last.updated_at.clone(), conversation_id: last.conversation_id.clone() });
+            let page = list_conversations_page(&connection, None, "all", "", 100, cursor.as_ref())
+                .unwrap();
+            for row in &page {
+                assert!(ids.insert(row.conversation_id.clone()));
+            }
+            let Some(last) = page.last() else {
+                break;
+            };
+            cursor = Some(ConversationListCursor {
+                updated_at: last.updated_at.clone(),
+                conversation_id: last.conversation_id.clone(),
+            });
         }
         assert_eq!(ids.len(), 251);
-        assert!(list_conversations_page(&connection, Some("other-novel"), "all", "", 100, None).unwrap().is_empty());
+        assert!(
+            list_conversations_page(&connection, Some("other-novel"), "all", "", 100, None)
+                .unwrap()
+                .is_empty()
+        );
         assert!(list_conversations_page(&connection, None, "unknown", "", 100, None).is_err());
-        assert!(list_conversations_page(&connection, None, "all", &"字".repeat(201), 100, None).is_err());
+        assert!(
+            list_conversations_page(&connection, None, "all", &"字".repeat(201), 100, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -4384,6 +4527,7 @@ mod tests {
                 turn_id: "turn-management".to_string(),
                 model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
                 worker_id: "worker-management".to_string(),
+                chapter_id: None,
                 created_at: "2026-08-24T00:00:05Z".to_string(),
             },
         )

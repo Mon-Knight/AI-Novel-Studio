@@ -1,21 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkbenchTaskMenu } from './WorkbenchTaskMenu';
-import {
-  ArrowUpRight,
-  Check,
-  ChevronRight,
-  Ellipsis,
-  Library,
-  Plus,
-  Search,
-  X,
-} from 'lucide-react';
+import { Check, Ellipsis, Library, Search, X } from 'lucide-react';
 import type { Novel } from '../../types/novel';
 import type { TaskConversation } from '../../types/conversation';
-import { statusLabel } from './workbenchHelpers';
+import { formatRecentActivity, statusLabel } from './workbenchHelpers';
 import { WorkbenchDirectoryFeedback } from './WorkbenchDirectoryFeedback';
 import type { WorkbenchConversationDirectory } from '../../features/workbench/useWorkbenchConversationDirectory';
 import { isComposingKeyboardEvent } from '../../utils/keyboardEvent';
+import { SidebarFooter } from '../../components/layout/SidebarFooter';
+import { SidebarQuickActions } from '../../components/layout/SidebarQuickActions';
+import { WorkbenchProjectHeading } from './WorkbenchProjectHeading';
+import { Tooltip } from '../../components/common/Tooltip';
 
 interface WorkbenchNavigationProps {
   directory: WorkbenchConversationDirectory & { initializing: boolean };
@@ -29,6 +24,8 @@ interface WorkbenchNavigationProps {
   projectsError: string;
   conversationsError: string;
   creatingTask: boolean;
+  /** Increments when the shell asks the tree to focus its search field. */
+  searchFocusToken?: number;
   onCreateTask: () => void;
   onSelectProject: (novelId: string) => void;
   onSelectTask: (novelId: string, conversationId: string) => void;
@@ -54,20 +51,6 @@ function NavigationSkeleton() {
   );
 }
 
-function formatRecentActivity(value: string): string {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return '';
-  const elapsed = Math.max(0, Date.now() - timestamp);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (elapsed < minute) return '刚刚';
-  if (elapsed < hour) return `${Math.floor(elapsed / minute)}分钟前`;
-  if (elapsed < day) return `${Math.floor(elapsed / hour)}小时前`;
-  if (elapsed < 7 * day) return `${Math.floor(elapsed / day)}天前`;
-  return new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
-}
-
 export function WorkbenchNavigation({
   directory,
   novels,
@@ -80,6 +63,7 @@ export function WorkbenchNavigation({
   projectsError,
   conversationsError,
   creatingTask,
+  searchFocusToken = 0,
   onCreateTask,
   onSelectProject,
   onSelectTask,
@@ -98,8 +82,21 @@ export function WorkbenchNavigation({
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const handledSearchFocusTokenRef = useRef(0);
   const normalizedQuery = directory.displayQuery.trim().toLocaleLowerCase();
   const displayedArchive = directory.displayArchive;
+
+  useEffect(() => {
+    if (
+      searchFocusToken > handledSearchFocusTokenRef.current &&
+      !directory.initializing &&
+      searchInputRef.current
+    ) {
+      searchInputRef.current.focus({ preventScroll: true });
+      handledSearchFocusTokenRef.current = searchFocusToken;
+    }
+  }, [directory.initializing, searchFocusToken]);
 
   const visibleConversations = useMemo(
     () =>
@@ -218,28 +215,21 @@ export function WorkbenchNavigation({
   return (
     <aside className="workbench-tree" aria-label="小说项目与创作任务">
       <div className="workbench-tree-header">
-        <div>
-          <div className="workbench-eyebrow">创作工作台</div>
-          <h1>创作任务</h1>
-        </div>
-        <button
-          type="button"
-          className="workbench-new-task"
-          data-testid="workbench-create-task"
-          aria-label="新建创作任务"
-          aria-busy={creatingTask}
-          title="新建创作任务"
-          disabled={projectsLoading || conversationsLoading || creatingTask || novels.length === 0}
-          onClick={onCreateTask}
-        >
-          <Plus aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
+        <SidebarQuickActions
+          onNewTask={onCreateTask}
+          onSearch={() => searchInputRef.current?.focus()}
+          newTaskBusy={creatingTask}
+          newTaskDisabled={
+            projectsLoading || conversationsLoading || creatingTask || novels.length === 0
+          }
+        />
       </div>
 
       <div className="workbench-tree-tools">
         <label className="workbench-task-search">
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
           <input
+            ref={searchInputRef}
             type="search"
             aria-label="搜索创作任务"
             value={query}
@@ -297,47 +287,23 @@ export function WorkbenchNavigation({
             const collapsed = !query.trim() && collapsedProjects.has(novel.id);
             return (
               <section className="workbench-project" key={novel.id}>
-                <div className="workbench-project-heading">
-                  <button
-                    type="button"
-                    className="workbench-project-collapse"
-                    aria-label={`${collapsed ? '展开' : '收起'}${novel.title}的任务`}
-                    aria-expanded={!collapsed}
-                    disabled={Boolean(query.trim())}
-                    title={query.trim() ? '搜索结果保持展开' : undefined}
-                    onClick={() =>
-                      setCollapsedProjects((current) => {
-                        const next = new Set(current);
-                        if (next.has(novel.id)) next.delete(novel.id);
-                        else next.add(novel.id);
-                        return next;
-                      })
-                    }
-                  >
-                    <ChevronRight aria-hidden="true" size={14} strokeWidth={1.8} />
-                  </button>
-                  <button
-                    type="button"
-                    className={`workbench-project-row ${selectedNovelId === novel.id ? 'is-active' : ''}`}
-                    data-testid="workbench-project"
-                    data-novel-id={novel.id}
-                    data-selected={selectedNovelId === novel.id ? 'true' : 'false'}
-                    title={novel.title}
-                    onClick={() => onSelectProject(novel.id)}
-                  >
-                    <span className="workbench-project-mark" aria-hidden="true">
-                      {novel.title.slice(0, 1) || '书'}
-                    </span>
-                    <span className="workbench-project-title">{novel.title}</span>
-                    <span
-                      className="workbench-project-count"
-                      aria-label={`当前已载入${novelConversations.length}个任务`}
-                      title="当前查询已载入的任务数，不是项目总数"
-                    >
-                      {novelConversations.length}
-                    </span>
-                  </button>
-                </div>
+                <WorkbenchProjectHeading
+                  novelId={novel.id}
+                  title={novel.title}
+                  taskCount={novelConversations.length}
+                  current={selectedNovelId === novel.id}
+                  collapsed={collapsed}
+                  collapseDisabled={Boolean(query.trim())}
+                  onToggleCollapse={() =>
+                    setCollapsedProjects((current) => {
+                      const next = new Set(current);
+                      if (next.has(novel.id)) next.delete(novel.id);
+                      else next.add(novel.id);
+                      return next;
+                    })
+                  }
+                  onSelect={() => onSelectProject(novel.id)}
+                />
                 {!collapsed &&
                   novelConversations.map((conversation) => {
                     const running = runningConversationIds.has(conversation.conversationId);
@@ -350,6 +316,8 @@ export function WorkbenchNavigation({
                         ? 'running'
                         : conversation.status;
                     const isBusy = busyTaskId === conversation.conversationId;
+                    const updatedLabel = formatRecentActivity(conversation.updatedAt);
+                    const selected = selectedConversationId === conversation.conversationId;
                     return (
                       <div className="workbench-task-entry" key={conversation.conversationId}>
                         {renamingId === conversation.conversationId ? (
@@ -389,34 +357,46 @@ export function WorkbenchNavigation({
                           </div>
                         ) : (
                           <>
-                            <button
-                              type="button"
-                              className={`workbench-task-row ${selectedConversationId === conversation.conversationId ? 'is-active' : ''}`}
-                              data-testid="workbench-task"
-                              data-conversation-id={conversation.conversationId}
-                              data-status={displayStatus}
-                              data-selected={
-                                selectedConversationId === conversation.conversationId
-                                  ? 'true'
-                                  : 'false'
+                            <Tooltip
+                              boundarySelector=".workbench-tree"
+                              content={
+                                <>
+                                  <span className="ui-tooltip-title">{conversation.title}</span>
+                                  <span className="ui-tooltip-detail">
+                                    {statusLabel(displayStatus)}
+                                    {updatedLabel ? ` · 更新于 ${updatedLabel}` : ''}
+                                  </span>
+                                </>
                               }
-                              title={`${conversation.title} · ${statusLabel(displayStatus)}`}
-                              onClick={() => onSelectTask(novel.id, conversation.conversationId)}
                             >
-                              <span
-                                className={`workbench-status-dot is-${displayStatus}`}
-                                aria-hidden="true"
-                              />
-                              <span className="workbench-task-copy">
-                                <span className="workbench-task-title">{conversation.title}</span>
-                                <time dateTime={conversation.updatedAt}>
-                                  {formatRecentActivity(conversation.updatedAt)}
-                                </time>
-                              </span>
-                              <span className="workbench-task-status">
-                                {statusLabel(displayStatus)}
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                className={`workbench-task-row ${selected ? 'is-active' : ''}`}
+                                data-testid="workbench-task"
+                                data-conversation-id={conversation.conversationId}
+                                data-status={displayStatus}
+                                data-selected={selected ? 'true' : 'false'}
+                                aria-current={selected ? 'true' : undefined}
+                                aria-label={`${conversation.title}，${statusLabel(displayStatus)}${
+                                  updatedLabel ? `，更新于 ${updatedLabel}` : ''
+                                }${selected ? '，当前任务' : ''}`}
+                                onClick={() => onSelectTask(novel.id, conversation.conversationId)}
+                              >
+                                <span
+                                  className={`workbench-status-dot is-${displayStatus}`}
+                                  aria-hidden="true"
+                                />
+                                <span className="workbench-task-copy">
+                                  <span className="workbench-task-title">{conversation.title}</span>
+                                  {selected && (
+                                    <time dateTime={conversation.updatedAt}>{updatedLabel}</time>
+                                  )}
+                                </span>
+                                <span className="workbench-task-status">
+                                  {statusLabel(displayStatus)}
+                                </span>
+                              </button>
+                            </Tooltip>
                             <button
                               type="button"
                               className="workbench-task-menu-trigger"
@@ -472,11 +452,20 @@ export function WorkbenchNavigation({
         )}
       </div>
 
-      <button type="button" className="workbench-library-link" onClick={onOpenLibrary}>
-        <Library aria-hidden="true" size={14} strokeWidth={1.8} />
-        <span>管理小说作品</span>
-        <ArrowUpRight aria-hidden="true" size={13} strokeWidth={1.8} />
-      </button>
+      <SidebarFooter
+        className="workbench-tree-footer"
+        action={
+          <button
+            type="button"
+            className="workbench-library-link"
+            aria-label="管理小说作品"
+            title="管理小说作品"
+            onClick={onOpenLibrary}
+          >
+            <Library aria-hidden="true" size={15} strokeWidth={1.8} />
+          </button>
+        }
+      />
       {openMenuConversation && (
         <WorkbenchTaskMenu
           conversation={openMenuConversation}

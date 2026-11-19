@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ChapterGenerationSnapshot } from '../../types/generationContext';
+import { normalizeChapterEngineeringState } from '../engineering/chapterEngineeringService';
 import type { AiSettings } from '../../types/ai';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import type { ChapterGenerationExecutionInput } from '../ai/chapterGenerationExecutionService';
@@ -96,6 +97,135 @@ const providerRequestEvidence: AiProviderRequestEvidence = {
 };
 
 const inRangeChapterCandidate = '正'.repeat(3_000);
+
+test('writer binds an explicit older revision source and distinguishes browser wrapper from prose hash', async () => {
+  const sourceText = 'SOURCE_CANDIDATE_A_CANARY';
+  const sourceBodyHash = await computeContentSha256(sourceText);
+  const source = {
+    conversationId: 'conversation-1',
+    novelId: 'novel-001',
+    chapterId: 'chapter-003',
+    cardId: 'card-a',
+    artifactId: 'artifact-a',
+    artifactHash: 'e'.repeat(64),
+    artifactType: 'chapter_text',
+    title: '旧候选 A',
+  };
+  const calls: ChapterGenerationExecutionInput[] = [];
+  const writer = createTestWorkbenchChapterWriter({
+    getSettings: () => baseSettings,
+    loadAdoptedPreviousChapter: noPreviousAdoptedChapter,
+    compileContext: async (input) => {
+      assert.equal(input.currentEditorContent, sourceText);
+      return snapshot;
+    },
+    executeGeneration: async (input) => {
+      calls.push(input);
+      return {
+        persistence: 'ephemeral_browser',
+        text: inRangeChapterCandidate,
+        provider: {
+          text: inRangeChapterCandidate,
+          providerId: 'mock',
+          modelId: 'Frozen Mock',
+          durationMs: 1,
+        },
+      };
+    },
+  });
+  const input = {
+    novelId: 'novel-001',
+    chapterId: 'chapter-003',
+    goal: '按旧候选修改',
+    mode: 'generate' as const,
+    previousCandidateText: sourceText,
+    revisionSource: source,
+    revisionSourceContentHash: sourceBodyHash,
+    modelSnapshot: frozenModel,
+  };
+  const result = await writer.generate(input);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].taskInput.parentArtifactId, 'artifact-a');
+  assert.equal(calls[0].taskInput.derivationType, 'revision');
+  assert.equal(calls[0].taskInput.sourceContentHash, sourceBodyHash);
+  assert.equal(
+    (calls[0].taskInput.revisionSource as typeof source).artifactHash,
+    source.artifactHash,
+  );
+  assert.equal(result.integrityReview?.checks.semanticRules, 'not_checked');
+  assert.equal(
+    result.integrityReview?.scope.candidateHash,
+    await computeContentSha256(result.text),
+  );
+  await assert.rejects(
+    writer.generate({ ...input, revisionSourceContentHash: undefined }),
+    /修订来源/u,
+  );
+  await assert.rejects(
+    writer.generate({ ...input, previousCandidateText: 'CHANGED_CANDIDATE' }),
+    /修订来源/u,
+  );
+  await assert.rejects(
+    writer.generate({ ...input, revisionSource: { ...source, chapterId: 'other' } }),
+    /修订来源/u,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test('writer freezes a task word target before generation and validates against that same target', async () => {
+  const engineering = normalizeChapterEngineeringState({
+    id: 'engineering-old',
+    novelId: 'novel-001',
+    chapterId: 'chapter-003',
+    status: 'active',
+    chapterCard: { targetWordCount: 1000 },
+  })!;
+  let calls = 0;
+  const text = '正'.repeat(3200);
+  const writer = createTestWorkbenchChapterWriter({
+    getSettings: () => baseSettings,
+    loadAdoptedPreviousChapter: noPreviousAdoptedChapter,
+    compileContext: async (input) => {
+      assert.equal(input.targetWordCount, 3200);
+      return {
+        ...snapshot,
+        compiledContext: {
+          ...snapshot.compiledContext,
+          baseContext: {
+            ...snapshot.compiledContext.baseContext,
+            targetWordCount: input.targetWordCount,
+          },
+          activeEngineeringState: engineering,
+        },
+      };
+    },
+    executeGeneration: async (input) => {
+      calls += 1;
+      assert.equal(input.taskInput.targetWordCount, 3200);
+      assert.match(JSON.stringify(input.request.messages), /目标字数：3200/u);
+      assert.doesNotMatch(JSON.stringify(input.request.messages), /目标字数：1000/u);
+      assert.equal(input.settings.maxTokens, frozenModel.options.maxTokens);
+      return {
+        persistence: 'ephemeral_browser',
+        text,
+        provider: { text, providerId: 'mock', modelId: 'Frozen Mock', durationMs: 1 },
+      };
+    },
+  });
+  const result = await writer.generate({
+    novelId: 'novel-001',
+    chapterId: 'chapter-003',
+    goal: '生成本章正文',
+    targetWordCount: 3200,
+    mode: 'generate',
+    modelSnapshot: frozenModel,
+  });
+  assert.equal(result.targetWordCount, 3200);
+  assert.equal(result.finalWordCount, 3200);
+  assert.equal(result.lengthRepairCount, 0);
+  assert.equal(calls, 1);
+  assert.equal(snapshot.compiledContext.baseContext.targetWordCount, 3000);
+});
 
 test('semantic review warnings preserve the candidate with no automatic Provider rewrite', async () => {
   const samples = [
@@ -1587,6 +1717,31 @@ test('snapshot compiles multiple world settings, frozen profiles and reference c
         worldBackground: '主世界设定 CANARY_WORLD_PRIMARY：月潮决定城门开放时刻。',
         chapterSettings: '- 补充设定 CANARY_WORLD_SECONDARY：潮汐档案只能由守钟人调阅。',
         ruleSystems: 'RULE_CANARY：守钟人只能在月潮退去后调阅档案。',
+        ruleSystemCoverage: {
+          schemaVersion: 'generation_rule_coverage_v1',
+          novelId: 'novel-001',
+          status: 'complete',
+          requiredCount: 1,
+          includedCount: 1,
+          sourceIds: ['rule-001'],
+          projectionHash: await computeContentSha256(
+            'RULE_CANARY：守钟人只能在月潮退去后调阅档案。',
+          ),
+        },
+        worldSettingCoverage: {
+          schemaVersion: 'generation_rule_coverage_v1',
+          novelId: 'novel-001',
+          status: 'complete',
+          requiredCount: 2,
+          includedCount: 2,
+          sourceIds: ['world-primary-001', 'world-secondary-001'],
+          projectionHash: await computeContentSha256(
+            JSON.stringify({
+              worldBackground: '主世界设定 CANARY_WORLD_PRIMARY：月潮决定城门开放时刻。',
+              chapterSettings: '- 补充设定 CANARY_WORLD_SECONDARY：潮汐档案只能由守钟人调阅。',
+            }),
+          ),
+        },
         worldSettingSources: [
           {
             id: 'world-primary-001',

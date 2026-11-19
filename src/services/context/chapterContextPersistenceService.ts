@@ -20,6 +20,7 @@ import {
   mapCharacterStateFromTauriDto,
   toTauriCharacterStateInput,
 } from './characterStateService';
+import { assertSummaryContextEligible } from '../ai/summaryApplicationPolicy';
 import { mapContextRecordFromTauriDto } from './contextRecordService';
 
 const CONTEXT_RECORDS_STORAGE_KEY = 'ai_novel_studio_context_records';
@@ -307,6 +308,12 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
 export const chapterContextPersistenceService = {
   async save(input: SaveChapterContextBundleInput): Promise<SaveChapterContextBundleResult> {
     normalizeIdentity(input);
+    if (
+      input.summary.enabled !== false ||
+      input.contextRecords.some((record) => record.isActive !== false) ||
+      input.characterStates.length > 0
+    )
+      assertSummaryContextEligible(input.summary.validationResult, input.summary.validationStatus);
     if (getDbMode() === 'tauri') {
       const preparedContexts = input.contextRecords.map((item) => ({
         ...item,

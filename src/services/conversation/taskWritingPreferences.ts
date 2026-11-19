@@ -1,0 +1,26 @@
+import type { TaskRuntimeInput } from './taskRuntimeAdapter';
+import { taskConversationService } from './taskConversationService';
+import {
+  composeWorkbenchInstruction,
+  deriveTaskConstraintBrief,
+  summarizeTaskConstraintBrief,
+} from './taskConstraintBrief';
+import { resolveTaskWordTarget } from './taskWordTarget';
+import { decodeWorkbenchTurnContent } from './workbenchTurnOrigin';
+
+export async function prepareTaskWritingPreferences(input: TaskRuntimeInput) {
+  const bundle = await taskConversationService.get(input.conversationId, {
+    hydrateArtifacts: false,
+  });
+  if (!bundle || bundle.conversation.novelId !== input.novelId) {
+    throw new Error('写章任务对话不存在或不属于当前作品。');
+  }
+  const brief = deriveTaskConstraintBrief(bundle.turns, input.turnId);
+  const stored = bundle.turns.find((turn) => turn.turnId === input.turnId && turn.role === 'user');
+  const targetGoal = stored ? decodeWorkbenchTurnContent(stored.content).content : input.goal;
+  return {
+    writerInstruction: composeWorkbenchInstruction(input.goal, brief.constraints),
+    taskConstraints: brief.entries.length > 0 ? summarizeTaskConstraintBrief(brief) : undefined,
+    targetWordCount: resolveTaskWordTarget(targetGoal, bundle.turns, input.turnId),
+  };
+}

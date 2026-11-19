@@ -1,0 +1,1429 @@
+{
+  "plan": {
+    "files": [
+      ".cursor/rules/update-release-exe.mdc",
+      ".github/workflows/release.yml",
+      ".github/workflows/security.yml",
+      ".github/workflows/windows-desktop-e2e.yml",
+      ".gitignore",
+      "AGENTS.md",
+      "CHANGELOG.md",
+      "README.md",
+      "docs/agent-workflow.md",
+      "docs/architecture/conversational-creative-workbench.md",
+      "docs/architecture/provider-execution-pipeline.md",
+      "docs/feature-gap-analysis-v3.7.0.md",
+      "docs/technical/desktop-build.md",
+      "docs/technical/desktop-e2e.md",
+      "docs/technical/testing.md",
+      "docs/ui-reference.md",
+      "package-lock.json",
+      "package.json",
+      "reports/frontend-design-audit-2026-10-19.md",
+      "reports/frontend-redesign-proof-2026-10-19.html",
+      "reports/t01-ORIG_HEAD-backup-20260910.txt",
+      "reports/t01-commit-msg-api-source.txt",
+      "reports/t01-commit-msg-reconstruct.txt",
+      "reports/t01-index-backup-20260910.bin",
+      "reports/t01-recovery-plan-2026-09-10.md",
+      "reports/t01-reflog-HEAD-backup-20260910.txt",
+      "reports/t06-t12-handoff-commit-plan-2026-09-10.md",
+      "reports/tauri2-migration-2026-10-28.md",
+      "reports/ui-detail-refinement/after-1024x700.json",
+      "reports/ui-detail-refinement/after-1024x700.png",
+      "reports/ui-detail-refinement/after-1440x900.json",
+      "reports/ui-detail-refinement/after-1440x900.png",
+      "reports/ui-detail-refinement/after-focus-1024x700.json",
+      "reports/ui-detail-refinement/after-focus-1024x700.png",
+      "reports/ui-detail-refinement/after-hover-1024x700.png",
+      "reports/ui-detail-refinement/after-light-1024x700-copy.png",
+      "reports/ui-detail-refinement/after-light-1024x700.png",
+      "reports/ui-detail-refinement/after-light-contrast-1024x700.json",
+      "reports/ui-detail-refinement/after-model-unavailable-1024x700.json",
+      "reports/ui-detail-refinement/after-model-unavailable-1024x700.png",
+      "reports/ui-detail-refinement/baseline-1024x700.json",
+      "reports/ui-detail-refinement/baseline-1024x700.png",
+      "reports/ui-detail-refinement/baseline-1440x900.json",
+      "reports/ui-detail-refinement/baseline-1440x900.png",
+      "reports/ui-detail-refinement/baseline-model-unavailable-1024x700.json",
+      "reports/ui-detail-refinement/baseline-model-unavailable-1024x700.png",
+      "reports/ui-detail-refinement/diagnostic-startup.png",
+      "reports/ui-detail-refinement/ui-refinement-baseline.browser.spec.ts",
+      "reports/ui-detail-refinement/ui-refinement-diagnostic.browser.spec.ts",
+      "reports/ui-detail-refinement/vite-smoke.png",
+      "reports/ui-detail-refinement/wdio.local.conf.ts",
+      "reports/updater-verification-and-summary-validation-2026-10-28.md",
+      "reports/ux-round2-baseline/status-before.txt",
+      "reports/ux-round2-baseline/tracked-before.patch",
+      "reports/ux-round2-validation/cargo-check-039-after.exit.txt",
+      "reports/ux-round2-validation/cargo-check-039-before.exit.txt",
+      "reports/ux-round2-validation/cargo-test-migrations-2.exit.txt",
+      "reports/ux-round2-validation/cargo-test-migrations-3.exit.txt",
+      "reports/ux-round2-validation/cargo-test-migrations.exit.txt",
+      "reports/ux-round2-validation/desktop-ux-round2-plan.md",
+      "reports/ux-round2-validation/desktop-ux-round2/candidate-first-screen.json",
+      "reports/ux-round2-validation/desktop-ux-round2/candidate-first-screen.png",
+      "reports/ux-round2-validation/desktop-ux-round2/focus-ctrl-k-search.png",
+      "reports/ux-round2-validation/desktop-ux-round2/focus-hidden-tree-and-panel.png",
+      "reports/ux-round2-validation/desktop-ux-round2/focus-restored.png",
+      "reports/ux-round2-validation/desktop-ux-round2/focus-round-trip.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-entered.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-ctrl-k.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-frame-bar.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-toggle.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-pinned-1440.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1024.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1440.json",
+      "reports/ux-round2-validation/desktop-ux-round2/panel-geometry.json",
+      "reports/ux-round2-validation/desktop-ux-round2/panel-pinned-1440x900.png",
+      "reports/ux-round2-validation/desktop-ux-round2/panel-transient-1024x900.png",
+      "reports/ux-round2-validation/desktop-ux-round2/panel-transient-1440x900.png",
+      "reports/ux-round2-validation/desktop-ux-round2/read-group-expanded.png",
+      "reports/ux-round2-validation/desktop-ux-round2/read-group.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-candidate-first-screen.png",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-four-states.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-four-states-pinned.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-pinned-dock.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-transient-overlay.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-panel-states.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-pinned-dock.png",
+      "reports/ux-round2-validation/desktop-ux-round2/world-form-first-screen.png",
+      "reports/ux-round2-validation/desktop-ux-round2/world-form-native-save.json",
+      "reports/ux-round2-validation/desktop-ux-round2/world-form-preview-full-text.png",
+      "reports/ux-round2-validation/novel-detail-all.exit.txt",
+      "reports/ux-round2-validation/novel-detail-eight.exit.txt",
+      "reports/ux-round2-validation/novel-detail-eslint.exit.txt",
+      "reports/ux-round2-validation/novel-detail-page.exit.txt",
+      "reports/ux-round2-validation/novel-detail-prettier.exit.txt",
+      "reports/ux-round2-validation/summary.txt",
+      "reports/ux-round2-validation/visual/geometry-metrics-ui-optimization.json",
+      "reports/ux-round2-validation/visual/geometry-metrics-workbench-layout.json",
+      "reports/ux-round2-validation/visual/ui-candidate-first-screen-1440x900.png",
+      "reports/ux-round2-validation/visual/ui-focus-1024x700.png",
+      "reports/ux-round2-validation/visual/ui-focus-1280x820.png",
+      "reports/ux-round2-validation/visual/ui-focus-1440x900.png",
+      "reports/ux-round2-validation/visual/ui-focus-2560x1440.png",
+      "reports/ux-round2-validation/visual/ui-panel-pinned-1024x700.png",
+      "reports/ux-round2-validation/visual/ui-panel-pinned-1280x820.png",
+      "reports/ux-round2-validation/visual/ui-panel-pinned-1440x900.png",
+      "reports/ux-round2-validation/visual/ui-panel-pinned-2560x1440.png",
+      "reports/ux-round2-validation/visual/workbench-candidate-card-1280x820.png",
+      "reports/ux-round2-validation/visual/workbench-focus-1024x700.png",
+      "reports/ux-round2-validation/visual/workbench-focus-1440x900.png",
+      "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1024x700.png",
+      "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1280x820.png",
+      "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1440x900.png",
+      "reports/ux-round2-validation/visual/workbench-pinned-collapsed-2560x1440.png",
+      "reports/ux-round2-validation/visual/workbench-read-disclosure-1440x900.png",
+      "reports/ux-round2-validation/visual/workbench-read-disclosure-expanded-1440x900.png",
+      "reports/ux-round2-validation/visual/workbench-transient-1024x700.png",
+      "reports/ux-round2-validation/visual/workbench-transient-1280x820.png",
+      "reports/ux-round2-validation/visual/workbench-transient-1440x900.png",
+      "reports/ux-round2-validation/visual/workbench-transient-2560x1440.png",
+      "rust-toolchain.toml",
+      "scripts/agent-workflow/check_docs_sync.ps1",
+      "scripts/agent-workflow/check_version_sync.ps1",
+      "scripts/e2e/real-conversation-acceptance-profile.test.ts",
+      "scripts/e2e/real-conversation-acceptance-profile.ts",
+      "scripts/e2e/run-e2e.ts",
+      "scripts/e2e/run-real-conversation-acceptance.ts",
+      "scripts/e2e/run-writing-fault-injection.mjs",
+      "scripts/e2e/run-writing-fault-injection.test.mjs",
+      "scripts/release/build-release-manifest.mjs",
+      "scripts/release/build-release-manifest.test.mjs",
+      "scripts/release/bump-version.mjs",
+      "scripts/release/channel-publication.mjs",
+      "scripts/release/channel-publication.test.mjs",
+      "scripts/release/release-artifacts.mjs",
+      "scripts/release/release-artifacts.test.mjs",
+      "scripts/release/release-fixtures.mjs",
+      "scripts/release/select-release-artifacts.mjs",
+      "scripts/release/select-release-channel.test.mjs",
+      "src-tauri/Cargo.lock",
+      "src-tauri/Cargo.toml",
+      "src-tauri/capabilities/desktop.json",
+      "src-tauri/capabilities/migrated.json",
+      "src-tauri/src/ai.rs",
+      "src-tauri/src/commands/app_update.rs",
+      "src-tauri/src/main.rs",
+      "src-tauri/src/services/dsh/commands.rs",
+      "src-tauri/src/window_state.rs",
+      "src-tauri/tauri.conf.json",
+      "src/components/common/Tooltip.test.tsx",
+      "src/components/common/Tooltip.tsx",
+      "src/components/right-dock/panels/ChapterSummaryPanelView.tsx",
+      "src/components/right-dock/panels/ChapterSummaryValidationNotice.tsx",
+      "src/components/workspace/ChapterSummaryDetails.tsx",
+      "src/hooks/useWindowChrome.ts",
+      "src/hooks/useWorkspaceLeaveGuard.ts",
+      "src/pages/Workbench/WorkbenchComposer.test.tsx",
+      "src/pages/Workbench/WorkbenchComposer.tsx",
+      "src/pages/Workbench/WorkbenchGoalBrief.tsx",
+      "src/pages/Workbench/WorkbenchModelRecoveryNotice.tsx",
+      "src/pages/Workbench/WorkbenchNavigation.test.tsx",
+      "src/pages/Workbench/WorkbenchNavigation.tsx",
+      "src/pages/Workbench/WorkbenchProjectHeading.tsx",
+      "src/pages/Workbench/WorkbenchRouteFallback.tsx",
+      "src/services/ai/aiCancellation.test.ts",
+      "src/services/ai/aiExecutionPipeline.ts",
+      "src/services/ai/chapterSummaryGrounding.test.ts",
+      "src/services/ai/mockAiClient.ts",
+      "src/services/ai/mockChapterSummary.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/services/ai/summaryValidator.ts",
+      "src/services/context/chapterContextPersistence.test.ts",
+      "src/services/context/worldStateTimeline.test.ts",
+      "src/services/conversation/workbenchModelAvailability.test.ts",
+      "src/services/conversation/workbenchModelAvailability.ts",
+      "src/services/database/db.ts",
+      "src/services/dsh/taskRuntimeService.test.ts",
+      "src/services/tauri/desktopSecurityContract.test.mjs",
+      "src/services/tauri/e2eBridge.ts",
+      "src/services/tauri/e2eBridgeSecurity.test.mjs",
+      "src/services/tauri/e2eNetworkGuard.ts",
+      "src/services/tauri/runtime.ts",
+      "src/services/tauri/scopedDesktopFs.test.ts",
+      "src/services/tauri/scopedDesktopFs.ts",
+      "src/services/update/appUpdateService.ts",
+      "src/styles/global.css",
+      "src/styles/variables.css",
+      "src/styles/workbench-refinement.css",
+      "src/test/components/ChapterSummaryWorkflowNotice.test.tsx",
+      "src/test/components/FrameBarWindowChrome.test.tsx",
+      "src/test/references/ReferenceImportCard.test.tsx",
+      "src/test/workspace-reliability/useWorkspaceLeaveGuard.test.tsx",
+      "src/types/chapterSummary.ts",
+      "src/utils/nativeDialog.ts",
+      "src/utils/nativeNotification.ts",
+      "tests/e2e/chapter-context-persistence.spec.ts",
+      "tests/e2e/tauri2-migration-regression.spec.ts",
+      "tests/e2e/workbench-ui-detail-refinement.spec.ts",
+      "tests/real-acceptance/conversation-60000.spec.ts",
+      "tests/real-acceptance/production-app-helpers.ts"
+    ],
+    "reasons": [
+      {
+        "file": ".cursor/rules/update-release-exe.mdc",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": ".github/workflows/release.yml",
+        "scope": "CI verification graph",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": ".github/workflows/security.yml",
+        "scope": "CI verification graph",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": ".github/workflows/windows-desktop-e2e.yml",
+        "scope": "CI verification graph",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": ".gitignore",
+        "scope": "repository configuration",
+        "evidence": "diff check"
+      },
+      {
+        "file": "AGENTS.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "CHANGELOG.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "README.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/agent-workflow.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/architecture/conversational-creative-workbench.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/architecture/provider-execution-pipeline.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/feature-gap-analysis-v3.7.0.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/technical/desktop-build.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/technical/desktop-e2e.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/technical/testing.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "docs/ui-reference.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "package-lock.json",
+        "scope": "frontend dependencies and build configuration",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "package.json",
+        "scope": "package manifest fields",
+        "evidence": "Changed manifest fields: scripts, dependencies, devDependencies"
+      },
+      {
+        "file": "reports/frontend-design-audit-2026-10-19.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/frontend-redesign-proof-2026-10-19.html",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-ORIG_HEAD-backup-20260910.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-commit-msg-api-source.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-commit-msg-reconstruct.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-index-backup-20260910.bin",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-recovery-plan-2026-09-10.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t01-reflog-HEAD-backup-20260910.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/t06-t12-handoff-commit-plan-2026-09-10.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/tauri2-migration-2026-10-28.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-1440x900.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-focus-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-focus-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-hover-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-light-1024x700-copy.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-light-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-light-contrast-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-model-unavailable-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/after-model-unavailable-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-1440x900.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-model-unavailable-1024x700.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/baseline-model-unavailable-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/diagnostic-startup.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/ui-refinement-baseline.browser.spec.ts",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/ui-refinement-diagnostic.browser.spec.ts",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/vite-smoke.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ui-detail-refinement/wdio.local.conf.ts",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/updater-verification-and-summary-validation-2026-10-28.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-baseline/status-before.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-baseline/tracked-before.patch",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/cargo-check-039-after.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/cargo-check-039-before.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/cargo-test-migrations-2.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/cargo-test-migrations-3.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/cargo-test-migrations.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2-plan.md",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/candidate-first-screen.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/candidate-first-screen.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/focus-ctrl-k-search.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/focus-hidden-tree-and-panel.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/focus-restored.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/focus-round-trip.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-entered.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-ctrl-k.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-frame-bar.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-toggle.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-pinned-1440.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1024.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1440.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/panel-geometry.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/panel-pinned-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/panel-transient-1024x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/panel-transient-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/read-group-expanded.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/read-group.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-candidate-first-screen.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-four-states.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-four-states-pinned.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-pinned-dock.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-transient-overlay.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-panel-states.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/repair-pinned-dock.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/world-form-first-screen.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/world-form-native-save.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/desktop-ux-round2/world-form-preview-full-text.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/novel-detail-all.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/novel-detail-eight.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/novel-detail-eslint.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/novel-detail-page.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/novel-detail-prettier.exit.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/summary.txt",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/geometry-metrics-ui-optimization.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/geometry-metrics-workbench-layout.json",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-candidate-first-screen-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-focus-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-focus-1280x820.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-focus-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-focus-2560x1440.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-panel-pinned-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-panel-pinned-1280x820.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-panel-pinned-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/ui-panel-pinned-2560x1440.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-candidate-card-1280x820.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-focus-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-focus-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1280x820.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-pinned-collapsed-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-pinned-collapsed-2560x1440.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-read-disclosure-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-read-disclosure-expanded-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-transient-1024x700.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-transient-1280x820.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-transient-1440x900.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "reports/ux-round2-validation/visual/workbench-transient-2560x1440.png",
+        "scope": "documentation",
+        "evidence": "docs-sync; version sync only where applicable"
+      },
+      {
+        "file": "rust-toolchain.toml",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/agent-workflow/check_docs_sync.ps1",
+        "scope": "development tooling",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/agent-workflow/check_version_sync.ps1",
+        "scope": "development tooling",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/e2e/real-conversation-acceptance-profile.test.ts",
+        "scope": "changed unit test",
+        "evidence": "scripts/e2e/real-conversation-acceptance-profile.test.ts"
+      },
+      {
+        "file": "scripts/e2e/real-conversation-acceptance-profile.ts",
+        "scope": "desktop harness",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "scripts/e2e/run-e2e.ts",
+        "scope": "desktop harness",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/e2e/run-real-conversation-acceptance.ts",
+        "scope": "desktop harness",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/e2e/run-writing-fault-injection.mjs",
+        "scope": "isolated writing fault carrier",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "scripts/e2e/run-writing-fault-injection.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "scripts/e2e/run-writing-fault-injection.test.mjs"
+      },
+      {
+        "file": "scripts/release/build-release-manifest.mjs",
+        "scope": "release tooling",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "scripts/release/build-release-manifest.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "scripts/release/build-release-manifest.test.mjs"
+      },
+      {
+        "file": "scripts/release/bump-version.mjs",
+        "scope": "release tooling",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/release/channel-publication.mjs",
+        "scope": "release tooling",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "scripts/release/channel-publication.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "scripts/release/channel-publication.test.mjs"
+      },
+      {
+        "file": "scripts/release/release-artifacts.mjs",
+        "scope": "release tooling",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "scripts/release/release-artifacts.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "scripts/release/release-artifacts.test.mjs"
+      },
+      {
+        "file": "scripts/release/release-fixtures.mjs",
+        "scope": "release tooling",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/release/select-release-artifacts.mjs",
+        "scope": "release tooling",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "scripts/release/select-release-channel.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "scripts/release/select-release-channel.test.mjs"
+      },
+      {
+        "file": "src-tauri/Cargo.lock",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/Cargo.toml",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/capabilities/desktop.json",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/capabilities/migrated.json",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/src/ai.rs",
+        "scope": "native AI boundary",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/src/commands/app_update.rs",
+        "scope": "native IPC boundary",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/src/main.rs",
+        "scope": "SQLite and native shared state",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/src/services/dsh/commands.rs",
+        "scope": "DSH and Canonical",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/src/window_state.rs",
+        "scope": "native window state",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src-tauri/tauri.conf.json",
+        "scope": "native packaging",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/components/common/Tooltip.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/components/common/Tooltip.test.tsx"
+      },
+      {
+        "file": "src/components/common/Tooltip.tsx",
+        "scope": "shared UI",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/components/right-dock/panels/ChapterSummaryPanelView.tsx",
+        "scope": "chapter summary source and editor handoff",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/components/right-dock/panels/ChapterSummaryValidationNotice.tsx",
+        "scope": "AI generation and cancellation",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/components/workspace/ChapterSummaryDetails.tsx",
+        "scope": "chapter summary source and editor handoff",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/hooks/useWindowChrome.ts",
+        "scope": "shared state and primitives",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/hooks/useWorkspaceLeaveGuard.ts",
+        "scope": "shared state and primitives",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchComposer.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/pages/Workbench/WorkbenchComposer.test.tsx"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchComposer.tsx",
+        "scope": "workbench interaction and candidate continuity",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchGoalBrief.tsx",
+        "scope": "workbench",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchModelRecoveryNotice.tsx",
+        "scope": "workbench",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchNavigation.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/pages/Workbench/WorkbenchNavigation.test.tsx"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchNavigation.tsx",
+        "scope": "workbench",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchProjectHeading.tsx",
+        "scope": "workbench",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/pages/Workbench/WorkbenchRouteFallback.tsx",
+        "scope": "workbench",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/ai/aiCancellation.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/ai/aiCancellation.test.ts"
+      },
+      {
+        "file": "src/services/ai/aiExecutionPipeline.ts",
+        "scope": "AI generation and cancellation",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/services/ai/chapterSummaryGrounding.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/ai/chapterSummaryGrounding.test.ts"
+      },
+      {
+        "file": "src/services/ai/mockAiClient.ts",
+        "scope": "AI generation and cancellation",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/services/ai/mockChapterSummary.ts",
+        "scope": "AI generation and cancellation",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/ai/realAiClient.ts",
+        "scope": "AI generation and cancellation",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/ai/summaryValidator.ts",
+        "scope": "AI generation and cancellation",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/context/chapterContextPersistence.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/context/chapterContextPersistence.test.ts"
+      },
+      {
+        "file": "src/services/context/worldStateTimeline.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/context/worldStateTimeline.test.ts"
+      },
+      {
+        "file": "src/services/conversation/workbenchModelAvailability.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/conversation/workbenchModelAvailability.test.ts"
+      },
+      {
+        "file": "src/services/conversation/workbenchModelAvailability.ts",
+        "scope": "workbench",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/services/database/db.ts",
+        "scope": "editor and formal writes",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/dsh/taskRuntimeService.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/dsh/taskRuntimeService.test.ts"
+      },
+      {
+        "file": "src/services/tauri/desktopSecurityContract.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "src/services/tauri/desktopSecurityContract.test.mjs"
+      },
+      {
+        "file": "src/services/tauri/e2eBridge.ts",
+        "scope": "desktop harness",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/tauri/e2eBridgeSecurity.test.mjs",
+        "scope": "changed unit test",
+        "evidence": "src/services/tauri/e2eBridgeSecurity.test.mjs"
+      },
+      {
+        "file": "src/services/tauri/e2eNetworkGuard.ts",
+        "scope": "desktop harness",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/tauri/runtime.ts",
+        "scope": "shell and startup",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/services/tauri/scopedDesktopFs.test.ts",
+        "scope": "changed unit test",
+        "evidence": "src/services/tauri/scopedDesktopFs.test.ts"
+      },
+      {
+        "file": "src/services/tauri/scopedDesktopFs.ts",
+        "scope": "shell and startup",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/services/update/appUpdateService.ts",
+        "scope": "shell and startup",
+        "evidence": "adjacent behavior tests plus domain safety/journeys"
+      },
+      {
+        "file": "src/styles/global.css",
+        "scope": "shared UI",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/styles/variables.css",
+        "scope": "shared UI",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/styles/workbench-refinement.css",
+        "scope": "workbench interaction and candidate continuity",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/test/components/ChapterSummaryWorkflowNotice.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/test/components/ChapterSummaryWorkflowNotice.test.tsx"
+      },
+      {
+        "file": "src/test/components/FrameBarWindowChrome.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/test/components/FrameBarWindowChrome.test.tsx"
+      },
+      {
+        "file": "src/test/references/ReferenceImportCard.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/test/references/ReferenceImportCard.test.tsx"
+      },
+      {
+        "file": "src/test/workspace-reliability/useWorkspaceLeaveGuard.test.tsx",
+        "scope": "changed unit test",
+        "evidence": "src/test/workspace-reliability/useWorkspaceLeaveGuard.test.tsx"
+      },
+      {
+        "file": "src/types/chapterSummary.ts",
+        "scope": "shared state and primitives",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/utils/nativeDialog.ts",
+        "scope": "shared state and primitives",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "src/utils/nativeNotification.ts",
+        "scope": "shared state and primitives",
+        "evidence": "owned domain tests/journeys"
+      },
+      {
+        "file": "tests/e2e/chapter-context-persistence.spec.ts",
+        "scope": "desktop scenario",
+        "evidence": "real Tauri with isolated SQLite"
+      },
+      {
+        "file": "tests/e2e/tauri2-migration-regression.spec.ts",
+        "scope": "desktop scenario",
+        "evidence": "real Tauri with isolated SQLite"
+      },
+      {
+        "file": "tests/e2e/workbench-ui-detail-refinement.spec.ts",
+        "scope": "desktop scenario",
+        "evidence": "real Tauri with isolated SQLite"
+      },
+      {
+        "file": "tests/real-acceptance/conversation-60000.spec.ts",
+        "scope": "opt-in live harness",
+        "evidence": "Live calls require separate authorization; validate the harness offline."
+      },
+      {
+        "file": "tests/real-acceptance/production-app-helpers.ts",
+        "scope": "isolated writing fault carrier",
+        "evidence": "Production desktop with isolated profile and loopback model; no cloud credentials."
+      }
+    ],
+    "tests": [],
+    "e2e": [],
+    "coverage": true,
+    "rustFull": true,
+    "rustCheck": true,
+    "rustSize": true,
+    "rustFilters": [],
+    "desktopFull": true,
+    "faultInjection": true,
+    "production": true,
+    "docs": true,
+    "version": true,
+    "browser": false,
+    "typecheck": true,
+    "build": true,
+    "lint": [
+      "src/components/common/Tooltip.tsx",
+      "src/components/right-dock/panels/ChapterSummaryPanelView.tsx",
+      "src/components/right-dock/panels/ChapterSummaryValidationNotice.tsx",
+      "src/components/workspace/ChapterSummaryDetails.tsx",
+      "src/hooks/useWindowChrome.ts",
+      "src/hooks/useWorkspaceLeaveGuard.ts",
+      "src/pages/Workbench/WorkbenchComposer.tsx",
+      "src/pages/Workbench/WorkbenchGoalBrief.tsx",
+      "src/pages/Workbench/WorkbenchModelRecoveryNotice.tsx",
+      "src/pages/Workbench/WorkbenchNavigation.tsx",
+      "src/pages/Workbench/WorkbenchProjectHeading.tsx",
+      "src/pages/Workbench/WorkbenchRouteFallback.tsx",
+      "src/services/ai/aiExecutionPipeline.ts",
+      "src/services/ai/mockAiClient.ts",
+      "src/services/ai/mockChapterSummary.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/services/ai/summaryValidator.ts",
+      "src/services/conversation/workbenchModelAvailability.ts",
+      "src/services/database/db.ts",
+      "src/services/tauri/e2eBridge.ts",
+      "src/services/tauri/e2eNetworkGuard.ts",
+      "src/services/tauri/runtime.ts",
+      "src/services/tauri/scopedDesktopFs.ts",
+      "src/services/update/appUpdateService.ts",
+      "src/types/chapterSummary.ts",
+      "src/utils/nativeDialog.ts",
+      "src/utils/nativeNotification.ts"
+    ],
+    "format": [
+      ".github/workflows/release.yml",
+      ".github/workflows/security.yml",
+      ".github/workflows/windows-desktop-e2e.yml",
+      "AGENTS.md",
+      "CHANGELOG.md",
+      "README.md",
+      "docs/agent-workflow.md",
+      "docs/architecture/conversational-creative-workbench.md",
+      "docs/architecture/provider-execution-pipeline.md",
+      "docs/feature-gap-analysis-v3.7.0.md",
+      "docs/technical/desktop-build.md",
+      "docs/technical/desktop-e2e.md",
+      "docs/technical/testing.md",
+      "docs/ui-reference.md",
+      "package-lock.json",
+      "package.json",
+      "reports/frontend-design-audit-2026-10-19.md",
+      "reports/frontend-redesign-proof-2026-10-19.html",
+      "reports/t01-recovery-plan-2026-09-10.md",
+      "reports/t06-t12-handoff-commit-plan-2026-09-10.md",
+      "reports/tauri2-migration-2026-10-28.md",
+      "reports/ui-detail-refinement/after-1024x700.json",
+      "reports/ui-detail-refinement/after-1440x900.json",
+      "reports/ui-detail-refinement/after-focus-1024x700.json",
+      "reports/ui-detail-refinement/after-light-contrast-1024x700.json",
+      "reports/ui-detail-refinement/after-model-unavailable-1024x700.json",
+      "reports/ui-detail-refinement/baseline-1024x700.json",
+      "reports/ui-detail-refinement/baseline-1440x900.json",
+      "reports/ui-detail-refinement/baseline-model-unavailable-1024x700.json",
+      "reports/ui-detail-refinement/ui-refinement-baseline.browser.spec.ts",
+      "reports/ui-detail-refinement/ui-refinement-diagnostic.browser.spec.ts",
+      "reports/ui-detail-refinement/wdio.local.conf.ts",
+      "reports/updater-verification-and-summary-validation-2026-10-28.md",
+      "reports/ux-round2-validation/desktop-ux-round2-plan.md",
+      "reports/ux-round2-validation/desktop-ux-round2/candidate-first-screen.json",
+      "reports/ux-round2-validation/desktop-ux-round2/focus-round-trip.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-entered.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-ctrl-k.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-frame-bar.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-focus-exited-by-toggle.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-pinned-1440.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1024.json",
+      "reports/ux-round2-validation/desktop-ux-round2/geometry-transient-1440.json",
+      "reports/ux-round2-validation/desktop-ux-round2/panel-geometry.json",
+      "reports/ux-round2-validation/desktop-ux-round2/read-group.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-four-states.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-four-states-pinned.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-pinned-dock.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-geometry-transient-overlay.json",
+      "reports/ux-round2-validation/desktop-ux-round2/repair-panel-states.json",
+      "reports/ux-round2-validation/desktop-ux-round2/world-form-native-save.json",
+      "reports/ux-round2-validation/visual/geometry-metrics-ui-optimization.json",
+      "reports/ux-round2-validation/visual/geometry-metrics-workbench-layout.json",
+      "scripts/e2e/real-conversation-acceptance-profile.test.ts",
+      "scripts/e2e/real-conversation-acceptance-profile.ts",
+      "scripts/e2e/run-e2e.ts",
+      "scripts/e2e/run-real-conversation-acceptance.ts",
+      "scripts/e2e/run-writing-fault-injection.mjs",
+      "scripts/e2e/run-writing-fault-injection.test.mjs",
+      "scripts/release/build-release-manifest.mjs",
+      "scripts/release/build-release-manifest.test.mjs",
+      "scripts/release/bump-version.mjs",
+      "scripts/release/channel-publication.mjs",
+      "scripts/release/channel-publication.test.mjs",
+      "scripts/release/release-artifacts.mjs",
+      "scripts/release/release-artifacts.test.mjs",
+      "scripts/release/release-fixtures.mjs",
+      "scripts/release/select-release-artifacts.mjs",
+      "scripts/release/select-release-channel.test.mjs",
+      "src-tauri/capabilities/desktop.json",
+      "src-tauri/capabilities/migrated.json",
+      "src-tauri/tauri.conf.json",
+      "src/components/common/Tooltip.test.tsx",
+      "src/components/common/Tooltip.tsx",
+      "src/components/right-dock/panels/ChapterSummaryPanelView.tsx",
+      "src/components/right-dock/panels/ChapterSummaryValidationNotice.tsx",
+      "src/components/workspace/ChapterSummaryDetails.tsx",
+      "src/hooks/useWindowChrome.ts",
+      "src/hooks/useWorkspaceLeaveGuard.ts",
+      "src/pages/Workbench/WorkbenchComposer.test.tsx",
+      "src/pages/Workbench/WorkbenchComposer.tsx",
+      "src/pages/Workbench/WorkbenchGoalBrief.tsx",
+      "src/pages/Workbench/WorkbenchModelRecoveryNotice.tsx",
+      "src/pages/Workbench/WorkbenchNavigation.test.tsx",
+      "src/pages/Workbench/WorkbenchNavigation.tsx",
+      "src/pages/Workbench/WorkbenchProjectHeading.tsx",
+      "src/pages/Workbench/WorkbenchRouteFallback.tsx",
+      "src/services/ai/aiCancellation.test.ts",
+      "src/services/ai/aiExecutionPipeline.ts",
+      "src/services/ai/chapterSummaryGrounding.test.ts",
+      "src/services/ai/mockAiClient.ts",
+      "src/services/ai/mockChapterSummary.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/services/ai/summaryValidator.ts",
+      "src/services/context/chapterContextPersistence.test.ts",
+      "src/services/context/worldStateTimeline.test.ts",
+      "src/services/conversation/workbenchModelAvailability.test.ts",
+      "src/services/conversation/workbenchModelAvailability.ts",
+      "src/services/database/db.ts",
+      "src/services/dsh/taskRuntimeService.test.ts",
+      "src/services/tauri/desktopSecurityContract.test.mjs",
+      "src/services/tauri/e2eBridge.ts",
+      "src/services/tauri/e2eBridgeSecurity.test.mjs",
+      "src/services/tauri/e2eNetworkGuard.ts",
+      "src/services/tauri/runtime.ts",
+      "src/services/tauri/scopedDesktopFs.test.ts",
+      "src/services/tauri/scopedDesktopFs.ts",
+      "src/services/update/appUpdateService.ts",
+      "src/styles/global.css",
+      "src/styles/variables.css",
+      "src/styles/workbench-refinement.css",
+      "src/test/components/ChapterSummaryWorkflowNotice.test.tsx",
+      "src/test/components/FrameBarWindowChrome.test.tsx",
+      "src/test/references/ReferenceImportCard.test.tsx",
+      "src/test/workspace-reliability/useWorkspaceLeaveGuard.test.tsx",
+      "src/types/chapterSummary.ts",
+      "src/utils/nativeDialog.ts",
+      "src/utils/nativeNotification.ts",
+      "tests/e2e/chapter-context-persistence.spec.ts",
+      "tests/e2e/tauri2-migration-regression.spec.ts",
+      "tests/e2e/workbench-ui-detail-refinement.spec.ts",
+      "tests/real-acceptance/conversation-60000.spec.ts",
+      "tests/real-acceptance/production-app-helpers.ts"
+    ]
+  },
+  "results": [
+    {
+      "id": "diff",
+      "exitCode": 0,
+      "durationMs": 242,
+      "cases": 0,
+      "tail": "warning: in the working copy of '.cursor/rules/update-release-exe.mdc', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'src-tauri/Cargo.lock', LF will be replaced by CRLF the next time Git touches it\n\n",
+      "status": "PASS"
+    },
+    {
+      "id": "format",
+      "exitCode": 1,
+      "durationMs": 3744,
+      "cases": 0,
+      "tail": "Checking formatting...\n[warn] src-tauri/capabilities/desktop.json\n[warn] src-tauri/capabilities/migrated.json\n[warn] src-tauri/tauri.conf.json\n[warn] Code style issues found in 3 files. Run Prettier with --write to fix.\n\n",
+      "status": "FAIL"
+    },
+    {
+      "id": "coverage",
+      "exitCode": 0,
+      "durationMs": 1123014,
+      "cases": 2532,
+      "tail": "EditorArea.tsx:23:31)\n\n ✓ src/test/critical-components/EditorAreaReviewCommands.test.tsx (2 tests) 232ms\n ✓ src/test/critical-components/CheckPanelBehavior.test.tsx (4 tests) 1471ms\n   ✓ CheckPanelView > renders full report state and dispatches every quality workflow action  488ms\n   ✓ CheckPanel controller > persists a successful check, changes status, locates text and loads history  856ms\n ✓ src/test/critical-components/WritingWorkspacePageBehavior.test.tsx (1 test) 504ms\n   ✓ WritingWorkspacePage orchestration > routes workspace actions through unified stores and reliability guards  502ms\n ✓ src/test/critical-components/WorkspaceAuxiliaryPanels.test.tsx (8 tests) 3408ms\n   ✓ DraftHistoryPanel > loads, paginates, restores, adopts and discards immutable draft versions  941ms\n   ✓ VolumeTree > windows large chapter lists, selects chapters and creates inside a selected volume  2156ms\n\n Test Files  11 passed (11)\n      Tests  40 passed (40)\n   Start at  17:38:43\n   Duration  70.46s (transform 6.81s, setup 6.02s, collect 18.39s, tests 9.51s, environment 20.26s, prepare 3.69s)\n\n % Coverage report from v8\n-------------------|---------|----------|---------|---------|-------------------\nFile               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s \n-------------------|---------|----------|---------|---------|-------------------\nAll files          |   90.62 |     79.9 |    87.5 |   90.62 |                   \n ...ht-dock/panels |   83.18 |    72.43 |    92.3 |   83.18 |                   \n  ...ratePanel.tsx |   61.36 |    45.83 |     100 |   61.36 | ...77,394-404,414 \n  ...PanelView.tsx |   99.42 |    96.55 |     100 |   99.42 | 349,358           \n  CheckPanel.tsx   |   82.88 |    68.93 |      70 |   82.88 | ...27-436,439-442 \n  ...PanelView.tsx |     100 |      100 |     100 |     100 |                   \n  ...toryPanel.tsx |   95.16 |    75.34 |     100 |   95.16 | ...78,281,298-302 \n ...ents/workspace |    93.1 |    83.33 |   78.57 |    93.1 |                   \n  VolumeTree.tsx   |    93.1 |    83.33 |   78.57 |    93.1 | ...56,281,323-336 \n ...nomousPlanning |   97.86 |    86.77 |   97.36 |   97.86 |                   \n  ...sApplyBar.tsx |     100 |      100 |     100 |     100 |                   \n  ...riefPanel.tsx |   88.53 |    69.23 |    90.9 |   88.53 | 46-53,57-69       \n  ...tionPanel.tsx |   99.51 |    85.33 |     100 |   99.51 | 77                \n  ...anContent.tsx |     100 |      100 |     100 |     100 |                   \n  ...nProgress.tsx |     100 |      100 |     100 |     100 |                   \n  ...rControls.tsx |     100 |    88.23 |     100 |     100 | ...30,232-243,245 \n pages/StoryAssets |   93.93 |    92.03 |   85.29 |   93.93 |                   \n  ...atchPanel.tsx |     100 |     92.3 |   66.66 |     100 | 29                \n  ...ssetForms.tsx |     100 |    95.12 |     100 |     100 | 55,78             \n  ...ssetsPage.tsx |   83.88 |    86.36 |   77.77 |   83.88 | ...19-225,240-257 \n  ...ionReview.tsx |     100 |      100 |     100 |     100 |                   \n ...itingWorkspace |   93.24 |    74.68 |   68.42 |   93.24 |                   \n  ...spacePage.tsx |   92.87 |    62.71 |   57.14 |   92.87 | ...23-429,436-438 \n  ...spaceView.tsx |   93.68 |    81.81 |      75 |   93.68 | ...45,389,396,408 \n-------------------|---------|----------|---------|---------|-------------------\nCritical component coverage gate (each group >= 60%)\nGroup                 Lines   Statements   Functions   Branches\nCheckPanel             83.21%      83.21%      72.73%     69.23%\nAiGeneratePanel        78.12%      78.12%     100.00%     73.58%\nDraftHistory           95.17%      95.17%     100.00%     75.34%\nVolumeTree             93.10%      93.10%      78.57%     83.33%\nWritingWorkspace       93.24%      93.24%      68.42%     74.68%\nStoryAssets            93.94%      93.94%      85.29%     92.04%\nAutonomousPlanning     97.87%      97.87%      97.37%     86.77%\nCritical component coverage gate passed.\n\n",
+      "status": "PASS"
+    },
+    {
+      "id": "lint",
+      "exitCode": 1,
+      "durationMs": 25466,
+      "cases": 0,
+      "tail": "\n> ai-novel-studio@3.7.0 lint:ci\n> node scripts/quality/check-ui-icons.mjs && eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0\n\nUI icon gate passed for 751 production source files and 26 stylesheets.\n\nF:\\ai-novel-studio-hotfix-v321\\reports\\ui-detail-refinement\\ui-refinement-diagnostic.browser.spec.ts\n  17:5  error  Unexpected console statement  no-console\n  20:7  error  Unexpected console statement  no-console\n  22:7  error  Unexpected console statement  no-console\n\n✖ 3 problems (3 errors, 0 warnings)\n\n\n",
+      "status": "FAIL"
+    },
+    {
+      "id": "frontend-build",
+      "exitCode": 0,
+      "durationMs": 23477,
+      "cases": 0,
+      "tail": " kB │ gzip:   6.73 kB\ndist/assets/GenerationTracePanel-CFyP_ZDy.js                   12.30 kB │ gzip:   3.85 kB\ndist/assets/SettingSuggestionsPage-OpLBT1c4.js                 13.17 kB │ gzip:   5.47 kB\ndist/assets/MultiAgentPanelRuntime-BFIDjdwR.js                 13.32 kB │ gzip:   4.89 kB\ndist/assets/draftVersionService-DgdJwq9g.js                    13.72 kB │ gzip:   5.23 kB\ndist/assets/chapterCreationService-DUFb--rb.js                 14.89 kB │ gzip:   6.40 kB\ndist/assets/TemplatesPage-LpCC2-4J.js                          15.36 kB │ gzip:   5.90 kB\ndist/assets/OutlineEditorPage-D3Is8mqO.js                      15.56 kB │ gzip:   5.60 kB\ndist/assets/autonomousSchedulerWorker-DeOVBgz1.js              15.90 kB │ gzip:   5.85 kB\ndist/assets/CharactersPanel-CyOt3pjt.js                        16.35 kB │ gzip:   5.39 kB\ndist/assets/ImportJsonDialog-BD4CG8SU.js                       16.49 kB │ gzip:   6.08 kB\ndist/assets/settingSuggestionService-HAWDw7qL.js               16.83 kB │ gzip:   7.11 kB\ndist/assets/AiTasksPage-d4zuCrWl.js                            16.96 kB │ gzip:   6.75 kB\ndist/assets/chapterProseOrchestrator-BpD51z7W.js               16.98 kB │ gzip:   6.75 kB\ndist/assets/projectBackupService-BbjirhFa.js                   17.01 kB │ gzip:   6.02 kB\ndist/assets/OutlinePanel-CyIJO5r8.js                           17.31 kB │ gzip:   5.00 kB\ndist/assets/ContextViewPanel-7zi_UUDD.js                       18.10 kB │ gzip:   6.59 kB\ndist/assets/multiAgentRuntime-BTvLHCYd.js                      18.32 kB │ gzip:   7.81 kB\ndist/assets/StyleProfilesPage-BKAT7mM3.js                      18.59 kB │ gzip:   5.47 kB\ndist/assets/outlineService-OGkuOmsi.js                         18.93 kB │ gzip:   7.18 kB\ndist/assets/ChapterSummaryPanel-Dl0KoIl2.js                    19.04 kB │ gzip:   5.69 kB\ndist/assets/autonomousPersistence-CH-jdD_B.js                  20.26 kB │ gzip:   7.68 kB\ndist/assets/taskRuntimeService-CyCWeGI_.js                     20.34 kB │ gzip:   9.70 kB\ndist/assets/ReferenceLibraryPage-fAS8n-0T.js                   24.21 kB │ gzip:   9.64 kB\ndist/assets/realAiClient-By-DBTgo.js                           24.97 kB │ gzip:   8.99 kB\ndist/assets/vendor-tauri-DOqsqY-F.js                           26.89 kB │ gzip:   6.25 kB\ndist/assets/CheckPanel-B5eUKm_a.js                             28.64 kB │ gzip:   9.69 kB\ndist/assets/chapterBeatPlanPolicy-DES7J_we.js                  30.08 kB │ gzip:  10.96 kB\ndist/assets/contextBuilder-CJwtrC9J.js                         31.38 kB │ gzip:  13.52 kB\ndist/assets/taskConversationService-DGBDwkYK.js                32.18 kB │ gzip:  11.65 kB\ndist/assets/ChapterEngineeringPanel-0FlEzSX9.js                35.78 kB │ gzip:  11.70 kB\ndist/assets/productionCompilationRegistry-DfDmH7iX.js          36.35 kB │ gzip:  13.35 kB\ndist/assets/aiSettingsService-ttGAwTed.js                      54.37 kB │ gzip:  27.48 kB\ndist/assets/AutonomousPlanningPage-o54pYT7U.js                 59.53 kB │ gzip:  18.68 kB\ndist/assets/SettingsPage-xJoXwSXo.js                           62.16 kB │ gzip:  20.35 kB\ndist/assets/vendor-misc-Sg49zva5.js                            63.18 kB │ gzip:  13.42 kB\ndist/assets/AiGeneratePanel-Cd-ngsDm.js                        68.93 kB │ gzip:  25.45 kB\ndist/assets/NovelDetailPage-BMgMTDtm.js                        70.32 kB │ gzip:  18.72 kB\ndist/assets/artifactDecisionService-Dt7xqLp1.js                77.49 kB │ gzip:  29.98 kB\ndist/assets/vendor-router-BueCptE_.js                          95.59 kB │ gzip:  32.33 kB\ndist/assets/index-CNhcT4DE.js                                 107.01 kB │ gzip:  35.36 kB\ndist/assets/chapterGenerationPipeline-CCWTATls.js             121.59 kB │ gzip:  47.35 kB\ndist/assets/vendor-react-BIxrD-si.js                          142.22 kB │ gzip:  45.57 kB\ndist/assets/WritingWorkspacePage-CTJfp7E1.js                  154.24 kB │ gzip:  49.95 kB\ndist/assets/WorkbenchPage-DfgSvhCX.js                         354.76 kB │ gzip: 118.74 kB\n✓ built in 8.12s\n\n",
+      "status": "PASS"
+    },
+    {
+      "id": "bundle-budget",
+      "exitCode": 0,
+      "durationMs": 542,
+      "cases": 0,
+      "tail": "\n> ai-novel-studio@3.7.0 test:bundle-size\n> node scripts/quality/check-bundle-size.mjs\n\n[bundle-size] PASS\n[bundle-size] manifest: F:\\ai-novel-studio-hotfix-v321\\dist\\.vite\\manifest.json\n[bundle-size] limits: entry raw 409,600 B (400.00 KiB), entry gzip-9 138,240 B (135.00 KiB), any chunk raw 460,800 B (450.00 KiB), any chunk gzip-9 163,840 B (160.00 KiB)\n[bundle-size] entry: assets/index-CNhcT4DE.js — raw 112,028 B (109.40 KiB), gzip-9 35,330 B (34.50 KiB)\n[bundle-size] largest raw: assets/WorkbenchPage-DfgSvhCX.js — 383,303 B (374.32 KiB)\n[bundle-size] largest gzip-9: assets/WorkbenchPage-DfgSvhCX.js — 118,563 B (115.78 KiB)\n[bundle-size] measured JavaScript chunks: 127\n\n",
+      "status": "PASS"
+    },
+    {
+      "id": "component-size",
+      "exitCode": 0,
+      "durationMs": 736,
+      "cases": 0,
+      "tail": "\n> ai-novel-studio@3.7.0 test:component-size\n> node scripts/quality/check-component-size.mjs\n\nComponent size gate passed for 752 production sources (223 TSX, largest src/components/right-dock/panels/ChapterEngineeringPanel.tsx at 500 lines); 33 legacy TS modules held at their frozen budget.\n\n",
+      "status": "PASS"
+    }
+  ]
+}

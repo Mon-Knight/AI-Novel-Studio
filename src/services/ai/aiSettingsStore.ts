@@ -1,6 +1,5 @@
 import type {
   AiSettings,
-  CloudApiProvider,
   GatewayModelConfig,
   LocalChapterModelSettings,
   SavedApiModelProfile,
@@ -9,6 +8,7 @@ import type {
 } from '../../types/ai';
 import { createUniqueId } from '../../utils/uniqueId';
 import {
+  normalizeSavedApiModelProfile,
   persistableSavedApiModel,
   profileFromActiveSettings,
   savedApiModelMatchesSettings,
@@ -24,6 +24,11 @@ import {
 } from './savedOptionalModels';
 import { lsGet, lsSet } from '../database/db';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
+import {
+  canonicalModelProviderId,
+  normalizeModelBaseUrl,
+  normalizeModelId,
+} from '../conversation/modelIdentity';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -44,26 +49,21 @@ export interface SessionModelCredentialIdentity {
 const sessionModelCredentials = new Map<string, string>();
 let nativeCredentialRestorePromise: Promise<void> | null = null;
 
-function canonicalProviderId(providerId: string): string {
-  const normalized = providerId.trim().toLowerCase();
-  return normalized === 'deepseek' || normalized === 'deepseek-official'
-    ? 'deepseek-official'
-    : normalized;
-}
+const canonicalProviderId = canonicalModelProviderId;
 
 function normalizedBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, '');
+  return normalizeModelBaseUrl(baseUrl);
 }
 
 function credentialIdentityKey(identity: SessionModelCredentialIdentity): string | undefined {
   const providerId = canonicalProviderId(identity.providerId);
   const baseUrl = normalizedBaseUrl(identity.baseUrl);
-  const modelId = identity.modelId.trim();
+  const modelId = normalizeModelId(identity.modelId);
   if (!providerId || providerId === 'mock' || !baseUrl || !modelId) return undefined;
   return JSON.stringify([identity.scope, providerId, baseUrl, modelId]);
 }
 
-function rememberSessionModelApiKey(
+export function rememberSessionModelApiKey(
   identity: SessionModelCredentialIdentity,
   apiKey: string,
 ): void {
@@ -188,6 +188,16 @@ export async function syncSessionModelCredentialsToNative(settings: AiSettings):
   const gateway = settings.gateway ?? settings.remoteWriter;
   if (gateway) {
     bindings.push({ identity: gatewayCredentialIdentity(gateway), apiKey: gateway.apiKey });
+  }
+  for (const profile of settings.savedApiModels ?? []) {
+    const identity = {
+      scope: 'provider' as const,
+      providerId: profile.provider,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
+    };
+    const apiKey = resolveSessionModelApiKey(identity);
+    if (apiKey) bindings.push({ identity, apiKey });
   }
   await Promise.all(
     bindings.map(({ identity, apiKey }) => setNativeSessionModelApiKey(identity, apiKey)),
@@ -347,35 +357,6 @@ function normalizeGatewaySettings(
 }
 
 export const normalizeRemoteWriterSettings = normalizeGatewaySettings;
-
-function isCloudApiProvider(value: unknown): value is CloudApiProvider {
-  return value === 'deepseek' || value === 'openai_compatible';
-}
-
-function normalizeSavedApiModelProfile(stored: unknown): SavedApiModelProfile | undefined {
-  if (!stored || typeof stored !== 'object') return undefined;
-  const raw = stored as Partial<SavedApiModelProfile>;
-  if (!isCloudApiProvider(raw.provider)) return undefined;
-  const id = String(raw.id ?? '').trim();
-  const baseUrl = String(raw.baseUrl ?? '').trim();
-  const modelName = String(raw.modelName ?? '').trim();
-  const label = String(raw.label ?? '').trim() || modelName;
-  if (!id || !baseUrl || !modelName) return undefined;
-  return persistableSavedApiModel({
-    id,
-    label,
-    provider: raw.provider,
-    baseUrl,
-    modelName,
-    temperature: normalizeNumber(raw.temperature, 0.7, 0, 2),
-    maxTokens: Math.round(normalizeNumber(raw.maxTokens, 8000, 1, 200000)),
-    timeoutSeconds: Math.round(normalizeNumber(raw.timeoutSeconds, 120, 1, 1800)),
-    inputPricePerMillionTokens: normalizeOptionalPrice(raw.inputPricePerMillionTokens),
-    outputPricePerMillionTokens: normalizeOptionalPrice(raw.outputPricePerMillionTokens),
-    lastTestAt: typeof raw.lastTestAt === 'string' ? raw.lastTestAt : undefined,
-    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : undefined,
-  });
-}
 
 function normalizeSavedApiModels(
   stored: Partial<AiSettings>,

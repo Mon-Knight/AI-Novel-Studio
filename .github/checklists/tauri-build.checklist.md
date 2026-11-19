@@ -1,14 +1,13 @@
 # Tauri Desktop Build Checklist
 
 > 用途：Tauri 桌面应用构建前的检查清单
-> 使用时机：执行 `npm run tauri build` 前后
+> 使用时机：打包配置、依赖图或发布任务执行 `npm run tauri:build` 前后；普通局部修改不要求完整安装包构建
 
 ---
 
 ## 构建前
 
-- [ ] `npm run build`（前端构建）已通过
-- [ ] `cargo check`（Rust 编译检查）已通过
+- [ ] `cargo check --locked --manifest-path src-tauri/Cargo.toml` 已通过（`tauri:build` 已包含前端构建，不必提前重复 `npm run build`）
 - [ ] 图标资源存在于 `src-tauri/icons/`
 - [ ] `tauri.conf.json` 配置正确
   - [ ] `package.productName` = "AI Novel Studio"
@@ -32,7 +31,7 @@
 - [ ] 安装包路径已记录
 - [ ] EXE 路径已记录
 - [ ] EXE 可启动
-- [ ] 窗口尺寸符合桌面端要求（默认 1440×900）
+- [ ] 窗口尺寸符合 `tauri.conf.json`（默认 1280×820，最小 1024×700）
 - [ ] 最大化功能正常
 - [ ] 前端页面正常加载
 - [ ] 无控制台报错

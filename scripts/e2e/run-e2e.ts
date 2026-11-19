@@ -7,6 +7,9 @@ import { execFile, spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { redactLogText, sanitizeArtifactDirectory } from './artifact-sanitizer.ts';
+import { assertUnelevatedWindowsHost } from './host-integrity.ts';
+import { legacyPanelSpecs, selectDesktopSpecs } from './spec-selection.ts';
+import { desktopCarrierEnvironment, prepareDesktopCarrier } from './e2e-carrier.mjs';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -37,11 +40,18 @@ const productAppPath = path.join(
 );
 const allSpecs = [
   'app-start.spec.ts',
+  'workbench-writing-smoke.spec.ts',
+  'workbench-task-authorization.spec.ts',
+  'workbench-staged-recovery.spec.ts',
+  'interaction-world-rules-repair.spec.ts',
+  'ux-round2.spec.ts',
   'cold-start.spec.ts',
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',
   'project-backup-boundary.spec.ts',
+  'txt-import-atomic.spec.ts',
   'workbench-task-directory.spec.ts',
+  'workbench-ui-detail-refinement.spec.ts',
   'chapter-save.spec.ts',
   'large-text-save.spec.ts',
   'provider-pipeline-setting.spec.ts',
@@ -56,8 +66,11 @@ const allSpecs = [
   'conversational-workbench.spec.ts',
   'agent-production-closed-loop.spec.ts',
   'domain-facade-sqlite.spec.ts',
+  'tauri2-migration-regression.spec.ts',
+  'native-plugin-contract.spec.ts',
 ];
-const specs = selectSpecs(process.argv.slice(2));
+const specs = selectDesktopSpecs(process.argv.slice(2), allSpecs);
+assertUnelevatedWindowsHost();
 
 const artifactRoot = path.resolve(
   process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'),
@@ -79,6 +92,8 @@ if (process.env.AI_NOVEL_STUDIO_E2E !== undefined && process.env.AI_NOVEL_STUDIO
   throw new Error('AI_NOVEL_STUDIO_E2E must be 1 when supplied.');
 }
 fs.mkdirSync(artifactRoot, { recursive: true });
+const carrier = await prepareDesktopCarrier(workspaceRoot);
+console.log(`[E2E] DeepSeek carrier: ${diagnosticPath(carrier.runtimeRoot)}`);
 
 let activeWdioPid: number | undefined;
 let signalCleanupStarted = false;
@@ -118,7 +133,9 @@ for (const [index, spec] of specs.entries()) {
   const before = await snapshotProcesses();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...desktopCarrierEnvironment(carrier),
     AI_NOVEL_STUDIO_E2E: '1',
+    AI_NOVEL_STUDIO_E2E_LEGACY_PANELS: legacyPanelSpecs.has(spec) ? '1' : '0',
     AI_NOVEL_STUDIO_E2E_RUN_ID: runId,
     AI_NOVEL_STUDIO_E2E_DATA_DIR: specRoot,
     AI_NOVEL_STUDIO_E2E_ARTIFACTS: specArtifacts,
@@ -127,6 +144,9 @@ for (const [index, spec] of specs.entries()) {
     ...(nativeDriver ? { AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER: nativeDriver } : {}),
     AI_NOVEL_STUDIO_E2E_APP: appPath,
     ...(spec === 'cold-start.spec.ts' ? { AI_NOVEL_STUDIO_E2E_STARTUP_TIMING: '1' } : {}),
+    ...(spec === 'workbench-staged-recovery.spec.ts'
+      ? { AI_NOVEL_STUDIO_E2E_HOLD_STAGE_KEY: 'beat_state:scene-staged-1:1' }
+      : {}),
   };
   console.log(`\n[E2E] ${spec} (isolated data: ${diagnosticPath(specRoot)})`);
   let result: WdioRunResult = { exitCode: 1, signal: null, timedOut: false };
@@ -332,28 +352,6 @@ function canBindPort(
   });
 }
 
-function selectSpecs(args: string[]): string[] {
-  const smoke = args.includes('--smoke');
-  const specIndex = args.indexOf('--spec');
-  if (smoke && specIndex >= 0) {
-    throw new Error('--smoke and --spec cannot be used together.');
-  }
-  if (specIndex < 0) return smoke ? allSpecs.slice(0, 1) : allSpecs;
-
-  const requested = args[specIndex + 1];
-  if (!requested || requested.startsWith('--')) {
-    throw new Error('--spec requires one E2E spec name.');
-  }
-  if (args.indexOf('--spec', specIndex + 1) >= 0) {
-    throw new Error('--spec can be supplied only once.');
-  }
-  const normalized = requested.endsWith('.spec.ts') ? requested : `${requested}.spec.ts`;
-  if (!allSpecs.includes(normalized)) {
-    throw new Error(`Unknown E2E spec: ${requested}. Expected one of: ${allSpecs.join(', ')}`);
-  }
-  return [normalized];
-}
-
 async function runWdio(
   spec: string,
   env: NodeJS.ProcessEnv,
@@ -500,7 +498,7 @@ async function ensureE2eApplication(dataRoot: string): Promise<string> {
   const tauriCli = path.join(workspaceRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
   const child = spawn(
     process.execPath,
-    [tauriCli, 'build', '--features', 'e2e', '--bundles', 'none', '--ci'],
+    [tauriCli, 'build', '--features', 'e2e', '--no-bundle', '--ci'],
     {
       cwd: workspaceRoot,
       env: {

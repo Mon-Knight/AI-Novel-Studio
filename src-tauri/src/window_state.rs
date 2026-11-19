@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::Window;
+use tauri::{WebviewWindow, Window};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WindowState {
@@ -132,7 +132,7 @@ pub fn save_window_state(window: &Window, app_data_dir: &PathBuf) {
 }
 
 /// 应用窗口状态
-pub fn apply_window_state(window: &Window, state: &WindowState) {
+pub fn apply_window_state(window: &WebviewWindow, state: &WindowState) {
     use tauri::Position::Physical;
     use tauri::Size::Logical;
 

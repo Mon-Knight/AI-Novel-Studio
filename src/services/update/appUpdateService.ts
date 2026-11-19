@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/api/shell';
+import { open } from '@tauri-apps/plugin-shell';
 import { APP_VERSION } from '../../constants/version';
 import type { AppError } from '../../types/appError';
 import { appLogger } from '../observability/appLogger';

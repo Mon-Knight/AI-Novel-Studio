@@ -14,18 +14,21 @@ import { chapterContextPersistenceService } from '../../../services/context/chap
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
 import { validateSummary } from '../../../services/ai/summaryValidator';
+import { evaluateSummaryApplicationPolicy } from '../../../services/ai/summaryApplicationPolicy';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoading';
 import type { ChapterDraft } from '../../../types/ai';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import { ChapterSummaryPanelView } from './ChapterSummaryPanelView';
+import { ChapterSummaryWorkflowNotice } from '../../workspace/ChapterSummaryWorkflowNotice';
+import { isE2eLegacyWorkspacePanelsEnabled } from '../../../types/rightSidebar';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
   chapter?: Chapter;
 }
 
-function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
+function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   const [summary, setSummary] = useState<ChapterSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -168,6 +171,9 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   // 保存总结（含校验状态）
   const handleSaveSummary = async () => {
     if (!novelId || !chapter || !genResult) return;
+    const contextEligible = Boolean(
+      validation && evaluateSummaryApplicationPolicy(validation).eligible,
+    );
     setGenLoading(true);
     setGenError('');
     try {
@@ -210,7 +216,7 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
               nextChapterHook: genResult.nextChapterHook,
               validationStatus: validation?.passed ? 'passed' : validation ? 'failed' : 'pending',
               validationResult: validation || undefined,
-              enabled: validation?.safeToContext !== false,
+              enabled: contextEligible,
               draftVersion: adoptedDraft?.versionNo,
             },
             contextRecords: genResult.contextRecords.map((record) => ({
@@ -218,11 +224,11 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
               novelId,
               chapterId: chapter.id,
               volumeId: chapter.volumeId,
-              isActive: validation?.safeToContext !== false,
+              isActive: contextEligible,
               draftVersion: adoptedDraft?.versionNo,
             })),
             characterStates: genResult.characterChanges.flatMap((change) =>
-              change.characterId
+              contextEligible && change.characterId
                 ? [
                     {
                       novelId,
@@ -294,4 +300,10 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   );
 }
 
-export default ChapterSummaryPanel;
+export default function ChapterSummaryPanel(props: ChapterSummaryPanelProps) {
+  return isE2eLegacyWorkspacePanelsEnabled() ? (
+    <LegacyChapterSummaryPanel {...props} />
+  ) : (
+    <ChapterSummaryWorkflowNotice {...props} />
+  );
+}

@@ -186,7 +186,7 @@ describe('structured artifact candidate review semantics', () => {
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it('does not allow local note editing or another revision after an artifact is decided', async () => {
+  it('keeps a decided candidate read-only while allowing return to its revision composer', async () => {
     const user = userEvent.setup();
     const onDecide = decisionCallback();
     const artifact = characterArtifact();
@@ -227,6 +227,14 @@ describe('structured artifact candidate review semantics', () => {
     }
     expect(screen.queryByTestId('workbench-artifact-apply')).toBeNull();
     expect(onDecide).not.toHaveBeenCalled();
+    // Resuming an already requested revision only restores the composer source.
+    // It must not unlock immutable candidate fields or apply any content.
+    await user.click(screen.getByRole('button', { name: '返回修订输入区' }));
+    expect(onDecide.mock.calls).toEqual([['request_revision']]);
+    for (const field of screen.queryAllByRole('textbox')) {
+      expect((field as HTMLInputElement | HTMLTextAreaElement).disabled).toBe(true);
+    }
+    expect(screen.queryByTestId('workbench-artifact-apply')).toBeNull();
   });
 
   it('locks candidate note editing and application when evidence becomes invalid', async () => {
@@ -473,8 +481,19 @@ describe('structured artifact candidate review semantics', () => {
     const view = render(stream(''));
     const cards = screen.getAllByTestId('workbench-artifact-card');
     expect(cards).toHaveLength(2);
-    expect(cards[0].closest('[data-testid="workbench-turn"]')).not.toBeNull();
-    expect(cards[1].closest('[data-testid="workbench-turn"]')).toBeNull();
+    // Cards are now flat public events: every candidate keeps its conversation attribution and
+    // a run-attached candidate additionally carries the turn/run identity of that run.
+    const attachedEntry = cards[0].closest('[data-testid="workbench-public-event"]');
+    const orphanEntry = cards[1].closest('[data-testid="workbench-public-event"]');
+    expect(attachedEntry).not.toBeNull();
+    expect(orphanEntry).not.toBeNull();
+    expect(attachedEntry?.getAttribute('data-conversation-id')).toBe(attached.conversationId);
+    // The event carries the authoritative run attribution, which is what the persisted run says
+    // (a card may store a different or missing turn identity).
+    expect(attachedEntry?.getAttribute('data-turn-id')).toBe(bundle.runs[0].turnId);
+    expect(attachedEntry?.getAttribute('data-run-id')).toBe(attached.runId);
+    expect(orphanEntry?.getAttribute('data-conversation-id')).toBe(orphan.conversationId);
+    expect(orphanEntry?.getAttribute('data-run-id')).toBeNull();
     for (const [index, card] of cards.entries()) {
       const row = within(card).getAllByTestId('workbench-artifact-candidate')[0];
       await user.click(within(row).getByRole('button', { name: '填写修订意见' }));

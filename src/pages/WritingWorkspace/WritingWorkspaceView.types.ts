@@ -96,5 +96,8 @@ export interface WritingWorkspaceViewProps {
   reviewCandidate?: ReviewCandidateDocument | null;
   reviewAuthorizationId?: string;
   reviewArtifactId?: string;
+  onReviewAuthorizationRenewed?: (
+    authorization: import('../../types/conversation').ReviewAuthorization,
+  ) => void;
   onBeforeAdopt?: (draftId: string) => Promise<void>;
 }

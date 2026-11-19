@@ -60,6 +60,8 @@ export interface CompiledAiContextSource {
 }
 
 export interface AiContextSourceManifestV1 {
+  /** Frozen exact revision identity participates in the compilation hash. */
+  revisionSource?: import('./artifactRevision').ArtifactRevisionSource;
   contractVersion: 'context_manifest_v1';
   compilerVersion: 'context_compiler_v1';
   tokenEstimator: 'utf8_bytes_div3_v1';

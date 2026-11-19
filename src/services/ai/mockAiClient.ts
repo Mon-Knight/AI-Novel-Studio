@@ -10,6 +10,8 @@ import type {
 } from '../../types/ai';
 import { AiRequestCancelledError, throwIfAiRequestCancelled } from './aiCancellation';
 import { emitAiStreamEvent } from './aiStreamProtocol';
+import { mockChapterScenePlan, mockChapterStagedResponse } from './mockChapterStagedResponses';
+import { mockChapterSummary } from './mockChapterSummary';
 import { createProviderTransportRequestId } from './providerRequestPolicy';
 
 const E2E_MODE = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -179,7 +181,11 @@ function extractInfo(messages: { role: string; content: string }[]) {
     allText.match(/^章节[：:]\s*(.+)$/m)?.[1] ||
     '未命名章节';
   const genre = allText.match(/题材：(.+)/)?.[1];
-  const targetWords = parseInt(allText.match(/目标字数：约 (\d+)/)?.[1] || '4000');
+  const targetWords = parseInt(
+    allText.match(/目标字数：约 (\d+)/)?.[1] ||
+      allText.match(/章节目标字数：\s*(\d+)/)?.[1] ||
+      '4000',
+  );
   const chapterOutline =
     allText
       .match(
@@ -380,31 +386,6 @@ function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
   return result;
 }
 
-function mockChapterScenePlan(): string {
-  return JSON.stringify({
-    scenes: [
-      {
-        sceneNo: 1,
-        title: '线索进入现场',
-        contextCapsule: '主角刚进入当前场景，尚未确认线索来源。',
-        location: '当前章节主要地点',
-        characters: ['主角'],
-        goal: '让主角获得一个可验证的新线索。',
-        conflict: '时间压力迫使主角在信息不完整时做出选择。',
-        beats: [
-          { order: 1, text: '建立场景开场状态并明确当前行动目标。', required: true },
-          { order: 2, text: '出现阻力，使主角必须采取具体行动。', required: true },
-          { order: 3, text: '以新的线索或状态变化结束场景。', required: true },
-        ],
-        constraints: ['保持当前视角，不提前解释幕后真相。'],
-        expectedEndState: '主角获得下一步行动依据。',
-        result: '主角得到下一步行动依据。',
-        transition: '转入下一场景的行动准备。',
-      },
-    ],
-  });
-}
-
 function mockCharacterGenerate(_info: ReturnType<typeof extractInfo>): string {
   return JSON.stringify({
     characters: [
@@ -576,44 +557,6 @@ function mockQualityCheck(info: ReturnType<typeof extractInfo>): string {
         description: '同一描述方式在短距离内重复出现，建议替换用词。',
         evidence: '',
         suggestion: '使用同义词或变换句式来避免重复。',
-      },
-    ],
-  });
-}
-
-function mockChapterSummary(info: ReturnType<typeof extractInfo>): string {
-  return JSON.stringify({
-    summaryTitle: `${info.chapterTitle}上下文`,
-    summary: `本章《${info.chapterTitle}》推进了主线，并留下后续承接点。`,
-    keyEvents: ['主角进入关键场景', '重要冲突被触发', '获得新的线索'],
-    coreEvents: ['主角获得可继续追查的关键线索'],
-    protagonistStateChange: '主角由被动应对转为主动追查。',
-    importantCharacterChanges: [{ name: info.protagonist, change: '目标更明确，并决定继续追查。' }],
-    characterChanges: [
-      {
-        characterName: info.protagonist,
-        stateSummary: '经历本章事件后目标更明确。',
-        relationshipChanges: '与同伴信任上升',
-        goalChanges: '准备追查下一条线索',
-      },
-    ],
-    relationshipChanges: [],
-    settingChanges: ['关键场景受隐藏势力影响'],
-    newLocations: ['关键线索所在的新场景'],
-    newItemsOrAbilities: [],
-    newForeshadows: ['关键线索背后仍有隐藏势力'],
-    resolvedForeshadows: [],
-    foreshadowing: ['隐藏势力仍未现身'],
-    unresolvedQuestions: ['隐藏势力为何介入'],
-    factsMustRemember: ['主角已经获得关键线索'],
-    nextChapterHints: '下一章可以承接本章线索，继续推进调查和冲突。',
-    nextChapterHook: '关键线索指向新的调查目标。',
-    contextRecords: [
-      {
-        contextType: 'chapter_summary',
-        title: `${info.chapterTitle}摘要`,
-        content: `本章核心事件：${info.chapterOutline || '主线推进'}`,
-        importance: 4,
       },
     ],
   });
@@ -1119,7 +1062,7 @@ export class MockAiClient implements AiClient {
     await waitForMockAiGateForE2e(options.signal);
     await delay(undefined, options.signal);
     throwIfAiRequestCancelled(options.signal);
-    const taskType =
+    const taskType: string =
       (request.taskType as MockTaskType | undefined) || detectTaskType(request.messages);
     const info = extractInfo(request.messages);
     let text: string;
@@ -1147,7 +1090,7 @@ export class MockAiClient implements AiClient {
         text = mockChapterPolish(info, request.messages);
         break;
       case 'context_summarize':
-        text = mockChapterSummary(info);
+        text = mockChapterSummary(info, request.messages);
         break;
       case 'outline_generate':
         text = mockOutlineGenerate(info);
@@ -1191,7 +1134,9 @@ export class MockAiClient implements AiClient {
       case 'chapter_beat_repair':
       case 'chapter_generate':
       default:
-        text = mockChapterGenerate(info);
+        text = await mockChapterStagedResponse(taskType, request.messages, info, () =>
+          mockChapterGenerate(info),
+        );
         break;
     }
 

@@ -2,7 +2,7 @@
  * AI Novel Studio - 导入导出中心页面
  * 统一风格方案管理 UI 结构设计
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowDownToLine, FileJson, Upload } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import { PageHeader, PageLayout, PageTabs } from '../../components/common/PageLayout';
@@ -11,6 +11,11 @@ import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { exportService } from '../../services/export/exportService';
+import {
+  formatExportProgress,
+  hasFormalChapter,
+  type ManuscriptExportOptions,
+} from '../../services/export/manuscriptExport';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -26,6 +31,8 @@ function ImportExportPage() {
   const [selectedChapterId, setSelectedChapterId] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const exportActive = useRef(false);
   const [showTxtImport, setShowTxtImport] = useState(false);
   const [showJsonImport, setShowJsonImport] = useState(false);
 
@@ -56,7 +63,7 @@ function ImportExportPage() {
     chapterRepository.getByNovelId(selectedNovelId).then((list) => {
       if (cancelled) return;
       setChapters(list);
-      const adopted = list.filter((c) => c.status === 'adopted' || c.status === 'summarized');
+      const adopted = list.filter(hasFormalChapter);
       setSelectedChapterId((current) => {
         if (current && adopted.some((chapter) => chapter.id === current)) return current;
         return adopted[0]?.id ?? '';
@@ -67,26 +74,39 @@ function ImportExportPage() {
     };
   }, [selectedNovelId]);
 
-  const handleExport = async (fn: () => Promise<string | void>) => {
+  const handleExport = async (fn: (options: ManuscriptExportOptions) => Promise<string | void>) => {
+    if (exportActive.current) return;
+    exportActive.current = true;
+    setExporting(true);
     setErr('');
     setMsg('导出中...');
     try {
-      const savedPath = await fn();
-      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
-      setTimeout(() => setMsg(''), 4000);
+      let receipt = '导出成功';
+      const savedPath = await fn({
+        onProgress: (progress) => {
+          const message = formatExportProgress(progress);
+          if (progress.stage === 'complete') receipt = message;
+          setMsg(message);
+        },
+      });
+      setMsg(savedPath ? `${receipt}：${savedPath}` : receipt);
     } catch (e: unknown) {
       setErr(describeUnknownError(e, '导出失败'));
       setMsg('');
+    } finally {
+      exportActive.current = false;
+      setExporting(false);
     }
   };
 
   const pageActions = (
     <>
       {activeTab === 'import' && (
-        <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+        <div className="resource-row resource-row--wrap">
           <button
             type="button"
             className="btn btn-primary btn-sm"
+            data-testid="project-import-txt"
             onClick={() => setShowTxtImport(true)}
           >
             <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
@@ -115,30 +135,12 @@ function ImportExportPage() {
       />
 
       {msg && (
-        <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: 'var(--color-primary-light, #e0e7ff)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: 'var(--color-primary, #4338ca)',
-          }}
-        >
+        <div className="resource-notice resource-notice--success" role="status">
           {msg}
         </div>
       )}
       {err && (
-        <div
-          style={{
-            fontSize: 13,
-            padding: '6px 12px',
-            background: 'var(--color-error-bg, #fee2e2)',
-            borderRadius: 6,
-            marginBottom: 16,
-            color: 'var(--color-error, #b91c1c)',
-          }}
-        >
+        <div className="resource-notice resource-notice--error" role="alert">
           {err}
         </div>
       )}
@@ -154,6 +156,7 @@ function ImportExportPage() {
       >
         {activeTab === 'export' && (
           <NovelExportSection
+            busy={exporting}
             novels={novels}
             selectedNovelId={selectedNovelId}
             onSelectNovelId={setSelectedNovelId}

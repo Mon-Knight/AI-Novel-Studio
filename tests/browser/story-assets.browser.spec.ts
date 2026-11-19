@@ -77,14 +77,15 @@ describe('real browser development mode', () => {
       });
     };
 
+    // ZCode 令牌基线：侧栏面板 / 主文字 / 卡片底色（卡片使用 --color-bg-card，与侧栏面板区分）。
     const dark = await themeSnapshot('dark');
     expect(dark).toMatchObject({
       preference: 'dark',
       effective: 'dark',
       colorScheme: 'dark',
-      surfaceToken: '#252526',
-      textToken: '#f3f3f3',
-      cardBackground: 'rgb(37, 37, 38)',
+      surfaceToken: '#191813',
+      textToken: '#ece5d6',
+      cardBackground: 'rgb(35, 32, 25)',
     });
 
     const light = await themeSnapshot('light');
@@ -92,9 +93,9 @@ describe('real browser development mode', () => {
       preference: 'light',
       effective: 'light',
       colorScheme: 'light',
-      surfaceToken: '#ffffff',
-      textToken: '#1a1a2e',
-      cardBackground: 'rgb(255, 255, 255)',
+      surfaceToken: '#f5f1e8',
+      textToken: '#1d1b17',
+      cardBackground: 'rgb(255, 253, 248)',
     });
   });
 });

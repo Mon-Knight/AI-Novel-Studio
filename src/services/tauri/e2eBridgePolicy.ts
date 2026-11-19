@@ -1,6 +1,7 @@
 const E2E_ALLOWED_COMMANDS = new Set([
   'get_e2e_diagnostics',
   'get_all_novels',
+  'export_project_backup',
   'get_novel_by_id',
   'get_protagonist',
   'get_volumes_by_novel_id',
@@ -46,9 +47,16 @@ const E2E_ALLOWED_COMMANDS = new Set([
   'corrupt_e2e_large_text_chunk',
   'get_review_authorization',
   'get_e2e_agent_closed_loop_state',
+  'seed_e2e_legacy_local_storage',
+  'get_e2e_legacy_storage_seed_state',
+  'probe_e2e_legacy_local_storage',
+  'get_e2e_legacy_storage_probe_entries',
   'get_task_conversation',
   'get_task_turn_run_projection',
   'dsh_get_task_runtime_status',
+  'list_task_authorizations',
+  'list_task_authorization_receipts',
+  'list_chapter_workflow_stages',
 ]);
 
 export function isE2eBridgeCommandAllowed(command: string): boolean {

@@ -1,6 +1,6 @@
 # R4：真实 Main Agent Runtime 验证方案（Canonical exposure 后置设计稿）
 
-> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 DSH 验证。** 四个 Canonical 只读 Tool 已是 `stable` + `working`，共享 Manifest 的 `modelVisibleToolIdentities` 长度为 4。不得再把 `catalog_only` 或空可见集合写成当前状态。Gateway 已能在 Canonical allowlist 下列出 `novel.read` 等；宿主启动仍注入 legacy `ALLOWED_TOOLS`。R4 仍未 VERIFIED：必须在真实 DSH 只读回合把 Canonical 名注入 Worker `tools/list` 并由模型自主调用。宿主 `mainAgentRuntimeService` 脚手架不能代替该证据。Writing SubAgent 与 `chapter_write` 不在本方案范围内。
+> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 live 云端验收。** 四个 Canonical 只读 Tool 已是 `stable` + `working`。仓内 loopback 已证明 Canonical-only 读取；live 云端仍 NOT VERIFIED，`mainAgentRuntimeService` 脚手架不能代替该证据。本文是 R4 验证方案快照：Writing SubAgent 不在本方案范围内，但其产品路径已于 v3.7.0 开放，见 [`../architecture/writing-subagent-contract.md`](../architecture/writing-subagent-contract.md)。下文“chapter_write → TypeScript adapter”是方案起草时的路径描述。
 
 > 本文只定义 exposure 通过后的 R4 验证证据，不代表 R4 已通过。验证必须使用显式真实 Provider profile；默认 Mock E2E 不变。
 
@@ -184,7 +184,7 @@ npm run test:agent-runtime:real
 - API Key 仅进程内存；`model_snapshot`、TaskRun、ToolCallEvent、JSONL session、报告和 E2E artifact 均不得含凭据字段。
 - 本地模型 Base URL 必须是 loopback；禁止任意远程 URL 通过“local” profile 绕过治理代理。
 - 使用临时数据库/worker/session 目录；测试结束销毁或保留在明确的失败 artifact 目录，绝不写用户作品库。
-- 工具权限保持只读；R4 不新增 candidate/adopt/save/write 工具。章节采用继续使用已经完成的显式 `ReviewAuthorization` 原子事务，通用结构化 `request_apply` 继续失败关闭。
+- 工具权限保持只读；R4 不新增 candidate/adopt/save/write 工具。章节采用继续使用已经完成的显式 `ReviewAuthorization` 原子事务，通用结构化 `request_apply` 维持“白名单同事务写入、其余失败关闭”的边界不变，R4 不扩大该边界。
 - 默认 Mock E2E 的网络阻断、模型快照和断言保持不变；真实 profile 与默认 profile 不能共享环境变量残留。
 
 ## 结论

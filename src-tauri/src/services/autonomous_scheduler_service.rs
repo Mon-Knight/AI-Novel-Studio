@@ -841,7 +841,7 @@ fn map_attempt(row: &Row<'_>) -> rusqlite::Result<AutonomousRunChapterAttemptDto
     })
 }
 
-fn find_attempt(
+pub(crate) fn find_attempt(
     connection: &Connection,
     attempt_id: &str,
 ) -> Result<Option<AutonomousRunChapterAttemptDto>, AppError> {

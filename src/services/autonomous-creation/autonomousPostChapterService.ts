@@ -1,5 +1,6 @@
 import type { AiGenerateOptions, ChapterDraft } from '../../types/ai';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from '../ai/aiCancellation';
+import { assertSummaryContextEligible } from '../ai/summaryApplicationPolicy';
 import type { AutonomousChapterRun, AutonomousStoryPlan } from '../../types/autonomousCreation';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
@@ -389,6 +390,7 @@ export class AutonomousPostChapterService {
     if (run.analysis?.status === 'confirmed') return plan;
 
     const validation = this.dependencies.validateSummary(input.draft.content, candidate);
+    assertSummaryContextEligible(validation, validation.passed ? 'passed' : 'failed');
     const contentHash = this.dependencies.hashContent(input.draft.content);
     const identityPrefix = `${plan.planId}:${input.chapter.id}`;
     const saved = await this.dependencies.contextPersistence.save({

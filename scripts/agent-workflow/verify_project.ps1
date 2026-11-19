@@ -4,7 +4,11 @@
 # Purpose: Run the complete release-quality verification matrix.
 
 [CmdletBinding()]
-param()
+param(
+    # Local implementation acceptance builds the executable, never an installer.
+    # Default release behavior and the clean-working-tree gate remain unchanged.
+    [switch]$NoBundle
+)
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -113,25 +117,49 @@ $npmSteps = @(
     @{ Name = "npm run test:docs-sync"; Arguments = @("run", "test:docs-sync") },
     @{ Name = "npm run test:coverage"; Arguments = @("run", "test:coverage") },
     @{ Name = "npm run test:component-size"; Arguments = @("run", "test:component-size") },
+    @{ Name = "npm run test:rust-file-size"; Arguments = @("run", "test:rust-file-size") },
     @{ Name = "npm run lint:ci"; Arguments = @("run", "lint:ci") },
     @{ Name = "npm run build"; Arguments = @("run", "build") },
-    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") },
-    @{ Name = "npm run test:ai-tasks-delete"; Arguments = @("run", "test:ai-tasks-delete") },
-    @{ Name = "npm run test:project-backup"; Arguments = @("run", "test:project-backup") }
+    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") }
 )
 
 foreach ($step in $npmSteps) {
     Invoke-VerificationStep -Name $step.Name -WorkingDirectory $ProjectRoot -Executable $npm -Arguments $step.Arguments
 }
 
-Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check")
+Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check", "--locked")
 Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")
 Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")
-Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")
+Invoke-VerificationStep -Name "required Rust regression discovery" -WorkingDirectory $ProjectRoot -Executable "node" -Arguments @("scripts/quality/run-cargo-tests.mjs", "--list-only", "--filter", "ai_task_delete", "--filter", "project_backup_")
+Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--workspace", "--", "--test-threads=1")
 
 # The complete desktop suite is a release gate, not a substitute for Node or Rust tests.
 Invoke-VerificationStep -Name "npm run test:e2e" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e")
-Invoke-VerificationStep -Name "npm run tauri:build" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "tauri:build")
+Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults")
+if ($NoBundle) {
+    $releaseExecutable = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "src-tauri\target\release\AI Novel Studio.exe"))
+    $occupied = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and [string]::Equals($_.Path, $releaseExecutable, [System.StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    })
+    if ($occupied.Count -gt 0) {
+        Write-Host "[verify_project] Local EXE is in use; refusing to overwrite: $releaseExecutable" -ForegroundColor Red
+        Add-VerificationResult -Step "local executable build (in use)" -Status "FAIL"
+    } else {
+        # Scope this environment change to the verifier process; never redirect the deliverable.
+        [Environment]::SetEnvironmentVariable("CARGO_TARGET_DIR", $null, "Process")
+        Invoke-VerificationStep -Name "npm run dsh:assets" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "dsh:assets")
+        if ($script:Results[-1].Status -eq "PASS") {
+            $npx = Resolve-Executable -Candidates @("npx.cmd", "npx")
+            Invoke-VerificationStep -Name "local release EXE (no installer)" -WorkingDirectory $ProjectRoot -Executable $npx -Arguments @("tauri", "build", "--no-bundle")
+            if ($script:Results[-1].Status -eq "PASS" -and -not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
+                Write-Host "[verify_project] Expected productName executable is missing: $releaseExecutable" -ForegroundColor Red
+                Add-VerificationResult -Step "local executable location" -Status "FAIL"
+            }
+        }
+    }
+} else {
+    Invoke-VerificationStep -Name "npm run tauri:build" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "tauri:build")
+}
 
 Write-Host "[verify_project] Checking required checklists..." -ForegroundColor Yellow
 $checklistFiles = @(

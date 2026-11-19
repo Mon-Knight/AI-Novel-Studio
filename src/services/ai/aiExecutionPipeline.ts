@@ -17,6 +17,7 @@ import { normalizeAppError, type AppError } from '../../types/appError';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { isTauri } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
+import { artifactValidationError, selectArtifactPersister } from './chapterRevisionPersistence';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 import { createAiPricingSnapshot } from './aiCost';
 import { aiTaskService } from './aiTaskService';
@@ -111,6 +112,7 @@ interface RuntimePort {
   failAttempt: typeof aiTaskRuntimeService.failAttempt;
   cancel: typeof aiTaskRuntimeService.cancel;
   createArtifact: typeof aiTaskRuntimeService.createArtifact;
+  createChapterRevisionArtifact?: typeof aiTaskRuntimeService.createChapterRevisionArtifact;
   getArtifact: typeof aiTaskRuntimeService.getArtifact;
 }
 
@@ -199,7 +201,7 @@ function mapProviderError(
   }
   const normalized = normalizeAppError(error, 'AI Provider 执行失败。', context);
   if (normalized.code !== 'UNKNOWN_ERROR') return toExecutionError(normalized);
-  // Tauri 1.x commands may reject with a plain string instead of an Error.
+  // Tauri commands may reject with a plain string instead of an Error.
   // Preserve that already-sanitized backend message so HTTP/config failures do
   // not collapse into the generic network bucket.
   const message = typeof error === 'string' && error.trim() ? error.trim() : normalized.message;
@@ -748,6 +750,7 @@ async function executeAiTaskInternal(
   let projectionSettled = false;
   let releaseProjection: () => void = () => {};
   try {
+    const persistArtifact = await selectArtifactPersister(input, contract, dependencies.runtime);
     const taskInput = await buildTaskInput({ ...input, traceId }, contract, adapter, operationId);
     task = await withCommitReplay(() => dependencies.runtime.create(taskInput));
     if (dependencies.projection) {
@@ -772,18 +775,12 @@ async function executeAiTaskInternal(
     const completedReplay = await replayCompletedTask(dependencies.runtime, task);
     if (completedReplay) {
       providerCompleted = true;
-      if (completedReplay.artifactBundle?.artifact.processingStatus === 'invalid') {
-        throw new AiExecutionError({
-          code: 'ARTIFACT_VALIDATION_FAILED',
-          message: 'AI 结果未通过校验。',
-          retryable: true,
-          traceId,
-          operationId,
-          details: {
-            artifactId: completedReplay.artifactBundle.artifact.artifactId,
-            issueCodes: completedReplay.artifactBundle.issues.map((issue) => issue.code),
-          },
-        });
+      const artifactFailure = artifactValidationError(completedReplay.artifactBundle, {
+        traceId,
+        operationId,
+      });
+      if (artifactFailure) {
+        throw new AiExecutionError(artifactFailure);
       }
       await dependencies.projection?.markSucceeded(task.taskId, {
         resultText: completedReplay.text,
@@ -850,21 +847,10 @@ async function executeAiTaskInternal(
       rawContent: provider.text,
       structuredPayloadJson,
     };
-    const artifactBundle = await withCommitReplay(() =>
-      dependencies.runtime.createArtifact(artifactInput),
-    );
-    if (artifactBundle.artifact.processingStatus === 'invalid') {
-      throw new AiExecutionError({
-        code: 'ARTIFACT_VALIDATION_FAILED',
-        message: 'AI 结果未通过校验。',
-        retryable: true,
-        traceId,
-        operationId,
-        details: {
-          artifactId: artifactBundle.artifact.artifactId,
-          issueCodes: artifactBundle.issues.map((issue) => issue.code),
-        },
-      });
+    const artifactBundle = await withCommitReplay(() => persistArtifact(artifactInput));
+    const artifactFailure = artifactValidationError(artifactBundle, { traceId, operationId });
+    if (artifactFailure) {
+      throw new AiExecutionError(artifactFailure);
     }
     await dependencies.projection?.markSucceeded(task.taskId, {
       resultText: provider.text,

@@ -14,7 +14,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useRef } from 'react';
 import type { PanelType } from '../../types/rightSidebar';
-import { WORKSPACE_E2E_PANELS } from '../../types/rightSidebar';
+import { isE2eLegacyWorkspacePanelsEnabled, WORKSPACE_E2E_PANELS } from '../../types/rightSidebar';
 import type { EditorCommandType } from '../workspace/EditorArea';
 
 interface PanelToolbarButton {
@@ -133,7 +133,7 @@ function RightToolbar({
   hasReviewCandidate = false,
 }: RightToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const e2eEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+  const e2eEnabled = isE2eLegacyWorkspacePanelsEnabled();
   const buttons = e2eEnabled
     ? [
         ...reviewToolbarButtons.slice(0, 3),

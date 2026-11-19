@@ -176,21 +176,9 @@ pub fn delete_style_profile(
     project_id: &str,
     style_profile_id: &str,
 ) -> Result<(), String> {
-    let was_active =
-        style_profile_repository::delete_style_profile_row(conn, style_profile_id, project_id)?;
-    if was_active {
-        if let Some(new_active_id) =
-            style_profile_repository::find_latest_remaining_style_profile_id(conn, project_id)?
-        {
-            let now = chrono::Utc::now().to_rfc3339();
-            let _ = style_profile_repository::activate_style_profile_row(
-                conn,
-                &new_active_id,
-                project_id,
-                &now,
-            );
-        }
-    }
+    style_profile_repository::delete_style_profile_row(conn, style_profile_id, project_id)?;
+    // Deletion is not consent to activate another (possibly AI-generated) profile.
+    // Existing active profiles in other scopes are not modified; selection stays explicit.
     Ok(())
 }
 
@@ -272,6 +260,24 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(fallback.name, "默认小说风格");
+    }
+
+    #[test]
+    fn style_delete_active_never_activates_unreviewed_ai_candidate() {
+        for scope in ["", "11111111-1111-1111-1111-111111111111"] {
+            let conn=setup_test_db();
+            let make_input=|name:&str,kind:&str|serde_json::from_value::<SaveStyleProfileInput>(serde_json::json!({"projectId":scope,"name":name,"sourceType":kind})).unwrap();
+            let active=save_style_profile(&conn,None,make_input("手动当前方案","manual")).unwrap();
+            set_active_style_profile(&conn,SetActiveStyleProfileInput{project_id:scope.into(),style_profile_id:active.id.clone()}).unwrap();
+            let candidate=save_style_profile(&conn,None,make_input("未审阅离线AI候选","ai_analyzed")).unwrap();
+            assert!(!candidate.is_active);
+            delete_style_profile(&conn,scope,&active.id).unwrap();
+            let owner=(!scope.is_empty()).then_some(scope);
+            assert_eq!(conn.query_row("SELECT COUNT(*) FROM style_profiles WHERE novel_id IS ?1 AND is_active=1",[owner],|row|row.get::<_,i64>(0)).unwrap(),0);
+            assert!(!style_profile_repository::find_style_profile_by_id(&conn,&candidate.id).unwrap().is_active);
+            set_active_style_profile(&conn,SetActiveStyleProfileInput{project_id:scope.into(),style_profile_id:candidate.id.clone()}).unwrap();
+            assert!(style_profile_repository::find_style_profile_by_id(&conn,&candidate.id).unwrap().is_active);
+        }
     }
 
     #[test]

@@ -24,6 +24,10 @@ import {
   Zap,
 } from 'lucide-react';
 import { PanelLoaderIcon } from './PanelLoaderIcon';
+import {
+  ChapterSummaryAdvisoryList,
+  ChapterSummaryValidationNotice,
+} from './ChapterSummaryValidationNotice';
 
 interface ChapterSummaryPanelViewProps {
   aiSettings: AiSettings;
@@ -158,60 +162,7 @@ export function ChapterSummaryPanelView({
             <span>生成结果预览</span>
           </div>
 
-          {validation && (
-            <div
-              style={{
-                fontSize: 12,
-                padding: '6px 8px',
-                borderRadius: 4,
-                marginBottom: 8,
-                background: validation.passed
-                  ? 'color-mix(in srgb, var(--color-success) 6%, transparent)'
-                  : validation.safeToContext
-                    ? 'color-mix(in srgb, var(--color-warning) 6%, transparent)'
-                    : 'color-mix(in srgb, var(--color-error) 6%, transparent)',
-                border: `1px solid ${validation.passed ? 'color-mix(in srgb, var(--color-success) 25%, transparent)' : validation.safeToContext ? 'color-mix(in srgb, var(--color-warning) 25%, transparent)' : 'color-mix(in srgb, var(--color-error) 25%, transparent)'}`,
-              }}
-            >
-              <div
-                className="panel-inline-status"
-                style={{
-                  fontWeight: 600,
-                  color: validation.passed
-                    ? 'var(--color-success)'
-                    : validation.safeToContext
-                      ? 'var(--color-warning-text)'
-                      : 'var(--color-error)',
-                }}
-              >
-                {validation.passed ? (
-                  <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                ) : validation.safeToContext ? (
-                  <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
-                ) : (
-                  <CircleX aria-hidden="true" size={14} strokeWidth={1.8} />
-                )}
-                <span>
-                  {validation.passed
-                    ? '校验通过'
-                    : validation.safeToContext
-                      ? '校验有警告'
-                      : '校验失败'}
-                  （{validation.score} 分）
-                </span>
-              </div>
-              {validation.problems.map((problem, index) => (
-                <div key={index} style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                  • {problem.message}
-                </div>
-              ))}
-              {!validation.safeToContext && (
-                <div style={{ color: 'var(--color-error)', marginTop: 4, fontWeight: 500 }}>
-                  校验未通过，保存后不会自动启用为可用上下文。你可以手动启用或重新生成。
-                </div>
-              )}
-            </div>
-          )}
+          {validation && <ChapterSummaryValidationNotice validation={validation} />}
 
           <div style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 8, whiteSpace: 'pre-wrap' }}>
             {genResult.summary}
@@ -304,6 +255,22 @@ export function ChapterSummaryPanelView({
                 <CheckCircle2 aria-hidden="true" size={12} strokeWidth={1.8} /> 校验通过
               </span>
             )}
+            {summary.validationStatus === 'passed' &&
+              (summary.validationResult?.advisories?.length ?? 0) > 0 && (
+                <span
+                  data-testid="chapter-summary-advisory-badge"
+                  className="panel-inline-status"
+                  style={{
+                    fontSize: 12,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--color-warning) 13%, transparent)',
+                    color: 'var(--color-warning-text)',
+                  }}
+                >
+                  <TriangleAlert aria-hidden="true" size={12} strokeWidth={1.8} /> 有审阅提示
+                </span>
+              )}
             {summary.validationStatus === 'failed' && (
               <span
                 className="panel-inline-status"
@@ -369,6 +336,8 @@ export function ChapterSummaryPanelView({
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>{summary.summary}</div>
           </div>
+
+          <ChapterSummaryAdvisoryList validation={summary.validationResult} />
 
           {summary.keyEvents && summary.keyEvents.length > 0 && (
             <div className="panel-section">

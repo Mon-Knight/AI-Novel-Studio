@@ -9,10 +9,30 @@
  * Environment:
  *   MOCK_WORKBENCH_PORT        Loopback port; 0/default asks the OS to choose.
  *   MOCK_WORKBENCH_MODE        normal | text-only | delayed-text | tool-error | delay | cancel | attestation-fail | attestation-delay
+ *                              | forbidden-tool | cross-novel | upstream-error-once | hold-generate
  *   MOCK_WORKBENCH_NOVEL_ID    novelId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CHAPTER_ID  chapterId placed in scripted tool arguments.
+ *   MOCK_WORKBENCH_FOREIGN_NOVEL_ID / MOCK_WORKBENCH_FOREIGN_CHAPTER_ID
+ *                              Out-of-scope ids used by the cross-novel fault mode.
  *   MOCK_WORKBENCH_CANDIDATE_TEXT  generate_chapter candidate (never exposed in summaries).
  *   MOCK_WORKBENCH_DELAY_MS    Delay between SSE phases for delay/cancel modes.
+ *
+ * Fault modes (Writing SubAgent gate E-4b):
+ *   forbidden-tool       after the context reads the model calls `expand_settings`, a tool the
+ *                        chapter_write allowlist never exposes; the host must reject it.
+ *   cross-novel          generate_chapter carries the foreign novel/chapter ids.
+ *   upstream-error-once  the first non-attestation completion fails with HTTP 500, later ones
+ *                        behave like normal (transport-level retry drill).
+ *   upstream-error       every non-attestation completion fails with HTTP 500 until the mode
+ *                        is switched again (fail-closed + explicit retry drill).
+ *   hold-generate        the generate_chapter completion never finishes until the client
+ *                        disconnects (process restart / cancellation drills).
+ *   upstreamFailureScope defaults to all; chapter-write injects HTTP faults only when the
+ *                        roster advertises generate_chapter, after normal creative planning.
+ * Creative-dialogue rosters read context and request creative.plan_action; they never emit
+ * chapter candidates or consume the scripted candidate sequence.
+ * The in-process handle exposes `configure()` so one server can switch modes and ids between
+ * scenarios without rebinding its port.
  *
  * Security: request bodies and headers are never retained. In particular,
  * Authorization, cookies, credentials, prompts, tool arguments, and tool
@@ -45,7 +65,14 @@ const MODES = new Set([
   'cancel',
   'attestation-fail',
   'attestation-delay',
+  'forbidden-tool',
+  'cross-novel',
+  'upstream-error-once',
+  'upstream-error',
+  'hold-generate',
 ]);
+const FORBIDDEN_TOOL_WIRE_NAME = 'mcp__novel__expand_settings';
+const FORBIDDEN_TOOL_MARKER = 'expand_settings';
 const CONTEXT_TOOLS = [
   'novel.read_context',
   'chapter.read_outline',
@@ -65,6 +92,7 @@ const CANONICAL_READ_UNDERSCORED = Object.freeze([
   ['memory.search', 'memory_search'],
 ]);
 const GENERATE_TOOL = 'generate_chapter';
+const CREATIVE_PLAN_TOOL = 'creative.plan_action';
 const MODEL_TOOL_ATTESTATION_NAME = 'ans_runtime_attest_tool_call_v1';
 
 const TOOL_MARKERS = new Map([
@@ -76,6 +104,7 @@ const TOOL_MARKERS = new Map([
   ['chapter.read_outline', ['chapter_read_outline', 'get_chapter_context']],
   ['get_character_states', ['get_character_states']],
   ['search_memory', ['search_memory']],
+  [CREATIVE_PLAN_TOOL, ['creative_plan_action']],
   [GENERATE_TOOL, ['generate_chapter']],
 ]);
 
@@ -122,8 +151,20 @@ function resolveMode(value) {
   return selected;
 }
 
+function resolveCandidateTexts(value) {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value)) throw new TypeError('candidateTexts must be an array');
+  return Object.freeze(
+    value.map((text, index) => nonEmptyOption(text, `candidateTexts[${index}]`)),
+  );
+}
+
 function resolveOptions(options = {}) {
   const mode = resolveMode(options.mode ?? process.env.MOCK_WORKBENCH_MODE);
+  const upstreamFailureScope = options.upstreamFailureScope ?? 'all';
+  if (!['all', 'chapter-write'].includes(upstreamFailureScope)) {
+    throw new TypeError('upstreamFailureScope must be all or chapter-write');
+  }
   const defaultDelay = mode === 'cancel' ? 30_000 : mode === 'delay' ? 150 : 0;
   const port = integerOption(
     options.port ?? process.env.MOCK_WORKBENCH_PORT ?? 0,
@@ -135,6 +176,7 @@ function resolveOptions(options = {}) {
   }
   return Object.freeze({
     mode,
+    upstreamFailureScope,
     port,
     novelId: nonEmptyOption(
       options.novelId ?? process.env.MOCK_WORKBENCH_NOVEL_ID,
@@ -146,11 +188,23 @@ function resolveOptions(options = {}) {
       'MOCK_WORKBENCH_CHAPTER_ID',
       'mock-workbench-chapter',
     ),
+    foreignNovelId: nonEmptyOption(
+      options.foreignNovelId ?? process.env.MOCK_WORKBENCH_FOREIGN_NOVEL_ID,
+      'MOCK_WORKBENCH_FOREIGN_NOVEL_ID',
+      'mock-workbench-foreign-novel',
+    ),
+    foreignChapterId: nonEmptyOption(
+      options.foreignChapterId ?? process.env.MOCK_WORKBENCH_FOREIGN_CHAPTER_ID,
+      'MOCK_WORKBENCH_FOREIGN_CHAPTER_ID',
+      'mock-workbench-foreign-chapter',
+    ),
     candidateText: nonEmptyOption(
       options.candidateText ?? process.env.MOCK_WORKBENCH_CANDIDATE_TEXT,
       'MOCK_WORKBENCH_CANDIDATE_TEXT',
       '雨停在城门开启之前。沈砚收起湿透的地图，沿着石阶走进尚未苏醒的长街。\n\n远处钟声响起，他知道真正的考验才刚刚开始。',
     ),
+    // The sequence advances only when a candidate tool call is emitted; its last item repeats.
+    candidateTexts: resolveCandidateTexts(options.candidateTexts),
     delayMs: integerOption(
       options.delayMs ?? process.env.MOCK_WORKBENCH_DELAY_MS ?? defaultDelay,
       'MOCK_WORKBENCH_DELAY_MS',
@@ -255,9 +309,25 @@ function wireTools(body) {
   return { actualNames, byCanonical };
 }
 
+/**
+ * The host requires every read to happen inside the current run, and its turn prompt says so.
+ * A resumed DSH session replays earlier turns (including their tool calls) ahead of the new
+ * user message; a compliant model therefore only counts what it did after that message.
+ */
+function messagesOfCurrentTurn(messages) {
+  let start = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      start = index + 1;
+      break;
+    }
+  }
+  return messages.slice(start);
+}
+
 function calledTools(messages) {
   const called = new Set();
-  for (const message of messages) {
+  for (const message of messagesOfCurrentTurn(messages)) {
     if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
     for (const call of message.tool_calls) {
       const canonical = canonicalToolName(call?.function?.name);
@@ -276,21 +346,34 @@ function contentLength(value) {
   }, 0);
 }
 
+const HOST_USER_RETRY_NOTICE = '用户重试';
+
+function contentText(value) {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((block) => (typeof block === 'string' ? block : (block?.text ?? ''))).join('');
+}
+
 function summarizeMessages(messages) {
   const roles = { system: 0, user: 0, assistant: 0, tool: 0, other: 0 };
   let promptChars = 0;
   let lastUserChars = 0;
   let toolResultCount = 0;
+  let userRetryNotice = false;
   for (const message of messages) {
     const role = typeof message?.role === 'string' ? message.role : 'other';
     if (Object.hasOwn(roles, role)) roles[role] += 1;
     else roles.other += 1;
     const length = contentLength(message?.content);
     promptChars += length;
-    if (role === 'user') lastUserChars = length;
+    if (role === 'user') {
+      lastUserChars = length;
+      // Only whether the host's retry notice is present; the prompt itself is never kept.
+      userRetryNotice = contentText(message?.content).includes(HOST_USER_RETRY_NOTICE);
+    }
     if (role === 'tool') toolResultCount += 1;
   }
-  return { roles, promptChars, lastUserChars, toolResultCount };
+  return { roles, promptChars, lastUserChars, toolResultCount, userRetryNotice };
 }
 
 function chapterScopedArguments(options) {
@@ -325,7 +408,23 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
         query: '章节创作上下文',
         topK: 5,
       };
+    case CREATIVE_PLAN_TOOL:
+      return {
+        novelId: options.novelId,
+        chapterId: options.chapterId,
+        action: GENERATE_TOOL,
+        instruction:
+          '生成本章正文，描写演武场激战与天生异象；沿用任务已确认的字数目标，只提交供人工审阅的章节候选。',
+      };
     case GENERATE_TOOL:
+      if (options.mode === 'cross-novel') {
+        // The reads stayed in scope; only the candidate submission points at another book.
+        return {
+          novelId: options.foreignNovelId,
+          chapterId: options.foreignChapterId,
+          candidateText: options.candidateText,
+        };
+      }
       return {
         novelId: options.novelId,
         chapterId: options.chapterId,
@@ -334,6 +433,31 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
     default:
       throw new ContractError(`unsupported canonical tool: ${canonical}`);
   }
+}
+
+function forbiddenToolAlreadyCalled(messages) {
+  for (const message of messagesOfCurrentTurn(messages)) {
+    if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
+    for (const call of message.tool_calls) {
+      const name = call?.function?.name;
+      if (typeof name === 'string' && normalizedToolName(name).includes(FORBIDDEN_TOOL_MARKER)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function createForbiddenToolCall(options, sequence) {
+  return {
+    canonical: FORBIDDEN_TOOL_MARKER,
+    id: `call_mock_${sequence}_0_${FORBIDDEN_TOOL_MARKER}`,
+    name: FORBIDDEN_TOOL_WIRE_NAME,
+    arguments: JSON.stringify({
+      novelId: options.novelId,
+      settings: [{ name: '越权设定', description: '模型试图在章节写作回合写入正式设定。' }],
+    }),
+  };
 }
 
 function requireWireTools(byCanonical, canonicalNames) {
@@ -416,9 +540,13 @@ function createPlan(body, options, sequence) {
   }
 
   const advertisedCanonicalReads = CANONICAL_READ_TOOLS.filter((name) => byCanonical.has(name));
+  if (byCanonical.has(CREATIVE_PLAN_TOOL) && byCanonical.has(GENERATE_TOOL)) {
+    throw new ContractError('creative dialogue and chapter writing tools must use separate runs');
+  }
   const canonicalOnly =
     advertisedCanonicalReads.length > 0 &&
     !byCanonical.has('novel.read_context') &&
+    !byCanonical.has(CREATIVE_PLAN_TOOL) &&
     !byCanonical.has(GENERATE_TOOL);
   if (canonicalOnly) {
     const missingCanonical = advertisedCanonicalReads.filter((name) => !alreadyCalled.has(name));
@@ -444,6 +572,38 @@ function createPlan(body, options, sequence) {
       kind: 'tools',
       phase: 'context-tools',
       calls: createToolCalls(missingContext, byCanonical, options, sequence),
+      advertisedToolNames: actualNames,
+    };
+  }
+  if (byCanonical.has(CREATIVE_PLAN_TOOL)) {
+    if (!alreadyCalled.has(CREATIVE_PLAN_TOOL)) {
+      return {
+        kind: 'tools',
+        phase: 'creative-plan-action',
+        calls: createToolCalls([CREATIVE_PLAN_TOOL], byCanonical, options, sequence),
+        advertisedToolNames: actualNames,
+      };
+    }
+    return {
+      kind: 'text',
+      phase: 'creative-dialogue-final',
+      text: '已请求本章的候选创作工作流。正文将由章节写作回合生成，等待人工审阅。',
+      advertisedToolNames: actualNames,
+    };
+  }
+  if (options.mode === 'forbidden-tool') {
+    if (!forbiddenToolAlreadyCalled(messages)) {
+      return {
+        kind: 'tools',
+        phase: 'forbidden-tool',
+        calls: [createForbiddenToolCall(options, sequence)],
+        advertisedToolNames: actualNames,
+      };
+    }
+    return {
+      kind: 'text',
+      phase: 'forbidden-tool-final',
+      text: '越权工具调用已被拒绝；本回合没有生成章节候选，也未修改正式小说事实。',
       advertisedToolNames: actualNames,
     };
   }
@@ -524,6 +684,17 @@ async function waitForScriptDelay(options, signal) {
   }
 }
 
+/** Parks the response until the client disconnects (or the server shuts down). */
+function holdUntilClientCloses(signal) {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(new ClientClosedError());
+      return;
+    }
+    signal.addEventListener('abort', () => reject(new ClientClosedError()), { once: true });
+  });
+}
+
 async function streamPlan(response, body, plan, options, summary, signal) {
   const model = safeName(body.model);
   const requestId = summary.requestId;
@@ -554,6 +725,10 @@ async function streamPlan(response, body, plan, options, summary, signal) {
     (plan.phase === 'model-tool-attestation' && options.mode === 'attestation-delay')
   ) {
     await waitForScriptDelay(options, signal);
+  }
+  if (options.mode === 'hold-generate' && plan.phase === 'generate-chapter') {
+    summary.phase = 'hold-generate';
+    await holdUntilClientCloses(signal);
   }
 
   let completionChars = 0;
@@ -621,7 +796,15 @@ function finishSummary(state, summary, outcome) {
   state.activeRequests = Math.max(0, state.activeRequests - 1);
 }
 
-async function handleChat(request, response, state, options, pathname) {
+function hasAttestationTool(body) {
+  return (Array.isArray(body.tools) ? body.tools : []).some(
+    (tool) => tool?.type === 'function' && tool?.function?.name === MODEL_TOOL_ATTESTATION_NAME,
+  );
+}
+
+async function handleChat(request, response, state, pathname) {
+  // Scenario switches through configure() must apply to the next request immediately.
+  const options = state.options;
   state.activeRequests += 1;
   state.peakActiveRequests = Math.max(state.peakActiveRequests, state.activeRequests);
   const sequence = ++state.sequence;
@@ -664,9 +847,40 @@ async function handleChat(request, response, state, options, pathname) {
     };
     state.requests.push(summary);
 
+    const injectFailure =
+      !hasAttestationTool(body) &&
+      (options.upstreamFailureScope === 'all' || wireTools(body).byCanonical.has(GENERATE_TOOL)) &&
+      (options.mode === 'upstream-error' ||
+        (options.mode === 'upstream-error-once' && state.injectedUpstreamFailures === 0));
+    if (injectFailure) {
+      state.injectedUpstreamFailures += 1;
+      summary.phase = 'injected-upstream-failure';
+      summary.advertisedToolNames = wireTools(body).actualNames;
+      jsonResponse(response, 500, {
+        error: {
+          message: `injected upstream failure (mock fault mode ${options.mode})`,
+          code: 'MOCK_INJECTED_UPSTREAM_FAILURE',
+        },
+      });
+      completed = true;
+      finishSummary(state, summary, 'injected_failure');
+      return;
+    }
+
     let plan;
     try {
-      plan = createPlan(body, options, sequence);
+      const candidateText =
+        options.candidateTexts.length > 0
+          ? options.candidateTexts[
+              Math.min(state.candidateCalls, options.candidateTexts.length - 1)
+            ]
+          : options.candidateText;
+      plan = createPlan(body, { ...options, candidateText }, sequence);
+      if (plan.kind === 'tools' && plan.calls.some((call) => call.canonical === GENERATE_TOOL)) {
+        state.candidateCalls += 1;
+        summary.candidateCallNumber = state.candidateCalls;
+        summary.candidateTextLength = candidateText.length;
+      }
     } catch (error) {
       if (!(error instanceof ContractError)) throw error;
       summary.phase = 'contract-error';
@@ -731,6 +945,8 @@ function createState(options) {
     sequence: 0,
     activeRequests: 0,
     peakActiveRequests: 0,
+    injectedUpstreamFailures: 0,
+    candidateCalls: 0,
     requests: [],
     controllers: new Set(),
   };
@@ -742,12 +958,31 @@ function requestSnapshot(state) {
     requestCount: state.requests.length,
     activeRequests: state.activeRequests,
     peakActiveRequests: state.peakActiveRequests,
+    injectedUpstreamFailures: state.injectedUpstreamFailures,
+    candidateCalls: state.candidateCalls,
     requests: state.requests.map((summary) => {
       const safe = { ...summary };
       delete safe.startedAtMs;
       return safe;
     }),
   };
+}
+
+/** Re-resolve the scripted options; ids and mode change, the bound port does not. */
+function reconfigure(state, overrides) {
+  const { port: _port, delayMs, ...current } = state.options;
+  // A mode switch without an explicit delay falls back to that mode's default delay.
+  const carriedDelay =
+    overrides.mode !== undefined && overrides.delayMs === undefined ? {} : { delayMs };
+  state.options = resolveOptions({
+    ...current,
+    ...carriedDelay,
+    ...overrides,
+    port: state.options.port,
+  });
+  if (state.options.mode.startsWith('upstream-error')) state.injectedUpstreamFailures = 0;
+  state.candidateCalls = 0;
+  return state.options;
 }
 
 /** Start the loopback-only mock and return its discovery/teardown handle. */
@@ -761,7 +996,7 @@ export async function startMockWorkbenchUpstream(options = {}) {
         ok: true,
         ready: true,
         host: HOST,
-        mode: resolved.mode,
+        mode: state.options.mode,
         requestCount: state.requests.length,
         activeRequests: state.activeRequests,
         peakActiveRequests: state.peakActiveRequests,
@@ -779,7 +1014,7 @@ export async function startMockWorkbenchUpstream(options = {}) {
       request.method === 'POST' &&
       (pathname === '/chat/completions' || pathname === '/v1/chat/completions')
     ) {
-      void handleChat(request, response, state, resolved, pathname);
+      void handleChat(request, response, state, pathname);
       return;
     }
     if (pathname.endsWith('/chat/completions')) {
@@ -805,12 +1040,16 @@ export async function startMockWorkbenchUpstream(options = {}) {
   return Object.freeze({
     host: HOST,
     port: address.port,
-    mode: resolved.mode,
+    get mode() {
+      return state.options.mode;
+    },
     baseUrl,
     upstreamBaseUrl: `${baseUrl}/v1`,
     chatCompletionsUrl: `${baseUrl}/v1/chat/completions`,
     healthUrl: `${baseUrl}/health`,
     requestsUrl: `${baseUrl}/requests`,
+    configure: (overrides = {}) => reconfigure(state, overrides),
+    snapshot: () => requestSnapshot(state),
     close,
   });
 }

@@ -22,12 +22,14 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const { MemoryRouter } = await import('react-router-dom');
 const vite = await createServer({
   appType: 'custom',
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true, hmr: false, watch: null },
 });
+const { MemoryRouter } = (await vite.ssrLoadModule(
+  '/src/test/routerExports.ts',
+)) as typeof import('react-router-dom');
 const novelRepositoryModule = (await vite.ssrLoadModule(
   '/src/services/database/novelRepository.ts',
 )) as typeof import('../../services/database/novelRepository');
@@ -47,6 +49,7 @@ const originalNovelGetAll = novelRepository.getAll;
 const originalGetByNovelId = settingSuggestionService.getByNovelId;
 const originalGenerate = settingSuggestionService.generate;
 const originalAdopt = settingSuggestionService.adopt;
+const originalPreviewAdoption = settingSuggestionService.previewAdoption;
 const originalDiscard = settingSuggestionService.discard;
 
 const novel = {
@@ -87,7 +90,6 @@ function renderPage() {
       MemoryRouter,
       {
         initialEntries: ['/setting-suggestions'],
-        future: { v7_startTransition: true, v7_relativeSplatPath: true },
       },
       React.createElement(SettingSuggestionsPage),
     ),
@@ -97,6 +99,7 @@ function renderPage() {
 beforeEach(() => {
   novelRepository.getAll = async () => [novel];
   settingSuggestionService.getByNovelId = async () => [];
+  settingSuggestionService.previewAdoption = async () => null;
 });
 
 afterEach(() => {
@@ -105,6 +108,7 @@ afterEach(() => {
   settingSuggestionService.getByNovelId = originalGetByNovelId;
   settingSuggestionService.generate = originalGenerate;
   settingSuggestionService.adopt = originalAdopt;
+  settingSuggestionService.previewAdoption = originalPreviewAdoption;
   settingSuggestionService.discard = originalDiscard;
 });
 
@@ -268,4 +272,63 @@ test('candidate review actions update, discard, expand, and edit-adopt records',
   });
   assert.equal(view.container.querySelector('.modal-overlay'), null);
   assert.ok(findCard('Edited Candidate'));
+});
+
+test('legacy rule candidate adoption waits for a visible impact preview and explicit author confirmation', async () => {
+  const record: SettingSuggestionRecord = {
+    id: 'governed-rule',
+    novelId: novel.id,
+    suggestionType: 'rule',
+    worldType: '现实',
+    referenceStyle: '社会悬疑',
+    prompt: '候选prompt',
+    resultJson: '{}',
+    item: { name: '医院供电', content: '急救区域优先供电' },
+    status: 'pending',
+    createdAt: novel.createdAt,
+    updatedAt: novel.updatedAt,
+  };
+  settingSuggestionService.getByNovelId = async () => [record];
+  settingSuggestionService.previewAdoption = async () => ({
+    novelId: novel.id,
+    ruleSetFingerprint: 'rules-1',
+    previewHash: 'candidate-preview-1',
+    sources: [],
+    affectedChapters: [
+      {
+        chapterId: 'ch-1',
+        title: '已采用章',
+        adoptedDraftId: 'draft-1',
+        certainty: 'potential_impact',
+        evidence: '潜在影响，不是已证明冲突',
+      },
+    ],
+    dependentRules: [],
+    uncertainty: ['请作者核对'],
+    blockingConflicts: [],
+    requiresConfirmation: true,
+  });
+  const guards: Array<Parameters<typeof settingSuggestionService.adopt>[2]> = [];
+  settingSuggestionService.adopt = async (_id, _item, guard) => {
+    guards.push(guard);
+    return {
+      record: { ...record, status: 'adopted' },
+      targetId: 'rule-target',
+      targetType: 'rule_system',
+    };
+  };
+  renderPage();
+  fireEvent.click(await screen.findByTestId('setting-suggestion-adopt'));
+  await screen.findByTestId('world-rule-change-confirmation');
+  assert.equal(guards.length, 0);
+  assert.match(screen.getByTestId('world-rule-previewed-content').textContent ?? '', /医院供电/);
+  fireEvent.click(screen.getByTestId('world-rule-change-cancel'));
+  assert.equal(guards.length, 0);
+  fireEvent.click(screen.getByTestId('setting-suggestion-adopt'));
+  await screen.findByTestId('world-rule-change-confirmation');
+  fireEvent.click(screen.getByTestId('setting-author-confirm'));
+  fireEvent.click(screen.getByTestId('world-rule-change-confirm'));
+  await waitFor(() => assert.equal(guards.length, 1));
+  assert.equal(guards[0]?.expectedRuleSetFingerprint, 'rules-1');
+  assert.equal(guards[0]?.changeAuthorization?.previewHash, 'candidate-preview-1');
 });

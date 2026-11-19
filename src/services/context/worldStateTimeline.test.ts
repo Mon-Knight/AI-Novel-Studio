@@ -144,6 +144,60 @@ test('timeline ignores disabled, expired and validation-failed persisted facts',
   assert.equal(timeline, undefined);
 });
 
+test('timeline includes a summary whose only validation issue is a non-blocking advisory', () => {
+  const advisoryOnly = {
+    ...summary('chapter-1', '审阅提示事实'),
+    validationStatus: 'passed' as const,
+    validationResult: {
+      passed: true,
+      score: 88,
+      problems: [],
+      advisories: [
+        {
+          code: 'SUMMARY_SEMANTICS_REQUIRE_REVIEW',
+          path: '/grounding',
+          message: '引句位置与字段覆盖已核对，语义仍需作者审阅。',
+        },
+      ],
+      safeToContext: true,
+    },
+  };
+
+  const timeline = buildPersistedWorldStateTimeline({
+    orderedChapters: [chapter('chapter-1', 1), chapter('chapter-2', 2)],
+    volumes: [volume('volume-1', 1)],
+    targetChapterId: 'chapter-2',
+    summaries: [advisoryOnly],
+    contextRecords: [],
+  });
+
+  assert.ok(timeline);
+  assert.match(timeline.content, /审阅提示事实/);
+});
+
+test('timeline rejects high-scoring blocking validation even when legacy safeToContext is true', () => {
+  const unsafe: ChapterSummary = {
+    ...summary('chapter-1', '不应进入上下文'),
+    validationStatus: 'passed',
+    validationResult: {
+      passed: false,
+      score: 76,
+      safeToContext: true,
+      problems: [{ type: 'character_error', message: '角色不在原文' }],
+    },
+  };
+  assert.equal(
+    buildPersistedWorldStateTimeline({
+      orderedChapters: [chapter('chapter-1', 1), chapter('chapter-2', 2)],
+      volumes: [],
+      targetChapterId: 'chapter-2',
+      summaries: [unsafe],
+      contextRecords: [],
+    }),
+    undefined,
+  );
+});
+
 test('first chapter never receives a synthetic world-state timeline', () => {
   const timeline = buildPersistedWorldStateTimeline({
     orderedChapters: [chapter('chapter-1', 1), chapter('chapter-2', 2)],

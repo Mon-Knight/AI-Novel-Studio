@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inspectChapterCandidateIntegrity } from './chapterCandidateIntegrity';
+import {
+  inspectChapterCandidateIntegrity,
+  buildChapterCandidateIntegrityReview,
+  formatChapterCandidateIntegrityReview,
+} from './chapterCandidateIntegrity';
+
+test('review distinguishes finite checks, warnings, missing evidence and unperformed rule semantics', () => {
+  const warning = {
+    code: 'chapter_temporal_semantics_conflict',
+    severity: 'warning',
+    summary: '时间疑点',
+  } as const;
+  const review = buildChapterCandidateIntegrityReview({
+    scope: { novelId: 'n', chapterId: 'c', artifactId: 'a', candidateHash: 'a'.repeat(64) },
+    issues: [warning],
+    previousChapterBoundary: 'not_applicable',
+    ruleCoverage: {
+      schemaVersion: 'generation_rule_coverage_v1',
+      novelId: 'n',
+      status: 'complete',
+      sourceIds: ['r'],
+      requiredCount: 1,
+      includedCount: 1,
+      projectionHash: 'b'.repeat(64),
+    },
+  });
+  assert.deepEqual(review.issues, [warning]);
+  assert.equal(review.checks.integrity, 'checked');
+  assert.equal(review.checks.ruleContext, 'complete');
+  assert.equal(review.checks.semanticRules, 'not_checked');
+  assert.match(formatChapterCandidateIntegrityReview(review), /warning.*时间疑点/u);
+  assert.match(formatChapterCandidateIntegrityReview(review), /不触发自动重写/u);
+  assert.match(formatChapterCandidateIntegrityReview(review), /全规则语义检查未执行/u);
+  const unavailable = buildChapterCandidateIntegrityReview({
+    scope: review.scope,
+    unavailableReasons: ['读取失败'],
+  });
+  assert.equal(unavailable.checks.integrity, 'not_checked');
+  assert.equal(unavailable.checks.previousChapterBoundary, 'not_checked');
+  assert.match(formatChapterCandidateIntegrityReview(unavailable), /读取失败/u);
+  assert.match(formatChapterCandidateIntegrityReview(unavailable), /不能据此判定候选通过/u);
+});
 
 test('low-confidence cross-actor actions and unrelated event times are review warnings', () => {
   const samples = [

@@ -21,6 +21,7 @@ import {
 } from '../../types/rightSidebar';
 import { useWorkspaceDraftApplication } from '../../features/workspace/useWorkspaceDraftApplication';
 import { useWorkspaceChapterLoader } from '../../features/workspace/useWorkspaceChapterLoader';
+import { useWorkspaceReviewAuthority } from '../../features/workspace/useWorkspaceReviewAuthority';
 import { useWorkspaceCreationActions } from '../../features/workspace/useWorkspaceCreationActions';
 import { useWorkspaceRecoveryActions } from '../../features/workspace/useWorkspaceRecoveryActions';
 import { useWorkspaceRecovery } from '../../hooks/useWorkspaceRecovery';
@@ -31,7 +32,6 @@ import { getCurrentWritingContext, type WritingContext } from '../../utils/writi
 import { useRightSidebarStore } from '../../store/rightSidebarStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import WritingWorkspaceView from './WritingWorkspaceView';
-import { artifactDecisionService } from '../../services/conversation/artifactDecisionService';
 import { reportAppError } from '../../utils/reportAndPresentError';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
@@ -181,6 +181,13 @@ function WritingWorkspacePage() {
     setCurrentDraft,
     setDraftWordCount,
     setDirty: setIsDirty,
+  });
+  const reviewAuthority = useWorkspaceReviewAuthority({
+    requestedAuthorizationId: authorizationId,
+    requestedArtifactId: searchParams.get('artifactId')?.trim() || undefined,
+    novelId,
+    chapterId: activeChapterId,
+    loadedAuthorizationId: chapterLoader.effectiveReviewAuthorizationId,
   });
   const {
     setLoadState,
@@ -431,14 +438,6 @@ function WritingWorkspacePage() {
     [novelId, setChapters],
   );
 
-  const consumeReviewAuthorization = useCallback(
-    async (draftId: string) => {
-      if (!authorizationId) return;
-      await artifactDecisionService.consume(authorizationId, draftId);
-    },
-    [authorizationId],
-  );
-
   return (
     <WritingWorkspaceView
       novelId={novelId}
@@ -485,9 +484,10 @@ function WritingWorkspacePage() {
       reviewLocked={reviewLocked}
       onUnlockReview={() => setReviewLocked(false)}
       reviewCandidate={chapterLoader.reviewCandidate}
-      reviewAuthorizationId={authorizationId}
+      reviewAuthorizationId={reviewAuthority.authorizationId}
       reviewArtifactId={searchParams.get('artifactId')?.trim() || undefined}
-      onBeforeAdopt={consumeReviewAuthorization}
+      onReviewAuthorizationRenewed={reviewAuthority.onRenewed}
+      onBeforeAdopt={reviewAuthority.beforeAdopt}
     />
   );
 }

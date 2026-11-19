@@ -42,7 +42,20 @@ import {
 import { outputProfileService } from '../styles/outputProfileService';
 import { styleProfileService } from '../styles/styleProfileService';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { evaluateSummaryApplicationPolicy } from '../ai/summaryApplicationPolicy';
 import { findPreviousChapterForContinuity } from './workbenchChapterWriter';
+import {
+  assetEvidence,
+  compactSha256,
+  fingerprint,
+  formatCount,
+  latestUpdatedAt,
+  safeUpdatedAt,
+  safeVersion,
+  type WorkbenchAssetScopeEvidence,
+} from './workbenchAssetScopeEvidence';
+
+export type { WorkbenchAssetScopeEvidence } from './workbenchAssetScopeEvidence';
 
 export type WorkbenchAssetScopeGroup = 'foundation' | 'structure' | 'controls' | 'continuity';
 
@@ -65,12 +78,6 @@ export type WorkbenchAssetScopeKey =
   | 'context_record'
   | 'memory_context'
   | 'world_state';
-
-export interface WorkbenchAssetScopeEvidence {
-  source: string;
-  revision?: string;
-  fingerprint?: string;
-}
 
 export interface WorkbenchAssetScopeItem {
   key: WorkbenchAssetScopeKey;
@@ -184,55 +191,6 @@ function profileStatus(novelId: string, profile: StyleProfile | OutputProfile | 
   return profile.novelId === novelId ? ('ready' as const) : ('fallback' as const);
 }
 
-function safeUpdatedAt(value: string | undefined): string | undefined {
-  const match = value?.trim().match(/^(\d{4}-\d{2}-\d{2})/u);
-  return match?.[1] ? `更新 ${match[1]}` : undefined;
-}
-
-function latestUpdatedAt(values: Array<string | undefined>): string | undefined {
-  const dates = values
-    .flatMap((value) => value?.trim().match(/^(\d{4}-\d{2}-\d{2})/u)?.[1] ?? [])
-    .sort();
-  return dates.length > 0 ? `更新 ${dates[dates.length - 1]}` : undefined;
-}
-
-function safeVersion(value: number | undefined): string | undefined {
-  return Number.isSafeInteger(value) && (value ?? -1) >= 0 ? `v${value}` : undefined;
-}
-
-function compactSha256(value: string): string | undefined {
-  const normalized = value.trim().toLowerCase();
-  return /^[0-9a-f]{64}$/u.test(normalized)
-    ? `sha256:${normalized.slice(0, 8)}...${normalized.slice(-4)}`
-    : undefined;
-}
-
-async function fingerprint(material: unknown): Promise<string | undefined> {
-  if (material === undefined || material === null || material === '') return undefined;
-  try {
-    return compactSha256(await computeContentSha256(JSON.stringify(material)));
-  } catch {
-    return undefined;
-  }
-}
-
-async function assetEvidence(
-  source: string,
-  material: unknown,
-  revision?: string,
-): Promise<WorkbenchAssetScopeEvidence> {
-  const contentFingerprint = await fingerprint(material);
-  return {
-    source,
-    ...(revision ? { revision } : {}),
-    ...(contentFingerprint ? { fingerprint: contentFingerprint } : {}),
-  };
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString('zh-CN');
-}
-
 function orderChaptersForContextPreview(chapters: Chapter[], volumes: Volume[]): Chapter[] {
   const volumeOrder = new Map(volumes.map((volume) => [volume.id, volume.orderIndex]));
   return [...chapters].sort(
@@ -262,7 +220,11 @@ function selectContextPreview(input: {
     ? input.summaries
         .filter(
           (summary) =>
-            summary.chapterId === previousChapter.id && summary.enabled && !summary.isExpired,
+            summary.chapterId === previousChapter.id &&
+            summary.enabled &&
+            !summary.isExpired &&
+            evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus)
+              .eligible,
         )
         .sort(
           (left, right) =>

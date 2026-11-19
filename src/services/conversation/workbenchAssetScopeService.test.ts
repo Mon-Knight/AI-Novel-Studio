@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ChapterDraft } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
-import type { ChapterSummary } from '../../types/chapterSummary';
+import type { ChapterSummary, ChapterSummaryValidation } from '../../types/chapterSummary';
 import type { ChapterCharacter } from '../../types/character';
 import type { ChapterEvent } from '../../types/chapterEvent';
 import type { ContextRecord } from '../../types/context';
@@ -523,4 +523,96 @@ test('workbench asset scope reports a failed source instead of presenting it as 
   assert.equal(rules?.required, true);
   assert.equal(summary.unavailableCount, 1);
   assert.equal(summary.requiredMissingCount, 1);
+});
+
+test('summary policy excludes blocking and pending-human summaries from ready Context previews', async () => {
+  const base = dependencies({ getContextRecords: async () => [] });
+  const [summary] = await base.getChapterSummaries('novel-1');
+  const invalid: ChapterSummaryValidation[] = [
+    {
+      policyVersion: 1,
+      passed: false,
+      score: 99,
+      safeToContext: true,
+      problems: [{ type: 'character_error', message: '正文中不存在该角色。' }],
+    },
+    {
+      policyVersion: 1,
+      passed: true,
+      score: 100,
+      safeToContext: true,
+      problems: [],
+      reviewRequirement: 'human_required',
+      authorReviewed: false,
+    },
+    { policyVersion: 1, passed: true, score: 100, safeToContext: false, problems: [] },
+  ];
+  for (const validationResult of invalid) {
+    const scope = await loadWorkbenchAssetScope(
+      { novelId: 'novel-1', chapterId: 'chapter-1' },
+      {
+        ...base,
+        getChapterSummaries: async () => [
+          { ...summary, enabled: true, isExpired: false, validationResult },
+        ],
+      },
+    );
+    const context = scope.items.find((item) => item.key === 'context_record');
+    assert.equal(context?.status, 'missing');
+    assert.equal(context?.value, '目标章前无可用正式 Context');
+    assert.equal(context?.evidence?.revision, '0 条候选来源');
+  }
+});
+
+test('summary policy preserves manual legacy and nonblocking Context preview compatibility', async () => {
+  const base = dependencies({ getContextRecords: async () => [] });
+  const [summary] = await base.getChapterSummaries('novel-1');
+  const allowed: Array<ChapterSummaryValidation | undefined> = [
+    undefined,
+    {
+      passed: false,
+      score: 80,
+      safeToContext: true,
+      authorReviewed: true,
+      semanticValidation: 'not_checked',
+      evidenceValidation: 'passed',
+      problems: [{ type: 'speculation', message: '历史人工审阅，不是语义正确证明。' }],
+    },
+    {
+      policyVersion: 1,
+      passed: true,
+      score: 76,
+      safeToContext: true,
+      problems: [],
+      authorReviewed: false,
+      advisories: [{ code: 'SEMANTIC_NOT_CHECKED', path: '/summary', message: '仅结构校验。' }],
+    },
+  ];
+  for (const validationResult of allowed) {
+    const scope = await loadWorkbenchAssetScope(
+      { novelId: 'novel-1', chapterId: 'chapter-1' },
+      {
+        ...base,
+        getChapterSummaries: async () => [{ ...summary, validationResult }],
+      },
+    );
+    assert.equal(scope.items.find((item) => item.key === 'context_record')?.status, 'ready');
+    assert.equal(
+      scope.items.find((item) => item.key === 'context_record')?.value,
+      '前章总结 1 条 · 正式记录 0 条',
+    );
+  }
+  for (const flags of [
+    { enabled: false, isExpired: false },
+    { enabled: true, isExpired: true },
+  ]) {
+    const scope = await loadWorkbenchAssetScope(
+      { novelId: 'novel-1', chapterId: 'chapter-1' },
+      {
+        ...base,
+        getChapterSummaries: async () => [{ ...summary, ...flags }],
+      },
+    );
+    assert.equal(scope.items.find((item) => item.key === 'context_record')?.status, 'missing');
+  }
 });

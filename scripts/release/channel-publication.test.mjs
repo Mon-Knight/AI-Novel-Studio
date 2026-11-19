@@ -7,8 +7,10 @@ import {
   selectPreviousRelease,
   publishChannel,
   checkTaggedRelease,
+  validateChannelFiles,
 } from './channel-publication.mjs';
 import { githubTransport } from './publish-channel.mjs';
+import { minisignSignature } from './release-fixtures.mjs';
 
 const repository = 'owner/repo';
 const channel = 'stable';
@@ -17,10 +19,11 @@ const url = (version, name) =>
   `https://github.com/${repository}/releases/download/v${version}/${name}`;
 
 function fixture(version, previousVersion = null, selectedChannel = 'stable') {
+  const signature = minisignSignature({ version, fileName: 'app.msi.zip' });
   const binaries = {
     'app.msi.zip': Buffer.from(`updater ${version}`),
     'app.msi': Buffer.from(`installer ${version}`),
-    'app.msi.zip.sig': Buffer.from(`signature ${version}`),
+    'app.msi.zip.sig': Buffer.from(signature),
   };
   const artifact = (fileName) => ({
     fileName,
@@ -56,7 +59,7 @@ function fixture(version, previousVersion = null, selectedChannel = 'stable') {
     platforms: {
       'windows-x86_64': {
         url: url(version, 'app.msi.zip'),
-        signature: binaries['app.msi.zip.sig'].toString(),
+        signature,
       },
     },
   };
@@ -367,6 +370,116 @@ test('a corrupt final read-back triggers compensation and verifies the complete 
   assert.equal(corrupted, true);
   for (const name of CHANNEL_FILES)
     assert.deepEqual(transport.releases.get('updates-stable').contents[name], old.files[name]);
+});
+
+test('publishes a beta channel without touching the stable channel', async () => {
+  const transport = new FakeGitHub();
+  transport.releases.clear();
+  const stable = fixture('3.9.0');
+  transport.add('v3.9.0', stable);
+  transport.add('updates-stable', stable);
+  const betaOld = fixture('3.10.0-beta.2', null, 'beta');
+  const betaNew = fixture('3.10.0-beta.3', '3.10.0-beta.2', 'beta');
+  transport.add('v3.10.0-beta.2', betaOld, true);
+  transport.add('updates-beta', betaOld, true);
+  transport.add('v3.10.0-beta.3', betaNew, true);
+  const stableBefore = Object.fromEntries(
+    CHANNEL_FILES.map((name) => [
+      name,
+      Buffer.from(transport.releases.get('updates-stable').contents[name]),
+    ]),
+  );
+
+  const result = await publishChannel(transport, {
+    files: betaNew.files,
+    channel: 'beta',
+    repository,
+    target: 'test-sha',
+  });
+  assert.equal(result.status, 'published');
+  assert.deepEqual(
+    transport.releases.get('updates-beta').contents['latest.json'],
+    betaNew.files['latest.json'],
+  );
+  for (const name of CHANNEL_FILES) {
+    assert.deepEqual(transport.releases.get('updates-stable').contents[name], stableBefore[name]);
+  }
+  assert.deepEqual(transport.mutations, [
+    'upload:release.json',
+    'upload:rollback.json',
+    'upload:latest.json',
+    'notes',
+  ]);
+});
+
+test('validates v1Compatible artifacts while still accepting legacy signatures', () => {
+  const legacy = fixture('3.9.0');
+  const legacyLatest = JSON.parse(legacy.files['latest.json']);
+  legacyLatest.platforms['windows-x86_64'].signature = minisignSignature({
+    version: null,
+    fileName: 'app.msi.zip',
+  });
+  assert.doesNotThrow(() =>
+    validateChannelFiles(
+      { ...legacy.files, 'latest.json': encodeMetadata(legacyLatest) },
+      'stable',
+      repository,
+    ),
+  );
+
+  const data = fixture('3.10.0', '3.9.0');
+  assert.doesNotThrow(() => validateChannelFiles(data.files, 'stable', repository));
+
+  const badSignature = JSON.parse(data.files['latest.json']);
+  badSignature.platforms['windows-x86_64'].signature = 'not-base64';
+  assert.throws(
+    () =>
+      validateChannelFiles(
+        { ...data.files, 'latest.json': encodeMetadata(badSignature) },
+        'stable',
+        repository,
+      ),
+    /base64/u,
+  );
+
+  const badUpdater = JSON.parse(data.files['release.json']);
+  badUpdater.updaterArtifact = {
+    ...badUpdater.updaterArtifact,
+    fileName: 'app.msi',
+    downloadUrl: url('3.10.0', 'app.msi'),
+    signatureFileName: 'app.msi.sig',
+  };
+  const badUpdaterPointer = JSON.parse(data.files['latest.json']);
+  badUpdaterPointer.platforms['windows-x86_64'].url = url('3.10.0', 'app.msi');
+  assert.throws(
+    () =>
+      validateChannelFiles(
+        {
+          ...data.files,
+          'release.json': encodeMetadata(badUpdater),
+          'latest.json': encodeMetadata(badUpdaterPointer),
+        },
+        'stable',
+        repository,
+      ),
+    /v1-compatible zipped installer/u,
+  );
+
+  const badInstaller = JSON.parse(data.files['release.json']);
+  badInstaller.installerArtifact = {
+    ...badInstaller.installerArtifact,
+    fileName: 'app.zip',
+    downloadUrl: url('3.10.0', 'app.zip'),
+  };
+  assert.throws(
+    () =>
+      validateChannelFiles(
+        { ...data.files, 'release.json': encodeMetadata(badInstaller) },
+        'stable',
+        repository,
+      ),
+    /MSI or NSIS executable/u,
+  );
 });
 
 test('missing, duplicate and oversized remote assets fail before download', async () => {

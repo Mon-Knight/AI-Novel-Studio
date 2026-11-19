@@ -6,14 +6,14 @@
 
 import { showToast } from './toast';
 
-let tauriNotificationApi: typeof import('@tauri-apps/api/notification') | null = null;
+let tauriNotificationApi: typeof import('@tauri-apps/plugin-notification') | null = null;
 let permissionChecked = false;
 let permissionGranted = false;
 
 async function getTauriNotification() {
   if (tauriNotificationApi) return tauriNotificationApi;
   try {
-    tauriNotificationApi = await import('@tauri-apps/api/notification');
+    tauriNotificationApi = await import('@tauri-apps/plugin-notification');
   } catch {
     tauriNotificationApi = null;
   }

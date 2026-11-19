@@ -27,7 +27,7 @@ export const MemoryInspectorCard = memo(function MemoryInspectorCard({
         style={{
           padding: 16,
           textAlign: 'center',
-          color: 'var(--color-text-muted, #64748b)',
+          color: 'var(--color-text-muted)',
           fontSize: 13,
         }}
       >
@@ -41,10 +41,10 @@ export const MemoryInspectorCard = memo(function MemoryInspectorCard({
       className="workbench-memory-inspector-card"
       data-testid="workbench-memory-inspector-card"
       style={{
-        border: '1px solid var(--color-border-light, #e2e8f0)',
+        border: '1px solid var(--color-border-light)',
         borderRadius: 8,
         padding: 12,
-        background: 'var(--color-bg-card, #ffffff)',
+        background: 'var(--color-bg-card)',
         fontSize: 12,
       }}
     >
@@ -53,17 +53,17 @@ export const MemoryInspectorCard = memo(function MemoryInspectorCard({
           <Brain aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>Memory Context · v{versionNumber}</span>
         </strong>
-        <span style={{ color: 'var(--color-text-muted, #64748b)' }}>{sceneName || '当前分镜'}</span>
+        <span style={{ color: 'var(--color-text-muted)' }}>{sceneName || '当前分镜'}</span>
       </div>
-      <div style={{ color: 'var(--color-text-secondary, #475569)', marginBottom: 4 }}>
+      <div style={{ color: 'var(--color-text-secondary)', marginBottom: 4 }}>
         POV: {povName || '默认全知'} · 召回碎片: {retrievedCount} 条
       </div>
       <div
         style={{
           display: 'flex',
           gap: 8,
-          fontSize: 11,
-          color: 'var(--color-text-muted, #64748b)',
+          fontSize: 12,
+          color: 'var(--color-text-muted)',
         }}
       >
         <span>长期: {longTermCount}</span>

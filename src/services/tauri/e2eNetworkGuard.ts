@@ -60,6 +60,8 @@ function protocolOf(target: unknown, baseHref: string): string {
   return parseTarget(target, baseHref)?.protocol.toLowerCase() || 'invalid';
 }
 
+const TAURI_INTERNAL_HOSTS = new Set(['ipc.localhost', 'asset.localhost']);
+
 function sameEndpoint(target: URL, base: URL): boolean {
   return (
     target.protocol === base.protocol &&
@@ -68,11 +70,20 @@ function sameEndpoint(target: URL, base: URL): boolean {
   );
 }
 
+function isTauriInternalEndpoint(target: URL): boolean {
+  return (
+    (target.protocol === 'https:' || target.protocol === 'http:') &&
+    TAURI_INTERNAL_HOSTS.has(target.hostname) &&
+    target.port === ''
+  );
+}
+
 function isExternalTarget(target: unknown, baseHref: string): boolean {
   const parsed = parseTarget(target, baseHref);
   if (!parsed) return true;
   if (parsed.protocol === 'data:' || parsed.protocol === 'blob:' || parsed.protocol === 'about:')
     return false;
+  if (isTauriInternalEndpoint(parsed)) return false;
   try {
     return !sameEndpoint(parsed, new URL(baseHref));
   } catch {

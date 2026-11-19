@@ -2,7 +2,7 @@
  * AI Novel Studio - 右侧工具栏与弹出面板样式
  */
 
-/* === 右侧固定工具栏 === */
+/* === 右侧固定工具栏：与全局 56px 图标轨同一规格 === */
 .right-toolbar {
   width: var(--right-toolbar-width);
   min-width: var(--right-toolbar-width);
@@ -12,8 +12,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--spacing-sm) 0;
-  gap: 2px;
+  padding: 8px 0;
+  gap: 4px;
   overflow-y: auto;
   overflow-x: hidden;
   z-index: var(--z-right-toolbar);
@@ -21,8 +21,8 @@
 }
 
 .right-toolbar-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -38,18 +38,18 @@
   color: var(--color-text-secondary);
   font: inherit;
   cursor: pointer;
-  gap: 1px;
+  gap: 2px;
   position: relative;
 }
 
 .right-toolbar-btn::before {
   position: absolute;
   top: 50%;
-  left: 0;
-  width: 3px;
-  height: 20px;
+  left: -6px;
+  width: 2px;
+  height: 18px;
   border-radius: 0 2px 2px 0;
-  background: var(--color-primary);
+  background: var(--color-text-primary);
   content: '';
   opacity: 0;
   transform: translateY(-50%) scaleY(0.55);
@@ -63,9 +63,14 @@
   color: var(--color-text-primary);
 }
 
-.right-toolbar-btn.active {
+.right-toolbar-btn:active:not(:disabled) {
   background: var(--color-bg-active);
-  color: var(--color-primary);
+  transform: translateY(1px);
+}
+
+.right-toolbar-btn.active {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
 }
 
 .right-toolbar-btn.active::before {
@@ -97,7 +102,7 @@
 }
 
 .right-toolbar-btn .tb-label {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   line-height: 1;
 }
@@ -105,7 +110,8 @@
 /* === 右侧弹出面板 === */
 .right-panel-overlay {
   position: fixed;
-  top: var(--topbar-height);
+  /* The shell frame bar sits above the workspace topbar. */
+  top: calc(var(--frame-bar-height) + var(--topbar-height));
   left: 0;
   right: 0;
   bottom: var(--statusbar-height);
@@ -120,9 +126,9 @@
   right: var(--right-toolbar-width);
   bottom: 0;
   width: var(--right-panel-width);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-sidebar);
   border-left: 1px solid var(--color-border);
-  box-shadow: -4px 0 16px var(--color-shadow);
+  box-shadow: -12px 0 32px var(--color-shadow);
   display: flex;
   flex-direction: column;
   z-index: var(--z-right-panel);
@@ -155,12 +161,15 @@
   pointer-events: none;
 }
 
+/* 头部与工作台右侧面板（.workbench-side-view-header）同规格 */
 .right-panel-header {
-  padding: var(--spacing-md) var(--spacing-lg);
+  flex: 0 0 auto;
+  padding: 12px;
   border-bottom: 1px solid var(--color-border-light);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-height: 44px;
 }
 
@@ -168,12 +177,17 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: var(--font-size-md);
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .right-panel-close {
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -192,10 +206,16 @@
   color: var(--color-text-primary);
 }
 
+.right-panel-close:active {
+  background: var(--color-bg-active);
+  transform: translateY(1px);
+}
+
 .right-panel-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--spacing-lg);
+  padding: 12px;
 }
 
 /* === 面板内通用样式 === */
@@ -209,9 +229,9 @@
   gap: 6px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
   margin-bottom: var(--spacing-sm);
   padding-bottom: var(--spacing-xs);
   border-bottom: 1px solid var(--color-border-light);
@@ -327,16 +347,18 @@
 .agent-plan-card__subtitle {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .agent-plan-status {
   flex: none;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
 }
 
 .agent-plan-status--completed {
@@ -356,7 +378,7 @@
   gap: var(--spacing-sm);
   margin-top: var(--spacing-md);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .agent-plan-progress__track {
@@ -378,7 +400,7 @@
 .agent-plan-steps {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 5px 8px;
+  gap: 4px 8px;
   margin: var(--spacing-sm) 0 0;
   padding: 0;
   list-style: none;
@@ -388,9 +410,9 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .agent-plan-step--completed {
@@ -410,11 +432,11 @@
 .agent-plan-card__error,
 .agent-plan-result {
   margin-top: var(--spacing-sm);
-  padding: 7px 8px;
+  padding: 8px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
@@ -488,7 +510,7 @@
 
 .engineering-loop-item {
   min-width: 0;
-  padding: 7px var(--spacing-sm);
+  padding: 8px var(--spacing-sm);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
   background: var(--color-bg-card);
@@ -500,7 +522,7 @@
   display: block;
   margin-bottom: 2px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.2;
 }
 
@@ -555,6 +577,11 @@
   color: var(--color-text-primary);
 }
 
+.engineering-tab:active {
+  background: var(--color-bg-active);
+  transform: translateY(1px);
+}
+
 .engineering-tab.active {
   background: var(--color-bg-active);
   color: var(--color-primary);
@@ -595,7 +622,7 @@
 }
 
 .engineering-link-btn:hover {
-  color: var(--color-error);
+  color: var(--color-error-text);
 }
 
 .engineering-check-list {
@@ -644,7 +671,7 @@
   display: block;
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .engineering-snapshot-summary {
@@ -694,32 +721,32 @@
 }
 
 .engineering-source-row .source-used {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .engineering-source-row .source-missing {
-  color: var(--color-error);
+  color: var(--color-error-text);
 }
 
 .engineering-source-row .source-fallback {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .engineering-step-row .source-used {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .engineering-step-row .source-missing {
-  color: var(--color-error);
+  color: var(--color-error-text);
 }
 
 .engineering-step-row .source-fallback {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .engineering-snapshot-preview {
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .engineering-job-actions {
@@ -794,7 +821,7 @@
   display: block;
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.45;
   max-height: 80px;
   overflow: auto;
@@ -854,7 +881,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px;
   margin-bottom: 8px;
   background: var(--color-error-bg);
   border: 1px solid var(--color-error-border);
@@ -932,19 +959,19 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-md);
   color: var(--color-warning-text);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.4;
 }
 
 .panel-stale-warning-icon {
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 /* --- 按钮文案增强 --- */
@@ -958,8 +985,12 @@
   cursor: not-allowed;
 }
 
+.panel-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .panel-btn-sm {
-  padding: 4px 10px;
+  padding: 4px 8px;
   font-size: var(--font-size-xs);
   border-radius: var(--radius-sm);
 }
@@ -969,7 +1000,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   margin-bottom: 8px;
   background: var(--color-success-bg);
   border: 1px solid var(--color-success-border);
@@ -983,7 +1014,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   margin-bottom: 8px;
   background: var(--color-info-bg);
   border: 1px solid var(--color-info-border);
@@ -1000,13 +1031,13 @@
 /* 2K 及以上分辨率下增大面板宽度和间距 */
 @media (min-width: 2048px) {
   :root {
-    --right-panel-width: 380px;
-    --right-toolbar-width: 48px;
+    --right-panel-width: 400px;
+    --right-toolbar-width: 56px;
   }
 
   .right-toolbar-btn {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
   }
 
   .right-toolbar-btn .tb-icon {
@@ -1020,7 +1051,7 @@
   }
 
   .right-toolbar-btn .tb-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .right-panel-body {
@@ -1028,9 +1059,9 @@
   }
 
   .panel-section-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.6px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   .panel-field-label {
@@ -1038,11 +1069,11 @@
   }
 
   .panel-field-value {
-    font-size: 15px;
+    font-size: var(--font-size-md);
   }
 
   .panel-btn {
-    padding: 10px 16px;
+    padding: 12px 16px;
     font-size: 14px;
     border-radius: var(--radius-md);
   }
@@ -1071,25 +1102,25 @@
   .panel-success,
   .panel-info,
   .panel-stale-warning {
-    font-size: 12px;
-    padding: 10px 14px;
+    font-size: var(--font-size-xs);
+    padding: 12px 16px;
   }
 
   .right-panel-header {
-    padding: 14px 18px;
+    padding: 16px 18px;
     min-height: 48px;
   }
 
   .right-panel-title {
-    font-size: 15px;
+    font-size: var(--font-size-md);
   }
 }
 
 /* 4K 及以上分辨率 */
 @media (min-width: 3200px) {
   :root {
-    --right-panel-width: 420px;
-    --right-toolbar-width: 52px;
+    --right-panel-width: 440px;
+    --right-toolbar-width: 60px;
   }
 }
 
@@ -1149,7 +1180,7 @@
 .multi-agent-expert-selector {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 10px;
+  gap: 6px 8px;
   margin-bottom: var(--spacing-md);
 }
 
@@ -1158,11 +1189,19 @@
   align-items: center;
   min-width: 0;
   min-height: 30px;
-  gap: 7px;
+  gap: 8px;
   padding: 4px 6px;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   border-bottom: 1px solid var(--color-border-light);
+}
+
+.multi-agent-expert-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.multi-agent-expert-toggle:active {
+  background: var(--color-bg-active);
 }
 
 .multi-agent-expert-toggle input {
@@ -1239,12 +1278,20 @@
 .multi-agent-action {
   flex: 0 0 auto;
   min-width: 48px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   text-align: center;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
+}
+
+.multi-agent-action:hover {
+  border-color: var(--color-border-strong);
+}
+
+.multi-agent-action:active {
+  transform: translateY(1px);
 }
 
 .multi-agent-action.accept {
@@ -1287,6 +1334,10 @@
   background: var(--color-bg-hover);
 }
 
+.multi-agent-round-tabs button:active {
+  background: var(--color-bg-active);
+}
+
 .multi-agent-round-tabs button.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
@@ -1304,7 +1355,7 @@
 
 .multi-agent-metrics div {
   min-width: 0;
-  padding: 8px 5px;
+  padding: 8px 4px;
   background: var(--color-bg-card);
   text-align: center;
 }
@@ -1317,7 +1368,7 @@
 
 .multi-agent-metrics span {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .multi-agent-metrics strong {
@@ -1384,7 +1435,7 @@
 }
 
 .multi-agent-opinion-error {
-  color: var(--color-error);
+  color: var(--color-error-text);
 }
 
 /* === 角色列表 === */
@@ -1401,6 +1452,10 @@
 
 .character-item:hover {
   background: var(--color-bg-hover);
+}
+
+.character-item:active {
+  background: var(--color-bg-active);
 }
 
 .character-avatar {
@@ -1502,6 +1557,10 @@
 .polish-option:hover {
   border-color: var(--color-primary);
   background: var(--color-bg-hover);
+}
+
+.polish-option:active {
+  background: var(--color-bg-active);
 }
 
 .polish-option.selected {

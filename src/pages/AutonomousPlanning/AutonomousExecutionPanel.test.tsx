@@ -93,6 +93,39 @@ function renderPanel(value: AutonomousStoryPlan, calls: Record<string, number>) 
   );
 }
 
+test('恢复的采用章等待明确开始分析，键盘确认不会伪造沉淀或自动重放', async () => {
+  const calls = { generate: 0, book: 0, pause: 0, open: 0, retry: 0, confirm: 0, world: 0 };
+  const recovered = plan({
+    chapters: plan().chapters.map((chapter) => ({ ...chapter, status: 'adopted' })),
+    chapterRuns: [
+      {
+        runId: 'restored',
+        operationId: 'restored-op',
+        chapterId: 'chapter-1',
+        chapterNumber: 1,
+        status: 'adopted',
+        adoptedDraftId: 'adopted',
+        plannedCharacterBeatIds: [],
+        confirmedCharacterBeatIds: [],
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ],
+  });
+  renderPanel(recovered, calls);
+  assert.equal(calls.retry, 0);
+  assert.ok(screen.getByText('等待明确开始章节分析；刷新不会自动重放模型调用'));
+  const start = screen.getByRole('button', { name: '开始章节分析' });
+  start.focus();
+  assert.equal(document.activeElement, start);
+  const user = (await import('@testing-library/user-event')).default.setup({
+    document: dom.window.document,
+  });
+  await user.keyboard('{Enter}');
+  assert.equal(calls.retry, 1);
+  assert.equal(calls.confirm, 0, '生成许可不等于应用或人工审阅许可');
+});
+
 test('逐章面板只生成候选，并在六专家评审后引导用户到工作台采用', () => {
   const calls = { generate: 0, book: 0, pause: 0, open: 0, retry: 0, confirm: 0, world: 0 };
   let openedTarget: { chapterId: string; draftId: string } | undefined;
@@ -277,7 +310,11 @@ test('桌面调度面板冻结三档策略、预算、时间窗和失败熔断�
 
   assert.ok(screen.getByRole('region', { name: '跨进程无人值守调度' }));
   assert.ok(screen.getByText('达标后停在候选；在工作台确认采用后，调度队列自动继续。'));
-  assert.ok(screen.getByText('质量、预算与采用前复验通过后，自动采用正文并确认章节分析。'));
+  assert.ok(
+    screen.getByText(
+      '仅在另行签发的任务授权、质量门禁与写入复验均通过时自动采用正文和应用总结；否则等待人工决定。',
+    ),
+  );
   assert.ok(screen.getByLabelText('连续失败熔断'));
   assert.ok(screen.getByLabelText('每日 Token 上限'));
   fireEvent.click(screen.getByRole('button', { name: /全自动/ }));

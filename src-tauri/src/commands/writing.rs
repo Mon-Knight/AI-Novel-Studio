@@ -90,6 +90,14 @@ pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDt
 }
 
 #[tauri::command]
+pub fn save_chapter_details(
+    input: crate::services::chapter_details_service::SaveChapterDetailsInput,
+) -> Result<ChapterDto, String> {
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    crate::services::chapter_details_service::save_chapter_details(&mut conn, input)
+}
+
+#[tauri::command]
 pub fn delete_chapter(id: String) -> Result<(), String> {
     let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
     chapter_service::delete_chapter(&mut conn, &id)

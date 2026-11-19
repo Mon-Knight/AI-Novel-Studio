@@ -23,6 +23,22 @@ interface ChapterSummaryView {
   enabled: boolean;
   isExpired: boolean;
   draftVersion?: number;
+  validationStatus?: 'pending' | 'passed' | 'failed';
+  validationResult?: string | ChapterSummaryValidationView;
+}
+
+interface ChapterSummaryValidationView {
+  passed: boolean;
+  score: number;
+  problems: Array<{ type: string; message: string }>;
+  advisories?: Array<{ code: string; path: string; message: string }>;
+  safeToContext: boolean;
+  groundingIssues?: Array<{
+    severity: 'warning' | 'error';
+    code: string;
+    path: string;
+    message: string;
+  }>;
 }
 
 interface ContextRecordView {
@@ -41,6 +57,19 @@ interface ChapterView {
   novelId: string;
   adoptedDraftId?: string;
   status: string;
+}
+
+function parseSummaryValidation(
+  summary: ChapterSummaryView | null,
+): ChapterSummaryValidationView | null {
+  const value = summary?.validationResult;
+  if (!value) return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value) as ChapterSummaryValidationView;
+  } catch {
+    return null;
+  }
 }
 
 async function adoptEditorContent(
@@ -101,6 +130,11 @@ describe('chapter context persistence', () => {
     await clickTestId('chapter-summary-generate');
     const saveButton = await waitForTestId('chapter-summary-save');
     await saveButton.waitForEnabled({ timeout: 60000 });
+    const validationNotice = await waitForTestId('chapter-summary-validation-notice');
+    const validationNoticeText = await validationNotice.getText();
+    expect(validationNoticeText).toContain('结构与依据检查通过 · 语义未自动核验');
+    expect(validationNoticeText).toContain('有审阅提示');
+    expect(validationNoticeText).toContain('引句位置与字段覆盖已核对');
     await saveButton.click();
     await waitForTestId('chapter-summary-save-success');
     const savedRecord = await waitForTestId('chapter-summary-record');
@@ -122,6 +156,16 @@ describe('chapter context persistence', () => {
     expect(summaryBeforeRestart?.id).toBe(summaryId);
     expect(summaryBeforeRestart?.adoptedDraftId).toBe(adoptedDraftId);
     expect(summaryBeforeRestart?.isExpired).toBe(false);
+    expect(summaryBeforeRestart?.validationStatus).toBe('passed');
+    const validationBeforeRestart = parseSummaryValidation(summaryBeforeRestart);
+    expect(validationBeforeRestart?.passed).toBe(true);
+    expect(validationBeforeRestart?.safeToContext).toBe(true);
+    expect(validationBeforeRestart?.problems).toEqual([]);
+    expect(
+      validationBeforeRestart?.advisories?.some(
+        (advisory) => advisory.code === 'SUMMARY_SEMANTICS_REQUIRE_REVIEW',
+      ),
+    ).toBe(true);
     expect(summariesBeforeRestart.filter((item) => item.chapterId === chapterId)).toHaveLength(1);
     const chapterRecordsBeforeRestart = recordsBeforeRestart.filter(
       (record) => record.chapterId === chapterId,
@@ -157,6 +201,10 @@ describe('chapter context persistence', () => {
       summaryId!,
     );
     expect(await reopenedSummary.getAttribute('data-summary-expired')).toBe('false');
+    const advisoryBadge = await waitForTestId('chapter-summary-advisory-badge');
+    expect(await advisoryBadge.getText()).toContain('有审阅提示');
+    const advisoryList = await waitForTestId('chapter-summary-advisories');
+    expect(await advisoryList.getText()).toContain('引句位置与字段覆盖已核对');
 
     const [summaryAfterRestart, recordsAfterRestart] = await Promise.all([
       bridgeCall<ChapterSummaryView | null>('get_chapter_summary', { chapterId }),

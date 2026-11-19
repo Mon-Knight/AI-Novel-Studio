@@ -166,13 +166,9 @@ async function readDefaultSidecar(): Promise<string | null> {
     if (typeof localStorage === 'undefined') return null;
     return localStorage.getItem(LOCAL_MODEL_LIFECYCLE_BROWSER_KEY);
   }
-  const [{ readTextFile }, { homeDir, join }] = await Promise.all([
-    import('@tauri-apps/api/fs'),
-    import('@tauri-apps/api/path'),
-  ]);
-  const filePath = await join(await homeDir(), LOCAL_MODEL_LIFECYCLE_SIDECAR_NAME);
+  const { readDeclaredLifecycleSidecar } = await import('../../tauri/scopedDesktopFs');
   try {
-    return await readTextFile(filePath);
+    return await readDeclaredLifecycleSidecar(LOCAL_MODEL_LIFECYCLE_SIDECAR_NAME);
   } catch (error) {
     if (isMissingFileError(error)) return null;
     throw error;

@@ -1,0 +1,25 @@
+{
+  "contractVersion": "chapter_workflow_binding_v1",
+  "bindingVersion": 1,
+  "startMarker": "[CHAPTER_WORKFLOW_BINDING]",
+  "endMarker": "[/CHAPTER_WORKFLOW_BINDING]",
+  "maxIdentityUtf8Bytes": 200,
+  "bindingSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schemaVersion": { "type": "integer", "const": 1 },
+      "workflowId": { "type": "string", "minLength": 1 },
+      "stageKey": { "type": "string", "minLength": 1 },
+      "inputHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "required": ["schemaVersion", "workflowId", "stageKey", "inputHash", "planHash"]
+  },
+  "authority": {
+    "formalWrites": "forbidden",
+    "isAdoptionAuthorization": false,
+    "metadataAloneIsEvidence": false,
+    "mustAppearInActualRequestMessages": true
+  }
+}

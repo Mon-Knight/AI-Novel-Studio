@@ -98,23 +98,19 @@ function ReferenceImportCard({ novelId, works, onImported, onStatus }: Reference
     setBusy(true);
     onStatus('正在打开桌面文件选择器…');
     try {
-      const [{ open }, { readBinaryFile }] = await Promise.all([
-        import('@tauri-apps/api/dialog'),
-        import('@tauri-apps/api/fs'),
-      ]);
-      const selected = await open({
+      const { readBinaryFileFromOpenDialog } = await import('../../services/tauri/scopedDesktopFs');
+      const selected = await readBinaryFileFromOpenDialog({
         title: '选择 TXT 参考资料',
         multiple: false,
         directory: false,
         filters: [{ name: 'TXT 文本', extensions: ['txt'] }],
       });
-      if (typeof selected !== 'string') {
+      if (!selected) {
         onStatus('已取消选择参考资料。');
         return;
       }
-      const fileName = selected.split(/[\\/]/u).pop() ?? '';
-      const bytes = await readBinaryFile(selected);
-      await inspectBytes(fileName, bytes, selected);
+      const fileName = selected.path.split(/[\\/]/u).pop() ?? '';
+      await inspectBytes(fileName, selected.bytes, selected.path);
     } catch (caught: unknown) {
       reset();
       onStatus(describeUnknownError(caught, '桌面参考资料读取失败'), true);

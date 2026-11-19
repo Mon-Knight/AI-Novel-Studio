@@ -373,7 +373,7 @@ async function prepareApplication(
     console.log('[REAL ACCEPTANCE] building an unpackaged real-profile Tauri test carrier...');
     const result = await runChild(
       process.execPath,
-      [tauriCli, 'build', '--features', 'e2e', '--bundles', 'none', '--ci'],
+      [tauriCli, 'build', '--features', 'e2e', '--no-bundle', '--ci'],
       buildEnvironment,
       profile.apiKey,
     );

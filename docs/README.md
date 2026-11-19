@@ -4,104 +4,123 @@
 
 ## 从这里开始
 
-| 你要做什么               | 入口与阅读顺序                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 使用软件                 | [快速开始](user/quick-start.md) → [桌面使用](user/desktop-usage.md) → [AI 设置](user/ai-settings.md)                                 |
-| 让编码 Agent 修改项目    | [根 AGENTS.md](../AGENTS.md) → [Agent 工作流](agent-workflow.md) → 任务相关设计/实现/测试                                            |
-| 查任务与开发辅助         | [任务速查](project/agent-task-rules.md)、[开发 Skills](development-skills.md)                                                        |
-| 修改工作台/Agent Runtime | [对话工作台架构](architecture/conversational-creative-workbench.md) → [Runtime](agent-runtime.md) → [模块边界](module-boundaries.md) |
-| 修改数据库/保存采用      | [数据模型](data-model.md) → [Safe Apply](architecture/safe-apply.md) → [测试策略](technical/testing.md)                              |
-| 查看版本或准备发布       | [版本路线](version-roadmap.md)、[CHANGELOG](../CHANGELOG.md)、[Git 治理](project/git-workflow.md)                                    |
+| 你要做什么               | 入口与阅读顺序                                                                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 使用软件                 | [快速开始](user/quick-start.md) → [创作工作流](user/workflow-guide.md) → [桌面使用](user/desktop-usage.md) → [AI 设置](user/ai-settings.md)                                                                                    |
+| 让编码 Agent 修改项目    | [根 AGENTS.md](../AGENTS.md) → [Agent 工作流](agent-workflow.md) → 任务相关设计/实现/测试                                                                                                                                      |
+| 查任务与开发辅助         | [任务速查](project/agent-task-rules.md)、[开发 Skills](development-skills.md)                                                                                                                                                  |
+| UI 开发与组件规范        | [UI 开发框架](ui-development-framework.md) → [UI 标准](ui-reference.md) → [前端指令](../.github/instructions/frontend.instructions.md)                                                                                         |
+| 修改工作台/Agent Runtime | [对话工作台架构](architecture/conversational-creative-workbench.md) → [Runtime](agent-runtime.md) → [模块边界](module-boundaries.md)                                                                                           |
+| 修改数据库/保存采用      | [数据模型](data-model.md) → [Safe Apply](architecture/safe-apply.md) → [测试策略](technical/testing.md)                                                                                                                        |
+| 修改世界/规则与候选来源  | [世界规则契约](design/world-rule-contract.md) → [Writing SubAgent 契约](architecture/writing-subagent-contract.md) → [数据模型](data-model.md)                                                                                 |
+| 查看版本或准备发布       | [版本路线](version-roadmap.md)、[CHANGELOG](../CHANGELOG.md)、[Git 治理](project/git-workflow.md)                                                                                                                              |
+| 规划下一版与功能缺陷治理 | [缺口复核与用户旅程](feature-gap-analysis-v3.7.0.md#gap-review-20260927) → [v3.8.0 单版本总体计划](version-roadmap.md#v380-integrated-plan) → [完整自我迭代机制](ai-agent-roadmap.md#writing-self-improvement)（规划／未实施） |
+
+### 当前集成：统一 Agent 与任务级预授权（2026-11-11）
+
+**INTEGRATION / NOT YET FULLY VERIFIED**，不升级应用版本，不改写下面历史批次的日期/结论。当前契约入口：
+
+- [统一 Runtime](agent-runtime.md#13-统一原生执行与任务级预授权2026-11-11集成验证中)：桌面原生单协调器、父子隔离、阶段/预算/取消与模型适配；Scene/Beat 原生阶段链源码已落地，确定性 Writer 顶层仅限浏览器开发兼容，动态/真实桌面证据边界见实施记录。
+- [任务授权、迁移与总结策略](data-model.md#45-任务级预授权与总结应用策略2026-11-11)：迁移总数 001～043，即 `041_task_authorizations`、`042_library_task_scope`（nullable novel identity 安全重建）与 `043_host_terminal_native_facts`（仅 `dsh.*` 原生控制事实可在 Run 终态后 append，普通工具仍限活动 Run）。001～040 definition/checksum 保持，041/042 已落地定义不改写，本批仅 043 重建 `trg_tool_call_events_validate_insert`；当前备份 schema 13，恢复 active 授权为 expired。
+- [用户授权操作](user/workflow-guide.md#21-可选为当前目标签发有限预授权)：默认人工，三个动作分别选择，绑定当前明确目标而非整段会话未来所有要求；可查看、撤销与核对真实回执。
+- [验证矩阵](technical/testing.md#12-统一-runtime-与任务授权验收2026-11-11待最终门禁)与[本地 EXE 构建](technical/desktop-build.md#21-当前统一-runtime-本地交付2026-11-11)：离线、回环、真实桌面分开；可选 `-NoBundle` 不生成安装包或发布，也不改变默认发布/脏工作树门禁。
+- [本批实施记录：11 月 18 日续验](../reports/unified-agent-2026-11-11/implementation.md#closeout-20261118)：原生授权终止修复、固定 Mock 桌面重启与撤销、验证结果及本地 EXE 指纹。R4 live 保持 `NOT_VERIFIED`，文学效果未验证。
 
 ### 文档时效与权威
 
 - 机器版本以 `package.json` 和版本同步检查为准；本索引不另行维护一份“当前版本”总声明。
 - 仓库开发规则只有根 `AGENTS.md` 一个主入口；IDE 指令、Skills 与任务速查只补充，不扩大授权。
 - 产品/UI/开发长文保留早期设计；优先读取开头的演进说明和当前版本覆盖章节。v3.3.0+ 工作台以专门架构文档为准。
-- `audit/`、`audit-v2/`、`architecture-audit-v2/` 和历史发布归档是带版本/时间的证据，不是当前待办或自动执行授权；Mock、loopback、真实桌面与 live 云端结论必须区分。
+- 历史 v3.7.0 交互、候选与世界规则批次：工作台架构第 13.1 节、Writing SubAgent 第 3.4 节及世界规则契约保留当时实现与待验收说明。用户授权的 `039_result_artifacts_cross_task_lineage`（数据模型第 44 节）保持 001～038 定义/checksum；后续 040 增加章节阶段事实，备份曾推进至 schema 12。这不是当前迁移总数或本批验证结论；当前 001～043/schema 13 及统一内核以本页当前集成入口为准，历史证据不挪用，R4 live 仍 NOT VERIFIED。
+- `audit/`、`audit-v2/`、`architecture-audit-v2/` 和历史发布归档是带版本/时间的证据，不是当前待办或自动执行授权；`architecture-audit-v2/` 是 Canonical exposure 前快照。Mock、loopback、真实桌面与 live 云端结论必须区分。当前缺口以 [`feature-gap-analysis-v3.7.0.md`](feature-gap-analysis-v3.7.0.md) 为准。
+- 2026-09-27 规划核对：上述“仍在集成/待统一验收”说明保留原批次语义，后续适用本地、Rust、SQLite、桌面与 EXE 收尾结果以[最近复核为 2026-09-26 的报告](../reports/closeout-2026-09-18.md)为准；不包含 R4 live 或未来改动。缺陷台账第 6 节补充最新核对，下一版将完整自我迭代与核心缺陷治理统一交付，不分成多个版本。
 
 ---
 
 ## user/ - 用户使用指南
 
-| 文档                                                | 说明                               | 状态                |
-| --------------------------------------------------- | ---------------------------------- | ------------------- |
-| [quick-start.md](user/quick-start.md)               | 快速开始指南                       | ✅ 已整理           |
-| [desktop-usage.md](user/desktop-usage.md)           | Windows 桌面端使用说明             | ✅ 已整理           |
-| [ai-settings.md](user/ai-settings.md)               | AI 模式与模型配置                  | ✅ 已整理           |
-| [data-import-export.md](user/data-import-export.md) | 数据导入导出与完整项目备份恢复说明 | ✅ v2.1.7 已同步    |
-| [workflow-guide.md](user/workflow-guide.md)         | 创作工作流指南                     | 🚧 占位，待后续细化 |
+| 文档                                                | 说明                               | 状态             |
+| --------------------------------------------------- | ---------------------------------- | ---------------- |
+| [quick-start.md](user/quick-start.md)               | 快速开始指南                       | ✅ 已整理        |
+| [desktop-usage.md](user/desktop-usage.md)           | Windows 桌面端使用说明             | ✅ v3.7.0 已同步 |
+| [ai-settings.md](user/ai-settings.md)               | AI 模式与模型配置                  | ✅ 已整理        |
+| [data-import-export.md](user/data-import-export.md) | 数据导入导出与完整项目备份恢复说明 | ✅ v2.1.7 已同步 |
+| [workflow-guide.md](user/workflow-guide.md)         | 创作工作流指南                     | ✅ v3.7.0 已同步 |
 
 ## project/ - 项目管理文档
 
-| 文档                                                             | 说明                                        | 状态                 |
-| ---------------------------------------------------------------- | ------------------------------------------- | -------------------- |
-| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ 持续维护          |
-| [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有              |
-| [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有              |
-| [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口、证据校正与建议演进顺序 | ✅ 2026-07-28 已审计 |
-| [agent-task-rules.md](project/agent-task-rules.md)               | Agent 任务速查与权威入口导航                | ✅ 已整理            |
-| [git-workflow.md](project/git-workflow.md)                       | 分支策略、PR 门禁、发布与紧急修复流程       | ✅ v3.0.0 已明确     |
-| [release-history.md](project/release-history.md)                 | 40 份历史发布说明的单一只读归档             | ✅ v3.0.0 已合并     |
+| 文档                                                             | 说明                                        | 状态                   |
+| ---------------------------------------------------------------- | ------------------------------------------- | ---------------------- |
+| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ 持续维护            |
+| [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有                |
+| [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有                |
+| [feature-gap-analysis-v3.7.0.md](feature-gap-analysis-v3.7.0.md) | v3.7.0 缺口历史截面、总体复核与旅程验收规划 | 📝 2026-09-27 补充核对 |
+| [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口（历史快照）             | 📦 2026-07-28 快照     |
+| [agent-task-rules.md](project/agent-task-rules.md)               | Agent 任务速查与权威入口导航                | ✅ 已整理              |
+| [git-workflow.md](project/git-workflow.md)                       | 分支策略、PR 门禁、发布与紧急修复流程       | ✅ v3.0.0 已明确       |
+| [release-history.md](project/release-history.md)                 | 40 份历史发布说明的单一只读归档             | ✅ v3.0.0 已合并       |
 
 ## technical/ - 技术文档
 
-| 文档                                                                                                    | 说明                                                         | 状态                        |
-| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------- |
-| [architecture.md](technical/architecture.md)                                                            | 项目架构总览                                                 | 🚧 占位，待后续细化         |
-| [database.md](technical/database.md)                                                                    | 数据库设计与迁移                                             | 🚧 占位，待后续细化         |
-| [desktop-build.md](technical/desktop-build.md)                                                          | 桌面端构建指南                                               | 🚧 占位，待后续细化         |
-| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                               | ✅ v3.6.2 已补充            |
-| [diagnostics.md](technical/diagnostics.md)                                                              | 前端异常、原生 panic、本地脱敏导出与隐私边界                 | ✅ v3.0.0 已实现            |
-| [ai-execution-facts.md](architecture/ai-execution-facts.md)                                             | v2.3.0 Task / Snapshot / Artifact 执行事实架构               | ✅ 已冻结并实现             |
-| [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md)                           | v2.3.1 Provider Adapter 与首批入口迁移                       | ✅ 已实现                   |
-| [safe-apply.md](architecture/safe-apply.md)                                                             | v2.3.2 Proposal / Plan / TargetLink 单目标安全应用           | ✅ 已实现                   |
-| [context-constraint-tool-registry.md](architecture/context-constraint-tool-registry.md)                 | v2.4.0 正式编译协议、预算与工具注册边界                      | ✅ 已实现                   |
-| [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复        | ✅ 已实现                   |
-| [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实          | ✅ 已实现                   |
-| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | 对话工作台、Runtime 边界、Canonical 只读准入与 live 验收标准 | ✅ 持续维护，区分实现与验收 |
-| [dual-model-creative-runtime.md](architecture/dual-model-creative-runtime.md)                           | Phase 5.1 云端优先、可选本地作家、路由与模型上线门           | 🚧 5.1-B/C 已实现           |
-| [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环     | 📝 执行任务书               |
-| [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                           | ✅ v2.1.7+ 持续适用         |
-| [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据                 | ✅ 已记录                   |
-| [v2.3.2 Safe Apply 验收报告](audit/phase-3/10-v2.3.2-safe-apply-acceptance.md)                          | 安全应用不变量、桌面 E2E 与安装包证据                        | ✅ 已记录                   |
-| [v2.4.0 Compiler / Registry 验收报告](audit/phase-3/11-v2.4.0-compiler-tool-registry-acceptance.md)     | 编译确定性、后端失败关闭、真实 API 与安装包证据              | ✅ 已记录                   |
-| [v2.5.0 Planner Runtime 验收报告](audit/phase-3/12-v2.5.0-planner-runtime-acceptance.md)                | 持久 DAG、lease、显式重试、恢复与桌面 E2E 证据               | ✅ 已记录                   |
-| [真实 UI 对话 6 万字验收报告](audit-v2/real_conversation_ui_acceptance.md)                              | 真实 UI 工程闭环、任务拓扑纠偏与 61,396 字内容审读           | ⚠️ 工程通过 / 内容不通过    |
-| [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md)                                          | 执行事实层发布门禁与安装包证据                               | ✅ 通过                     |
-| [Agent 要求时效审计](audit/agent-requirements-review-2026-08-20.md)                                     | UI、Harness、测试、Skills 与协作规则时效审计                 | ✅ 2026-08-20 已同步        |
-| [api-routes.md](technical/api-routes.md)                                                                | API 路由说明                                                 | 🚧 占位，待后续细化         |
-| [deployment.md](technical/deployment.md)                                                                | 部署说明                                                     | 🚧 占位，待后续细化         |
+| 文档                                                                                                    | 说明                                                         | 状态                                   |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
+| [architecture.md](technical/architecture.md)                                                            | 项目架构总览                                                 | 🚧 占位，待后续细化                    |
+| [database.md](technical/database.md)                                                                    | 数据库设计与迁移                                             | 🚧 占位，待后续细化                    |
+| [desktop-build.md](technical/desktop-build.md)                                                          | 桌面端构建指南                                               | 🚧 占位，待后续细化                    |
+| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                               | ✅ v3.7.0 已补充                       |
+| [diagnostics.md](technical/diagnostics.md)                                                              | 前端异常、原生 panic、本地脱敏导出与隐私边界                 | ✅ v3.0.0 已实现                       |
+| [ai-execution-facts.md](architecture/ai-execution-facts.md)                                             | v2.3.0 Task / Snapshot / Artifact 执行事实架构               | ✅ 已冻结并实现                        |
+| [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md)                           | v2.3.1 Provider Adapter 与首批入口迁移                       | ✅ 已实现                              |
+| [safe-apply.md](architecture/safe-apply.md)                                                             | v2.3.2 Proposal / Plan / TargetLink 单目标安全应用           | ✅ 已实现                              |
+| [context-constraint-tool-registry.md](architecture/context-constraint-tool-registry.md)                 | v2.4.0 正式编译协议、预算与工具注册边界                      | ✅ 已实现                              |
+| [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复        | ✅ 已实现                              |
+| [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实          | ✅ 已实现                              |
+| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | 对话工作台、Runtime 边界、Canonical 只读准入与 live 验收标准 | ✅ 持续维护，区分实现与验收            |
+| [writing-subagent-contract.md](architecture/writing-subagent-contract.md)                               | candidate-only 写章、精确修订来源与必需读取覆盖              | 🚧 源码已落地；动态/真实桌面证据待记录 |
+| [dual-model-creative-runtime.md](architecture/dual-model-creative-runtime.md)                           | Phase 5.1 云端优先、可选本地作家、路由与模型上线门           | 🚧 5.1-B/C 已实现                      |
+| [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环     | 📝 执行任务书                          |
+| [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                           | ✅ v2.1.7+ 持续适用                    |
+| [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据                 | ✅ 已记录                              |
+| [v2.3.2 Safe Apply 验收报告](audit/phase-3/10-v2.3.2-safe-apply-acceptance.md)                          | 安全应用不变量、桌面 E2E 与安装包证据                        | ✅ 已记录                              |
+| [v2.4.0 Compiler / Registry 验收报告](audit/phase-3/11-v2.4.0-compiler-tool-registry-acceptance.md)     | 编译确定性、后端失败关闭、真实 API 与安装包证据              | ✅ 已记录                              |
+| [v2.5.0 Planner Runtime 验收报告](audit/phase-3/12-v2.5.0-planner-runtime-acceptance.md)                | 持久 DAG、lease、显式重试、恢复与桌面 E2E 证据               | ✅ 已记录                              |
+| [真实 UI 对话 6 万字验收报告](audit-v2/real_conversation_ui_acceptance.md)                              | 真实 UI 工程闭环、任务拓扑纠偏与 61,396 字内容审读           | ⚠️ 工程通过 / 内容不通过               |
+| [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md)                                          | 执行事实层发布门禁与安装包证据                               | ✅ 通过                                |
+| [Agent 要求时效审计](audit/agent-requirements-review-2026-08-20.md)                                     | UI、Harness、测试、Skills 与协作规则时效审计                 | ✅ 2026-08-20 已同步                   |
+| [api-routes.md](technical/api-routes.md)                                                                | API 路由说明                                                 | 🚧 占位，待后续细化                    |
+| [deployment.md](technical/deployment.md)                                                                | 部署说明                                                     | 🚧 占位，待后续细化                    |
 
 ## design/ - 设计文档
 
-| 文档                                                              | 说明               | 状态                            |
-| ----------------------------------------------------------------- | ------------------ | ------------------------------- |
-| [novel-engineering.md](design/novel-engineering.md)               | 小说工程化设计     | 🚧 占位，待后续细化             |
-| [context-assets.md](design/context-assets.md)                     | 上下文资产管理设计 | 🚧 占位，待后续细化             |
-| [setting-suggestions.md](design/setting-suggestions.md)           | 设定库 AI 推演设计 | ✅ v1.7.9～v1.7.10 已实现基础版 |
-| [future-interactive-story.md](design/future-interactive-story.md) | 未来交互式叙事设计 | 🚧 占位，待后续细化             |
+| 文档                                                              | 说明                                   | 状态                                      |
+| ----------------------------------------------------------------- | -------------------------------------- | ----------------------------------------- |
+| [novel-engineering.md](design/novel-engineering.md)               | 小说工程化设计                         | 🚧 占位，待后续细化                       |
+| [context-assets.md](design/context-assets.md)                     | 上下文资产管理设计                     | 🚧 占位，待后续细化                       |
+| [setting-suggestions.md](design/setting-suggestions.md)           | 设定库 AI 推演历史与当前校正           | 📦 保留 v1.7.9～v1.7.10，当前边界见校正头 |
+| [world-rule-contract.md](design/world-rule-contract.md)           | 世界规则结构、作者变更门禁与上下文覆盖 | 🚧 v3.7.0 实现同步，待统一验收            |
+| [future-interactive-story.md](design/future-interactive-story.md) | 未来交互式叙事设计                     | 🚧 占位，待后续细化                       |
 
 ---
 
 ## 根级参考文档
 
-| 文档                                               | 说明                               |
-| -------------------------------------------------- | ---------------------------------- |
-| [product-design.md](product-design.md)             | 产品设计总纲                       |
-| [ui-reference.md](ui-reference.md)                 | UI 参考标准                        |
-| [data-model.md](data-model.md)                     | 数据模型边界                       |
-| [user-guide.md](user-guide.md)                     | 用户使用手册                       |
-| [prompt-system.md](prompt-system.md)               | 提示词系统设计                     |
-| [agent-workflow.md](agent-workflow.md)             | Agent 工作流                       |
-| [agent-runtime.md](agent-runtime.md)               | Agent 运行时说明                   |
-| [ai-agent-roadmap.md](ai-agent-roadmap.md)         | AI Agent 路线图                    |
-| [project-architecture.md](project-architecture.md) | 项目架构文档                       |
-| [module-boundaries.md](module-boundaries.md)       | 模块边界文档                       |
-| [development-rules.md](development-rules.md)       | 开发规则                           |
-| [development-skills.md](development-skills.md)     | 开发辅助 Skills 总览               |
-| [CHANGELOG.md](../CHANGELOG.md)                    | 唯一持续维护的版本变更记录         |
-| [release-history.md](project/release-history.md)   | 历史发布说明单文件归档与源文件哈希 |
+| 文档                                                       | 说明                               |
+| ---------------------------------------------------------- | ---------------------------------- |
+| [product-design.md](product-design.md)                     | 产品设计总纲                       |
+| [ui-reference.md](ui-reference.md)                         | UI 参考标准                        |
+| [ui-development-framework.md](ui-development-framework.md) | UI 实现、组件、可访问性与验收规范  |
+| [data-model.md](data-model.md)                             | 数据模型边界                       |
+| [user-guide.md](user-guide.md)                             | 用户使用手册                       |
+| [prompt-system.md](prompt-system.md)                       | 提示词系统设计                     |
+| [agent-workflow.md](agent-workflow.md)                     | Agent 工作流                       |
+| [agent-runtime.md](agent-runtime.md)                       | Agent 运行时说明                   |
+| [ai-agent-roadmap.md](ai-agent-roadmap.md)                 | AI Agent 路线图                    |
+| [project-architecture.md](project-architecture.md)         | 项目架构文档                       |
+| [module-boundaries.md](module-boundaries.md)               | 模块边界文档                       |
+| [development-rules.md](development-rules.md)               | 开发规则                           |
+| [development-skills.md](development-skills.md)             | 开发辅助 Skills 总览               |
+| [CHANGELOG.md](../CHANGELOG.md)                            | 唯一持续维护的版本变更记录         |
+| [release-history.md](project/release-history.md)           | 历史发布说明单文件归档与源文件哈希 |
 
 原 40 份逐版本发布说明已合并到 `project/release-history.md`。新增变更只写入根目录
 `CHANGELOG.md`；发布流水线按版本提取对应段落，不再创建文档碎片。

@@ -17,6 +17,8 @@ import { styleProfileService } from '../styles/styleProfileService';
 import { buildStylePromptProjection } from '../styles/styleProfilePromptProjection';
 import { contextRecordService } from './contextRecordService';
 import { chapterSummaryService } from './chapterSummaryService';
+import { evaluateSummaryApplicationPolicy } from '../ai/summaryApplicationPolicy';
+import { limitPart, takeUntilBudget, tokenCount } from './novelContextCompressionTextBudget';
 import type { ContextRecord } from '../../types/context';
 
 export const CONTEXT_COMPRESSION_PROVIDER_ID = 'ans.novel-context.extractive-v1';
@@ -59,10 +61,6 @@ export interface AppliedContextCompression {
   previousRecordId?: string;
 }
 
-function tokenCount(text: string): number {
-  return [...text].length;
-}
-
 function unique(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -78,32 +76,6 @@ function coverageBucket(text: string, required: string[]): CoverageEvidence['cha
     present,
     missing: required.filter((item) => !present.includes(item)),
   };
-}
-
-function takeUntilBudget(parts: string[], budget: number): string {
-  const kept: string[] = [];
-  let used = 0;
-  for (const part of parts) {
-    const next = part.trim();
-    if (!next) continue;
-    const cost = tokenCount(next) + (kept.length > 0 ? 1 : 0);
-    if (used + cost > budget) {
-      const remaining = budget - used - (kept.length > 0 ? 1 : 0);
-      if (remaining > 8) {
-        kept.push(`${[...next].slice(0, remaining).join('').trimEnd()}…`);
-      }
-      break;
-    }
-    kept.push(next);
-    used += cost;
-  }
-  return kept.join('\n');
-}
-
-function limitPart(value: string | undefined, limit: number): string {
-  const text = value?.trim() ?? '';
-  if (text.length <= limit) return text;
-  return `${text.slice(0, Math.max(0, limit - 9))}…[已截断]`;
 }
 
 function normalizedTimestamp(value: string): string {
@@ -448,9 +420,15 @@ export const novelContextCompressionProvider = {
         .map(
           (record) => `${record.contextType}《${record.title}》：${limitPart(record.content, 700)}`,
         ),
-      ...summaries.map(
-        (summary) => `总结《${summary.chapterId}》：${limitPart(summary.summary, 700)}`,
-      ),
+      ...summaries
+        .filter(
+          (summary) =>
+            summary.enabled &&
+            !summary.isExpired &&
+            evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus)
+              .eligible,
+        )
+        .map((summary) => `总结《${summary.chapterId}》：${limitPart(summary.summary, 700)}`),
     ];
     const compressedText = takeUntilBudget(parts, budget);
     const coverage: CoverageEvidence = {

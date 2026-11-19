@@ -1,11 +1,162 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { normalizeChapterEngineeringState } from '../engineering/chapterEngineeringService';
 import {
   assertRequiredCoreAssets,
+  assertGenerationRuleCoverage,
   compileGenerationContextSnapshot,
 } from './generationContextCompiler';
 
+import {
+  buildRuleSystemsProjectionForWriter,
+  buildWorldSettingsProjectionForWriter,
+} from '../prompt/contextBuilder';
+import { buildChapterProviderContextSources } from './chapterProviderContext';
+
 const emptyEngineeringBundle = async () => ({ states: [], hasUnappliedDraft: false });
+
+test('engineering viewpoint known and unknown canaries survive the old section limit into Provider sources', async () => {
+  const engineering = normalizeChapterEngineeringState({
+    id: 'e',
+    novelId: 'n',
+    chapterId: 'c',
+    status: 'active',
+    chapterCard: {
+      chapterGoal: 'long-goal-'.repeat(1000),
+      viewpointCharacter: 'VIEWPOINT_CANARY',
+      knownInformation: ['KNOWN_CANARY'],
+      unknownInformation: ['UNKNOWN_CANARY'],
+    },
+  })!;
+  const compiled = await compileGenerationContextSnapshot(
+    { novelId: 'n', chapterId: 'c' },
+    {
+      buildBaseContext: async () => ({ novelTitle: 'n', chapterTitle: 'c' }),
+      getEngineeringBundle: async () => ({
+        states: [engineering],
+        activeState: engineering,
+        hasUnappliedDraft: false,
+      }),
+      loadAssetContext: async () => ({ sources: [], warnings: [] }),
+    },
+  );
+  const section = compiled.compiledContext.sections.find(
+    (section) => section.key === 'engineering',
+  )!;
+  assert.ok(section.content.length > 8000);
+  for (const canary of ['VIEWPOINT_CANARY', 'KNOWN_CANARY', 'UNKNOWN_CANARY']) {
+    assert.ok(section.content.includes(canary));
+    assert.ok(compiled.compiledPromptText.includes(canary));
+  }
+  const sources = buildChapterProviderContextSources({
+    snapshot: compiled,
+    requestSourceVersion: compiled.contextHash,
+    requestInstruction: '写本章',
+  });
+  const engineeringSource = sources.find((source) => source.label === section.title)!;
+  assert.equal(engineeringSource.required, true);
+  assert.equal(engineeringSource.requireFull, true);
+  assert.equal(engineeringSource.content, section.content);
+});
+
+test('required rule and world coverage rejects missing cross-scope stale and partial projections', async () => {
+  const ruleProjection = await buildRuleSystemsProjectionForWriter('n', [
+    {
+      id: 'r',
+      novelId: 'n',
+      title: 'Rule',
+      content: '规则尾部RULE_TAIL',
+      isActive: true,
+      createdAt: 't',
+      updatedAt: 't',
+    },
+  ]);
+  const worldProjection = await buildWorldSettingsProjectionForWriter('n', [
+    {
+      id: 'w',
+      novelId: 'n',
+      title: 'World',
+      content: '世界尾部WORLD_TAIL',
+      isActive: true,
+      createdAt: 't',
+      updatedAt: 't',
+    },
+  ]);
+  const base = {
+    novelTitle: 'n',
+    chapterTitle: 'c',
+    chapterOutline: '大纲',
+    protagonist: '主角',
+    ...ruleProjection,
+    ...worldProjection,
+  };
+  await assertGenerationRuleCoverage('n', base);
+  await assert.rejects(assertGenerationRuleCoverage('other', base), /context_incomplete/u);
+  await assert.rejects(
+    assertGenerationRuleCoverage('n', { ...base, ruleSystemCoverage: undefined }),
+    /context_incomplete/u,
+  );
+  await assert.rejects(
+    assertGenerationRuleCoverage('n', { ...base, ruleSystems: '规则被截断' }),
+    /context_incomplete/u,
+  );
+  await assert.rejects(
+    assertGenerationRuleCoverage('n', { ...base, worldBackground: '世界被截断' }),
+    /context_incomplete/u,
+  );
+  await assert.rejects(
+    assertGenerationRuleCoverage('n', {
+      ...base,
+      ruleSystemCoverage: { ...base.ruleSystemCoverage, includedCount: 0 },
+    }),
+    /context_incomplete/u,
+  );
+  await assert.rejects(
+    compileGenerationContextSnapshot(
+      { novelId: 'n', chapterId: 'c', requireCoreAssets: true },
+      {
+        buildBaseContext: async () => ({ ...base, ruleSystemCoverage: undefined }),
+        getEngineeringBundle: emptyEngineeringBundle,
+        loadAssetContext: async () => ({ sources: [], warnings: [] }),
+      },
+    ),
+    /context_incomplete/u,
+  );
+});
+
+test('task target is passed into context compilation and frozen with its prompt hash', async () => {
+  const engineering = normalizeChapterEngineeringState({
+    id: 'engineering-1',
+    novelId: 'novel-target',
+    chapterId: 'chapter-target',
+    status: 'active',
+    chapterCard: { targetWordCount: 1000 },
+  })!;
+  const compile = (targetWordCount: number) =>
+    compileGenerationContextSnapshot(
+      { novelId: 'novel-target', chapterId: 'chapter-target', targetWordCount },
+      {
+        buildBaseContext: async (input) => ({
+          novelTitle: '字数测试',
+          chapterTitle: '第一章',
+          targetWordCount: input.targetWordCount,
+        }),
+        getEngineeringBundle: async () => ({
+          states: [engineering],
+          activeState: engineering,
+          hasUnappliedDraft: false,
+        }),
+        loadAssetContext: async () => ({ sources: [], warnings: [] }),
+      },
+    );
+  const first = await compile(3200);
+  const second = await compile(3000);
+  assert.equal(first.compiledContext.baseContext.targetWordCount, 3200);
+  assert.match(first.compiledPromptText, /目标字数：3200/u);
+  assert.notEqual(first.contextHash, second.contextHash);
+  assert.equal(first.compiledContext.activeEngineeringState?.chapterCard.targetWordCount, 1000);
+  assert.doesNotMatch(first.compiledPromptText, /目标字数：1000/u);
+});
 
 test('writer core-asset gate requires a formal rule system', () => {
   const context = {
