@@ -1050,6 +1050,11 @@ mod tests {
         )
         .unwrap();
 
+        let expected_sqlite_identity: (String, String) = conn
+            .query_row("SELECT sqlite_version(), sqlite_source_id()", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
         let diagnostics = build_e2e_diagnostics(&conn, data_dir.clone()).unwrap();
         let canonical_data_dir = fs::canonicalize(&data_dir).unwrap();
         let canonical_database = fs::canonicalize(data_dir.join(DATABASE_FILE)).unwrap();
@@ -1059,10 +1064,13 @@ mod tests {
         assert_eq!(diagnostics.integrity_check, "ok");
         assert!(diagnostics.database_runtime.foreign_keys_enabled);
         assert_eq!(diagnostics.database_runtime.journal_mode, "delete");
-        assert_eq!(diagnostics.database_runtime.sqlite_version, "3.51.3");
+        assert_eq!(
+            diagnostics.database_runtime.sqlite_version,
+            expected_sqlite_identity.0
+        );
         assert_eq!(
             diagnostics.database_runtime.sqlite_source_id,
-            "2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618"
+            expected_sqlite_identity.1
         );
         assert_eq!(diagnostics.database_runtime.busy_timeout_ms, 5_000);
         assert_eq!(diagnostics.database_runtime.synchronous, "full");

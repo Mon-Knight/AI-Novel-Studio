@@ -54,8 +54,7 @@ fn scoped_rows_hash(conn: &Connection, table: &str, scope: &str) -> Result<Strin
         .map_err(AppError::database)?;
     let columns = statement
         .column_names()
-        .iter()
-        .map(|s| s.to_string())
+        .map(str::to_string)
         .collect::<Vec<_>>();
     let values = statement
         .query_map([scope], |row| {

@@ -11,8 +11,7 @@ pub(in super::super) fn rows(
     let mut statement = connection.prepare(sql).map_err(|e| e.to_string())?;
     let names: Vec<String> = statement
         .column_names()
-        .iter()
-        .map(|s| s.to_string())
+        .map(str::to_string)
         .collect();
     let values = statement
         .query_map(args, |row| {
