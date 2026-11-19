@@ -75,7 +75,10 @@ function runFixture(args) {
       {
         cwd: root,
         encoding: 'utf8',
-        timeout: 30_000,
+        // The no-bundle fixture exercises the complete local verification matrix
+        // through Windows PowerShell. Hosted Windows runners can take slightly
+        // longer to start the isolated shell while coverage is active.
+        timeout: args.includes('-NoBundle') ? 90_000 : 30_000,
         windowsHide: true,
         env: {
           SystemRoot: systemRoot,
