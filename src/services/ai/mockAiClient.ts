@@ -11,6 +11,7 @@ import type {
 import { AiRequestCancelledError, throwIfAiRequestCancelled } from './aiCancellation';
 import { emitAiStreamEvent } from './aiStreamProtocol';
 import { mockChapterScenePlan, mockChapterStagedResponse } from './mockChapterStagedResponses';
+import { mockChapterSummary } from './mockChapterSummary';
 import { createProviderTransportRequestId } from './providerRequestPolicy';
 
 const E2E_MODE = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -561,44 +562,6 @@ function mockQualityCheck(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
-function mockChapterSummary(info: ReturnType<typeof extractInfo>): string {
-  return JSON.stringify({
-    summaryTitle: `${info.chapterTitle}上下文`,
-    summary: `本章《${info.chapterTitle}》推进了主线，并留下后续承接点。`,
-    keyEvents: ['主角进入关键场景', '重要冲突被触发', '获得新的线索'],
-    coreEvents: ['主角获得可继续追查的关键线索'],
-    protagonistStateChange: '主角由被动应对转为主动追查。',
-    importantCharacterChanges: [{ name: info.protagonist, change: '目标更明确，并决定继续追查。' }],
-    characterChanges: [
-      {
-        characterName: info.protagonist,
-        stateSummary: '经历本章事件后目标更明确。',
-        relationshipChanges: '与同伴信任上升',
-        goalChanges: '准备追查下一条线索',
-      },
-    ],
-    relationshipChanges: [],
-    settingChanges: ['关键场景受隐藏势力影响'],
-    newLocations: ['关键线索所在的新场景'],
-    newItemsOrAbilities: [],
-    newForeshadows: ['关键线索背后仍有隐藏势力'],
-    resolvedForeshadows: [],
-    foreshadowing: ['隐藏势力仍未现身'],
-    unresolvedQuestions: ['隐藏势力为何介入'],
-    factsMustRemember: ['主角已经获得关键线索'],
-    nextChapterHints: '下一章可以承接本章线索，继续推进调查和冲突。',
-    nextChapterHook: '关键线索指向新的调查目标。',
-    contextRecords: [
-      {
-        contextType: 'chapter_summary',
-        title: `${info.chapterTitle}摘要`,
-        content: `本章核心事件：${info.chapterOutline || '主线推进'}`,
-        importance: 4,
-      },
-    ],
-  });
-}
-
 function extractSuggestionType(messages: { role: string; content: string }[]): string {
   const allText = messages.map((m) => m.content).join('\n');
   return allText.match(/生成类型：(\w+)/)?.[1] || 'character';
@@ -1127,7 +1090,7 @@ export class MockAiClient implements AiClient {
         text = mockChapterPolish(info, request.messages);
         break;
       case 'context_summarize':
-        text = mockChapterSummary(info);
+        text = mockChapterSummary(info, request.messages);
         break;
       case 'outline_generate':
         text = mockOutlineGenerate(info);

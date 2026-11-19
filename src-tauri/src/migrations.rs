@@ -7,6 +7,12 @@ use sha2::{Digest, Sha256};
 
 #[path = "migrations_chapter_workflow_stages.rs"]
 mod chapter_workflow_stages;
+#[path = "migrations_task_authorizations.rs"]
+mod task_authorizations;
+#[path = "migrations_library_task_scope.rs"]
+mod library_task_scope;
+#[path = "migrations_host_terminal_native_facts.rs"]
+mod host_terminal_native_facts;
 
 #[path = "migrations_cross_task_lineage.rs"]
 mod cross_task_lineage;
@@ -28,7 +34,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 40] {
+fn migrations() -> [Migration; 43] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -230,6 +236,13 @@ fn migrations() -> [Migration; 40] {
             definition: chapter_workflow_stages::MIGRATION_DEFINITION,
             apply: chapter_workflow_stages::apply,
         },
+        Migration {
+            id: task_authorizations::MIGRATION_ID,
+            definition: task_authorizations::MIGRATION_DEFINITION,
+            apply: task_authorizations::apply,
+        },
+        Migration { id:library_task_scope::MIGRATION_ID,definition:library_task_scope::MIGRATION_DEFINITION,apply:library_task_scope::apply },
+        Migration { id:host_terminal_native_facts::MIGRATION_ID,definition:host_terminal_native_facts::MIGRATION_DEFINITION,apply:host_terminal_native_facts::apply },
     ]
 }
 
@@ -254,8 +267,8 @@ fn create_ledger(transaction: &Transaction<'_>) -> Result<(), AppError> {
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), AppError> {
     for migration in migrations() {
-        if migration.id == cross_task_lineage::MIGRATION_ID {
-            with_foreign_keys_disabled(connection, |connection| {
+        if migration.id == cross_task_lineage::MIGRATION_ID || migration.id == library_task_scope::MIGRATION_ID {
+            with_foreign_keys_disabled_for(connection, migration.id, |connection| {
                 apply_one_migration(connection, &migration)
             })?;
         } else {
@@ -275,8 +288,14 @@ fn foreign_keys_enabled(connection: &Connection) -> Result<bool, AppError> {
 /// SQLite treats `PRAGMA foreign_keys=OFF` as a no-op inside a transaction.
 /// The 039 table rebuild therefore disables enforcement on the connection
 /// *before* opening its Immediate transaction, then restores the prior value.
-fn with_foreign_keys_disabled(
+#[cfg(test)]
+fn with_foreign_keys_disabled(connection:&mut Connection,body:impl FnOnce(&mut Connection)->Result<(),AppError>)->Result<(),AppError>{
+    with_foreign_keys_disabled_for(connection,cross_task_lineage::MIGRATION_ID,body)
+}
+
+fn with_foreign_keys_disabled_for(
     connection: &mut Connection,
+    migration_id: &str,
     body: impl FnOnce(&mut Connection) -> Result<(), AppError>,
 ) -> Result<(), AppError> {
     let enabled = foreign_keys_enabled(connection)?;
@@ -292,11 +311,11 @@ fn with_foreign_keys_disabled(
         } else if !foreign_keys_enabled(connection)? && result.is_ok() {
             return Err(AppError::new(
                 codes::DATABASE_TRANSACTION_FAILED,
-                "结果产物跨任务血缘迁移未完成，数据库保持原状",
+                "兼容迁移恢复外键设置失败，数据库保持原状",
                 false,
             )
             .with_details(serde_json::json!({
-                "migrationId": cross_task_lineage::MIGRATION_ID,
+                "migrationId": migration_id,
                 "reason": "foreign_keys_not_restored",
             })));
         }

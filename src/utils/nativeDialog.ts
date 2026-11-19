@@ -6,7 +6,7 @@ import { appLogger } from '../services/observability/appLogger';
  * 调用方不需要知道底层实现。
  */
 
-let tauriDialogApi: typeof import('@tauri-apps/api/dialog') | null = null;
+let tauriDialogApi: typeof import('@tauri-apps/plugin-dialog') | null = null;
 
 export interface DialogOptions {
   title?: string;
@@ -56,7 +56,7 @@ function showE2eDialog(input: Omit<E2eDialogRequest, 'id' | 'resolve'>): Promise
 async function getTauriDialog() {
   if (tauriDialogApi) return tauriDialogApi;
   try {
-    tauriDialogApi = await import('@tauri-apps/api/dialog');
+    tauriDialogApi = await import('@tauri-apps/plugin-dialog');
   } catch {
     tauriDialogApi = null;
   }
@@ -87,7 +87,7 @@ export async function confirmDanger(options: DialogOptions): Promise<boolean> {
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      return await dialog.ask(message, { title, type: 'warning' });
+      return await dialog.ask(message, { title, kind: 'warning' });
     }
   } catch (err) {
     appLogger.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
@@ -126,7 +126,7 @@ export async function confirmInfo(options: DialogOptions): Promise<boolean> {
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      return await dialog.ask(message, { title, type: 'info' });
+      return await dialog.ask(message, { title, kind: 'info' });
     }
   } catch (err) {
     appLogger.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
@@ -163,7 +163,7 @@ export async function showInfo(options: {
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      await dialog.message(message, { title, type: 'info' });
+      await dialog.message(message, { title, kind: 'info' });
       return;
     }
   } catch {
@@ -197,7 +197,7 @@ export async function showError(options: {
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      await dialog.message(message, { title, type: 'error' });
+      await dialog.message(message, { title, kind: 'error' });
       return;
     }
   } catch {

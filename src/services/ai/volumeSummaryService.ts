@@ -15,6 +15,7 @@ import { aiTaskService } from './aiTaskService';
 import { safeJsonParse } from './jsonUtils';
 import type { AiGenerateOptions } from '../../types/ai';
 import { throwIfAiRequestCancelled } from './aiCancellation';
+import { evaluateSummaryApplicationPolicy } from './summaryApplicationPolicy';
 import { bindAiTaskCancellation, settleAiTaskError } from './aiTaskCancellation';
 
 /** 检查卷是否满足生成卷上下文的条件 */
@@ -53,6 +54,11 @@ export async function checkVolumeCompletion(
       continue;
     }
     chaptersWithContext++;
+    if (
+      !evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus).eligible
+    ) {
+      reasons.push(`第 ${ch.chapterNumber} 章章节上下文未通过应用策略，需要处理阻断问题或人工审阅`);
+    }
     if (summary.isExpired) {
       expiredContexts++;
       reasons.push(`第 ${ch.chapterNumber} 章章节上下文已过期`);
@@ -85,7 +91,12 @@ export async function collectVolumeChapterContexts(
 
   for (const ch of volChapters) {
     const summary = await chapterSummaryService.getByChapterId(ch.id);
-    if (summary && summary.enabled && !summary.isExpired) {
+    if (
+      summary &&
+      summary.enabled &&
+      !summary.isExpired &&
+      evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus).eligible
+    ) {
       contexts.push({
         chapterId: ch.id,
         chapterTitle: ch.title,

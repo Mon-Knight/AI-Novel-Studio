@@ -64,6 +64,10 @@ export default defineConfig(async () => ({
     manifest: true,
     chunkSizeWarningLimit: 450,
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        'legacy-storage-migration': path.resolve(__dirname, 'legacy-storage-migration.html'),
+      },
       output: {
         manualChunks: resolveVendorChunk,
       },

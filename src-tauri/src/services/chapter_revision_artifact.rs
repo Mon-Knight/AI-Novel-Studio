@@ -125,7 +125,7 @@ pub(super) fn validate(
     let verified = verify_source(
         connection,
         &source,
-        &task.novel_id,
+        task.novel_id.as_deref().filter(|id| !id.is_empty() && *id != "system").ok_or_else(invalid_source)?,
         task.chapter_id.as_deref(),
     )?;
     // Inspect decoded actual request messages, not an escaped JSON substring or a

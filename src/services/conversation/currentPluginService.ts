@@ -5,6 +5,7 @@ import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import { getAiSettings } from '../ai/aiSettingsStore';
 import { isTauri } from '../database/db';
 import { dshTaskRuntimeService } from '../dsh/taskRuntimeService';
+import { canonicalModelProviderId, normalizeModelId } from './modelIdentity';
 
 export type CurrentPluginCategory = 'function' | 'model' | 'other';
 export type CurrentPluginStatus = 'loaded' | 'failed' | 'unavailable';
@@ -135,9 +136,23 @@ function runtimeProjection(value: unknown): CurrentPluginProjection | undefined 
   ) {
     return undefined;
   }
-  const id = safeText(row.id, '', 240);
+  let id = safeText(row.id, '', 240);
   const name = safeText(row.name, '', 160);
   if (!id || !name) return undefined;
+  if (id.startsWith('model:')) {
+    const identity = id.slice('model:'.length);
+    const separator = identity.indexOf(':');
+    if (separator > 0 && separator < identity.length - 1) {
+      const providerId = canonicalModelProviderId(identity.slice(0, separator));
+      const modelId = normalizeModelId(identity.slice(separator + 1));
+      if (!providerId || !modelId) return undefined;
+      id = `model:${providerId}:${modelId}`;
+    }
+  } else if (id.startsWith('provider:')) {
+    const providerId = canonicalModelProviderId(id.slice('provider:'.length));
+    if (!providerId) return undefined;
+    id = `provider:${providerId}`;
+  }
   return {
     id,
     name,
@@ -258,8 +273,8 @@ function configuredModel(settings: AiSettings, desktop: boolean): CurrentPluginP
     };
   }
 
-  const providerId = settings.provider === 'deepseek' ? 'deepseek-official' : settings.provider;
-  const modelId = settings.modelName.trim() || 'unconfigured';
+  const providerId = canonicalModelProviderId(settings.provider);
+  const modelId = normalizeModelId(settings.modelName) || 'unconfigured';
   const configured = Boolean(settings.baseUrl.trim() && settings.modelName.trim());
   return {
     id: `model:${providerId}:${modelId}`,

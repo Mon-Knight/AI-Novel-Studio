@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { browser, expect } from '@wdio/globals';
-import { ensureIsolatedDesktopViewport } from './production-carrier-viewport';
+import {
+  ensureIsolatedDesktopViewport,
+  selectProductionWorkbenchWindow,
+} from './production-carrier-viewport';
 import {
   canonicalToolName,
   startMockWorkbenchUpstream,
@@ -504,7 +507,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     chapterId: string;
     goal?: string;
     localOnly?: boolean;
-    waitForRuntimeIdle?: boolean;
+    waitForRepairSettlement?: 'rejected' | 'candidate';
   }): Promise<{
     conversationId: string;
     conversation: SanitizedConversationEvidence;
@@ -516,6 +519,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       novelId,
       chapterId: input.chapterId,
       goal: input.goal ?? goalFor(chapter.title),
+      expectedModelKey: `openai_compatible:${MODEL_NAME}`,
       knownConversationIds,
     });
     knownConversationIds.add(started.conversationId);
@@ -533,19 +537,22 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         timeoutMsg: `${input.scenario.name}: planning did not hand off to a writing run`,
       });
     }
-    if (input.waitForRuntimeIdle) {
-      // Failed intermediate runs are evidence, not the end of an automatic length repair.
+    if (input.waitForRepairSettlement) {
+      // A failed intermediate run is not settlement. If the repair succeeds,
+      // the native root remains available for the author's candidate decision.
+      const expectedStatus =
+        input.waitForRepairSettlement === 'candidate' ? 'waiting_decision' : 'idle';
       await browser.waitUntil(
         async () => {
           const runtime = await invoke<{ status: string } | null>('dsh_get_task_runtime_status', {
             conversationId: started.conversationId,
           });
-          return runtime?.status === 'idle';
+          return runtime?.status === expectedStatus;
         },
         {
           timeout: turnTimeoutMs,
           interval: 500,
-          timeoutMsg: `${input.scenario.name}: the runtime did not finish its repair budget`,
+          timeoutMsg: `${input.scenario.name}: repair did not reach ${expectedStatus}`,
         },
       );
     }
@@ -928,7 +935,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       const { conversation, invariants } = await runScenarioTurn({
         scenario,
         chapterId,
-        waitForRuntimeIdle: true,
+        waitForRepairSettlement: 'rejected',
       });
       scenario.mockRequests = mockRequestsSince(before);
       scenario.conversation = conversation;
@@ -1041,6 +1048,9 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       const settingPersisted = persisted.turns.some(
         (turn) => turn.role === 'user' && turn.content === settingGoal,
       );
+      const defaultModelPreserved =
+        persisted.conversation.defaultModel?.providerId === 'openai_compatible' &&
+        persisted.conversation.defaultModel.modelId === MODEL_NAME;
       // Persist only numeric receipt facts, never user turns, instructions or generated prose.
       const expectedReceipt = [
         CONVERSATION_TARGET_WORD_COUNT,
@@ -1064,9 +1074,13 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         settingAttestationRequestCount: settingRequests.length - settingCompletionRequests.length,
         settingCompletionRequestCount: settingCompletionRequests.length,
         settingPersistedAfterReload: settingPersisted,
+        defaultModelPreservedAfterReload: defaultModelPreserved,
         receiptMatchesRange,
       };
       if (!settingPersisted) scenario.failures.push('the task word setting did not survive reload');
+      if (!defaultModelPreserved) {
+        scenario.failures.push('the local setting replaced the task’s selected API model');
+      }
       if (!receiptMatchesRange) {
         scenario.failures.push('the local receipt did not report target 3200 and range 2560-3680');
       }
@@ -1139,7 +1153,11 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     const repaired = buildCandidateText(REPAIR_TARGET_WORD_COUNT);
     mock!.configure({ mode: 'normal', chapterId, candidateTexts: [oversized, repaired] });
     try {
-      const result = await runScenarioTurn({ scenario, chapterId, waitForRuntimeIdle: true });
+      const result = await runScenarioTurn({
+        scenario,
+        chapterId,
+        waitForRepairSettlement: 'candidate',
+      });
       const { evidence: conversation } = await collectConversationEvidence({
         conversationId: result.conversationId,
         fixtureNovelId: novelId,
@@ -1250,6 +1268,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
       novelId,
       chapterId,
       goal: goalFor(chapters[5].title),
+      expectedModelKey: `openai_compatible:${MODEL_NAME}`,
       knownConversationIds,
     });
     knownConversationIds.add(started.conversationId);
@@ -1305,7 +1324,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
     notes.orphansKilled = killIsolatedOrphans(profileRoot);
 
     await browser.reloadSession();
-    await waitForTestId('app-shell');
+    await selectProductionWorkbenchWindow(browser);
     await ensureIsolatedDesktopViewport(browser);
     // The restarted host reconciles orphaned runs on startup and announces them once.
     const recoveryDialog = await browser.$('[data-testid="conversation-recovery-dialog"]');

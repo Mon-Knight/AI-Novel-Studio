@@ -70,6 +70,7 @@ export async function submitWorkbenchTask(input: WorkbenchTaskSubmissionInput): 
   input.submissionRef.current = true;
   input.onError('');
   let taskModel = input.taskModel;
+  let releasedBeforeRun = false;
   try {
     if (!conversationalGoal && !modelLed) {
       try {
@@ -87,6 +88,10 @@ export async function submitWorkbenchTask(input: WorkbenchTaskSubmissionInput): 
     const initialized = await input.createTask(goal, taskModel);
     if (!initialized) return;
     input.onCreated();
+    // Release creation lock as soon as the task row is persisted and the creator closes so
+    // creating a second independent task while the first run executes is never dropped.
+    input.submissionRef.current = false;
+    releasedBeforeRun = true;
     await input.startInitializedTask({
       conversationId: initialized.conversation.conversationId,
       novelId: initialized.conversation.novelId,
@@ -98,6 +103,6 @@ export async function submitWorkbenchTask(input: WorkbenchTaskSubmissionInput): 
   } catch (error) {
     input.onError(error instanceof Error ? error.message : '新建创作任务失败，请重试。');
   } finally {
-    input.submissionRef.current = false;
+    if (!releasedBeforeRun) input.submissionRef.current = false;
   }
 }

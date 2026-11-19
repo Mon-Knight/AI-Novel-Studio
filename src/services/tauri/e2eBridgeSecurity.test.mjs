@@ -46,16 +46,27 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
     'get_task_conversation',
     'get_task_turn_run_projection',
     'dsh_get_task_runtime_status',
+    'list_task_authorizations',
+    'list_task_authorization_receipts',
+    'list_chapter_workflow_stages',
     'get_result_artifact',
     'get_latest_chapter_generation_snapshot',
     'get_rule_systems',
     'list_memory_documents',
+    'seed_e2e_legacy_local_storage',
+    'get_e2e_legacy_storage_seed_state',
+    'probe_e2e_legacy_local_storage',
+    'get_e2e_legacy_storage_probe_entries',
   ]) {
     assert.equal(isE2eBridgeCommandAllowed(command), true, command);
   }
 
   for (const command of [
     'adopt_review_authorized_draft',
+    'apply_task_authorization',
+    'issue_task_authorization',
+    'revoke_task_authorization',
+    'submit_chapter_stage',
     'import_project_backup',
     'delete_novel_cascade',
     'consume_review_authorization',
@@ -67,6 +78,8 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
     'set_active_style_profile',
     'save_output_profile',
     'set_default_output_profile',
+    'finish_e2e_legacy_storage_seed',
+    'finish_e2e_legacy_storage_probe',
   ]) {
     assert.equal(isE2eBridgeCommandAllowed(command), false, command);
   }
@@ -122,9 +135,15 @@ test('E2E network guard permits app-local assets and blocks external transports'
   const guard = installE2eNetworkGuard(fakeWindow);
 
   await fakeWindow.fetch('/prompts/style.md');
+  await fakeWindow.fetch('https://ipc.localhost/invoke');
+  await fakeWindow.fetch('http://asset.localhost/icons/app.png');
   const xhr = new fakeWindow.XMLHttpRequest();
   xhr.open('GET', '/local.json');
-  assert.deepEqual(calls.fetch, ['/prompts/style.md']);
+  assert.deepEqual(calls.fetch, [
+    '/prompts/style.md',
+    'https://ipc.localhost/invoke',
+    'http://asset.localhost/icons/app.png',
+  ]);
   assert.deepEqual(calls.xhr, [['GET', '/local.json']]);
 
   await assert.rejects(
@@ -152,7 +171,7 @@ test('E2E network guard permits app-local assets and blocks external transports'
   assert.equal(calls.eventsource, 0);
   assert.equal(calls.beacon, 0);
   const diagnostics = guard.getAttempts();
-  assert.equal(diagnostics.total, 5);
+  assert.equal(diagnostics.total, 5); // Tauri's internal IPC/asset hosts are not network attempts.
   assert.deepEqual(diagnostics.byTransport, {
     fetch: 1,
     xhr: 1,

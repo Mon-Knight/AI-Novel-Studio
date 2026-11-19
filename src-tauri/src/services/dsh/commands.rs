@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::async_runtime;
+use tauri::{async_runtime, Emitter};
 
 use super::config::{cordis_yml, runtime_root, RuntimeCompositionSpec, WORKBENCH_COMPOSITION};
 use super::launcher::{
@@ -35,7 +35,7 @@ use super::task_runtime::{
 
 #[tauri::command]
 pub async fn dsh_start_task_turn(
-    window: tauri::Window,
+    window: tauri::WebviewWindow,
     input: StartTaskTurnInput,
 ) -> Result<TaskRuntimeResult, String> {
     let observer: TaskProjectionObserver = Arc::new(move |notice| {
@@ -48,7 +48,11 @@ pub async fn dsh_start_task_turn(
 }
 
 #[tauri::command]
-pub fn dsh_resolve_task_retry(conversation_id: String, novel_id: String, source_run_id: String) -> Result<task_runtime::retry::RetryResolution, String> {
+pub fn dsh_resolve_task_retry(
+    conversation_id: String,
+    novel_id: String,
+    source_run_id: String,
+) -> Result<task_runtime::retry::RetryResolution, String> {
     task_runtime::retry::resolve(&conversation_id, &novel_id, &source_run_id)
 }
 
@@ -133,30 +137,9 @@ fn safe_catalog_text(value: Option<&str>, fallback: &str) -> String {
     safe
 }
 
-fn canonical_workbench_tool(value: &str) -> Option<&'static str> {
-    match value {
-        "novel.read_context" | "mcp__novel__novel.read_context" => Some("novel.read_context"),
-        "chapter.read_outline" | "mcp__novel__chapter.read_outline" => Some("chapter.read_outline"),
-        "get_character_states" | "mcp__novel__get_character_states" => Some("get_character_states"),
-        "search_memory" | "mcp__novel__search_memory" => Some("search_memory"),
-        "generate_chapter" | "mcp__novel__generate_chapter" => Some("generate_chapter"),
-        "generate_outline" | "mcp__novel__generate_outline" => Some("generate_outline"),
-        "generate_characters" | "mcp__novel__generate_characters" => Some("generate_characters"),
-        "suggest_events" | "mcp__novel__suggest_events" => Some("suggest_events"),
-        "expand_settings" | "mcp__novel__expand_settings" => Some("expand_settings"),
-        "polish_chapter" | "mcp__novel__polish_chapter" => Some("polish_chapter"),
-        "check_quality" | "mcp__novel__check_quality" => Some("check_quality"),
-        "summarize_chapter" | "mcp__novel__summarize_chapter" => Some("summarize_chapter"),
-        value if value.starts_with("mcp__novel__novel_read_context_") => Some("novel.read_context"),
-        value if value.starts_with("mcp__novel__chapter_read_outline_") => {
-            Some("chapter.read_outline")
-        }
-        value if value.starts_with("mcp__novel__get_character_states_") => {
-            Some("get_character_states")
-        }
-        _ => None,
-    }
-}
+#[path = "commands_tool_projection.rs"]
+mod tool_projection;
+use tool_projection::canonical_workbench_tool;
 
 fn component_files_available(root: Option<&Path>, spec: &RuntimeCompositionSpec) -> bool {
     root.is_some_and(|root| {
@@ -889,6 +872,7 @@ fn prepare(
         task_novel_id: Some(input.novel_id.clone()),
         task_chapter_id: Some(input.chapter_id.clone()),
         candidate_policy: None,
+        task_budget_url: None,
     };
 
     let run_id = uuid::Uuid::new_v4().to_string();

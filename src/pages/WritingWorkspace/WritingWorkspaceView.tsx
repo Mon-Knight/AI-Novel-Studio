@@ -46,6 +46,7 @@ export default function WritingWorkspaceView({
   reviewCandidate,
   reviewAuthorizationId,
   reviewArtifactId,
+  onReviewAuthorizationRenewed,
   onBeforeAdopt,
 }: WritingWorkspaceViewProps) {
   const {
@@ -298,6 +299,7 @@ export default function WritingWorkspaceView({
                 reviewCandidate={activeReviewCandidate}
                 reviewAuthorizationId={reviewAuthorizationId}
                 reviewArtifactId={reviewArtifactId}
+                onReviewAuthorizationRenewed={onReviewAuthorizationRenewed}
                 onBeforeAdopt={onBeforeAdopt}
                 onActionStateChange={setEditorActionState}
               />

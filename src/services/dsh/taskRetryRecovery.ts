@@ -46,6 +46,7 @@ export function restoreDesktopRetry(input: TaskRuntimeInput): Promise<TaskRuntim
 /** Reads the original host contract; current input/model selectors cannot change the retry. */
 export async function restoreDshRetry(input: TaskRuntimeInput): Promise<TaskRuntimeInput> {
   if (!input.retrySourceRunId) return input;
+  if (!input.novelId) throw new Error('DSH_NOVEL_SCOPE_REQUIRED: 资料库任务不能恢复章节写作运行。');
   const resolved = await taskRetryRecovery.resolve(
     input.conversationId,
     input.novelId,

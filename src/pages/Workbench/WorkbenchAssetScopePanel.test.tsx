@@ -106,3 +106,45 @@ test('asset scope panel renders safe source evidence without asset content or fu
   assert.doesNotMatch(html, /世界设定正文不应出现在面板/u);
   assert.doesNotMatch(html, /1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef/u);
 });
+
+test('asset scope panel exposes compact group summaries and a collapse action', () => {
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchAssetScopePanel, {
+      summary: {
+        novelId: 'novel-1',
+        items: [
+          {
+            key: 'world',
+            group: 'foundation',
+            label: '正式世界',
+            value: '雾港旧城',
+            status: 'ready',
+            required: true,
+          },
+          {
+            key: 'master_outline',
+            group: 'structure',
+            label: '全书大纲',
+            value: '未准备',
+            status: 'missing',
+            required: false,
+          },
+        ],
+        requiredMissingCount: 0,
+        unavailableCount: 0,
+      },
+      loading: false,
+      error: '',
+      onRefresh: () => undefined,
+      onOpen: () => undefined,
+      onCollapse: () => undefined,
+    }),
+  );
+
+  assert.match(html, /创作上下文/u);
+  assert.match(html, /可用 1 项 · 待准备 0 项/u);
+  assert.match(html, /data-context-group-summary="foundation"[^>]*>.*?可用/su);
+  assert.match(html, /data-context-group-summary="structure"[^>]*>.*?部分未准备/su);
+  assert.match(html, /data-testid="workbench-asset-scope-details"/u);
+  assert.match(html, /data-testid="workbench-asset-scope-collapse"/u);
+});

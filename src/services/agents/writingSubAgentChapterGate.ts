@@ -13,10 +13,7 @@ import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
 import { volumeRepository } from '../database/volumeRepository';
 import { dshTaskRuntimeService, type DshTaskRuntimeInput } from '../dsh/taskRuntimeService';
-import { inspectChapterCandidateIntegrity } from '../generation/chapterCandidateIntegrity';
 import { planWritingSubAgentTurn, toDshTaskStartContract } from './writingSubAgentContract';
-
-const HOST_CANDIDATE_CALLS = 3;
 
 function hostError(code: string, message: string): Error {
   const error = new Error(message) as Error & { code: string };
@@ -85,16 +82,18 @@ export async function runHostGatedChapterTurn(
 ): Promise<TaskRun> {
   input.cancellationSignal?.throwIfAborted();
   const chapterId = input.chapterId;
+  const novelId = input.novelId;
   if (!chapterId) throw hostError('DSH_CHAPTER_TARGET_REQUIRED', '章节写作必须绑定目标章节。');
+  if (!novelId) throw hostError('DSH_NOVEL_SCOPE_REQUIRED', '章节写作必须绑定明确作品。');
   const chapter = await chapterRepository.getById(chapterId);
-  if (!chapter || chapter.novelId !== input.novelId) {
+  if (!chapter || chapter.novelId !== novelId) {
     throw new Error('目标章节不存在或不属于当前作品。');
   }
-  const continuity = await resolveWritingSubAgentContinuity(input.novelId, chapterId);
+  const continuity = await resolveWritingSubAgentContinuity(novelId, chapterId);
   const preferences = await prepareTaskWritingPreferences(input);
-  const revision = await verifyArtifactRevisionSource(input);
+  const revision = await verifyArtifactRevisionSource({ ...input, novelId });
   const contract = planWritingSubAgentTurn({
-    novelId: input.novelId,
+    novelId,
     chapterId,
     goal: input.goal,
     mode: input.workflowAction
@@ -118,72 +117,26 @@ export async function runHostGatedChapterTurn(
     revisionSource: revision?.source,
     modelSnapshot: contract.modelSnapshot,
   };
-  const seenRuns = new Set<string>();
-  let repairCodes: string[] = [];
-  let explicitRetry = input.explicitChapterRetry === true;
-  let continuesRunId: string | undefined;
-  for (;;) {
-    input.cancellationSignal?.throwIfAborted();
-    const drafted = await dshTaskRuntimeService.start(
-      {
-        ...base,
-        retrySourceRunId: explicitRetry ? input.retrySourceRunId : undefined,
-        chapterHostGate: {
-          phase: 'draft',
-          ...(continuesRunId ? { continuesRunId } : {}),
-          ...(explicitRetry ? { explicitRetry: true } : {}),
-          issueCodes: repairCodes,
-          issueSeverities: repairCodes.map(() => 'error' as const),
-          maxIntegrityRepairs: contract.budget.maxIntegrityRepairs,
+  const result = await dshTaskRuntimeService.start(
+    {
+      ...base,
+      unifiedRuntime: {
+        version: 1,
+        writingPreferences: {
+          targetWordCount: preferences.targetWordCount,
+          wordRangePercents: getChapterWordRangePercents(),
         },
       },
-      (notice) =>
-        observeTurnRunProjection(input.conversationId, input.turnId, notice.runId, onEvent),
+    },
+    (notice) => observeTurnRunProjection(input.conversationId, input.turnId, notice.runId, onEvent),
+  );
+  if (result.pendingChapterCandidate) {
+    throw hostError(
+      'DSH_UNIFIED_RUNTIME_REQUIRED',
+      '原生统一运行时未完成候选准入；渲染进程不会另起修复或应用回合。',
     );
-    const pending = drafted.pendingChapterCandidate;
-    if (!pending?.runId || !pending.contentHash || !pending.text.trim()) {
-      throw new Error(drafted.run.error || 'DSH 未保留可复核的章节候选');
-    }
-    if (drafted.run.status === 'completed' || drafted.artifactId) {
-      throw hostError('DSH_CHAPTER_CANDIDATE_WITHHELD', '未准入的章节草稿不能被报告为成功候选。');
-    }
-    if (seenRuns.has(pending.runId) || seenRuns.size >= HOST_CANDIDATE_CALLS) {
-      throw new Error('DSH_CHAPTER_CANDIDATE_ATTEMPTS_EXHAUSTED: 宿主停止草稿且未准入');
-    }
-    seenRuns.add(pending.runId);
-    explicitRetry = false;
-    continuesRunId = pending.runId;
-    const issues = inspectChapterCandidateIntegrity({
-      candidateText: pending.text,
-      previousChapterText: pending.previousChapterText,
-    });
-    const errors = issues.filter((issue) => issue.severity === 'error');
-    if (errors.length > 0) {
-      repairCodes = [...new Set(errors.map((issue) => issue.code))].sort();
-      continue;
-    }
-    input.cancellationSignal?.throwIfAborted();
-    const admitted = await dshTaskRuntimeService.start(
-      {
-        ...base,
-        retrySourceRunId: undefined,
-        chapterHostGate: {
-          phase: 'admit',
-          sourceRunId: pending.runId,
-          contentHash: pending.contentHash,
-          issueCodes: issues.map((issue) => issue.code),
-          issueSeverities: issues.map((issue) => issue.severity),
-          maxIntegrityRepairs: contract.budget.maxIntegrityRepairs,
-        },
-      },
-      (notice) =>
-        observeTurnRunProjection(input.conversationId, input.turnId, notice.runId, onEvent),
-    );
-    if (!admitted.artifactId || admitted.pendingChapterCandidate) {
-      throw new Error(admitted.run.error || 'DSH 未准入章节候选');
-    }
-    onEvent?.({ run: admitted.run });
-    await review(input, chapterId, admitted.artifactId);
-    return admitted.run;
   }
+  onEvent?.({ run: result.run });
+  if (result.artifactId) await review(input, chapterId, result.artifactId);
+  return result.run;
 }

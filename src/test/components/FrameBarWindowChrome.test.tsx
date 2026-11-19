@@ -16,8 +16,8 @@ vi.mock('../../services/tauri/runtime', () => ({
   isTauriRuntime: () => chromeHarness.native,
 }));
 
-vi.mock('@tauri-apps/api/window', () => ({
-  appWindow: {
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({
     isMaximized: async () => chromeHarness.maximized,
     onResized: async (listener: () => void) => {
       chromeHarness.resizedListener = listener;
@@ -26,7 +26,7 @@ vi.mock('@tauri-apps/api/window', () => ({
     minimize: chromeHarness.minimize,
     toggleMaximize: chromeHarness.toggleMaximize,
     close: chromeHarness.close,
-  },
+  }),
 }));
 
 vi.mock('../../components/sidebar/Sidebar', () => ({

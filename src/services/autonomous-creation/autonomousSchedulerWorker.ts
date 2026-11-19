@@ -16,9 +16,20 @@ import type {
   AutonomousSchedulerSnapshot,
 } from '../../types/autonomousScheduler';
 import { autonomousSchedulerService } from './autonomousSchedulerService';
+import { NativeAutonomousScheduler } from './nativeAutonomousScheduler';
+import { isTauriRuntime } from '../tauri/runtime';
 import { autonomousChapterRuntimeLoader } from './autonomousChapterRuntimeLoader';
+import {
+  RECOVERY_SWEEP_INTERVAL_MS,
+  defaultSnapshot,
+  errorCode,
+  estimateChapterReservation,
+  message,
+  proof,
+  type SchedulerService,
+} from './autonomousSchedulerWorkerSupport';
 
-type SchedulerService = typeof autonomousSchedulerService;
+export { estimateChapterReservation } from './autonomousSchedulerWorkerSupport';
 
 interface SchedulerWorkerDependencies {
   scheduler: SchedulerService;
@@ -48,50 +59,6 @@ interface SchedulerWorkerDependencies {
 interface ActiveWorker {
   controller: AbortController;
   promise: Promise<void>;
-}
-
-const RECOVERY_SWEEP_INTERVAL_MS = 15_000;
-
-function message(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
-}
-
-function errorCode(reason: unknown): string | undefined {
-  if (!reason || typeof reason !== 'object') return undefined;
-  return typeof (reason as { code?: unknown }).code === 'string'
-    ? (reason as { code: string }).code
-    : undefined;
-}
-
-function proof(
-  grant: Awaited<ReturnType<SchedulerService['acquireLease']>>,
-): AutonomousRunLeaseProof {
-  return { leaseId: grant.lease.leaseId, epoch: grant.lease.epoch, token: grant.token };
-}
-
-function defaultSnapshot(): AutonomousSchedulerSnapshot {
-  return {
-    capability: autonomousSchedulerService.capability(),
-    run: null,
-    attempts: [],
-    workerActive: false,
-    busy: false,
-  };
-}
-
-export function estimateChapterReservation(
-  plan: AutonomousStoryPlan,
-  chapterNumber: number,
-): {
-  estimatedTokens: number;
-  estimatedCostUsd: number;
-} {
-  const chapter = plan.chapters.find((item) => item.chapterNumber === chapterNumber);
-  const targetWords = chapter?.targetWordCount ?? plan.brief.targetWordsPerChapter ?? 2_400;
-  const estimatedTokens = Math.max(2_000, Math.min(10_000_000, Math.ceil(targetWords * 3)));
-  // Frozen conservative ceiling used only for scheduler reservation; the request ledger remains authoritative.
-  const estimatedCostUsd = Math.round((estimatedTokens / 1_000_000) * 30 * 10000) / 10000;
-  return { estimatedTokens, estimatedCostUsd };
 }
 
 export class AutonomousSchedulerWorker {
@@ -508,34 +475,36 @@ export class AutonomousSchedulerWorker {
   }
 }
 
-export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
-  scheduler: autonomousSchedulerService,
-  async getPlan(planId) {
-    const { autonomousPlanPersistence } = await import('./autonomousPersistence');
-    return autonomousPlanPersistence.getPlan(planId);
-  },
-  async generateCandidate(planId, signal, selection) {
-    return autonomousChapterRuntimeLoader.generateNextCandidate(planId, {
-      signal,
-      selection,
+export const autonomousSchedulerWorker = isTauriRuntime()
+  ? new NativeAutonomousScheduler()
+  : new AutonomousSchedulerWorker({
+      scheduler: autonomousSchedulerService,
+      async getPlan(planId) {
+        const { autonomousPlanPersistence } = await import('./autonomousPersistence');
+        return autonomousPlanPersistence.getPlan(planId);
+      },
+      async generateCandidate(planId, signal, selection) {
+        return autonomousChapterRuntimeLoader.generateNextCandidate(planId, {
+          signal,
+          selection,
+        });
+      },
+      async adoptDraft(draftId, chapterId) {
+        return draftVersionService.adopt(draftId, chapterId, { actor: 'autonomous_full_auto' });
+      },
+      async getReview(sessionId) {
+        const { multiAgentService } = await import('../multi-agent/multiAgentRuntime');
+        return multiAgentService.getSession(sessionId);
+      },
+      async confirmAnalysis(planId, chapterId, draftId, signal) {
+        const postChapter = await import('./autonomousPostChapterRuntime');
+        const draft = await draftVersionService.getById(chapterId, draftId);
+        const chapter = await chapterRepository.getById(chapterId);
+        if (!draft || !chapter) throw new Error('全自动收束缺少正式章节或采用稿。');
+        await postChapter.runAutonomousPostChapterAnalysis(planId, draft, signal);
+        await postChapter.autonomousPostChapterService.confirmAnalysis({ planId, chapter, draft });
+      },
+      generateId,
+      setInterval: (callback, delay) => globalThis.setInterval(callback, delay),
+      clearInterval: (handle) => globalThis.clearInterval(handle),
     });
-  },
-  async adoptDraft(draftId, chapterId) {
-    return draftVersionService.adopt(draftId, chapterId, { actor: 'autonomous_full_auto' });
-  },
-  async getReview(sessionId) {
-    const { multiAgentService } = await import('../multi-agent/multiAgentRuntime');
-    return multiAgentService.getSession(sessionId);
-  },
-  async confirmAnalysis(planId, chapterId, draftId, signal) {
-    const postChapter = await import('./autonomousPostChapterRuntime');
-    const draft = await draftVersionService.getById(chapterId, draftId);
-    const chapter = await chapterRepository.getById(chapterId);
-    if (!draft || !chapter) throw new Error('全自动收束缺少正式章节或采用稿。');
-    await postChapter.runAutonomousPostChapterAnalysis(planId, draft, signal);
-    await postChapter.autonomousPostChapterService.confirmAnalysis({ planId, chapter, draft });
-  },
-  generateId,
-  setInterval: (callback, delay) => globalThis.setInterval(callback, delay),
-  clearInterval: (handle) => globalThis.clearInterval(handle),
-});

@@ -28,12 +28,16 @@ export function inspectWritingFaultRuns(
       if (
         run.status === 'completed' &&
         run.providerId === 'ans-local' &&
-        events.length === 0 &&
+        events.length === 1 &&
+        events[0].toolName === 'task.configure_word_target' &&
+        events[0].status === 'succeeded' &&
+        events[0].localWordTargetReceipt === true &&
+        !events[0].error &&
         artifacts.length === 0
       ) {
         continue;
       }
-      failures.push('a local command was not completed without tools or artifacts');
+      failures.push('a local command did not complete with only a host word target receipt');
     }
     const plans = events.filter((event) => event.toolName === 'creative.plan_action');
     if (plans.length > 0) {

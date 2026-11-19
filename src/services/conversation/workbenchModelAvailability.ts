@@ -1,6 +1,7 @@
 import { isLoopbackAiBaseUrl } from '../ai/realAiClient';
 import { getCredentialStorageCopy } from '../ai/credentialStorageCopy';
 import type { CurrentPluginProjection } from './currentPluginService';
+import { canonicalModelProviderId, modelRouteKey, normalizeModelId } from './modelIdentity';
 
 export interface WorkbenchModelSelection {
   providerId: string;
@@ -14,7 +15,8 @@ export interface WorkbenchModelOption extends WorkbenchModelSelection {
   source: string;
 }
 
-export type WorkbenchModelDirectoryStatus = 'refreshing' | 'available' | 'unavailable';
+export type WorkbenchModelDirectoryStatus =
+  'not_registered' | 'initializing' | 'ready' | 'unavailable' | 'error';
 
 export interface WorkbenchModelAvailability {
   status: WorkbenchModelDirectoryStatus;
@@ -65,7 +67,24 @@ export class WorkbenchModelCredentialUnavailableError extends WorkbenchModelUnav
 }
 
 export function workbenchModelKey(model: WorkbenchModelSelection): string {
-  return `${model.providerId.trim()}:${model.modelId.trim()}`;
+  return modelRouteKey(model);
+}
+
+/** Stable key for the Runtime probe effect; endpoint changes must re-probe. */
+export function workbenchModelProbeKey(
+  model: WorkbenchModelSelection & {
+    runtimeMode: 'mock' | 'api';
+    baseUrl?: string;
+  },
+): string {
+  return `${model.runtimeMode}\u0000${modelRouteKey(model)}\u0000${model.baseUrl?.trim() ?? ''}`;
+}
+
+/** Only saved API routes need a Runtime registration probe. */
+export function shouldProbeConfiguredWorkbenchModel(
+  model: WorkbenchModelSelection & { runtimeMode: 'mock' | 'api'; baseUrl?: string },
+): boolean {
+  return model.runtimeMode === 'api' && Boolean(model.baseUrl?.trim() && model.modelId.trim());
 }
 
 export function resolveWorkbenchModelDirectoryTarget<T extends WorkbenchModelSelection>(
@@ -79,15 +98,27 @@ export function resolveWorkbenchModelDirectoryTarget<T extends WorkbenchModelSel
 export function isLocalLikeWorkbenchModel(
   model: WorkbenchModelSelection & { baseUrl?: string },
 ): boolean {
-  const providerId = model.providerId.trim().toLowerCase();
+  const providerId = canonicalModelProviderId(model.providerId);
   if (providerId.includes('local') || providerId === 'local_llama_cpp') return true;
   return Boolean(model.baseUrl && isLoopbackAiBaseUrl(model.baseUrl));
 }
 
+function modelSelectionFromPlugin(
+  plugin: CurrentPluginProjection,
+): WorkbenchModelSelection | undefined {
+  if (plugin.category !== 'model' || !plugin.id.startsWith(MODEL_PREFIX)) return undefined;
+  if (plugin.id === BROWSER_MOCK_PLUGIN_ID) return { providerId: 'mock', modelId: 'Mock' };
+  const identity = plugin.id.slice(MODEL_PREFIX.length);
+  const separator = identity.indexOf(':');
+  if (separator <= 0 || separator === identity.length - 1) return undefined;
+  const providerId = canonicalModelProviderId(identity.slice(0, separator));
+  const modelId = normalizeModelId(identity.slice(separator + 1));
+  if (!providerId || !modelId) return undefined;
+  return { providerId, modelId };
+}
+
 function optionFromPlugin(plugin: CurrentPluginProjection): WorkbenchModelOption | undefined {
   if (
-    plugin.category !== 'model' ||
-    !plugin.id.startsWith(MODEL_PREFIX) ||
     plugin.status !== 'loaded' ||
     plugin.availability !== 'available' ||
     plugin.initialization !== 'initialized' ||
@@ -96,30 +127,12 @@ function optionFromPlugin(plugin: CurrentPluginProjection): WorkbenchModelOption
   ) {
     return undefined;
   }
-
-  if (plugin.id === BROWSER_MOCK_PLUGIN_ID && plugin.source === 'browser-fallback') {
-    return {
-      key: 'mock:Mock',
-      providerId: 'mock',
-      modelId: 'Mock',
-      name: plugin.name,
-      pluginId: plugin.id,
-      source: plugin.source,
-    };
-  }
-
-  const identity = plugin.id.slice(MODEL_PREFIX.length);
-  const separator = identity.indexOf(':');
-  if (separator <= 0 || separator === identity.length - 1) return undefined;
-
-  const providerId = identity.slice(0, separator).trim();
-  const modelId = identity.slice(separator + 1).trim();
-  if (!providerId || !modelId) return undefined;
-
+  const selection = modelSelectionFromPlugin(plugin);
+  if (!selection) return undefined;
   return {
-    key: `${providerId}:${modelId}`,
-    providerId,
-    modelId,
+    key: modelRouteKey(selection),
+    providerId: selection.providerId,
+    modelId: selection.modelId,
     name: plugin.name,
     pluginId: plugin.id,
     source: plugin.source,
@@ -175,20 +188,20 @@ export function getWorkbenchModelAvailability({
   )?.description;
   if (refreshing) {
     return {
-      status: 'refreshing',
+      status: 'initializing',
       options,
       selectedOption,
       canSend,
-      message: '正在刷新模型列表；仍可直接发送，调用失败会显示在对话中。',
+      message: '正在刷新模型列表',
     };
   }
   if (refreshError) {
     return {
-      status: 'unavailable',
+      status: 'error',
       options,
       selectedOption,
       canSend,
-      message: `模型列表刷新失败：${refreshError}。仍可直接发送，调用失败会显示在对话中。`,
+      message: `模型列表刷新失败：${refreshError}。请重试 Runtime 初始化，或打开模型设置检查 Endpoint 与凭据。`,
     };
   }
   if (credentialAvailable === false) {
@@ -201,14 +214,39 @@ export function getWorkbenchModelAvailability({
     };
   }
   if (!selectedOption) {
+    // A row that exists in the Runtime projection but did not load is a real
+    // failure, not a missing registration. Keep the two states distinct.
+    const selectedDirectoryRow = plugins.find((plugin) => {
+      if (plugin.source === 'provider-settings') return false;
+      const selection = modelSelectionFromPlugin(plugin);
+      return selection ? modelRouteKey(selection) === selectedKey : false;
+    });
+    if (
+      selectedDirectoryRow &&
+      (selectedDirectoryRow.status === 'failed' || selectedDirectoryRow.health === 'failed')
+    ) {
+      return {
+        status: 'unavailable',
+        options,
+        canSend,
+        message: `Runtime 报告当前模型不可用：${selectedDirectoryRow.description}。请检查 Endpoint 与凭据后重试初始化。`,
+      };
+    }
+    if (runtimeFailure) {
+      return {
+        status: 'error',
+        options,
+        canSend,
+        message: `Runtime 初始化失败：${runtimeFailure}。请重试初始化，或检查模型设置。`,
+      };
+    }
     return {
-      status: 'unavailable',
+      status: 'not_registered',
       options,
       canSend,
-      message: runtimeFailure
-        ? `模型列表不可用：${runtimeFailure}。仍可直接发送，调用失败会显示在对话中。`
-        : '当前模型不在 Runtime 目录中；仍可直接发送，调用失败会显示在对话中。',
+      message:
+        '当前模型尚未注册到 Runtime；可重试初始化，仍可直接发送，后端会按冻结模型建立精确 Worker。',
     };
   }
-  return { status: 'available', options, selectedOption, canSend, message: '' };
+  return { status: 'ready', options, selectedOption, canSend, message: '' };
 }

@@ -30,6 +30,7 @@ import {
   type SuggestionAdoptionGuard,
 } from './settingSuggestionAdoption';
 export type { SuggestionAdoptionGuard };
+import { submitProductionAiEntry } from '../autonomous-creation/productionAiEntryService';
 import type { WorldRuleChangeImpact } from '../../types/worldRules';
 
 interface RuleSetSnapshot {
@@ -245,6 +246,23 @@ export const settingSuggestionService = {
     input: GenerateSettingSuggestionsInput,
     options: AiGenerateOptions = {},
   ): Promise<SettingSuggestionRecord[]> {
+    if (getDbMode() === 'tauri') {
+      const result = await submitProductionAiEntry({
+        novelId: input.novelId,
+        goal: `生成 ${input.count} 条${typeLabels[input.suggestionType]}候选：${input.worldType} / ${input.referenceStyle}`,
+        entry: { kind: 'setting_suggestions', input },
+        signal: options.signal,
+      });
+      const records = (await suggestionStore.listByNovel(input.novelId)).filter((record) =>
+        result.artifactIds.some((artifactId) =>
+          record.id.startsWith(`domain-setting-${artifactId}-`),
+        ),
+      );
+      if (records.length === 0)
+        throw new Error('统一任务没有可读取的设定候选；请查看任务产物与停止原因。');
+      return records;
+    }
+    // Explicit browser-development compatibility, never a desktop model route.
     const settings = aiSettingsService.getSettings();
     const frozenRuleSet = await currentRuleSetSnapshot(input.novelId);
     const prompt = await buildPrompt(input);

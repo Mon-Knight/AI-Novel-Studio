@@ -20,7 +20,7 @@ function fixture() {
       })),
     },
     hostSource:
-      'const CANONICAL_ALLOWED_TOOLS: &str = "novel.read,structure.read,context.read,memory.search";\nfn is_canonical_only_turn(input: &Input) -> bool { input.task_kind == "read" }\nfn turn_allowed_tools(input: &Input) -> &str { if is_canonical_only_turn(input) { CANONICAL_ALLOWED_TOOLS } else { ALLOWED_TOOLS } }',
+      'const CANONICAL_ALLOWED_TOOLS: &str = "novel.read,structure.read,context.read,memory.search";\nfn is_canonical_only_turn(input: &Input) -> bool { input.task_kind == "read" }\nfn turn_allowed_tools(input: &Input) -> &str { if is_canonical_only_turn(input) { return CANONICAL_ALLOWED_TOOLS; } ALLOWED_TOOLS }',
     documents: Object.fromEntries(
       Object.entries(CURRENT_CAPABILITY_DOCUMENTS).map(([file, numbers]) => [
         file,
@@ -58,8 +58,8 @@ test('detects identity, exposure, health and host read-allowlist drift independe
     },
     (input) => {
       input.hostSource = input.hostSource.replace(
-        'if is_canonical_only_turn(input) { CANONICAL_ALLOWED_TOOLS }',
-        'if is_canonical_only_turn(input) { ALLOWED_TOOLS }',
+        'return CANONICAL_ALLOWED_TOOLS;',
+        'return ALLOWED_TOOLS;',
       );
     },
   ]) {

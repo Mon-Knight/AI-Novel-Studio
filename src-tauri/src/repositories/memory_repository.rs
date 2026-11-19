@@ -1,6 +1,11 @@
 use crate::errors::AppError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[path = "../../shared/summary_application_policy.rs"]
+mod summary_application_policy;
+#[path = "memory_repository_mapping.rs"]
+mod mapping;
+use mapping::{map_chunk, map_document, map_embedding_at, CHUNK_SELECT, DOCUMENT_SELECT};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -62,80 +67,6 @@ pub struct MemoryCandidate {
     pub chunk: MemoryChunk,
     pub document: MemoryDocument,
     pub embedding: Option<MemoryEmbedding>,
-}
-
-fn map_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryDocument> {
-    Ok(MemoryDocument {
-        id: row.get(0)?,
-        novel_id: row.get(1)?,
-        source_type: row.get(2)?,
-        source_id: row.get(3)?,
-        source_version: row.get(4)?,
-        source_hash: row.get(5)?,
-        adopted_draft_id: row.get(6)?,
-        chapter_id: row.get(7)?,
-        status: row.get(8)?,
-        metadata_json: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        invalidated_at: row.get(12)?,
-        invalidation_reason: row.get(13)?,
-    })
-}
-
-const DOCUMENT_SELECT: &str =
-    "SELECT id, novel_id, source_type, source_id, source_version, source_hash,
-            adopted_draft_id, chapter_id, status, metadata_json, created_at, updated_at,
-            invalidated_at, invalidation_reason
-     FROM memory_documents";
-
-fn map_chunk(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryChunk> {
-    Ok(MemoryChunk {
-        id: row.get(0)?,
-        document_id: row.get(1)?,
-        novel_id: row.get(2)?,
-        chapter_id: row.get(3)?,
-        ordinal: row.get(4)?,
-        text: row.get(5)?,
-        token_count: row.get(6)?,
-        importance: row.get(7)?,
-        chapter_order_index: row.get(8)?,
-        temporal_start_chapter: row.get(9)?,
-        temporal_end_chapter: row.get(10)?,
-        entity_keys_json: row.get(11)?,
-        metadata_json: row.get(12)?,
-        content_hash: row.get(13)?,
-        created_at: row.get(14)?,
-    })
-}
-
-const CHUNK_SELECT: &str =
-    "SELECT id, document_id, novel_id, chapter_id, ordinal, text, token_count,
-            importance, chapter_order_index, temporal_start_chapter, temporal_end_chapter,
-            entity_keys_json, metadata_json, content_hash, created_at
-     FROM memory_chunks";
-
-fn map_embedding_at(
-    row: &rusqlite::Row<'_>,
-    offset: usize,
-) -> rusqlite::Result<Option<MemoryEmbedding>> {
-    let id = row.get::<_, Option<String>>(offset)?;
-    match id {
-        None => Ok(None),
-        Some(id) => Ok(Some(MemoryEmbedding {
-            id,
-            chunk_id: row.get(offset + 1)?,
-            novel_id: row.get(offset + 2)?,
-            provider: row.get(offset + 3)?,
-            model: row.get(offset + 4)?,
-            dimension: row.get(offset + 5)?,
-            vector_json: row.get(offset + 6)?,
-            vector_norm: row.get(offset + 7)?,
-            vector_hash: row.get(offset + 8)?,
-            chunk_content_hash: row.get(offset + 9)?,
-            created_at: row.get(offset + 10)?,
-        })),
-    }
 }
 
 pub fn find_document(
@@ -460,17 +391,23 @@ pub fn lexical_chunk_ids(
     escaped_match_query: &str,
     limit: i64,
 ) -> Result<Vec<String>, AppError> {
+    let summary_ids = summary_application_policy::eligible_summary_ids_json(connection, novel_id)
+        .map_err(AppError::database)?;
     let mut statement = connection
         .prepare(
-            "SELECT chunk_id FROM memory_chunks_fts
-             WHERE memory_chunks_fts MATCH ?1 AND novel_id = ?2
-             ORDER BY bm25(memory_chunks_fts), chunk_id ASC LIMIT ?3",
+            "SELECT memory_chunks_fts.chunk_id FROM memory_chunks_fts
+             JOIN memory_chunks c ON c.id=memory_chunks_fts.chunk_id AND c.novel_id=memory_chunks_fts.novel_id
+             JOIN memory_documents d ON d.id=c.document_id AND d.novel_id=c.novel_id
+             WHERE memory_chunks_fts MATCH ?1 AND memory_chunks_fts.novel_id = ?2 AND d.status='active'
+               AND (d.source_type != 'chapter_summary' OR d.source_id IN (SELECT value FROM json_each(?4)))
+             ORDER BY bm25(memory_chunks_fts), memory_chunks_fts.chunk_id ASC LIMIT ?3",
         )
         .map_err(AppError::database)?;
     let rows = statement
-        .query_map(params![escaped_match_query, novel_id, limit], |row| {
-            row.get(0)
-        })
+        .query_map(
+            params![escaped_match_query, novel_id, limit, summary_ids],
+            |row| row.get(0),
+        )
         .map_err(AppError::database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::database)?;
@@ -530,6 +467,8 @@ pub fn fetch_candidates(
     embedding_model: Option<&str>,
     limit: i64,
 ) -> Result<Vec<MemoryCandidate>, AppError> {
+    let summary_ids = summary_application_policy::eligible_summary_ids_json(connection, novel_id)
+        .map_err(AppError::database)?;
     let sql = format!(
         "{CANDIDATE_SELECT}
          WHERE d.novel_id = ?1 AND d.status = 'active'
@@ -537,6 +476,7 @@ pub fn fetch_candidates(
            AND (?3 IS NULL OR c.chapter_order_index <= ?3)
            AND (?4 IS NULL OR c.chapter_id = ?4)
            AND (?5 IS NULL OR c.importance >= ?5)
+           AND (d.source_type != 'chapter_summary' OR d.source_id IN (SELECT value FROM json_each(?9)))
          ORDER BY c.importance DESC, COALESCE(c.chapter_order_index, -1) DESC,
                   d.updated_at DESC, c.ordinal ASC, c.id ASC
          LIMIT ?8"
@@ -553,6 +493,7 @@ pub fn fetch_candidates(
                 embedding_provider.unwrap_or(""),
                 embedding_model.unwrap_or(""),
                 limit,
+                summary_ids,
             ],
             map_candidate,
         )
@@ -569,9 +510,12 @@ pub fn fetch_candidate_by_id(
     embedding_provider: Option<&str>,
     embedding_model: Option<&str>,
 ) -> Result<Option<MemoryCandidate>, AppError> {
+    let summary_ids = summary_application_policy::eligible_summary_ids_json(connection, novel_id)
+        .map_err(AppError::database)?;
     let sql = format!(
         "{CANDIDATE_SELECT}
-         WHERE d.novel_id = ?1 AND d.status = 'active' AND c.id = ?2"
+         WHERE d.novel_id = ?1 AND d.status = 'active' AND c.id = ?2
+           AND (d.source_type != 'chapter_summary' OR d.source_id IN (SELECT value FROM json_each(?8)))"
     );
     connection
         .query_row(
@@ -583,7 +527,8 @@ pub fn fetch_candidate_by_id(
                 Option::<i64>::None,
                 Option::<f64>::None,
                 embedding_provider.unwrap_or(""),
-                embedding_model.unwrap_or("")
+                embedding_model.unwrap_or(""),
+                summary_ids,
             ],
             map_candidate,
         )

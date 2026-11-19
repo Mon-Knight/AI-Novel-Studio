@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, History, MessageSquareText } from 'lucide-react';
 import type { NovelContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
 import type {
@@ -78,6 +78,7 @@ export interface WorkbenchMessageStreamProps {
   historyExpandToken?: number;
   onLoadOlderHistory?: () => void;
   onLoadLatestHistory?: () => void;
+  stageProgress?: ReactNode;
 }
 
 export function WorkbenchMessageStream(props: WorkbenchMessageStreamProps) {
@@ -116,6 +117,7 @@ function WorkbenchConversationStream({
   historyExpandToken = 0,
   onLoadOlderHistory,
   onLoadLatestHistory,
+  stageProgress,
 }: WorkbenchMessageStreamProps) {
   const { conversationId, novelId } = bundle.conversation;
   const artifactConversationIdRef = useRef<string | null>(null);
@@ -401,6 +403,7 @@ function WorkbenchConversationStream({
         onPointerDown={onUserScrollIntent}
         onKeyDown={onUserScrollIntent}
       >
+        {stageProgress}
         {(hiddenRoundCount > 0 ||
           historyHasOlder ||
           visibleRounds.length > WORKBENCH_HISTORY_PAGE_SIZE) && (

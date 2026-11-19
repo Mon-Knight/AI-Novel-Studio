@@ -87,6 +87,27 @@ fn assert_zero_domain_writes(connection: &Connection) {
     );
 }
 
+fn assert_blocked_before_domain_write(connection: &Connection) {
+    for table in [
+        "chapter_summaries",
+        "context_records",
+        "character_states",
+        "memory_documents",
+        "memory_chunks",
+    ] {
+        assert_eq!(
+            count(connection, table),
+            0,
+            "a blocking summary must not write {table}"
+        );
+    }
+    assert_eq!(
+        count(connection, "artifact_decisions"),
+        0,
+        "blocking validation stops before an apply decision is recorded"
+    );
+}
+
 #[test]
 fn summary_coverage_unknown_character_id_fails_closed_without_domain_writes() {
     let mut db = connection();
@@ -114,9 +135,10 @@ fn summary_coverage_unknown_character_name_fails_closed_without_domain_writes() 
             "stateSummary": "掌握了隐藏航线"
         }),
     );
-    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
-    assert_reference_conflict(&decision);
-    assert_zero_domain_writes(&db);
+    let error = apply_structured_artifact(&mut db, apply_input(&card, &bundle))
+        .expect_err("an unknown character name is a blocking character_error");
+    assert_eq!(error.code, "SUMMARY_BLOCKING_VALIDATION_ERROR");
+    assert_blocked_before_domain_write(&db);
 }
 
 #[test]
@@ -204,8 +226,8 @@ fn summary_coverage_character_id_and_name_mismatch_fails_closed() {
         &mut db,
         "reference-id-name-mismatch",
         json!({
-            "characterId": SUMMARY_CHARACTER_ID,
-            "characterName": "沈砚",
+            "characterId": SECOND_CHARACTER_ID,
+            "characterName": "林夏",
             "stateSummary": "ID 与姓名指向不同人物"
         }),
     );
@@ -304,10 +326,10 @@ fn summary_coverage_legacy_ambiguous_name_keeps_protagonist_first_resolution() {
 }
 
 #[test]
-fn summary_coverage_legacy_unknown_character_reference_keeps_silent_skip() {
+fn summary_coverage_legacy_unknown_character_reference_blocks_under_current_policy() {
     let mut db = connection();
-    // No summaryCoverageVersion marker: historical candidates keep best-effort
-    // resolution, so an unknown reference stays skipped instead of failing.
+    // No summaryCoverageVersion marker: historical candidates used best-effort
+    // resolution, but the current policy still blocks unknown character_error refs.
     let (card, bundle) = publish_draft_based(
         &mut db,
         "reference-legacy-unknown",
@@ -320,18 +342,8 @@ fn summary_coverage_legacy_unknown_character_reference_keeps_silent_skip() {
             }]
         })),
     );
-    let decision = apply_structured_artifact(&mut db, apply_input(&card, &bundle)).unwrap();
-    assert!(decision.conflict_code.is_none());
-    assert_eq!(count(&db, "chapter_summaries"), 1);
-    assert_eq!(count(&db, "character_states"), 0);
-    let raw: String = db
-        .query_row(
-            "SELECT validation_result FROM chapter_summaries",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let result: Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(result["coverageValidation"], "legacy_not_required");
-    assert_eq!(result["summaryCoverageVersion"], Value::Null);
+    let error = apply_structured_artifact(&mut db, apply_input(&card, &bundle))
+        .expect_err("legacy unknown character references are blocked by current policy");
+    assert_eq!(error.code, "SUMMARY_BLOCKING_VALIDATION_ERROR");
+    assert_blocked_before_domain_write(&db);
 }

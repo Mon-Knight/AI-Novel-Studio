@@ -10,6 +10,7 @@ import {
   hasUsableDshTaskCredentialAsync,
   resolveDshTaskApiKey,
   resolveDshTaskApiKeyAsync,
+  DSH_PLUGIN_PROBE_CONVERSATION_ID,
   dshTaskRuntimeService,
 } from './taskRuntimeService';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
@@ -64,6 +65,53 @@ test('DSH resolves only the credential bound to its frozen model identity', () =
       }),
     /冻结模型没有可用的匹配凭据/,
   );
+});
+
+test('configured model synchronization uses the isolated Runtime probe identity', async () => {
+  const original = dshTaskRuntimeService.listCurrentPlugins;
+  let requestedConversationId = '';
+  let requestedModelId = '';
+  dshTaskRuntimeService.listCurrentPlugins = async (conversationId, modelSnapshot) => {
+    requestedConversationId = conversationId ?? '';
+    requestedModelId = modelSnapshot?.modelId ?? '';
+    return [
+      {
+        id: 'model:deepseek-official:deepseek-chat',
+        status: 'loaded',
+        initialization: 'initialized',
+        availability: 'available',
+      },
+    ];
+  };
+  try {
+    const rows = await dshTaskRuntimeService.initializeConfiguredModel(snapshot);
+    assert.equal(requestedConversationId, DSH_PLUGIN_PROBE_CONVERSATION_ID);
+    assert.equal(requestedModelId, 'deepseek-chat');
+    assert.equal(rows[0]?.id, 'model:deepseek-official:deepseek-chat');
+  } finally {
+    dshTaskRuntimeService.listCurrentPlugins = original;
+  }
+});
+
+test('Mock configuration never initializes the desktop DSH probe', async () => {
+  const original = dshTaskRuntimeService.listCurrentPlugins;
+  let called = false;
+  dshTaskRuntimeService.listCurrentPlugins = async () => {
+    called = true;
+    return [];
+  };
+  try {
+    const rows = await dshTaskRuntimeService.initializeConfiguredModel({
+      ...snapshot,
+      providerId: 'mock',
+      modelId: 'Mock',
+      runtimeMode: 'mock',
+    });
+    assert.deepEqual(rows, []);
+    assert.equal(called, false);
+  } finally {
+    dshTaskRuntimeService.listCurrentPlugins = original;
+  }
 });
 
 test('legacy snapshots without baseUrl use the same exact active identity for credential readiness', async () => {
@@ -148,9 +196,11 @@ test('mock DSH snapshots never resolve session or native credentials', async () 
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __TAURI_IPC__: () => {
-        nativeVaultCalls += 1;
-        throw new Error('mock runtime must not query the native credential vault');
+      __TAURI_INTERNALS__: {
+        invoke: () => {
+          nativeVaultCalls += 1;
+          throw new Error('mock runtime must not query the native credential vault');
+        },
       },
     },
   });
@@ -240,21 +290,21 @@ test('cancelling while exact credentials load prevents native model dispatch and
   let nativeStarts = 0;
   let nativeInput: Record<string, unknown> | undefined;
   const bridgeWindow: Record<string, unknown> = { crypto: globalThis.crypto };
-  bridgeWindow.__TAURI_IPC__ = (message: {
-    cmd: string;
-    callback: number;
-    input?: Record<string, unknown>;
-  }) => {
-    const finish = (value: unknown) =>
-      (bridgeWindow[`_${message.callback}`] as (value: unknown) => void)(value);
-    if (message.cmd === 'resolve_session_model_credential') {
-      releaseCredential = (credential) => finish(credential);
-      entered();
-    } else if (message.cmd === 'dsh_start_task_turn') {
-      nativeStarts++;
-      nativeInput = message.input;
-      finish({ run: { status: 'completed' } });
-    } else throw new Error(`unexpected native test command ${message.cmd}`);
+  bridgeWindow.__TAURI_INTERNALS__ = {
+    invoke: (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'resolve_session_model_credential') {
+        return new Promise<string>((resolve) => {
+          releaseCredential = resolve;
+          entered();
+        });
+      }
+      if (cmd === 'dsh_start_task_turn') {
+        nativeStarts++;
+        nativeInput = (args as { input?: Record<string, unknown> } | undefined)?.input;
+        return Promise.resolve({ run: { status: 'completed' } });
+      }
+      return Promise.reject(new Error(`unexpected native test command ${cmd}`));
+    },
   };
   Object.defineProperty(globalThis, 'window', { configurable: true, value: bridgeWindow });
   const controller = new AbortController();
@@ -286,6 +336,179 @@ test('cancelling while exact credentials load prevents native model dispatch and
     assert.equal((nativeInput?.requestPolicy as { timeoutSeconds: number }).timeoutSeconds, 77);
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+    resetSessionModelCredentialsForTests();
+  }
+});
+
+test('native local-command ingress does not resolve credentials or disguise the selected model', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let vaultCalls = 0;
+  let captured: Record<string, unknown> | undefined;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: Record<string, unknown>) => {
+          if (command === 'resolve_session_model_credential') {
+            vaultCalls++;
+            return Promise.reject(new Error('no credentials permitted'));
+          }
+          if (command === 'dsh_start_task_turn') {
+            captured = args?.input as Record<string, unknown>;
+            return Promise.resolve({ run: { status: 'completed' } });
+          }
+          return Promise.reject(new Error(`unexpected command ${command}`));
+        },
+      },
+    },
+  });
+  try {
+    const selected = { ...snapshot, modelId: 'missing-credential-model' };
+    await dshTaskRuntimeService.start({
+      conversationId: 'local-setting',
+      novelId: 'novel',
+      turnId: 'setting-turn',
+      goal: '本任务目标字数设为3200字',
+      modelSnapshot: selected,
+      taskKind: 'creative_dialogue',
+      requiredReadTools: [],
+      unifiedRuntime: {
+        version: 1,
+        localCommand: {
+          kind: 'task_word_target',
+          targetWordCount: 3200,
+          wordRange: { target: 3200, minimum: 2560, maximum: 3680 },
+        },
+      },
+    });
+    assert.equal(vaultCalls, 0);
+    assert.equal(captured?.apiKey, '');
+    assert.equal((captured?.modelSnapshot as TaskModelSnapshot).modelId, selected.modelId);
+    assert.equal((captured?.unifiedRuntime as { version: number }).version, 1);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('in-flight parent cancellation reaches native authority without falsifying a committed terminal result', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let nativeEntered!: () => void;
+  let complete!: (value: unknown) => void;
+  const entered = new Promise<void>((resolve) => {
+    nativeEntered = resolve;
+  });
+  let cancellations = 0;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string) => {
+          if (command === 'dsh_start_task_turn') {
+            nativeEntered();
+            return new Promise<unknown>((resolve) => {
+              complete = resolve;
+            });
+          }
+          if (command === 'dsh_cancel_task_run') {
+            cancellations++;
+            return Promise.resolve({ status: 'cancel_requested' });
+          }
+          return Promise.reject(new Error(`unexpected command ${command}`));
+        },
+      },
+    },
+  });
+  const controller = new AbortController();
+  try {
+    const pending = dshTaskRuntimeService.start({
+      conversationId: 'cancel-inflight',
+      novelId: 'novel',
+      turnId: 'turn',
+      goal: '生成下一章',
+      modelSnapshot: { ...snapshot, providerId: 'mock', modelId: 'Mock', runtimeMode: 'mock' },
+      taskKind: 'creative_dialogue',
+      requiredReadTools: [],
+      unifiedRuntime: { version: 1 },
+      cancellationSignal: controller.signal,
+    });
+    await entered;
+    controller.abort();
+    assert.equal(cancellations, 1);
+    complete({ run: { status: 'completed' } });
+    assert.equal((await pending).run.status, 'completed');
+    assert.equal(dshTaskRuntimeService.isRunning('cancel-inflight'), false);
+  } finally {
+    complete?.({ run: { status: 'completed' } });
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('Stop before credential dispatch cancels ingress promptly and never starts a late native model run', async () => {
+  saveAiSettings(settings);
+  resetSessionModelCredentialsForTests();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let enteredVault!: () => void;
+  let releaseVault!: (credential: string) => void;
+  const entered = new Promise<void>((resolve) => {
+    enteredVault = resolve;
+  });
+  let nativeStarts = 0;
+  let nativeCancels = 0;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string) => {
+          if (command === 'resolve_session_model_credential') {
+            enteredVault();
+            return new Promise<string>((resolve) => {
+              releaseVault = resolve;
+            });
+          }
+          if (command === 'dsh_start_task_turn') {
+            nativeStarts++;
+            return Promise.resolve({ run: { status: 'completed' } });
+          }
+          if (command === 'dsh_cancel_task_run') {
+            nativeCancels++;
+            return Promise.resolve({ status: 'idle' });
+          }
+          return Promise.reject(new Error(`unexpected command ${command}`));
+        },
+      },
+    },
+  });
+  try {
+    const pending = dshTaskRuntimeService.start({
+      conversationId: 'stop-before-dispatch',
+      novelId: 'novel',
+      turnId: 'turn',
+      goal: '生成下一章',
+      modelSnapshot: snapshot,
+      taskKind: 'creative_dialogue',
+      requiredReadTools: [],
+      unifiedRuntime: { version: 1 },
+    });
+    await entered;
+    assert.equal(dshTaskRuntimeService.isRunning('stop-before-dispatch'), true);
+    const acknowledgement = await dshTaskRuntimeService.cancel('stop-before-dispatch');
+    assert.equal(acknowledgement.status, 'cancel_requested');
+    assert.equal(acknowledgement.runtime, 'ans-task-ingress');
+    assert.equal(acknowledgement.runId, '', 'no fabricated native Run or terminal state');
+    await assert.rejects(pending, { name: 'AbortError' });
+    assert.equal(dshTaskRuntimeService.isRunning('stop-before-dispatch'), false);
+    assert.equal(nativeStarts, 0);
+    assert.equal(nativeCancels, 0, 'there was not yet a native model execution to cancel');
+    releaseVault('late-exact-test-credential');
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(nativeStarts, 0, 'a late vault result cannot revive cancelled ingress');
+  } finally {
+    releaseVault?.('late-exact-test-credential');
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else Reflect.deleteProperty(globalThis, 'window');
     resetSessionModelCredentialsForTests();
   }

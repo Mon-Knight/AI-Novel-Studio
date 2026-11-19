@@ -620,3 +620,94 @@ test('candidate numbers stay stable across shuffled replay of the complete set',
   assert.equal(expected.find(([cardId]) => cardId === 'c1')?.[1], 1);
   assert.equal(expected.find(([cardId]) => cardId === 'c2')?.[1], 3);
 });
+
+test('omits succeeded ans-host bookkeeping events so reads group contiguously while failures stay visible', () => {
+  const bundle = replayBundle();
+  bundle.toolEvents = [
+    {
+      eventId: 'contract',
+      runId: 'r2',
+      sequence: 0,
+      toolName: 'dsh.execution_contract',
+      argumentsSummary: { source: 'ans-host' },
+      status: 'succeeded',
+      createdAt: at(12.1),
+      finishedAt: at(12.1),
+    },
+    {
+      eventId: 'usage-1',
+      runId: 'r2',
+      sequence: 1,
+      toolName: 'dsh.request_usage',
+      argumentsSummary: { source: 'ans-host' },
+      status: 'succeeded',
+      createdAt: at(12.2),
+      finishedAt: at(12.2),
+    },
+    {
+      eventId: 'read-outline',
+      runId: 'r2',
+      sequence: 2,
+      toolName: 'chapter.read_outline',
+      argumentsSummary: {},
+      status: 'succeeded',
+      createdAt: at(12.3),
+      finishedAt: at(12.4),
+    },
+    {
+      eventId: 'dispatch-1',
+      runId: 'r2',
+      sequence: 3,
+      toolName: 'dsh.tool_dispatch',
+      argumentsSummary: { source: 'ans-host', toolName: 'chapter.read_outline' },
+      status: 'succeeded',
+      createdAt: at(12.45),
+      finishedAt: at(12.45),
+    },
+    {
+      eventId: 'read-context',
+      runId: 'r2',
+      sequence: 4,
+      toolName: 'novel.read_context',
+      argumentsSummary: {},
+      status: 'succeeded',
+      createdAt: at(12.5),
+      finishedAt: at(12.6),
+    },
+    {
+      eventId: 'dispatch-failed',
+      runId: 'r2',
+      sequence: 5,
+      toolName: 'dsh.tool_dispatch',
+      argumentsSummary: { source: 'ans-host', toolName: 'generate_chapter' },
+      status: 'failed',
+      error: '预算超限',
+      createdAt: at(12.7),
+      finishedAt: at(12.7),
+    },
+    {
+      eventId: 'local-word-target',
+      runId: 'r2',
+      sequence: 6,
+      toolName: 'task.configure_word_target',
+      argumentsSummary: { source: 'ans-host' },
+      status: 'succeeded',
+      createdAt: at(12.8),
+      finishedAt: at(12.8),
+    },
+  ];
+  const projected = projectWorkbenchEvents(bundle);
+  const projectedTools = projected
+    .filter((entry): entry is Extract<typeof entry, { kind: 'tool' }> => entry.kind === 'tool')
+    .map((entry) => entry.event.eventId);
+  assert.deepEqual(projectedTools, ['read-outline', 'read-context', 'dispatch-failed']);
+  const segments = groupWorkbenchDisplaySegments(projected);
+  const grouped = segments.filter((segment) => segment.kind === 'completed-read');
+  assert.equal(grouped.length, 1);
+  if (grouped[0]?.kind === 'completed-read') {
+    assert.deepEqual(
+      grouped[0].events.map((entry) => entry.event.eventId),
+      ['read-outline', 'read-context'],
+    );
+  }
+});

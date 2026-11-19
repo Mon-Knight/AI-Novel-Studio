@@ -25,7 +25,7 @@ pub(crate) fn verified_artifact_result(
         artifact.processing_status.as_str(),
         "valid" | "valid_with_warnings"
     ) || artifact.content_hash != expected_result_hash
-        || artifact.source_novel_id != stage.novel_id
+        || artifact.source_novel_id.as_deref() != Some(stage.novel_id.as_str())
         || artifact.source_chapter_id.as_deref() != Some(stage.chapter_id.as_str())
     {
         return Err(result_invalid("验证产物不是当前阶段作用域内的有效结果"));
@@ -39,7 +39,7 @@ pub(crate) fn verified_artifact_result(
     if detail.task.task_id != artifact.task_id
         || detail.task.status != "completed"
         || detail.task.result_artifact_id.as_deref() != Some(artifact.artifact_id.as_str())
-        || detail.task.novel_id != stage.novel_id
+        || detail.task.novel_id.as_deref() != Some(stage.novel_id.as_str())
         || detail.task.chapter_id.as_deref() != Some(stage.chapter_id.as_str())
         || detail.input_snapshot.snapshot.snapshot_id != artifact.source_input_snapshot_id
         || detail.input_snapshot.snapshot.snapshot_id != detail.task.input_snapshot_id

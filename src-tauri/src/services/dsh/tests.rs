@@ -10,13 +10,13 @@
 //! supervisor timeout, crash, and two-child isolation without silently
 //! skipping those failure paths when a developer machine lacks the carrier.
 
+use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -361,6 +361,7 @@ impl RuntimeFixture {
             task_novel_id: Some(INTEGRATION_NOVEL_ID.to_string()),
             task_chapter_id: Some(INTEGRATION_CHAPTER_ID.to_string()),
             candidate_policy: None,
+            task_budget_url: None,
         };
         Self { config }
     }
@@ -1313,8 +1314,12 @@ fn start_task_snapshot(upstream: &str, model: &str) -> Value {
 }
 
 fn assert_no_model_attestation(run: &conversation_service::TaskRunRecord) {
-    assert!(run.model_snapshot.pointer("/runtime/toolCallingAttestation").is_none(),
-        "actual task execution must not manufacture model verification evidence");
+    assert!(
+        run.model_snapshot
+            .pointer("/runtime/toolCallingAttestation")
+            .is_none(),
+        "actual task execution must not manufacture model verification evidence"
+    );
 }
 
 fn request_policy_diagnostics() -> Value {
@@ -1350,7 +1355,8 @@ fn try_start_turn(
 ) -> Result<task_runtime::TaskRuntimeResult, String> {
     task_runtime::start(StartTaskTurnInput {
         conversation_id: conversation_id.to_string(),
-        novel_id: novel_id.to_string(),
+        novel_id: Some(novel_id.to_string()),
+        scope: None,
         turn_id: turn_id.to_string(),
         goal: goal.to_string(),
         chapter_id: None,
@@ -1370,6 +1376,8 @@ fn try_start_turn(
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     })
 }
 
@@ -1451,7 +1459,8 @@ fn start_path_rejects_cross_scope_before_creating_a_run_or_worker() {
 
     let cross_chapter = task_runtime::start(StartTaskTurnInput {
         conversation_id: conversation_id.clone(),
-        novel_id: novel_id.clone(),
+        novel_id: Some(novel_id.clone()),
+        scope: None,
         turn_id: turn_id.clone(),
         goal: "读取其他章节".to_string(),
         chapter_id: Some(other_chapter_id.clone()),
@@ -1471,6 +1480,8 @@ fn start_path_rejects_cross_scope_before_creating_a_run_or_worker() {
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     })
     .expect_err("cross-novel chapter must fail before launch");
     assert!(cross_chapter.contains("TASK_RUNTIME_SCOPE_MISMATCH"));
@@ -1490,7 +1501,9 @@ fn start_path_rejects_cross_scope_before_creating_a_run_or_worker() {
 
 #[test]
 fn creative_dialogue_start_path_initializes_its_narrow_registry_without_an_attestation() {
-    let _guard = START_PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = START_PATH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
     let scratch = ScratchDir::new("creative-start");
     let _environment = StartPathEnvironment::new(&root, &scratch);
@@ -1501,67 +1514,117 @@ fn creative_dialogue_start_path_initializes_its_narrow_registry_without_an_attes
         "goal":"我想写现实港口悬疑，先讨论设定", "taskKind":"creative_dialogue",
         "modelSnapshot":start_task_snapshot(&upstream.upstream_base_url,"creative-model"),
         "requestPolicy":default_request_policy()
-    })).expect("native creative dialogue input");
-    let result = task_runtime::start(input).unwrap_or_else(|error| panic!("creative start failed: {error}; upstream={}", upstream.snapshot()));
-    assert_eq!(result.run.status,"completed");
+    }))
+    .expect("native creative dialogue input");
+    let result = task_runtime::start(input).unwrap_or_else(|error| {
+        panic!(
+            "creative start failed: {error}; upstream={}",
+            upstream.snapshot()
+        )
+    });
+    assert_eq!(result.run.status, "completed");
     assert!(result.model_tool_attestation.is_none());
     assert!(result.artifact_id.is_none());
     assert!(result.planned_action.is_none());
     assert_no_model_attestation(&result.run);
-    let requests=upstream.snapshot();
-    assert_eq!(requests["requestCount"],1,"only the real dialogue request is dispatched");
-    assert_eq!(requests["requests"][0]["phase"],"text-only");
+    let requests = upstream.snapshot();
+    assert_eq!(
+        requests["requestCount"], 1,
+        "only the real dialogue request is dispatched"
+    );
+    assert_eq!(requests["requests"][0]["phase"], "text-only");
     task_runtime::debug_kill_worker(&conversation_id);
 }
 
 #[test]
 fn start_path_missing_exact_credential_is_a_persisted_dialogue_failure() {
-    let _guard = START_PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = START_PATH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
     let scratch = ScratchDir::new("direct-credential-fail");
     let _environment = StartPathEnvironment::new(&root, &scratch);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("direct-credential-fail");
     let error = try_start_turn(
-        &conversation_id, &novel_id, &turn_id, "https://provider.invalid/v1",
-        "configured-but-no-key", "读取作品上下文",
-    ).expect_err("missing exact credentials fail without dispatching to another model");
+        &conversation_id,
+        &novel_id,
+        &turn_id,
+        "https://provider.invalid/v1",
+        "configured-but-no-key",
+        "读取作品上下文",
+    )
+    .expect_err("missing exact credentials fail without dispatching to another model");
     assert!(error.contains("Provider API Key"), "{error}");
-    let connection = crate::db::get_connection().lock().expect("test database lock");
+    let connection = crate::db::get_connection()
+        .lock()
+        .expect("test database lock");
     let bundle = conversation_service::get(&connection, &conversation_id)
-        .expect("read conversation").expect("conversation exists");
+        .expect("read conversation")
+        .expect("conversation exists");
     assert_eq!(bundle.runs.len(), 1);
     assert_eq!(bundle.runs[0].status, "failed");
-    assert_eq!(bundle.runs[0].model_snapshot["modelId"], "configured-but-no-key");
+    assert_eq!(
+        bundle.runs[0].model_snapshot["modelId"],
+        "configured-but-no-key"
+    );
     assert_no_model_attestation(&bundle.runs[0]);
-    assert!(bundle.turns.iter().any(|turn| turn.role == "assistant" && turn.content.contains("任务运行失败")));
+    assert!(bundle
+        .turns
+        .iter()
+        .any(|turn| turn.role == "assistant" && turn.content.contains("任务运行失败")));
     assert!(!task_runtime::debug_has_worker_process(&conversation_id));
 }
 
 #[test]
 fn start_path_records_actual_model_failure_without_a_capability_probe() {
-    let _guard = START_PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = START_PATH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
     let scratch = ScratchDir::new("direct-model-fail");
     let _environment = StartPathEnvironment::new(&root, &scratch);
     let upstream = MockWorkbench::start("tool-error", 0);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("direct-model-fail");
     let error = try_start_turn(
-        &conversation_id, &novel_id, &turn_id, &upstream.upstream_base_url,
-        "model-without-verified-tools", "读取作品上下文",
-    ).expect_err("actual tool execution fails inside the conversation");
-    assert!(!error.contains("MODEL_TOOL_CALLING_NOT_VERIFIED"), "{error}");
-    let connection = crate::db::get_connection().lock().expect("test database lock");
+        &conversation_id,
+        &novel_id,
+        &turn_id,
+        &upstream.upstream_base_url,
+        "model-without-verified-tools",
+        "读取作品上下文",
+    )
+    .expect_err("actual tool execution fails inside the conversation");
+    assert!(
+        !error.contains("MODEL_TOOL_CALLING_NOT_VERIFIED"),
+        "{error}"
+    );
+    let connection = crate::db::get_connection()
+        .lock()
+        .expect("test database lock");
     let bundle = conversation_service::get(&connection, &conversation_id)
-        .expect("read conversation").expect("conversation exists");
+        .expect("read conversation")
+        .expect("conversation exists");
     assert_eq!(bundle.runs.len(), 1);
     assert_eq!(bundle.runs[0].status, "failed");
     assert!(bundle.runs[0].error.is_some());
-    assert!(bundle.turns.iter().any(|turn| turn.role == "assistant" && turn.content.contains("任务运行失败")));
-    assert!(bundle.runs[0].model_snapshot.pointer("/runtime/toolCallingAttestation").is_none());
+    assert!(bundle
+        .turns
+        .iter()
+        .any(|turn| turn.role == "assistant" && turn.content.contains("任务运行失败")));
+    assert!(bundle.runs[0]
+        .model_snapshot
+        .pointer("/runtime/toolCallingAttestation")
+        .is_none());
     drop(connection);
     let requests = upstream.snapshot();
-    assert!(requests["requests"].as_array().unwrap().iter().all(|request|
-        !request["phase"].as_str().unwrap_or("").contains("attestation")));
+    assert!(requests["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|request| !request["phase"]
+            .as_str()
+            .unwrap_or("")
+            .contains("attestation")));
     task_runtime::debug_kill_worker(&conversation_id);
 }
 
@@ -1596,13 +1659,12 @@ fn start_path_cancellation_aborts_actual_request_and_persists_cancelled_run() {
         Duration::from_secs(30),
         |value| {
             value.get("requestCount").and_then(Value::as_u64) == Some(1)
-                && value.pointer("/requests/0/phase").and_then(Value::as_str)
-                    == Some("text-only")
+                && value.pointer("/requests/0/phase").and_then(Value::as_str) == Some("text-only")
         },
     );
-    assert!(task_runtime::list_statuses().iter().any(|status| {
-        status.conversation_id == conversation_id && status.status == "running"
-    }));
+    assert!(task_runtime::list_statuses()
+        .iter()
+        .any(|status| { status.conversation_id == conversation_id && status.status == "running" }));
 
     let cancel_started = Instant::now();
     let cancelled = task_runtime::cancel(&conversation_id).expect("cancel actual model request");
@@ -1676,7 +1738,7 @@ fn start_path_followup_reuses_session_and_resumes_after_child_exit() {
     );
     assert_eq!(second.worker_id, first_worker);
     assert_eq!(second.session_id, first_session);
-    assert_eq!(second.session_lifecycle.as_deref(), Some("continued"));
+    assert_eq!(second.session_lifecycle.as_deref(), Some("resumed"));
     assert!(second.model_tool_attestation.is_none());
     assert_no_model_attestation(&second.run);
 
@@ -1755,14 +1817,10 @@ fn start_path_model_switch_uses_exact_directory_and_preserves_session_history() 
     assert_eq!(selected_health["route"]["model"], "directory-model-beta");
     assert!(task_runtime::debug_has_worker_process(&conversation_id));
 
-    let unselected_health = task_runtime::runtime_health_with_probe(
-        Some(&conversation_id),
-        false,
-        None,
-        None,
-    )
-    .expect("a read-only plugin view without selection remains compatible")
-    .expect("without a snapshot the idle task worker still provides its directory");
+    let unselected_health =
+        task_runtime::runtime_health_with_probe(Some(&conversation_id), false, None, None)
+            .expect("a read-only plugin view without selection remains compatible")
+            .expect("without a snapshot the idle task worker still provides its directory");
     assert_eq!(unselected_health["route"]["model"], "directory-model-alpha");
 
     let first_health = task_runtime::runtime_health_with_probe(
@@ -1954,7 +2012,8 @@ fn canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts() {
 
     let result = task_runtime::start(StartTaskTurnInput {
         conversation_id: conversation_id.clone(),
-        novel_id: novel_id.clone(),
+        novel_id: Some(novel_id.clone()),
+        scope: None,
         turn_id: turn_id.clone(),
         goal: "读取当前作品与章节上下文，给出下一步创作建议".to_string(),
         chapter_id: Some(chapter_id.clone()),
@@ -1974,6 +2033,8 @@ fn canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts() {
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     })
     .unwrap_or_else(|error| {
         panic!(
@@ -2196,8 +2257,7 @@ fn r4_evidence_path() -> PathBuf {
         .canonicalize()
         .unwrap_or_else(|_| panic!("ANS_R4_EVIDENCE_PATH_INVALID"));
     let rendered = parent.to_string_lossy().to_ascii_lowercase();
-    if !parent.starts_with(&temp) || rendered.contains("com.ainovelstudio.app") || path.exists()
-    {
+    if !parent.starts_with(&temp) || rendered.contains("com.ainovelstudio.app") || path.exists() {
         panic!("ANS_R4_EVIDENCE_PATH_INVALID");
     }
     path
@@ -2256,7 +2316,11 @@ fn r4_verify_carrier(root: &Path, explicit_gateway: &Path) {
         .get("runtimeBinSha256")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
-    if recorded.len() != 64 || !recorded.chars().all(|character| character.is_ascii_hexdigit()) {
+    if recorded.len() != 64
+        || !recorded
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
         panic!("ANS_R4_CARRIER_BIN_MISMATCH");
     }
     let recorded_gateway = matrix
@@ -2295,11 +2359,9 @@ fn r4_reservation_count() -> i64 {
         return i64::MAX;
     };
     connection
-        .query_row(
-            "SELECT COUNT(*) FROM ai_request_reservations",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM ai_request_reservations", [], |row| {
+            row.get(0)
+        })
         .unwrap_or(i64::MAX)
 }
 
@@ -2313,9 +2375,9 @@ fn r4_exact_canonical_tool(name: &str) -> bool {
 fn r4_public_tool_name(name: &str) -> String {
     if !name.is_empty()
         && name.len() <= 96
-        && name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-'))
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
+        })
     {
         name.to_string()
     } else {
@@ -2579,7 +2641,8 @@ fn canonical_read_turn_cloud_profile() {
                     || window_elapsed
                     || started.elapsed() >= R4_ABSOLUTE_DEADLINE
                 {
-                    if !stop.load(Ordering::SeqCst) && task_runtime::cancel(&conversation_id).is_ok()
+                    if !stop.load(Ordering::SeqCst)
+                        && task_runtime::cancel(&conversation_id).is_ok()
                     {
                         cancel_requested.store(true, Ordering::SeqCst);
                     }
@@ -2592,7 +2655,8 @@ fn canonical_read_turn_cloud_profile() {
 
     let result = task_runtime::start(StartTaskTurnInput {
         conversation_id: conversation_id.clone(),
-        novel_id: novel_id.clone(),
+        novel_id: Some(novel_id.clone()),
+        scope: None,
         turn_id,
         goal: R4_GOAL.to_string(),
         chapter_id: None,
@@ -2609,6 +2673,8 @@ fn canonical_read_turn_cloud_profile() {
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
         model_snapshot: json!({
             "providerId": provider,
             "modelId": model,
@@ -2653,7 +2719,8 @@ fn canonical_read_turn_cloud_profile() {
     };
     let run_id = result.as_ref().ok().map(|value| value.run.run_id.clone());
     let artifact_present = matches!(&result, Ok(value) if value.artifact_id.is_some());
-    let chapter_candidate = matches!(&result, Ok(value) if value.pending_chapter_candidate.is_some());
+    let chapter_candidate =
+        matches!(&result, Ok(value) if value.pending_chapter_candidate.is_some());
     drop(result);
 
     let connection = crate::db::get_connection()
@@ -2706,11 +2773,9 @@ fn canonical_read_turn_cloud_profile() {
             .unwrap_or_else(|_| panic!("ANS_R4_EVIDENCE_QUERY_FAILED"))
     };
     let reservations: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM ai_request_reservations",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM ai_request_reservations", [], |row| {
+            row.get(0)
+        })
         .unwrap_or(i64::MAX);
     let (prompt_tokens, completion_tokens) = connection
         .query_row(
@@ -2831,7 +2896,8 @@ fn canonical_read_turn_cloud_profile() {
     evidence.tool_count = evidence.tools.len();
     let body = serde_json::to_vec_pretty(&evidence)
         .unwrap_or_else(|_| panic!("ANS_R4_EVIDENCE_WRITE_FAILED"));
-    let body_text = String::from_utf8(body.clone()).unwrap_or_else(|_| panic!("ANS_R4_EVIDENCE_SECRET"));
+    let body_text =
+        String::from_utf8(body.clone()).unwrap_or_else(|_| panic!("ANS_R4_EVIDENCE_SECRET"));
     if body_text.contains(&api_key)
         || body_text.contains("Bearer ")
         || body_text.to_ascii_lowercase().contains("api_key")
@@ -2846,9 +2912,14 @@ fn canonical_read_turn_cloud_profile() {
         .iter()
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
-    let canonical_ok = ["novel.read", "structure.read", "context.read", "memory.search"]
-        .iter()
-        .all(|required| names.contains(required))
+    let canonical_ok = [
+        "novel.read",
+        "structure.read",
+        "context.read",
+        "memory.search",
+    ]
+    .iter()
+    .all(|required| names.contains(required))
         && evidence
             .tools
             .iter()

@@ -854,20 +854,65 @@ pub(crate) fn put_review_adopted_draft_in_transaction(
     authorization_id: &str,
     now: &str,
 ) -> Result<PutMemoryDocumentOutput, AppError> {
-    validate_id("authorizationId", authorization_id)?;
+    put_authorized_draft_in_transaction(
+        connection,
+        draft,
+        full_content,
+        authorization_id,
+        false,
+        now,
+    )
+}
+
+pub(crate) fn put_task_authorized_draft_in_transaction(
+    connection: &Connection,
+    draft: &ChapterDraftDto,
+    full_content: &str,
+    receipt_id: &str,
+    now: &str,
+) -> Result<PutMemoryDocumentOutput, AppError> {
+    put_authorized_draft_in_transaction(connection, draft, full_content, receipt_id, true, now)
+}
+
+fn put_authorized_draft_in_transaction(
+    connection: &Connection,
+    draft: &ChapterDraftDto,
+    full_content: &str,
+    authority_id: &str,
+    task_authorized: bool,
+    now: &str,
+) -> Result<PutMemoryDocumentOutput, AppError> {
+    validate_id(
+        if task_authorized {
+            "receiptId"
+        } else {
+            "authorizationId"
+        },
+        authority_id,
+    )?;
     let chapter_sequence_index =
         chapter_sequence_index(connection, &draft.novel_id, &draft.chapter_id)?;
+    let identity_kind = if task_authorized {
+        "task_authorization_receipt"
+    } else {
+        "review_authorization"
+    };
     let identity_hash = large_text_repository::sha256(&format!(
-        "review_authorization:{authorization_id}\ndraft:{}",
+        "{identity_kind}:{authority_id}\ndraft:{}",
         draft.id
     ));
-    let document_id = format!("mem-adopted-review-{identity_hash}");
+    let prefix = if task_authorized {
+        "task-authorized"
+    } else {
+        "review"
+    };
+    let document_id = format!("mem-adopted-{prefix}-{identity_hash}");
     let pieces = chunk_adopted_draft_content(full_content);
     let chunks = pieces
         .into_iter()
         .enumerate()
         .map(|(ordinal, text)| MemoryChunkInput {
-            id: format!("chk-review-{}-{ordinal}", &identity_hash[..32]),
+            id: format!("chk-{prefix}-{}-{ordinal}", &identity_hash[..32]),
             ordinal: ordinal as i64,
             token_count: memory_token_count(&text),
             content_hash: large_text_repository::sha256(&text),
@@ -890,10 +935,19 @@ pub(crate) fn put_review_adopted_draft_in_transaction(
         source_hash: large_text_repository::sha256(full_content),
         adopted_draft_id: Some(draft.id.clone()),
         chapter_id: Some(draft.chapter_id.clone()),
-        metadata: json!({
-            "title": draft.title.clone().unwrap_or_default(),
-            "versionNo": draft.version_no,
-        }),
+        metadata: if task_authorized {
+            json!({
+                "title": draft.title.clone().unwrap_or_default(),
+                "versionNo": draft.version_no,
+                "authorizationMode": "task_preauthorization",
+                "receiptId": authority_id,
+            })
+        } else {
+            json!({
+                "title": draft.title.clone().unwrap_or_default(),
+                "versionNo": draft.version_no,
+            })
+        },
         chunks,
     };
     persist_document_in_transaction(connection, input, now, PersistDocumentMode::Strict)
@@ -974,7 +1028,15 @@ pub(crate) fn sync_chapter_summary_in_transaction(
     summary: &ChapterSummaryDto,
     now: &str,
 ) -> Result<Option<PutMemoryDocumentOutput>, AppError> {
-    if !summary.enabled || summary.is_expired {
+    if !summary.enabled
+        || summary.is_expired
+        || !crate::services::summary_application_policy::evaluate(
+            summary.validation_result.as_deref(),
+            summary.validation_status.as_deref(),
+            crate::services::summary_application_policy::SummaryApplicationMode::Context,
+        )
+        .eligible
+    {
         invalidate_source_in_transaction(
             connection,
             &summary.novel_id,
@@ -2054,7 +2116,8 @@ mod tests {
                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
                  adopted_draft_id TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
                  content_hash TEXT, draft_version INTEGER, is_expired INTEGER NOT NULL DEFAULT 0,
-                 enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                 enabled INTEGER NOT NULL DEFAULT 1, validation_status TEXT,
+                 validation_result TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
              );
              CREATE TABLE context_records (
                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT,

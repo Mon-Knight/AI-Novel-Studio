@@ -16,25 +16,19 @@ import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { styleProfileService } from '../styles/styleProfileService';
 import { masterOutlineService, volumeOutlineService } from '../outlines/outlineService';
-import type { AiGenerateOptions } from '../../types/ai';
+import type {
+  OutlineGenerationOptions,
+  VolumeOutlineCandidate,
+  ChapterOutlineCandidate,
+} from '../../types/outlineGeneration';
+import { isTauri } from '../database/db';
+import { generateNativeOutline } from '../outlines/outlineRuntimeService';
+export type {
+  VolumeOutlineCandidate,
+  ChapterOutlineCandidate,
+} from '../../types/outlineGeneration';
 import { throwIfAiRequestCancelled } from './aiCancellation';
 import { bindAiTaskCancellation, settleAiTaskError } from './aiTaskCancellation';
-
-export interface VolumeOutlineCandidate {
-  title: string;
-  summary: string;
-  goal?: string;
-  mainConflict?: string;
-  rawText?: string;
-}
-
-export interface ChapterOutlineCandidate {
-  title: string;
-  outline: string;
-  goal?: string;
-  targetWordCount?: number;
-  rawText?: string;
-}
 
 async function buildOutlineContext(novelId: string, volumeId?: string) {
   const [novel, worldSettings, ruleSystems, protagonist, volumes, chapters] = await Promise.all([
@@ -154,7 +148,20 @@ async function buildOutlineContext(novelId: string, volumeId?: string) {
 }
 
 export const outlineGenerateService = {
-  async generateNovelOutline(novelId: string, options: AiGenerateOptions = {}): Promise<string> {
+  async generateNovelOutline(
+    novelId: string,
+    options: OutlineGenerationOptions = {},
+  ): Promise<string> {
+    if (isTauri()) {
+      const result = await generateNativeOutline(
+        novelId,
+        { kind: 'outline_generate', outlineType: 'master', format: 'editor_text' },
+        options,
+      );
+      if (result.format !== 'editor_text') throw new Error('OUTLINE_CANDIDATE_FORMAT_MISMATCH');
+      return result.value;
+    }
+    // Browser development compatibility is not the desktop execution kernel.
     const settings = aiSettingsService.getSettings();
     const context = await buildOutlineContext(novelId);
     const request = buildOutlineGeneratePrompt(context);
@@ -194,9 +201,25 @@ export const outlineGenerateService = {
   },
 
   async generateVolumeOutline(
-    input: { novelId: string; volumeTitle?: string },
-    options: AiGenerateOptions = {},
+    input: { novelId: string; volumeId?: string; volumeTitle?: string },
+    options: OutlineGenerationOptions = {},
   ): Promise<VolumeOutlineCandidate> {
+    if (isTauri()) {
+      const result = await generateNativeOutline(
+        input.novelId,
+        {
+          kind: 'outline_generate',
+          outlineType: 'volume',
+          format: 'volume_candidate',
+          targetId: input.volumeId,
+          targetTitle: input.volumeTitle,
+        },
+        options,
+      );
+      if (result.format !== 'volume_candidate')
+        throw new Error('OUTLINE_CANDIDATE_FORMAT_MISMATCH');
+      return result.value;
+    }
     const settings = aiSettingsService.getSettings();
     const context = await buildOutlineContext(input.novelId);
     const request = buildVolumeOutlineGeneratePrompt({
@@ -265,8 +288,27 @@ export const outlineGenerateService = {
       chapterGoal?: string;
       chapterCount?: number;
     },
-    options: AiGenerateOptions = {},
+    options: OutlineGenerationOptions = {},
   ): Promise<ChapterOutlineCandidate[]> {
+    if (isTauri()) {
+      const result = await generateNativeOutline(
+        input.novelId,
+        {
+          kind: 'outline_generate',
+          outlineType: 'chapter',
+          format: 'chapter_candidates',
+          targetId: input.chapterId,
+          volumeId: input.volumeId,
+          targetTitle: input.chapterTitle,
+          chapterGoal: input.chapterGoal,
+          chapterCount: input.chapterCount ?? 6,
+        },
+        options,
+      );
+      if (result.format !== 'chapter_candidates')
+        throw new Error('OUTLINE_CANDIDATE_FORMAT_MISMATCH');
+      return result.value;
+    }
     const settings = aiSettingsService.getSettings();
     const [context, volume] = await Promise.all([
       buildOutlineContext(input.novelId, input.volumeId),

@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { aiTaskRuntimeService } from '../../services/ai-tasks/aiTaskRuntimeService';
-import { artifactDecisionService } from '../../services/conversation/artifactDecisionService';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
 import { novelRepository } from '../../services/database/novelRepository';
@@ -16,13 +14,13 @@ import type { EditorContentSnapshot } from '../../types/workspaceSafety';
 import type { Novel } from '../../types/novel';
 import type { Volume } from '../../types/volume';
 import { countTextWords } from '../../utils/contentHash';
-import { computeContentSha256 } from '../../utils/contentIntegrity';
 import {
   MonotonicDocumentLoadGuard,
   resolveGuardedDocumentLoad,
   validateDraftDocumentTarget,
 } from './documentSafety';
 import { CHAPTER_DOCUMENT_LOAD_ERROR } from './workspaceDocumentMessages';
+import { loadWorkspaceReviewDocument } from './loadWorkspaceReviewDocument';
 
 const NOVEL_LOAD_RETRY_DELAYS_MS = [120, 240, 480];
 
@@ -105,6 +103,7 @@ export function useWorkspaceChapterLoader({
   const [pageError, setPageError] = useState('');
   const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
   const [reviewCandidate, setReviewCandidate] = useState<ReviewCandidateDocument | null>(null);
+  const [effectiveReviewAuthorizationId, setEffectiveReviewAuthorizationId] = useState<string>();
   const reviewCandidateRef = useRef<ReviewCandidateDocument | null>(null);
   const [chapterDocumentLoad, setChapterDocumentLoad] = useState<ChapterDocumentLoadState>({
     status: 'ready',
@@ -132,6 +131,7 @@ export function useWorkspaceChapterLoader({
       documentLoadGuardRef.current.invalidate();
       refs.activeChapterId.current = chapterId;
       setActiveChapterId(chapterId);
+      setEffectiveReviewAuthorizationId(undefined);
       setCurrentDraft(null);
       setContentLoadError(null);
       refs.currentDraft.current = null;
@@ -156,74 +156,37 @@ export function useWorkspaceChapterLoader({
       setContentLoadError(null);
       try {
         if (candidateAuthorizationId) {
-          const auth = await artifactDecisionService.getAuthorization(candidateAuthorizationId);
-          if (!auth || auth.status === 'expired') {
-            throw new Error('审阅授权不存在或已失效。');
-          }
-          if (auth.novelId !== requestNovelId || auth.chapterId !== chapterId) {
-            throw new Error('审阅授权与当前作品或章节不匹配。');
-          }
-          if (candidateArtifactId && auth.artifactId !== candidateArtifactId) {
-            throw new Error('审阅授权与产物标识不匹配。');
-          }
-          if (auth.status === 'consumed') {
-            if (!auth.consumedByDraftId) {
-              throw new Error('审阅授权已消费，但缺少采用草稿引用。');
-            }
-            const adoptedDraft = await draftVersionService.getById(
+          const resolved = await resolveGuardedDocumentLoad(
+            documentLoadGuardRef.current,
+            token,
+            loadWorkspaceReviewDocument({
+              novelId: requestNovelId,
               chapterId,
-              auth.consumedByDraftId,
-            );
-            if (
-              !adoptedDraft ||
-              !adoptedDraft.isAdopted ||
-              adoptedDraft.novelId !== requestNovelId ||
-              adoptedDraft.chapterId !== chapterId
-            ) {
-              throw new Error('审阅授权已消费，但采用草稿状态不一致。');
-            }
-            if (activateOnSuccess) commitActiveChapter(chapterId);
-            updateReviewCandidate(null);
-            setCurrentDraft(adoptedDraft);
-            refs.currentDraft.current = adoptedDraft;
-            setDraftWordCount(adoptedDraft.wordCount);
-            setDirty(false);
-            documentBlockedRef.current = false;
-            setChapterDocumentLoad({ status: 'ready', chapterId });
-            return true;
-          }
-          const artifactBundle = await aiTaskRuntimeService
-            .getArtifact(auth.artifactId)
-            .catch(() => null);
-          if (!artifactBundle?.rawContent) {
-            throw new Error('候选产物正文为空或无法读取。');
-          }
-          const computedHash = await computeContentSha256(artifactBundle.rawContent);
-          if (
-            artifactBundle.artifact.contentHash &&
-            !computedHash.startsWith('fallback_') &&
-            computedHash.toLowerCase() !== artifactBundle.artifact.contentHash.toLowerCase()
-          ) {
-            throw new Error('候选产物内容哈希校验失败。');
-          }
+              authorizationId: candidateAuthorizationId,
+              artifactId: candidateArtifactId,
+              draftId: selectedDraftId,
+            }),
+            () =>
+              activateOnSuccess
+                ? target
+                : { novelId: refs.activeNovelId.current, chapterId: refs.activeChapterId.current },
+          );
+          if (!resolved.accepted || refs.activeNovelId.current !== requestNovelId) return false;
+          const document = resolved.value;
           if (activateOnSuccess) commitActiveChapter(chapterId);
-          const candidateDoc: ReviewCandidateDocument = {
-            authorizationId: auth.authorizationId,
-            artifactId: auth.artifactId,
-            content: artifactBundle.rawContent,
-            contentHash: artifactBundle.artifact.contentHash || computedHash,
-            chapterId,
-            novelId: requestNovelId,
-          };
-          updateReviewCandidate(candidateDoc);
-          setCurrentDraft(null);
-          refs.currentDraft.current = null;
-          setDraftWordCount(countTextWords(candidateDoc.content));
+          updateReviewCandidate(document.candidate);
+          setEffectiveReviewAuthorizationId(document.authorization.authorizationId);
+          setCurrentDraft(document.draft);
+          refs.currentDraft.current = document.draft;
+          setDraftWordCount(
+            document.draft?.wordCount ?? countTextWords(document.candidate?.content ?? ''),
+          );
           setDirty(false);
           documentBlockedRef.current = false;
           setChapterDocumentLoad({ status: 'ready', chapterId });
           return true;
         }
+        setEffectiveReviewAuthorizationId(undefined);
 
         updateReviewCandidate(null);
         const draftRequest = selectedDraftId
@@ -430,6 +393,7 @@ export function useWorkspaceChapterLoader({
     loadState,
     setLoadState,
     reviewCandidate,
+    effectiveReviewAuthorizationId,
     chapterDocumentLoad,
     setChapterDocumentLoad,
     contentLoadError,

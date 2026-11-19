@@ -125,7 +125,11 @@ export function OutlineCandidateResults({
         <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
           {chapterCandidates.map((candidate, index) => (
             <div
-              key={`${candidate.title}-${index}`}
+              key={
+                candidate.runtimeIndex !== undefined
+                  ? `native-candidate-${candidate.runtimeIndex}`
+                  : `${candidate.title}-${index}`
+              }
               style={{
                 padding: 10,
                 border: '1px solid var(--color-border-light)',

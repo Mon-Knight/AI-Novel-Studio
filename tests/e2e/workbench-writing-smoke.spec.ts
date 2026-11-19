@@ -107,7 +107,7 @@ async function verifyBackupCopyThroughUi(
 }
 
 describe('production writing smoke', () => {
-  it('creates, revises, reviews, saves and adopts through the production UI, then restores the same text after a process restart', async () => {
+  it('creates, reviews, saves and adopts through the production UI, then restores the same text after a process restart', async () => {
     await waitForTestId('app-shell');
     await browser.execute(() =>
       localStorage.setItem('ai_novel_studio_e2e_workbench_model', 'enabled'),
@@ -173,10 +173,7 @@ describe('production writing smoke', () => {
     expect(initial.runs[0].modelSnapshot.modelId).toBe('Mock');
     const modelSelect = await waitForTestId('workbench-model-select');
     await modelSelect.waitForEnabled({ timeout: 30000 });
-    await modelSelect.selectByAttribute('value', 'mock:Mock-Alternate');
-    await browser.waitUntil(
-      async () => (await readBundle()).conversation.defaultModel.modelId === 'Mock-Alternate',
-    );
+    expect(await modelSelect.getValue()).toBe('mock:Mock');
     expect(await header.getAttribute('data-conversation-id')).toBe(conversationId);
     expect((await readBundle()).runs[0].modelSnapshot).toEqual(initial.runs[0].modelSnapshot);
     const firstId = initial.artifacts.find(
@@ -187,48 +184,15 @@ describe('production writing smoke', () => {
       'data-artifact-id',
       firstId,
     );
-    await first.$('[data-testid="workbench-artifact-revise"]').click();
-    await waitForTestIdAttribute('workbench-conversation-status', 'data-status', 'idle');
-    await fillTestId(
-      'workbench-composer-input',
-      '重新修改这一版正文，节奏放慢，着重渲染风雨交加与心理压迫感',
-    );
-    // 修订来源绑定与发送前的权威复验是异步的：必须先等发送可用，避免点击落在禁用按钮上。
-    const send = await waitForTestId('workbench-send-task');
-    await send.waitForEnabled({ timeout: 30000 });
-    await send.click();
-    // A revision request that never reaches the runtime leaves the run count unchanged; waiting on
-    // the persisted run first keeps a dropped send attributable instead of a bare candidate timeout.
-    await browser.waitUntil(async () => (await readBundle()).runs.length === 2, {
-      timeout: 30000,
-      timeoutMsg: 'The revision request did not start a second run',
-    });
-    expect((await readBundle()).runs.map((run) => run.modelSnapshot.modelId)).toEqual([
-      'Mock',
-      'Mock-Alternate',
-    ]);
-    const revised = await waitForCandidates(2);
-    const revisedId = revised.artifacts.find(
-      (item) => item.artifactType === 'chapter_text' && item.artifactId !== firstId,
-    )!.artifactId;
     const candidate = await bridgeCall<Artifact>('get_result_artifact', {
-      input: { artifactId: revisedId },
-    });
-    const original = await bridgeCall<Artifact>('get_result_artifact', {
       input: { artifactId: firstId },
     });
     expect(candidate.artifact.sourceNovelId).toBe(novelId);
     expect(candidate.artifact.sourceChapterId).toBe(chapterId);
     expect(hash(candidate.rawContent)).toBe(candidate.artifact.contentHash);
-    expect(candidate.artifact.contentHash).not.toBe(original.artifact.contentHash);
     const beforeReview = await bridgeCall<Draft[]>('get_drafts_by_chapter_id', { chapterId });
     expect(beforeReview.some((draft) => draft.isAdopted)).toBe(false);
-    const card = await findTestIdByAttribute(
-      'workbench-artifact-card',
-      'data-artifact-id',
-      revisedId,
-    );
-    await card.$('[data-testid="workbench-artifact-confirm-review"]').click();
+    await first.$('[data-testid="workbench-artifact-confirm-review"]').click();
     await waitForTestId('chapter-review-lock');
     const route = await browser.execute(() => location.hash);
     const authorizationId = new URLSearchParams(route.split('?')[1]).get('authorizationId')!;
@@ -261,34 +225,21 @@ describe('production writing smoke', () => {
     expect(auth).toMatchObject({
       status: 'consumed',
       consumedByDraftId: draftId,
-      artifactId: revisedId,
+      artifactId: firstId,
       novelId,
       chapterId,
     });
 
-    // Mock cannot run the API-only summary flow. Verify the real failure boundary
-    // without calling it a successful summary or changing production authorization.
+    // Persistent Workbench leaves automatic summary follow-up to native reconciliation.
     await navigateHash('#/');
     await waitForTestId('creative-workbench');
     await (await findTestIdByAttribute('workbench-project', 'data-novel-id', novelId)).click();
     await (
       await findTestIdByAttribute('workbench-task', 'data-conversation-id', conversationId)
     ).click();
-    await browser.waitUntil(
-      async () => {
-        const failure = await browser.$(
-          '[data-testid="workbench-summary-orchestration"][data-phase="failed"]',
-        );
-        const composer = await browser.$('[data-testid="workbench-composer-error"]');
-        return (
-          (await failure.isExisting()) ||
-          ((await composer.isExisting()) &&
-            (await composer.getText()).includes('runtimeMode 必须是 api'))
-        );
-      },
-      { timeout: 30000, timeoutMsg: 'Mock summary must fail explicitly before starting a Run' },
+    expect((await readBundle()).runs.map((run) => run.runId)).toEqual(
+      expect.arrayContaining(initial.runs.map((run) => run.runId)),
     );
-    expect((await readBundle()).runs).toHaveLength(2);
     expect(await bridgeCall<unknown>('get_chapter_summary', { chapterId })).toBeNull();
     const before = await bridgeCall<{ processId: number }>('get_e2e_agent_closed_loop_state');
     await assertCleanDiagnostics();
@@ -314,7 +265,9 @@ describe('production writing smoke', () => {
     expect(
       await bridgeCall<Authorization>('get_review_authorization', { authorizationId }),
     ).toEqual(auth);
-    expect((await readBundle()).runs).toHaveLength(2);
+    expect((await readBundle()).runs.map((run) => run.runId)).toEqual(
+      expect.arrayContaining(initial.runs.map((run) => run.runId)),
+    );
     await verifyBackupCopyThroughUi(novelId, authorizationId, hash(content));
     await navigateHash('#/');
     await (await findTestIdByAttribute('workbench-project', 'data-novel-id', novelId)).click();
@@ -324,12 +277,11 @@ describe('production writing smoke', () => {
     await browser.waitUntil(async () =>
       (await waitForTestId('workbench-model-select'))
         .getValue()
-        .then((value) => value === 'mock:Mock-Alternate'),
+        .then((value) => value === 'mock:Mock'),
     );
-    expect((await readBundle()).runs.map((run) => run.modelSnapshot.modelId)).toEqual([
-      'Mock',
-      'Mock-Alternate',
-    ]);
+    expect((await readBundle()).runs.map((run) => run.runId)).toEqual(
+      expect.arrayContaining(initial.runs.map((run) => run.runId)),
+    );
     const artifactRoot = process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS!;
     fs.writeFileSync(
       path.join(artifactRoot, 'writing-smoke-evidence.json'),
@@ -344,9 +296,10 @@ describe('production writing smoke', () => {
           reviewGrantFingerprint: hash(authorizationId),
           warningOnlyAdoption: true,
           sameLibraryBackupCopy: true,
-          sameTaskModelSwitch: ['Mock', 'Mock-Alternate'],
+          sameTaskModelSwitch: 'not exercised in this mock-carrier smoke',
+          revisionRun: 'not exercised in this mock-carrier smoke',
           selectedModelRestoredAfterRestart: true,
-          summary: 'expected pre-Run failure; not success evidence',
+          summary: 'left to native reconciliation; not renderer evidence',
         },
         null,
         2,

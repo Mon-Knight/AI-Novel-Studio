@@ -5,6 +5,7 @@ import {
   listAvailableWorkbenchModels,
   type WorkbenchModelOption,
 } from './workbenchModelAvailability';
+import { canonicalModelProviderId, normalizeModelBaseUrl, normalizeModelId } from './modelIdentity';
 
 /** Configured models can be used directly; directory entries describe loaded plugins. */
 export function listSelectableWorkbenchModels(
@@ -19,9 +20,9 @@ export function listSelectableWorkbenchModels(
     settings = getAiSettings();
   }
   const add = (provider: string, model: string, baseUrl: string, label = model) => {
-    const providerId = provider.trim() === 'deepseek' ? 'deepseek-official' : provider.trim();
-    const modelId = model.trim();
-    if (!providerId || providerId === 'mock' || !modelId || !baseUrl.trim()) return;
+    const providerId = canonicalModelProviderId(provider);
+    const modelId = normalizeModelId(model);
+    if (!providerId || providerId === 'mock' || !modelId || !normalizeModelBaseUrl(baseUrl)) return;
     const key = `${providerId}:${modelId}`;
     if (!choices.has(key))
       choices.set(key, {

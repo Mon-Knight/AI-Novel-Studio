@@ -21,7 +21,11 @@ export function selectDesktopSpecs(args: string[], allSpecs: string[]): string[]
   }
   if (smoke && requested.length) throw new Error('--smoke and --spec cannot be used together.');
   const selected = smoke
-    ? ['app-start.spec.ts', 'workbench-writing-smoke.spec.ts']
+    ? [
+        'app-start.spec.ts',
+        'workbench-writing-smoke.spec.ts',
+        'workbench-task-authorization.spec.ts',
+      ]
     : requested.length
       ? requested
       : allSpecs;

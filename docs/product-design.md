@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
+桌面统一执行：`unified-agent-runtime`（本批集成验证中）；只读阶段：`canonical-only`；受控写章：`writing-subagent`；`deterministic-writer` 仅限浏览器开发兼容；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -1324,6 +1324,8 @@ v0.1.0 完成后，应满足：
 
 ## 21.3 用户确认与章节审阅
 
+以下为默认人工模式；可选任务级预授权另见第 21.9 节，不伪造人工确认或替代特定人工判断。
+
 - 结构化候选可以在对话中确认并申请应用。桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务中写入领域事实并追加 `ArtifactDecision`；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续失败关闭且零领域写入。章节正文仍走 `ReviewAuthorization` 原子采用，不经 `request_apply`。
 - 审计/质量/风格报告按类型提供“标记已阅”、结论与后续任务入口，本身不写入小说事实，也不因阅读标记获得应用权限。
 - 章节正文采用双阶段流程：对话中确认进入审阅，再由人工审阅/编辑器显式编辑、保存和采用；桌面端由单一 Rust/SQLite 事务复验并消费 `ReviewAuthorization`、采用草稿并收敛任务状态。
@@ -1349,7 +1351,7 @@ v0.1.0 完成后，应满足：
 
 Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成。四个 Canonical 只读 identity（`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`）现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4。这只是 Catalog/Manifest exposure。
 
-R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。Writing SubAgent 已于 v3.7.0 对桌面端 + 真实 API 的 `chapter_write` 默认开放；mock / 本地 / 浏览器走确定性 Writer。详细标准见工作台架构第 14.5 节。本文不授权新版本开发。
+R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿主 start 契约、Worker 环境与工具授权已统一使用 `novel.read / structure.read / context.read / memory.search` 的 allowlist，Gateway 据此列出 Canonical 只读工具；候选与审计回合保留 legacy `ALLOWED_TOOLS`。已有仓内 loopback 证据，但 live 云端 Provider 仍 NOT VERIFIED，不能宣称 R4 VERIFIED；`mainAgentRuntimeService` 启发式脚手架也不是其验收证据。v3.7.0 初次开放的桌面双宿主属于历史：当前 API、Mock、本地共用统一原生 Runtime，Writing SubAgent 为受控阶段，旧确定性 Writer 顶层仅限浏览器开发兼容；本批仍待完整验证，见第 21.9 节。R4 的独立标准见工作台架构第 14.5 节。本文不授权新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
 
@@ -1367,6 +1369,20 @@ R4 的目标是 Canonical-only DSH 只读回合。工作台 `read` intent、宿�
 - 模型所需世界、规则与工程材料完整读取或失败关闭；公开 warning / error / not_checked 区分有限检查与未检查，semanticRules 始终 not_checked。浏览器只提供本机恢复与校验，不冒充 SQLite/桌面/live 证据；本机规则保存守卫缺 previewHash、规则集指纹或 intent 任一项即拒绝，不自动补签作者确认。
 
 结构、字段和实际门禁详见 [世界规则契约](design/world-rule-contract.md)。本批实现与验收分开，最终结论仅在全部修复后由父任务统一记录。
+
+## 21.9 统一任务与有限预授权（2026-11-11，集成验证中）
+
+状态为 **INTEGRATION / NOT YET FULLY VERIFIED**。此前按真实 API、Mock、本地模型划分桌面写章宿主的说明已由统一原生执行替代；浏览器仅保留受限开发兼容。不同作品、任务、子阶段上下文继续隔离，模型只在当前阶段允许的能力内选择下一步，普通回复不等于执行指令。
+
+新任务默认人工确认，不因可以生成就允许正式采用。任务头提供「本任务授权」，以独立选项授权规划应用、正文采用或总结应用；每种动作和总写入次数、已有章节、可选新建卷区间与卷章数量、预算、有效期均明确。授权仅覆盖当前明确用户目标及宿主受控后续阶段，不覆盖同会话后来新的独立要求；冻结模型或请求配置变化时需重新授权。
+
+当前「自动应用规划」只接受精确 `outline` 规划族，不等于允许任意 JSON、世界规则修改、批量清理或整本作品无限新建。预授权结果由原生服务每次复验作品/章节/产物、基线、质量、额度、期限与幂等后提交；正式回执展示授权来源，不伪造作者已审阅。人工阅读、拒绝、修改意见、章节编辑/保存/采用仍保留，未授权动作继续等待人工决定。
+
+用户可查看、刷新和撤销授权；撤销停止新写入，但已提交结果不会被表示为“全部取消”。预算到限、过期、冲突、材料不足及特定人工判断要求显示具体停止原因。任务自身后续阶段依据精确提交回执推进基线，人工编辑或其他任务写入后不能静默刷新旧授权。
+
+总结将阻断错误、普通提醒、语义未核验和具体人工审阅要求分别显示：角色错误等阻断项即使得分较高也不能进入上下文；证据片段或确定性升级需要作者判断，预授权暂停。普通 advisory 或结构通过都不能表述为内容语义正确。恢复备份不恢复有效授权，重启先核对权威事实，不盲目重放模型或未知写入。
+
+以上为当前产品契约同步，不代表所有入口、撤销竞争、键盘焦点、重启或真实桌面验证已通过；R4 live 与文学效果未验证。详见 [Runtime](agent-runtime.md#13-统一原生执行与任务级预授权2026-11-11集成验证中)与[本批实施记录](../reports/unified-agent-2026-11-11/implementation.md)。
 
 ---
 

@@ -110,3 +110,16 @@ test('loopback models retain their identity without a directory refresh or fallb
   assert.equal(resolved.baseUrl, loopback.baseUrl);
   assert.deepEqual(probes, []);
 });
+
+test('invalid API snapshots fail before task submission while directory state stays advisory', async () => {
+  // Keep the model identity outside the active settings so legacy hydration
+  // cannot legitimately restore an endpoint for it.
+  await assert.rejects(
+    () =>
+      validateWorkbenchModelForSend(
+        { ...snapshot, modelId: 'unconfigured-model', baseUrl: '' },
+        async () => [],
+      ),
+    /缺少 Provider、模型或 Endpoint/u,
+  );
+});

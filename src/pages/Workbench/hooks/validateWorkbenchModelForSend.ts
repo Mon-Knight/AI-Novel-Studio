@@ -18,5 +18,15 @@ export async function validateWorkbenchModelForSend(
   _refreshPlugins: WorkbenchPluginRefresh,
   _options: { allowLocalFallback?: boolean } = {},
 ): Promise<TaskModelSnapshot> {
-  return hydrateTaskModelSnapshotRuntime(modelSnapshot);
+  const hydrated = hydrateTaskModelSnapshotRuntime(modelSnapshot);
+  if (
+    hydrated.runtimeMode === 'api' &&
+    (!hydrated.providerId.trim() || !hydrated.modelId.trim() || !hydrated.baseUrl?.trim())
+  ) {
+    throw new Error('当前模型快照缺少 Provider、模型或 Endpoint，已停止启动任务。');
+  }
+  // Runtime directory state is descriptive.  The native task command remains
+  // the final route/credential authority, so a stale or still-initializing
+  // health snapshot does not permanently block a valid frozen model.
+  return hydrated;
 }

@@ -531,8 +531,29 @@ fn lineage_upgrade_keeps_rows_ledger_dependents_and_enables_cross_task_revision(
     assert_eq!(lineage_count(&connection, "placement_proposals"), 1);
     assert_eq!(lineage_count(&connection, "artifact_validation_issues"), 1);
     for (name, sql) in trigger_sql_before {
-        assert_eq!(lineage_object_sql(&connection, name), sql, "{name}");
-        assert!(!sql.is_empty(), "{name} missing");
+        let current = lineage_object_sql(&connection, name);
+        assert!(!current.is_empty(), "{name} missing");
+        match name {
+            "trg_result_artifacts_validate_insert" => {
+                assert!(
+                    sql.contains("t.novel_id = NEW.source_novel_id"),
+                    "{name} fixture drifted"
+                );
+                assert_eq!(
+                    current,
+                    sql.replace(
+                        "t.novel_id = NEW.source_novel_id",
+                        "t.novel_id IS NEW.source_novel_id"
+                    ),
+                    "{name}"
+                );
+            }
+            "trg_conversation_artifact_cards_projection_insert" => {
+                assert!(current.contains("t.novel_id = c.novel_id OR"), "{name}");
+                assert!(current.contains("c.scope_type='library'"), "{name}");
+            }
+            _ => assert_eq!(current, sql, "{name}"),
+        }
     }
     let fk_errors = connection
         .prepare("PRAGMA foreign_key_check")
@@ -595,6 +616,7 @@ fn lineage_new_empty_and_prerelease_match_upgraded_fk_structure() {
     let mut upgraded = lineage_connection();
     run_migrations(&mut upgraded).expect("upgrade");
     let expected = lineage_schema_signature(&upgraded);
+    let expected_artifact_sql = lineage_artifact_sql(&upgraded);
 
     let mut empty = Connection::open_in_memory().expect("empty");
     empty
@@ -615,8 +637,12 @@ fn lineage_new_empty_and_prerelease_match_upgraded_fk_structure() {
         lineage_released_migration_count()
     );
     let sql_before = lineage_artifact_sql(&pre_release);
-    run_migrations(&mut pre_release).expect("apply remaining 039/040 ledger facts");
-    assert_eq!(lineage_artifact_sql(&pre_release), sql_before);
+    assert!(
+        sql_before.contains("source_novel_id TEXT NOT NULL"),
+        "039 rebuild must keep the released NOT NULL column until 042"
+    );
+    run_migrations(&mut pre_release).expect("apply remaining 039/040/041/042/043 ledger facts");
+    assert_eq!(lineage_artifact_sql(&pre_release), expected_artifact_sql);
     assert_eq!(
         list_applied(&pre_release).expect("ledger").len(),
         EXPECTED_MIGRATION_CHECKSUMS.len()

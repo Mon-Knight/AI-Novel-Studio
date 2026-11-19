@@ -49,9 +49,9 @@ export function checkCapabilityDeclarations({ manifest, hostSource, documents })
   if (
     JSON.stringify(allowlist) !==
       JSON.stringify(expected.map((identity) => identity.split('@')[0]).sort()) ||
-    // Canonical-only read turns must be the first branch and the legacy allowlist the final
-    // fallback; narrower flagged branches (Writing SubAgent) may sit in between.
-    !/fn turn_allowed_tools\([^]*?if is_canonical_only_turn\(input\)\s*\{\s*CANONICAL_ALLOWED_TOOLS\s*\}(?:\s*else if [^{]*\{[^}]*\})*\s*else\s*\{\s*ALLOWED_TOOLS/u.test(
+    // The read-only guard must return before any domain/candidate dispatch can shadow it.
+    // This is a declaration drift check; native behavior tests still prove tool authorization.
+    !/fn turn_allowed_tools\([^)]*\)\s*->\s*&(?:'static\s+)?str\s*\{\s*if is_canonical_only_turn\(input\)\s*\{\s*return CANONICAL_ALLOWED_TOOLS;\s*\}/u.test(
       hostSource,
     ) ||
     !/fn is_canonical_only_turn\([^]*?input\.task_kind\s*==\s*"read"/u.test(hostSource)

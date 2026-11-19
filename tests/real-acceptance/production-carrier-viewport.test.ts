@@ -3,8 +3,58 @@ import test from 'node:test';
 import {
   desktopViewportAvailable,
   ensureIsolatedDesktopViewport,
+  selectProductionWorkbenchWindow,
   type DesktopViewport,
 } from './production-carrier-viewport';
+
+test('production carrier selects the visible HTTPS app after a short-lived migration handle closes', async () => {
+  let selected = '';
+  const inspected: string[] = [];
+  await selectProductionWorkbenchWindow({
+    async getWindowHandles() {
+      return ['closed', 'legacy', 'foreign', 'loading', 'main'];
+    },
+    async switchToWindow(handle) {
+      if (handle === 'closed') throw new Error('no such window: target window already closed');
+      selected = handle;
+    },
+    async getUrl() {
+      if (selected === 'legacy') return 'http://tauri.localhost/legacy-storage-migration.html';
+      if (selected === 'foreign') return 'https://tauri.localhost.invalid/';
+      return 'https://tauri.localhost/';
+    },
+    async execute() {
+      inspected.push(selected);
+      return selected === 'main';
+    },
+    async waitUntil(check) {
+      assert.equal(await check(), true);
+    },
+  });
+  assert.deepEqual(inspected, ['loading', 'main']);
+  assert.equal(selected, 'main');
+});
+
+test('a legacy window alone never satisfies the production workbench precondition', async () => {
+  await assert.rejects(
+    selectProductionWorkbenchWindow({
+      async getWindowHandles() {
+        return ['legacy'];
+      },
+      async switchToWindow() {},
+      async getUrl() {
+        return 'http://tauri.localhost/legacy-storage-migration.html';
+      },
+      async execute() {
+        throw new Error('must not inspect legacy storage');
+      },
+      async waitUntil(check, { timeoutMsg }) {
+        if (!(await check())) throw new Error(timeoutMsg);
+      },
+    }),
+    /Visible production workbench not found/u,
+  );
+});
 
 function viewportFixture(measurements: DesktopViewport[], neverAvailable = false) {
   const actions: Array<string | DesktopViewport> = [];

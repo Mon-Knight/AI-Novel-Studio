@@ -1480,7 +1480,7 @@ test('WorkbenchPage identifies automatic chapter summaries without presenting th
   assert.equal(turn.querySelector('.workbench-turn-meta')?.textContent?.includes('你'), false);
 });
 
-test('Workbench starts an automatic summary after the persisted-turn ensure lock is released', async () => {
+test('persistent Workbench leaves automatic summary ensure and start to native reconciliation', async () => {
   useBrowserMockModel();
   const fixedModel = {
     providerId: 'mock',
@@ -1491,7 +1491,6 @@ test('Workbench starts an automatic summary after the persisted-turn ensure lock
     capturedAt: '2026-08-29T00:00:00.000Z',
   };
   const authorizationId = 'review-summary-ensure-race';
-  const summaryTurnId = `summary-generation-${authorizationId}`;
   const adoptedChapter = {
     ...mockChapter,
     status: 'adopted' as const,
@@ -1517,11 +1516,7 @@ test('Workbench starts an automatic summary after the persisted-turn ensure lock
       },
     ],
   };
-  let releaseEnsure: () => void = () => undefined;
-  let ensureStarted = false;
-  const ensureGate = new Promise<void>((resolve) => {
-    releaseEnsure = () => resolve();
-  });
+  let ensureCount = 0;
   type ProjectionListener = Parameters<typeof taskSessionAdapter.subscribeToRuntimeProjections>[0];
   let projectionListener: ProjectionListener | undefined;
   let startCount = 0;
@@ -1534,26 +1529,9 @@ test('Workbench starts an automatic summary after the persisted-turn ensure lock
     return () => undefined;
   };
   artifactDecisionService.ensureChapterSummaryFollowUp = async () => {
-    ensureStarted = true;
-    currentBundle = {
-      ...currentBundle,
-      turns: [
-        ...currentBundle.turns,
-        {
-          turnId: summaryTurnId,
-          conversationId: mockConversation.conversationId,
-          sequence: 2,
-          role: 'user',
-          content: encodeWorkbenchTurnContent('总结本章', 'workbench_chapter_summary'),
-          createdAt: '2026-08-29T00:01:00.000Z',
-        },
-      ],
-    };
-    await ensureGate;
+    ensureCount += 1;
     return {
-      status: 'pending_generation',
-      nextAction: 'summarize_chapter',
-      instruction: '总结本章',
+      status: 'ready',
       chapterId: adoptedChapter.id,
       adoptedDraftId: adoptedChapter.adoptedDraftId,
     };
@@ -1577,7 +1555,7 @@ test('Workbench starts an automatic summary after the persisted-turn ensure lock
     </MemoryRouter>,
   );
 
-  await waitFor(() => assert.ok(ensureStarted && projectionListener));
+  await waitFor(() => assert.ok(projectionListener));
   await act(async () => {
     projectionListener?.({
       conversationId: mockConversation.conversationId,
@@ -1586,14 +1564,14 @@ test('Workbench starts an automatic summary after the persisted-turn ensure lock
       occurredAt: '2026-08-29T00:01:10.000Z',
     });
   });
-  await screen.findByText('系统步骤');
-  await act(async () => releaseEnsure());
-  await waitFor(() => assert.equal(startCount, 1));
-  await new Promise((resolve) => window.setTimeout(resolve, 20));
-  assert.equal(startCount, 1);
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  });
+  assert.equal(ensureCount, 0);
+  assert.equal(startCount, 0);
 });
 
-test('Workbench rechecks a startable automatic summary after runtime occupancy clears', async () => {
+test('persistent Workbench leaves a startable automatic summary to native reconciliation when runtime occupancy clears', async () => {
   useBrowserMockModel();
   const fixedModel = {
     providerId: 'mock',
@@ -1674,10 +1652,13 @@ test('Workbench rechecks a startable automatic summary after runtime occupancy c
   await act(async () => {
     runtimeOccupied = false;
   });
-  await waitFor(() => assert.equal(startCount, 1), { timeout: 3_000 });
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  });
+  assert.equal(startCount, 0);
 });
 
-test('Workbench bounds pre-run automatic summary recovery and exposes a manual retry', async () => {
+test('persistent Workbench does not fabricate pre-run automatic summary recovery or a renderer retry', async () => {
   useBrowserMockModel();
   const fixedModel = {
     providerId: 'mock',
@@ -1739,24 +1720,14 @@ test('Workbench bounds pre-run automatic summary recovery and exposes a manual r
     </MemoryRouter>,
   );
 
-  await waitFor(() => assert.equal(startInputs.length, 2));
-  const retry = await screen.findByRole('button', { name: '重试章节总结' });
-  await new Promise((resolve) => window.setTimeout(resolve, 20));
-  assert.equal(startInputs.length, 2);
-
-  fireEvent.click(retry);
-  await waitFor(() => assert.equal(startInputs.length, 4));
-  await screen.findByRole('button', { name: '重试章节总结' });
-  await new Promise((resolve) => window.setTimeout(resolve, 20));
-
-  assert.equal(startInputs.length, 4);
+  await screen.findByText('系统步骤');
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  });
+  assert.equal(startInputs.length, 0);
+  assert.equal(screen.queryByRole('button', { name: '重试章节总结' }), null);
   assert.equal(summaryBundle.runs.filter((run) => run.turnId === summaryTurnId).length, 0);
   assert.equal(summaryBundle.artifacts.filter((card) => card.turnId === summaryTurnId).length, 0);
-  for (const input of startInputs) {
-    assert.equal(input.turnId, summaryTurnId);
-    assert.equal(input.chapterId, adoptedChapter.id);
-    assert.deepEqual(input.modelSnapshot, fixedModel);
-  }
 });
 
 test('Workbench automatically sequences missing assets while keeping every apply decision manual', async () => {
@@ -5083,7 +5054,15 @@ test('Workbench task creator starts a local conversational goal without a Runtim
 
   const submit = screen.getByTestId('workbench-create-and-start') as HTMLButtonElement;
   assert.equal(submit.disabled, false);
-  assert.match(screen.getByTestId('workbench-new-task-model-status').textContent ?? '', /仍可创建/);
+  await waitFor(() =>
+    assert.equal(
+      screen.getByTestId('workbench-new-task-model-status').getAttribute('data-status'),
+      'unavailable',
+    ),
+  );
+  const modelStatus = screen.getByTestId('workbench-new-task-model-status').textContent ?? '';
+  assert.match(modelStatus, /仍可创建/);
+  assert.doesNotMatch(modelStatus, /正在刷新模型列表/);
   fireEvent.keyDown(goal, { key: 'Enter', ctrlKey: true });
 
   await waitFor(() => assert.equal(startedGoal, '你能做什么？'));

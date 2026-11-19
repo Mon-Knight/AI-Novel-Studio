@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
+import type { InvokeArgs } from '@tauri-apps/api/core';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { createServer } from 'vite';
 import type {
@@ -83,6 +84,19 @@ const request: AiGenerateRequest = {
 
 const POLICY_IPC_UNHANDLED = Symbol('policy-ipc-unhandled');
 
+// Tauri 2 widens mockIPC payloads to InvokeArgs | undefined; these tests only
+// exercise object-shaped command payloads.
+function asInvokeRecord(args: InvokeArgs | undefined): Record<string, unknown> {
+  return (args ?? {}) as Record<string, unknown>;
+}
+
+function resetTauriMocks(): void {
+  clearMocks();
+  // Tauri 2's mockIPC leaves an empty __TAURI_INTERNALS__ behind; remove it so
+  // browser-fallback tests observe a non-Tauri runtime again.
+  delete (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+}
+
 function handlePolicyIpc(command: string, args: Record<string, unknown>): unknown {
   if (command === 'reserve_ai_request') {
     const input = args.input as Record<string, unknown>;
@@ -130,7 +144,7 @@ async function waitForCondition(predicate: () => boolean, message: string): Prom
 }
 
 beforeEach(() => {
-  clearMocks();
+  resetTauriMocks();
   storage.clear();
   globalThis.fetch = originalFetch;
   if (mockModule.getMockAiGateStateForE2e().paused) {
@@ -139,7 +153,7 @@ beforeEach(() => {
 });
 
 after(async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = originalFetch;
   if (mockModule.getMockAiGateStateForE2e().paused) {
     mockModule.releaseMockAiForE2e();
@@ -252,8 +266,8 @@ test('Tauri cancellation waits for cancel_ai_request confirmation', async () => 
   });
 
   mockIPC((command, args) => {
-    calls.push({ command, args });
-    const policyResult = handlePolicyIpc(command, args);
+    calls.push({ command, args: asInvokeRecord(args) });
+    const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
     if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     if (command === 'ai_chat_completion') {
       markRequestStarted?.();
@@ -329,7 +343,7 @@ test('Tauri cancellation IPC failure waits for the original request to settle', 
 
   try {
     mockIPC((command, args) => {
-      const policyResult = handlePolicyIpc(command, args);
+      const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
       if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
       if (command === 'ai_chat_completion') {
         markRequestStarted?.();
@@ -385,7 +399,7 @@ test('Tauri cancellation settles when the original request finishes before a sta
   });
 
   mockIPC((command, args) => {
-    const policyResult = handlePolicyIpc(command, args);
+    const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
     if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     calls.push(command);
     if (command === 'ai_chat_completion') {
@@ -434,8 +448,8 @@ test('Tauri cancellation settles when the original request finishes before a sta
 test('Tauri timeout cancels a stalled invoke and remains a retryable timeout', async () => {
   const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
   mockIPC((command, args) => {
-    calls.push({ command, args });
-    const policyResult = handlePolicyIpc(command, args);
+    calls.push({ command, args: asInvokeRecord(args) });
+    const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
     if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     if (command === 'ai_chat_completion') return new Promise(() => {});
     if (command === 'cancel_ai_request') return true;
@@ -460,7 +474,7 @@ test('Tauri timeout cancels a stalled invoke and remains a retryable timeout', a
 test('Tauri timeout does not inherit a stalled cancellation IPC', async () => {
   const calls: string[] = [];
   mockIPC((command, args) => {
-    const policyResult = handlePolicyIpc(command, args);
+    const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
     if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     calls.push(command);
     if (command === 'ai_chat_completion') return new Promise(() => {});
@@ -498,7 +512,7 @@ test('Tauri timeout does not wait for the original invoke when cancellation is u
 
   try {
     mockIPC((command, args) => {
-      const policyResult = handlePolicyIpc(command, args);
+      const policyResult = handlePolicyIpc(command, asInvokeRecord(args));
       if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
       if (command === 'ai_chat_completion') return new Promise(() => {});
       if (command === 'cancel_ai_request') return false;
@@ -531,7 +545,7 @@ test('provider failure remains primary when conservative policy settlement also 
 
   try {
     mockIPC((command, args) => {
-      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, asInvokeRecord(args));
       if (command === 'ai_chat_completion') throw providerFailure;
       if (command === 'settle_ai_request') throw settlementFailure;
       throw new Error(`Unexpected command: ${command}`);
@@ -560,7 +574,7 @@ test('provider failure is not held open by a stalled policy settlement', async (
 
   try {
     mockIPC((command, args) => {
-      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, asInvokeRecord(args));
       if (command === 'ai_chat_completion') throw providerFailure;
       if (command === 'settle_ai_request') return new Promise(() => {});
       throw new Error(`Unexpected command: ${command}`);
@@ -581,7 +595,7 @@ test('provider failure is not held open by a stalled policy settlement', async (
 test('successful provider output is withheld when policy settlement fails closed', async () => {
   const settlementFailure = new Error('settlement unavailable');
   mockIPC((command, args) => {
-    if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+    if (command === 'reserve_ai_request') return handlePolicyIpc(command, asInvokeRecord(args));
     if (command === 'ai_chat_completion') return { text: 'provider success' };
     if (command === 'settle_ai_request') throw settlementFailure;
     throw new Error(`Unexpected command: ${command}`);
@@ -604,7 +618,7 @@ test('successful provider output is withheld when policy settlement stalls', asy
 
   try {
     mockIPC((command, args) => {
-      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, asInvokeRecord(args));
       if (command === 'ai_chat_completion') return { text: 'provider success' };
       if (command === 'settle_ai_request') return new Promise(() => {});
       throw new Error(`Unexpected command: ${command}`);
@@ -620,7 +634,7 @@ test('successful provider output is withheld when policy settlement stalls', asy
 });
 
 test('browser caller cancellation is distinct from request timeout', async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
     new Promise<Response>((_resolve, reject) => {
       const signal = init?.signal;
@@ -647,7 +661,7 @@ test('browser caller cancellation is distinct from request timeout', async () =>
 });
 
 test('browser HTTP errors do not expose provider response bodies', async () => {
-  clearMocks();
+  resetTauriMocks();
   const sensitiveBody = 'Bearer secret-token full sensitive prompt';
   globalThis.fetch = (async () => new Response(sensitiveBody, { status: 500 })) as typeof fetch;
 
@@ -662,7 +676,7 @@ test('browser HTTP errors do not expose provider response bodies', async () => {
 });
 
 test('browser malformed success responses do not expose provider response bodies', async () => {
-  clearMocks();
+  resetTauriMocks();
   const sensitiveBody = 'Bearer secret-token full sensitive prompt';
   globalThis.fetch = (async () => new Response(sensitiveBody, { status: 200 })) as typeof fetch;
 
@@ -790,7 +804,7 @@ test('external Beat repair has a dedicated reasoning-aware compiled contract', (
 });
 
 test('browser discards non-empty partial output when the provider reports token truncation', async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
@@ -820,7 +834,7 @@ test('browser discards non-empty partial output when the provider reports token 
 });
 
 test('browser rejects non-string provider content instead of returning an invalid response type', async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
@@ -844,7 +858,7 @@ test('browser rejects non-string provider content instead of returning an invali
 });
 
 test('browser fetch transport uses global timers when no window global exists', async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
@@ -865,7 +879,7 @@ test('browser fetch transport uses global timers when no window global exists', 
 });
 
 test('browser streaming emits ordered UTF-8 deltas before returning the exact aggregate', async () => {
-  clearMocks();
+  resetTauriMocks();
   const encoder = new TextEncoder();
   const source = [
     'data: {"choices":[{"delta":{"content":"你"},"finish_reason":null}]}\r\n\r\n',
@@ -929,7 +943,7 @@ test('browser streaming emits ordered UTF-8 deltas before returning the exact ag
 });
 
 test('browser streaming rejects an unmarked EOF and never reports completion', async () => {
-  clearMocks();
+  resetTauriMocks();
   globalThis.fetch = (async () =>
     new Response(
       new TextEncoder().encode(

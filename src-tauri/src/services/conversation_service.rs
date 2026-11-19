@@ -356,7 +356,7 @@ pub fn publish_structured_candidate(
             request_hash: None,
             trace_id: None,
             task_type: "context_summarize".to_string(),
-            novel_id: input.novel_id.clone(),
+            novel_id: Some(input.novel_id.clone()),
             chapter_id: input.chapter_id.clone(),
             draft_id: None,
             scope_type: if input.chapter_id.is_some() {

@@ -307,7 +307,7 @@ $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
-    "npm run tauri:build -- --bundles none --ci"
+    "npm run tauri:build -- --no-bundle --ci"
 )
 Add-CheckResult "desktop DSH and gateway precede Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and the production Tauri build"
 

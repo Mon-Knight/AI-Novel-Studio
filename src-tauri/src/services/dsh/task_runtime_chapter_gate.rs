@@ -13,14 +13,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-pub(crate) const WITHHELD_ERROR: &str = "DSH_CHAPTER_CANDIDATE_WITHHELD: 候选已通过字数门禁但尚未准入，不是成功结果，也没有可用候选卡";
+pub(crate) const WITHHELD_ERROR: &str =
+    "DSH_CHAPTER_CANDIDATE_WITHHELD: 候选已通过字数门禁但尚未准入，不是成功结果，也没有可用候选卡";
 const HOST_CALLS: usize = 3;
 fn issue_severity(code: &str) -> Option<&'static str> {
     Some(match code {
-        "chapter_opening_rollback" | "chapter_boundary_sentence_repetition" | "chapter_tail_pollution"
-        | "chapter_meta_reasoning_leakage" | "chapter_authorial_label_leakage" => "error",
-        "chapter_boundary_action_replay" | "chapter_source_chain_break"
-        | "chapter_dialogue_reference_conflict" | "chapter_temporal_semantics_conflict"
+        "chapter_opening_rollback"
+        | "chapter_boundary_sentence_repetition"
+        | "chapter_tail_pollution"
+        | "chapter_meta_reasoning_leakage"
+        | "chapter_authorial_label_leakage" => "error",
+        "chapter_boundary_action_replay"
+        | "chapter_source_chain_break"
+        | "chapter_dialogue_reference_conflict"
+        | "chapter_temporal_semantics_conflict"
         | "chapter_audit_voice_leakage" => "warning",
         _ => return None,
     })
@@ -75,11 +81,17 @@ pub(crate) struct DraftBudget {
 }
 
 pub(crate) fn is_gated_draft(input: &StartTaskTurnInput) -> bool {
-    input.chapter_host_gate.as_ref().is_some_and(|gate| gate.phase == "draft")
+    input
+        .chapter_host_gate
+        .as_ref()
+        .is_some_and(|gate| gate.phase == "draft")
 }
 
 pub(crate) fn is_admit(input: &StartTaskTurnInput) -> bool {
-    input.chapter_host_gate.as_ref().is_some_and(|gate| gate.phase == "admit")
+    input
+        .chapter_host_gate
+        .as_ref()
+        .is_some_and(|gate| gate.phase == "admit")
 }
 
 pub(crate) fn withholds_artifact(input: &StartTaskTurnInput) -> bool {
@@ -89,13 +101,16 @@ pub(crate) fn withholds_artifact(input: &StartTaskTurnInput) -> bool {
 pub(crate) fn validate_host_gate(input: &StartTaskTurnInput) -> Result<(), String> {
     if !is_chapter_writing_turn(input) {
         if input.continuity_claim.is_some() || input.chapter_host_gate.is_some() {
-            return Err("DSH_TASK_CONTRACT_INVALID: 只有章节写作可以声明前章或候选准入".to_string());
+            return Err(
+                "DSH_TASK_CONTRACT_INVALID: 只有章节写作可以声明前章或候选准入".to_string(),
+            );
         }
         return Ok(());
     }
     let Some(gate) = input.chapter_host_gate.as_ref() else {
         return Err(
-            "DSH_CHAPTER_HOST_GATE_REQUIRED: 章节写作必须先草稿再准入，不能直接生成候选卡".to_string(),
+            "DSH_CHAPTER_HOST_GATE_REQUIRED: 章节写作必须先草稿再准入，不能直接生成候选卡"
+                .to_string(),
         );
     };
     if gate.phase != "draft" && gate.phase != "admit" {
@@ -106,7 +121,12 @@ pub(crate) fn validate_host_gate(input: &StartTaskTurnInput) -> Result<(), Strin
     }
     validate_issue_list(gate)?;
     if gate.phase == "admit"
-        && (gate.source_run_id.as_deref().unwrap_or("").trim().is_empty()
+        && (gate
+            .source_run_id
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
             || !super::chapter_continuity::is_sha256(gate.content_hash.as_deref().unwrap_or("")))
     {
         return Err("DSH_CHAPTER_ADMISSION_IDENTITY_REQUIRED".to_string());
@@ -127,7 +147,11 @@ fn validate_issue_list(gate: &ChapterHostGate) -> Result<(), String> {
 }
 
 pub(crate) fn repair_prompt(input: &StartTaskTurnInput) -> String {
-    let Some(gate) = input.chapter_host_gate.as_ref().filter(|gate| gate.phase == "draft") else {
+    let Some(gate) = input
+        .chapter_host_gate
+        .as_ref()
+        .filter(|gate| gate.phase == "draft")
+    else {
         return String::new();
     };
     let codes: Vec<&str> = gate
@@ -156,8 +180,14 @@ pub(crate) fn pending_candidate(
         content_hash: large_text_repository::sha256(text),
         text: text.to_string(),
         word_count: crate::services::draft_service::word_count(text),
-        previous_chapter_text: input.verified_continuity.as_ref().map(|item| item.content.clone()),
-        previous_chapter_id: input.verified_continuity.as_ref().map(|item| item.chapter_id.clone()),
+        previous_chapter_text: input
+            .verified_continuity
+            .as_ref()
+            .map(|item| item.content.clone()),
+        previous_chapter_id: input
+            .verified_continuity
+            .as_ref()
+            .map(|item| item.chapter_id.clone()),
         previous_source_hash: input
             .verified_continuity
             .as_ref()
@@ -202,7 +232,9 @@ pub(crate) fn fail_abandoned_withheld(
     conversation_id: &str,
 ) -> Result<(), String> {
     let mut statement = connection
-        .prepare("SELECT run_id, error FROM task_runs WHERE conversation_id=?1 AND status='running'")
+        .prepare(
+            "SELECT run_id, error FROM task_runs WHERE conversation_id=?1 AND status='running'",
+        )
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![conversation_id], |row| {
@@ -214,7 +246,11 @@ pub(crate) fn fail_abandoned_withheld(
     drop(statement);
     let finished_at = now();
     for (run_id, error) in rows {
-        if !error.as_deref().unwrap_or("").starts_with("DSH_CHAPTER_CANDIDATE_WITHHELD") {
+        if !error
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("DSH_CHAPTER_CANDIDATE_WITHHELD")
+        {
             continue;
         }
         conversation_service::update_run(
@@ -255,7 +291,11 @@ pub(crate) fn admit_connection(
         .chapter_host_gate
         .clone()
         .ok_or_else(|| "DSH_CHAPTER_ADMISSION_IDENTITY_REQUIRED".to_string())?;
-    if gate.issue_severities.iter().any(|severity| severity == "error") {
+    if gate
+        .issue_severities
+        .iter()
+        .any(|severity| severity == "error")
+    {
         return Err(
             "DSH_CHAPTER_INTEGRITY_ERROR_WITHHELD: 宿主有限文本检查发现 error，候选不可用；这不是语义证明"
                 .to_string(),
@@ -281,9 +321,7 @@ pub(crate) fn admit_connection(
     if frozen_generation_snapshot(&run.model_snapshot)
         != frozen_generation_snapshot(&input.model_snapshot)
     {
-        return Err(
-            "DSH_CHAPTER_ADMISSION_MODEL_MISMATCH: 准入不能改写冻结模型选项".to_string(),
-        );
+        return Err("DSH_CHAPTER_ADMISSION_MODEL_MISMATCH: 准入不能改写冻结模型选项".to_string());
     }
     let novel_id: String = connection
         .query_row(
@@ -292,7 +330,8 @@ pub(crate) fn admit_connection(
             |row| row.get::<_, String>(0),
         )
         .map_err(|_| "DSH_CHAPTER_ADMISSION_SCOPE_MISMATCH".to_string())?;
-    if novel_id != input.novel_id || matches!(run.status.as_str(), "cancelled" | "cancel_requested")
+    if Some(novel_id.as_str()) != input.novel_id.as_deref()
+        || matches!(run.status.as_str(), "cancelled" | "cancel_requested")
     {
         return Err("DSH_CHAPTER_ADMISSION_SCOPE_MISMATCH".to_string());
     }
@@ -334,8 +373,18 @@ pub(crate) fn admit_connection(
         .ok_or_else(|| "DSH_CHAPTER_ADMISSION_EMPTY".to_string())?;
     complete_run(connection, &run_id)?;
     let run = reload_run(connection, &run_id)?;
-    let _ = notify_projection(notifier.as_ref(), &input.conversation_id, &run_id, "artifact");
-    let _ = notify_projection(notifier.as_ref(), &input.conversation_id, &run_id, "terminal");
+    let _ = notify_projection(
+        notifier.as_ref(),
+        &input.conversation_id,
+        &run_id,
+        "artifact",
+    );
+    let _ = notify_projection(
+        notifier.as_ref(),
+        &input.conversation_id,
+        &run_id,
+        "terminal",
+    );
     Ok(admission_result(run, artifact_id, notifier))
 }
 
@@ -399,7 +448,9 @@ fn existing_artifact(
         )
         .map_err(|error| error.to_string())?;
     let ids = statement
-        .query_map(params![conversation_id, run_id], |row| row.get::<_, String>(0))
+        .query_map(params![conversation_id, run_id], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -415,7 +466,10 @@ fn active_worker(conversation_id: &str) -> Result<bool, String> {
         .lock()
         .map_err(|_| "Worker 状态锁失败".to_string())?;
     Ok(workers.get(conversation_id).is_some_and(|worker| {
-        matches!(worker.status.as_str(), "attesting" | "running" | "cancel_requested")
+        matches!(
+            worker.status.as_str(),
+            "attesting" | "running" | "cancel_requested"
+        )
     }))
 }
 
@@ -434,5 +488,3 @@ fn frozen_generation_snapshot(snapshot: &Value) -> Value {
     }
     copy
 }
-
-

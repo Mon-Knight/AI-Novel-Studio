@@ -268,16 +268,15 @@ pub fn record_artifact_decision(
 }
 
 #[tauri::command]
-pub fn apply_structured_artifact(
+pub async fn apply_structured_artifact(
     input: crate::services::structured_artifact_apply_service::ApplyStructuredArtifactInput,
 ) -> Result<service::ArtifactDecisionRecord, AppError> {
-    let mut connection = get_connection()
-        .lock()
-        .map_err(|_| AppError::poisoned_lock())?;
-    crate::services::structured_artifact_apply_service::apply_structured_artifact(
-        &mut connection,
-        input,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let decision={let mut connection=get_connection().lock().map_err(|_|AppError::poisoned_lock())?;
+            crate::services::structured_artifact_apply_service::apply_structured_artifact(&mut connection,input)?};
+        if decision.apply_transaction_id.is_some(){super::task_authorization::reconcile_after_commit(&decision.conversation_id);}
+        Ok(decision)
+    }).await.map_err(|_|AppError::new("TASK_RECONCILIATION_FAILED","应用调用被中断，请按原操作身份核对结果",true))?
 }
 
 #[tauri::command]
@@ -329,13 +328,18 @@ pub fn ensure_chapter_summary_follow_up(
 }
 
 #[tauri::command]
-pub fn adopt_review_authorized_draft(
+pub async fn adopt_review_authorized_draft(
     input: service::AdoptReviewAuthorizedDraftInput,
 ) -> Result<service::AdoptReviewAuthorizedDraftResult, AppError> {
-    let mut connection = get_connection()
-        .lock()
-        .map_err(|_| AppError::poisoned_lock())?;
-    service::adopt_review_authorized_draft(&mut connection, input)
+    tauri::async_runtime::spawn_blocking(move || {
+        let (result,conversation_id)={let mut connection=get_connection().lock().map_err(|_|AppError::poisoned_lock())?;
+            let result=service::adopt_review_authorized_draft(&mut connection,input)?;
+            use rusqlite::OptionalExtension;
+            let conversation_id=connection.query_row("SELECT conversation_id FROM artifact_decisions WHERE decision_id=?1",[&result.authorization.decision_id],|r|r.get::<_,String>(0)).optional().ok().flatten();
+            (result,conversation_id)};
+        if let Some(id)=conversation_id{super::task_authorization::reconcile_after_commit(&id);}
+        Ok(result)
+    }).await.map_err(|_|AppError::new("TASK_RECONCILIATION_FAILED","采用调用被中断，请核对原授权与采用事实",true))?
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@
 > 文档性质：对照当前可执行代码的缺口清单与文档口径校正。**不授权下一版本开发，不宣称 R4 VERIFIED。**
 > 历史快照：[`feature-gap-analysis-v3.0.0.md`](feature-gap-analysis-v3.0.0.md)（2026-07-28）、[`audit-v2/`](audit-v2/)、[`architecture-audit-v2/`](architecture-audit-v2/) 保留原文，不得把旧表改写成当前状态。
 >
+> **2026-10-28 桌面壳补充**：当前工作区已迁移至 Tauri 2.12.5；下方 2026-09-09 的 Tauri 1.x 审计截面及其命令/allowlist 描述保留历史含义，不作为当前配置证据。
+>
 > **2026-09-27 补充**：第 2～5 节保留 2026-09-09 截面；后续修复、证据变化与总体处置见[第 6 节](#gap-review-20260927)。特别是有界字数自动修正已实现，不能继续按下方旧清单认定完全没有自动修正。下一版统一规划见 [v3.8.0 完整计划](version-roadmap.md#v380-integrated-plan)。
 
 ---

@@ -76,12 +76,12 @@ import { executeWorkbenchConversationDecision } from '../../../services/conversa
 import { buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
 import { executeWorkbenchTurnAfterContextReady } from '../workbenchExecutionGate';
 import { useConversationScopedState } from './useConversationScopedState';
+import { useChapterSummaryRetry } from './chapterSummaryRetry';
 import { useWorkbenchRevisionDraft } from './useWorkbenchRevisionDraft';
 import { useWorkbenchChapterAssetRecovery } from './useWorkbenchChapterAssetRecovery';
 import { createTrailingRefreshQueue } from './trailingRefreshQueue';
 import { setsEqual, useWorkbenchRuntimeHeartbeat } from './useWorkbenchRuntimeHeartbeat';
 import type { WorkbenchPluginRefreshSource } from './useWorkbenchPlugins';
-
 export function useWorkbenchTaskRunner(input: {
   selectedNovelId: string;
   selectedConversationId: string;
@@ -123,7 +123,6 @@ export function useWorkbenchTaskRunner(input: {
     loadConversations,
     refreshPlugins,
   } = input;
-
   const { draft, revisionSource, updateDraft, setDraft, clearRevisionSource } =
     useWorkbenchRevisionDraft(selectedConversationId);
   const {
@@ -782,8 +781,10 @@ export function useWorkbenchTaskRunner(input: {
           }
         }
 
+        if (!retryRequest.novelId) throw new Error('工作台重试缺少作品作用域');
         const completedRun = await executePersistedTurn({
           ...retryRequest,
+          novelId: retryRequest.novelId,
           modelSnapshot: retryModel,
           ...(sourceTurn.revisionSource ? { revisionSource: sourceTurn.revisionSource } : {}),
         });
@@ -1374,6 +1375,9 @@ export function useWorkbenchTaskRunner(input: {
   }, [reconcilePersistedAssetOrchestration]);
 
   useEffect(() => {
+    // Desktop preparation is a native root phase. Re-rendering or selecting a
+    // conversation must never launch an unparented model execution.
+    if (taskConversationService.isPersistent()) return;
     const current = assetRecovery;
     if (
       !current ||
@@ -1395,6 +1399,7 @@ export function useWorkbenchTaskRunner(input: {
   ]);
 
   useEffect(() => {
+    if (taskConversationService.isPersistent()) return;
     const current = assetRecovery;
     const pending = current
       ? pendingSendConversationIdsRef.current.has(current.conversationId)
@@ -1521,6 +1526,11 @@ export function useWorkbenchTaskRunner(input: {
 
           if (selectedConversationIdRef.current !== conversationId) return;
           setChapterSummaryOrchestration(state);
+
+          // Native adoption/apply receipts wake the same task lifecycle. This hook
+          // projects its state only; no model replay is caused by selection,
+          // heartbeat, remount or a summary readiness observation on desktop.
+          if (taskConversationService.isPersistent()) return;
 
           if (state.phase === 'story_complete') {
             summaryConversationContinuationRef.current.delete(conversationId);
@@ -1704,18 +1714,11 @@ export function useWorkbenchTaskRunner(input: {
     validateModelForSend,
   ]);
 
-  const retryChapterSummaryStart = useCallback(() => {
-    const turnId = chapterSummaryOrchestration.turnId;
-    if (
-      chapterSummaryOrchestration.phase !== 'failed' ||
-      chapterSummaryOrchestration.runId ||
-      !turnId
-    ) {
-      return;
-    }
-    summaryAutomaticStartFailuresRef.current.delete(turnId);
-    setSummaryStartRetryEpoch((current) => current + 1);
-  }, [chapterSummaryOrchestration]);
+  const retryChapterSummaryStart = useChapterSummaryRetry(
+    chapterSummaryOrchestration,
+    summaryAutomaticStartFailuresRef.current,
+    setSummaryStartRetryEpoch,
+  );
 
   const startInitializedTask = useCallback(
     async (request: {

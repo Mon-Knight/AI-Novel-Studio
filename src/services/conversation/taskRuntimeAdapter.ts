@@ -1,5 +1,6 @@
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import type { ArtifactRevisionSource } from '../../types/artifactRevision';
+import type { TaskDomainEntry } from '../../types/taskDomainEntry';
 import { verifyArtifactRevisionSource } from './artifactRevisionSourceService';
 import {
   captureBrowserChapterRuleBaseline,
@@ -22,6 +23,7 @@ import { workbenchChapterWriter } from './workbenchChapterWriter';
 import { buildWorkbenchMemoryQuery } from './workbenchMemoryQuery';
 import { taskGoalDirective } from './taskGoalDirective';
 import type { TaskConstraintBriefReceipt } from '../../types/taskConstraintBrief';
+import { summarizeArguments, summarizeResult } from './taskRuntimeEvidenceSummary';
 import { chapterRequiredError, formatWorkbenchFailure } from './workbenchFailure';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
 import type { ToolInvocationContext, ToolResult } from '../../types/toolRegistry';
@@ -29,7 +31,12 @@ import type { RetryExecutionContract } from '../dsh/taskRetryRecovery';
 
 export interface TaskRuntimeInput {
   conversationId: string;
-  novelId: string;
+  /**
+   * Library tasks have no novel identity; `null` is explicit so native JSON
+   * keeps the scope distinct from an omitted or borrowed project identity.
+   * The browser fallback rejects library tasks explicitly.
+   */
+  novelId?: string | null;
   turnId: string;
   goal: string;
   chapterId?: string;
@@ -37,6 +44,8 @@ export interface TaskRuntimeInput {
   /** Stable per-task worker identity supplied by the DSH session adapter. */
   workerId?: string;
   revisionSource?: ArtifactRevisionSource;
+  /** Dedicated UI input, verified and executed only by the same native root. */
+  domainEntry?: TaskDomainEntry;
   /** User clicked retry on this same turn. Automatic repairs must leave it unset. */
   explicitChapterRetry?: boolean;
   /** Exact failed stage; native code revalidates its persisted contract on dispatch. */
@@ -72,30 +81,6 @@ const WRITER_TOOLS = new Set(['generate_chapter', 'polish_chapter']);
 
 function isChapterRevisionGoal(goal: string): boolean {
   return /重新|重写|修改|改写|润色|优化|调整/i.test(taskGoalDirective(goal).text);
-}
-
-function summarizeArguments(args: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(args).map(([key, value]) => {
-      if (/prompt|content|body|text|query|goal|candidateText/i.test(key)) {
-        return [key, typeof value === 'string' ? { length: value.length } : '[redacted]'];
-      }
-      if (typeof value === 'string' && value.length > 240) return [key, value.slice(0, 240) + '…'];
-      return [key, value];
-    }),
-  );
-}
-
-function summarizeResult(result: ToolResult): unknown {
-  if (!result || typeof result !== 'object') return result;
-  const data = result.data;
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const record = data as Record<string, unknown>;
-    if (typeof record.text === 'string') {
-      return { ...result, data: { ...record, text: { length: record.text.length } } };
-    }
-  }
-  return result;
 }
 
 function withWriterContextEvidence(
@@ -297,12 +282,14 @@ async function execute(
   chapterWriter: ChapterWriterPort,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
-  const revision = await verifyArtifactRevisionSource(input);
+  const novelId = input.novelId;
+  if (!novelId) throw new Error('资料库任务必须使用桌面统一 Runtime，浏览器回退不支持。');
+  const revision = await verifyArtifactRevisionSource({ ...input, novelId });
   assertTaskGoalExecutable(input.goal, revision?.source);
   const candidateTool = selectCandidateTool(input.goal, input.chapterId, revision?.source);
   const browserRuleSet =
     !isTauri() && WRITER_TOOLS.has(candidateTool?.name ?? '')
-      ? await captureBrowserChapterRuleBaseline(input.novelId)
+      ? await captureBrowserChapterRuleBaseline(novelId)
       : undefined;
   const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
   const workerId = input.workerId ?? 'worker-' + input.conversationId + '-' + String(Date.now());
@@ -318,7 +305,7 @@ async function execute(
   onEvent?.({ run: currentRun });
   const context: ToolInvocationContext = {
     invocationId: run.runId,
-    novelId: input.novelId,
+    novelId,
     chapterId: input.chapterId,
     grantedPermissions: ['novel.read', 'chapter.read'],
     allowedTools: WORKBENCH_TOOLS.map((name) => name + '@1'),
@@ -336,18 +323,18 @@ async function execute(
     }
 
     const steps: Array<{ name: string; args: () => Record<string, unknown> }> = [
-      { name: 'novel.read_context', args: () => ({ novelId: input.novelId }) },
+      { name: 'novel.read_context', args: () => ({ novelId }) },
     ];
     if (input.chapterId) {
       steps.push({
         name: 'chapter.read_outline',
-        args: () => ({ novelId: input.novelId, chapterId: input.chapterId }),
+        args: () => ({ novelId, chapterId: input.chapterId }),
       });
     }
     steps.push({
       name: 'search_memory',
       args: () => ({
-        novelId: input.novelId,
+        novelId,
         query: buildWorkbenchMemoryQuery(input.goal),
         ...(input.chapterId ? { targetChapterId: input.chapterId } : {}),
       }),
@@ -360,7 +347,7 @@ async function execute(
       steps.push({
         name: candidateTool.name,
         args: () => ({
-          novelId: input.novelId,
+          novelId,
           ...(input.chapterId ? { chapterId: input.chapterId } : {}),
           candidateText: buildStructuredFallback(
             candidateTool.name,
@@ -401,7 +388,7 @@ async function execute(
           const prevCandidate = revision?.content;
 
           const written = await chapterWriter.generate({
-            novelId: input.novelId,
+            novelId,
             chapterId: input.chapterId,
             goal: writerInstruction,
             targetWordCount,
@@ -431,7 +418,7 @@ async function execute(
             },
           });
           args = {
-            novelId: input.novelId,
+            novelId,
             chapterId: input.chapterId,
             candidateText: written.text,
           };
@@ -507,11 +494,10 @@ async function execute(
               ? String((result.data as { text?: string }).text ?? '')
               : '');
           if (text) {
-            if (browserRuleSet)
-              await assertBrowserChapterRuleBaseline(input.novelId, browserRuleSet);
+            if (browserRuleSet) await assertBrowserChapterRuleBaseline(novelId, browserRuleSet);
             await publishChapterCandidate({
               conversationId: input.conversationId,
-              novelId: input.novelId,
+              novelId,
               chapterId: input.chapterId,
               runId: run.runId,
               turnId: input.turnId,
@@ -584,12 +570,21 @@ export function createTaskRuntimeAdapter(deps: TaskRuntimeAdapterDependencies = 
   const activeWorkers = new Map<string, ActiveWorker>();
   return {
     start(input: TaskRuntimeInput, onEvent?: (event: TaskRuntimeEvent) => void): Promise<TaskRun> {
+      if (isTauri()) {
+        return Promise.reject(
+          new Error('DESKTOP_TASK_RUNTIME_REQUIRED: 桌面任务必须通过原生 Agent Runtime 执行。'),
+        );
+      }
       const existing = activeWorkers.get(input.conversationId);
       if (existing) {
         return Promise.reject(new Error('当前任务已有活动运行'));
       }
       const controller = new AbortController();
+      const onParentAbort = () => controller.abort();
+      input.cancellationSignal?.addEventListener('abort', onParentAbort, { once: true });
+      if (input.cancellationSignal?.aborted) controller.abort();
       const promise = execute(input, controller, chapterWriter, onEvent).finally(() => {
+        input.cancellationSignal?.removeEventListener('abort', onParentAbort);
         activeWorkers.delete(input.conversationId);
       });
       activeWorkers.set(input.conversationId, { controller, promise });

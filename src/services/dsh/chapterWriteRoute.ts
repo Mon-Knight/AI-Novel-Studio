@@ -1,7 +1,4 @@
 import { isTauri } from '../database/db';
-import { isWritingSubAgentDshEnabled } from '../agents/writingSubAgentContract';
-import { chapterEngineeringService } from '../engineering/chapterEngineeringService';
-import { stagedScenePlanFromSnapshot } from '../conversation/workbenchStagedChapterWrite';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import type { ArtifactRevisionSource } from '../../types/artifactRevision';
 
@@ -18,41 +15,19 @@ export interface ChapterWriteRouteInput {
 
 export interface ChapterWriteRouteDependencies {
   isTauri?: () => boolean;
+  /** Legacy adapter inputs are ignored: neither a flag nor a plan can select a desktop host. */
   dshEnabled?: (runtimeMode: TaskModelSnapshot['runtimeMode'] | undefined) => boolean;
   hasAppliedSceneOnlyPlan?: (novelId: string, chapterId: string) => Promise<boolean>;
 }
 
-async function readAppliedSceneOnlyPlan(_novelId: string, chapterId: string): Promise<boolean> {
-  const bundle = await chapterEngineeringService.getBundle(chapterId);
-  const scenes = bundle.activeState?.scenePlan;
-  return Boolean(
-    scenes &&
-    stagedScenePlanFromSnapshot({
-      compiledContext: { activeEngineeringState: bundle.activeState } as never,
-    }),
-  );
-}
-
-/** Applied Scene-only plans use the deterministic staged writer. Retries and other chapters keep DSH. */
+/**
+ * Desktop writing has one lifecycle authority: the native Task Runtime.
+ * An applied Scene/Beat plan is an input to a governed capability, never a reason
+ * to leave that authority. The Writer result is a browser-development adapter only.
+ */
 export async function selectChapterWriteHost(
-  input: ChapterWriteRouteInput,
+  _input: ChapterWriteRouteInput,
   dependencies: ChapterWriteRouteDependencies = {},
 ): Promise<ChapterWriteHost> {
-  const tauri = (dependencies.isTauri ?? isTauri)();
-  const runtimeMode = input.modelSnapshot?.runtimeMode;
-  const dshEnabled =
-    dependencies.dshEnabled?.(runtimeMode) ??
-    (tauri &&
-      isWritingSubAgentDshEnabled({
-        isTauri: true,
-        modelRuntimeMode: runtimeMode ?? 'api',
-      }));
-  const dsh = Boolean(tauri && input.chapterId && (input.retrySourceRunId || dshEnabled));
-  if (!dsh) return 'writer';
-  if (input.retrySourceRunId || input.revisionSource || input.workflowAction === 'polish_chapter') {
-    return 'dsh';
-  }
-  const hasPlan = dependencies.hasAppliedSceneOnlyPlan ?? readAppliedSceneOnlyPlan;
-  if (input.chapterId && (await hasPlan(input.novelId, input.chapterId))) return 'writer';
-  return 'dsh';
+  return (dependencies.isTauri ?? isTauri)() ? 'dsh' : 'writer';
 }

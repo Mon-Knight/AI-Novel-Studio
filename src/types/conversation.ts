@@ -1,3 +1,4 @@
+import type { ReviewAuthorizationSavedDraft } from './reviewAuthorizationRenewal';
 import type { ArtifactRevisionSource } from './artifactRevision';
 import type {
   ArtifactProcessingStatus,
@@ -145,9 +146,15 @@ export interface ReviewAuthorization {
   issuedAt: string;
   consumedAt?: string;
   consumedByDraftId?: string;
+  renewedFromAuthorizationId?: string;
+  /** Immutable saved-draft snapshot captured by explicit manual re-consent. */
+  reviewDraftBinding?: ReviewAuthorizationSavedDraft;
 }
 
 export interface ReviewCandidateDocument {
+  /** Read projection from native resume; never inferred from a URL draft id. */
+  reviewDraftBinding?: ReviewAuthorizationSavedDraft;
+  changedSinceRenewal?: boolean;
   authorizationId: string;
   artifactId: string;
   content: string;

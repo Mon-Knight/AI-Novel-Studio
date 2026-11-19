@@ -12,8 +12,8 @@ import { WRITING_SUBAGENT_FLAG_KEY } from './real-profile-env';
 
 /**
  * Helpers shared by the production-binary carriers (real profile and fault injection).
- * They talk to the app through the production IPC bridge (`window.__TAURI_INVOKE__`) and
- * the production workbench UI; nothing here depends on the Cargo `e2e` feature.
+ * They talk to the app through the production Tauri IPC bridge and the production
+ * workbench UI; nothing here depends on the Cargo `e2e` feature.
  * Every value they return is already safe to persist as evidence: ids, statuses, counts,
  * lengths and hashes — never prompts, chapter text or credentials.
  */
@@ -55,6 +55,8 @@ export interface BundleToolEvent {
   runId: string;
   toolName: string;
   status: string;
+  argumentsSummary?: { source?: string; formalWrite?: boolean };
+  result?: { scope?: string; modelCalled?: boolean } | null;
   durationMs?: number | null;
   error?: string | null;
 }
@@ -74,7 +76,11 @@ export interface BundleTurn {
 }
 
 export interface ConversationBundle {
-  conversation: { conversationId: string; status: string };
+  conversation: {
+    conversationId: string;
+    status: string;
+    defaultModel?: BundleRun['modelSnapshot'];
+  };
   turns: BundleTurn[];
   runs: BundleRun[];
   toolEvents: BundleToolEvent[];
@@ -111,13 +117,20 @@ export async function invoke<T>(command: string, args: Record<string, unknown> =
         }
         return String(error);
       };
-      const bridge = (
-        window as unknown as {
-          __TAURI_INVOKE__?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
-        }
-      ).__TAURI_INVOKE__;
+      const tauriWindow = window as unknown as {
+        // Tauri 2 exposes invoke through __TAURI_INTERNALS__; the legacy
+        // __TAURI_INVOKE__ hook is kept as a fallback for older carriers.
+        __TAURI_INTERNALS__?: {
+          invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
+        };
+        __TAURI_INVOKE__?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
+      };
+      const internals = tauriWindow.__TAURI_INTERNALS__;
+      const bridge = internals?.invoke
+        ? (cmd: string, payload?: Record<string, unknown>) => internals.invoke?.(cmd, payload)
+        : tauriWindow.__TAURI_INVOKE__;
       if (!bridge) {
-        done({ ok: false, error: 'window.__TAURI_INVOKE__ is unavailable' });
+        done({ ok: false, error: 'Tauri invoke bridge is unavailable' });
         return;
       }
       Promise.resolve(bridge(name, input))
@@ -293,7 +306,7 @@ export async function waitForModelCatalog(): Promise<{ status: string; message: 
   await browser.waitUntil(
     async () => {
       const status = await control.getAttribute('data-model-status');
-      return status !== null && status !== 'refreshing';
+      return status !== null && status !== 'initializing';
     },
     {
       timeout: 120_000,
@@ -319,6 +332,7 @@ export async function startChapterTaskThroughUi(input: {
   chapterId: string;
   goal: string;
   modelHint?: string;
+  expectedModelKey?: string;
   knownConversationIds?: ReadonlySet<string>;
 }): Promise<{
   conversationId: string;
@@ -337,27 +351,39 @@ export async function startChapterTaskThroughUi(input: {
 
   const modelSelect = await waitForTestId('workbench-new-task-model-select');
   let catalog = await waitForModelCatalog();
-  if (catalog.status !== 'available') {
+  if (catalog.status !== 'ready') {
     const retry = await browser.$('[data-testid="workbench-new-task-model-status-retry"]');
     if (await retry.isExisting()) {
       await retry.click();
       catalog = await waitForModelCatalog();
     }
   }
-  const hint = input.modelHint?.toLowerCase();
+  const hint = input.modelHint?.trim().toLowerCase();
+  if (!hint && !input.expectedModelKey) {
+    throw new Error('A model hint or exact model key is required before starting a task.');
+  }
+  const matchesIntendedModel = (key: string) =>
+    key.length > 0 &&
+    (!input.expectedModelKey || key === input.expectedModelKey) &&
+    (!hint || key.toLowerCase().includes(hint));
   let selectedModel = (await modelSelect.getValue()) ?? '';
-  if (hint && !selectedModel.toLowerCase().includes(hint) && (await modelSelect.isEnabled())) {
+  if (!matchesIntendedModel(selectedModel) && (await modelSelect.isEnabled())) {
+    const matches: string[] = [];
     for (const option of await modelSelect.$$('option')) {
       const value = (await option.getAttribute('value')) ?? '';
       const disabled = await option.getAttribute('disabled');
-      if (value.toLowerCase().includes(hint) && disabled === null) {
-        await modelSelect.selectByAttribute('value', value);
-        break;
-      }
+      if (disabled === null && matchesIntendedModel(value)) matches.push(value);
+    }
+    if (matches.length === 1) {
+      await modelSelect.selectByAttribute('value', matches[0]);
+      catalog = await waitForModelCatalog();
     }
     selectedModel = (await modelSelect.getValue()) ?? '';
   }
-  if (catalog.status !== 'available') {
+  if (!matchesIntendedModel(selectedModel)) {
+    throw new Error('The requested model is missing, locked or ambiguous; no task was started.');
+  }
+  if (catalog.status !== 'ready') {
     throw new Error(`model directory is ${catalog.status}: ${catalog.message || '<no message>'}`);
   }
 
@@ -445,6 +471,7 @@ export interface SanitizedConversationEvidence {
     status: string;
     durationMs: number | null;
     error: string | null;
+    localWordTargetReceipt?: boolean;
   }>;
   runtimeProjectionEvents: string[];
   artifacts: Array<Record<string, unknown>>;
@@ -516,6 +543,15 @@ export async function collectConversationEvidence(input: {
       status: event.status,
       durationMs: event.durationMs ?? null,
       error: sanitizeError(event.error),
+      ...(event.toolName === 'task.configure_word_target'
+        ? {
+            localWordTargetReceipt:
+              event.argumentsSummary?.source === 'ans-host' &&
+              event.argumentsSummary.formalWrite === false &&
+              event.result?.scope === 'task' &&
+              event.result.modelCalled === false,
+          }
+        : {}),
     })),
     runtimeProjectionEvents: bundle.toolEvents
       .filter((event) => isRuntimeProjection(event.toolName))

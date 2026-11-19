@@ -75,7 +75,7 @@ fn previous_chapter_order_uses_volume_then_full_hash_and_ignores_unadopted_text(
     let body = "上一章真正采用的全文。";
     adopt(&connection, "novel-order", "ch-a1", body, None);
     let mut input = gate_input();
-    input.novel_id = "novel-order".to_string();
+    input.novel_id = Some("novel-order".to_string());
     input.chapter_id = Some("ch-a2".to_string());
     chapter_continuity::freeze_continuity(&connection, &mut input).expect("sibling");
     let verified = input.verified_continuity.clone().expect("adopted sibling");
@@ -99,7 +99,7 @@ fn previous_chapter_rejects_unadopted_empty_stale_hash_and_cross_scope_claims() 
     let connection = ai_task_service::tests::connection().expect("database");
     seed_story(&connection, "novel-reject");
     let mut input = gate_input();
-    input.novel_id = "novel-reject".to_string();
+    input.novel_id = Some("novel-reject".to_string());
     input.chapter_id = Some("ch-a2".to_string());
     let missing = chapter_continuity::freeze_continuity(&connection, &mut input).expect_err("unadopted");
     assert!(missing.contains("DSH_PREVIOUS_CHAPTER_NOT_ADOPTED"));
@@ -138,7 +138,7 @@ fn readoption_change_between_freeze_and_revalidate_blocks_admission() {
     seed_story(&connection, "novel-change");
     adopt(&connection, "novel-change", "ch-a1", "冻结时的正文", None);
     let mut input = gate_input();
-    input.novel_id = "novel-change".to_string();
+    input.novel_id = Some("novel-change".to_string());
     input.chapter_id = Some("ch-a2".to_string());
     chapter_continuity::freeze_continuity(&connection, &mut input).expect("freeze");
     connection

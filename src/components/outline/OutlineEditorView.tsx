@@ -159,8 +159,9 @@ export function OutlineEditorView({
             }}
           >
             <ClipboardList aria-hidden="true" size={13} strokeWidth={1.8} />
-            生成上下文摘要
+            作品上下文预览
           </div>
+          <p>桌面实际请求与使用来源以创作任务中的原生证据为准；此预览不证明内容语义正确。</p>
           {context.protagonistName && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <UserRound aria-hidden="true" size={12} strokeWidth={1.8} />

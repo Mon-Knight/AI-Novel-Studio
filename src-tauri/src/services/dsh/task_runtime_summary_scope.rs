@@ -51,7 +51,11 @@ pub(super) fn resolve_session_scope(
                 WHERE turn.turn_id=?1 AND turn.conversation_id=?2 AND turn.role='user'
                   AND conversation.novel_id=?3
              )",
-            params![&input.turn_id, &input.conversation_id, &input.novel_id],
+            params![
+                &input.turn_id,
+                &input.conversation_id,
+                input.require_novel_id()?
+            ],
             |row| row.get::<_, bool>(0),
         )
         .optional()
@@ -65,16 +69,16 @@ pub(super) fn resolve_session_scope(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "DSH_MANUAL_SUMMARY_SCOPE_INVALID".to_string())?;
-    draft_repository::validate_target(connection, &input.novel_id, chapter_id)
+    draft_repository::validate_target(connection, input.require_novel_id()?, chapter_id)
         .map_err(|error| error.to_string())?;
     // This verifies ownership, adoption state, large-text integrity and the content hash.
-    let baseline = read_chapter_base_snapshot(connection, &input.novel_id, chapter_id)
+    let baseline = read_chapter_base_snapshot(connection, input.require_novel_id()?, chapter_id)
         .map_err(|error| error.to_string())?;
     let adopted_draft_id = baseline
         .draft_id
         .ok_or_else(|| "DSH_MANUAL_SUMMARY_ADOPTED_DRAFT_REQUIRED".to_string())?;
     Ok(ChapterSummaryRecoveryScope {
-        novel_id: input.novel_id.clone(),
+        novel_id: input.require_novel_id()?.to_string(),
         chapter_id: chapter_id.to_string(),
         adopted_draft_id,
     })

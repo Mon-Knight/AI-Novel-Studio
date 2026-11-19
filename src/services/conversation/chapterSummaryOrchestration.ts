@@ -1,5 +1,9 @@
 import type { Chapter } from '../../types/chapter';
 import type { ChapterSummary } from '../../types/chapterSummary';
+import {
+  evaluateSummaryApplicationPolicy,
+  type SummaryPolicyStopReason,
+} from '../ai/summaryApplicationPolicy';
 import type {
   ArtifactDecision,
   ConversationArtifactCard,
@@ -34,6 +38,7 @@ export interface ChapterSummaryOrchestrationState {
   runId?: string;
   cardId?: string;
   nextChapterId?: string;
+  stopReason?: SummaryPolicyStopReason;
   pendingChapters?: Array<{
     chapterId: string;
     phase: ChapterSummaryOrchestrationPhase;
@@ -77,7 +82,8 @@ function hasMatchingSummary(
       summary.chapterId === authorization.chapterId &&
       summary.adoptedDraftId === authorization.consumedByDraftId &&
       summary.enabled &&
-      !summary.isExpired,
+      !summary.isExpired &&
+      evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus).eligible,
   );
 }
 
@@ -228,6 +234,16 @@ function resolveSummaryForAuthorization(
   if (existingSummary && (!existingSummary.enabled || existingSummary.isExpired)) {
     return { phase: existingSummary.isExpired ? 'expired' : 'disabled', ...base };
   }
+  const summaryPolicy = existingSummary
+    ? evaluateSummaryApplicationPolicy(
+        existingSummary.validationResult,
+        existingSummary.validationStatus,
+      )
+    : undefined;
+  const blockedSummary: ChapterSummaryOrchestrationState | undefined =
+    summaryPolicy && !summaryPolicy.eligible
+      ? { phase: 'failed', ...base, stopReason: summaryPolicy.stopReason }
+      : undefined;
 
   const turn = input.bundle.turns.find((item) => item.turnId === base.turnId);
   const otherSummaryCard = [...input.bundle.artifacts]
@@ -254,20 +270,25 @@ function resolveSummaryForAuthorization(
       runId: otherSummaryCard.runId,
     });
   }
-  if (!turn) return { phase: 'ensure_turn', ...base };
+  if (!turn) return blockedSummary ?? { phase: 'ensure_turn', ...base };
   const runs = input.bundle.runs.filter((run) => run.turnId === turn.turnId);
   const run = latestRun(runs);
   if (!run) {
-    return {
-      phase: input.credentialAvailable === false ? 'awaiting_credentials' : 'ready_to_start',
-      ...base,
-    };
+    return (
+      blockedSummary ?? {
+        phase: input.credentialAvailable === false ? 'awaiting_credentials' : 'ready_to_start',
+        ...base,
+      }
+    );
   }
   const withRun = { ...base, runId: run.runId };
   if (ACTIVE_RUN_STATUSES.has(run.status)) return { phase: 'generating', ...withRun };
 
   const card = validSummaryCard(input.bundle, run, authorization, turn.turnId);
-  if (!card) return { phase: 'failed', ...withRun };
+  if (!card)
+    return blockedSummary
+      ? { ...blockedSummary, runId: run.runId }
+      : { phase: 'failed', ...withRun };
   return resolveSummaryDecision(input.bundle, card, withRun);
 }
 
@@ -308,6 +329,12 @@ export function chapterSummaryOrchestrationLabel(state: ChapterSummaryOrchestrat
     case 'conflict':
       return '总结应用发生基线冲突，请重新生成候选';
     case 'failed':
+      if (state.stopReason === 'SUMMARY_HUMAN_REVIEW_REQUIRED') {
+        return '本章总结需要作者审阅，尚不能作为继续创作的正式上下文';
+      }
+      if (state.stopReason) {
+        return '本章总结未通过上下文应用策略，已停止继续创作；请审阅或重新总结';
+      }
       return state.runId ? '章节总结未完成，请使用回合中的重试操作' : '章节总结启动失败，请重试';
     case 'disabled':
       return '本章总结已停用，未用于正式上下文；可在章节审阅中管理';

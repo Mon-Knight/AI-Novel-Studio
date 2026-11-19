@@ -123,14 +123,27 @@ export async function dbCall<T>(
     } catch (e: unknown) {
       const errorMessage = describeUnknownError(e, `Tauri command failed: ${command}`);
       const appError = normalizeAppError(e, errorMessage);
-      appLogger.error('[DB_CALL_FAILED]', {
-        command,
-        args: sanitizeForDbLog(args),
-        code: appError.code,
-        retryable: appError.retryable,
-        traceId: appError.traceId,
-        operationId: appError.operationId,
-      });
+      // Cancelling a generation job can race the final step write. Rust rejects
+      // the write because the parent is already terminal; that expected guard is
+      // surfaced to the pipeline as cancellation, not as an application error.
+      const expectedGenerationTerminal =
+        command === 'save_generation_step_result' &&
+        errorMessage.includes('generation_step_parent_terminal');
+      if (expectedGenerationTerminal) {
+        appLogger.debug('[DB_CALL_EXPECTED_TERMINAL]', {
+          command,
+          code: appError.code,
+        });
+      } else {
+        appLogger.error('[DB_CALL_FAILED]', {
+          command,
+          args: sanitizeForDbLog(args),
+          code: appError.code,
+          retryable: appError.retryable,
+          traceId: appError.traceId,
+          operationId: appError.operationId,
+        });
+      }
       if (e instanceof Error) {
         throw e;
       }

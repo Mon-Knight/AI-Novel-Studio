@@ -14,6 +14,7 @@ import { chapterContextPersistenceService } from '../../../services/context/chap
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
 import { validateSummary } from '../../../services/ai/summaryValidator';
+import { evaluateSummaryApplicationPolicy } from '../../../services/ai/summaryApplicationPolicy';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoading';
 import type { ChapterDraft } from '../../../types/ai';
@@ -170,6 +171,9 @@ function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProp
   // 保存总结（含校验状态）
   const handleSaveSummary = async () => {
     if (!novelId || !chapter || !genResult) return;
+    const contextEligible = Boolean(
+      validation && evaluateSummaryApplicationPolicy(validation).eligible,
+    );
     setGenLoading(true);
     setGenError('');
     try {
@@ -212,7 +216,7 @@ function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProp
               nextChapterHook: genResult.nextChapterHook,
               validationStatus: validation?.passed ? 'passed' : validation ? 'failed' : 'pending',
               validationResult: validation || undefined,
-              enabled: validation?.safeToContext !== false,
+              enabled: contextEligible,
               draftVersion: adoptedDraft?.versionNo,
             },
             contextRecords: genResult.contextRecords.map((record) => ({
@@ -220,11 +224,11 @@ function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProp
               novelId,
               chapterId: chapter.id,
               volumeId: chapter.volumeId,
-              isActive: validation?.safeToContext !== false,
+              isActive: contextEligible,
               draftVersion: adoptedDraft?.versionNo,
             })),
             characterStates: genResult.characterChanges.flatMap((change) =>
-              change.characterId
+              contextEligible && change.characterId
                 ? [
                     {
                       novelId,

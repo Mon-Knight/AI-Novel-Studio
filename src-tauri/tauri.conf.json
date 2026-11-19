@@ -2,76 +2,41 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "AI Novel Studio",
-    "version": "3.7.0"
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": ["bin/unpack-payload.mjs", "bin/dsh-runtime.zip"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": "v1Compatible"
   },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "dialog": {
-        "all": true
-      },
-      "fs": {
-        "all": false,
-        "readFile": true,
-        "writeFile": true,
-        "scope": {
-          "allow": ["$HOME/.ai-novel-studio-local-model-lifecycle.json"],
-          "deny": [],
-          "requireLiteralLeadingDot": true
-        }
-      },
-      "notification": {
-        "all": true
-      },
-      "window": {
-        "all": false,
-        "close": true,
-        "minimize": true,
-        "maximize": true,
-        "unmaximize": true,
-        "startDragging": true
-      }
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "com.ainovelstudio.app",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "resources": ["bin/unpack-payload.mjs", "bin/dsh-runtime.zip"]
-    },
-    "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-      "devCsp": "default-src 'self' http://localhost:1420 http://127.0.0.1:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420 http://127.0.0.1:1420; style-src 'self' 'unsafe-inline' http://localhost:1420 http://127.0.0.1:1420; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: http://localhost:1420 http://127.0.0.1:1420; font-src 'self' data: http://localhost:1420 http://127.0.0.1:1420; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420 https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-      "dangerousDisableAssetCspModification": ["style-src"]
-    },
+  "productName": "AI Novel Studio",
+  "mainBinaryName": "AI Novel Studio",
+  "version": "3.7.0",
+  "identifier": "com.ainovelstudio.app",
+  "plugins": {
     "updater": {
-      "active": true,
-      "dialog": false,
-      "endpoints": [
-        "https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-stable/latest.json"
-      ],
       "pubkey": "UPDATER_PUBLIC_KEY_REPLACED_IN_RELEASE_CI",
       "windows": {
         "installMode": "passive",
         "installerArgs": []
-      }
-    },
+      },
+      "endpoints": [
+        "https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-stable/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
+  },
+  "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
         "fullscreen": false,
@@ -81,8 +46,14 @@
         "width": 1280,
         "height": 820,
         "minWidth": 1024,
-        "minHeight": 700
+        "minHeight": 700,
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "security": {
+      "dangerousDisableAssetCspModification": ["style-src"],
+      "devCsp": "default-src 'self' http://localhost:1420 http://127.0.0.1:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420 http://127.0.0.1:1420; style-src 'self' 'unsafe-inline' http://localhost:1420 http://127.0.0.1:1420; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: http://localhost:1420 http://127.0.0.1:1420; font-src 'self' data: http://localhost:1420 http://127.0.0.1:1420; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420 https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost https: http: ws: wss:; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
   }
 }

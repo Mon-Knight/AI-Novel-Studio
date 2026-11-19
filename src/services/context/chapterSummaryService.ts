@@ -11,6 +11,7 @@ import type {
   CreateChapterSummaryInput,
 } from '../../types/chapterSummary';
 import type { ContextRecord } from '../../types/context';
+import { assertSummaryContextEligible } from '../ai/summaryApplicationPolicy';
 
 export const CHAPTER_SUMMARIES_STORAGE_KEY = 'ai_novel_studio_chapter_summaries';
 const CONTEXT_RECORDS_STORAGE_KEY = 'ai_novel_studio_context_records';
@@ -250,6 +251,8 @@ export const chapterSummaryService = {
   },
 
   async create(input: CreateChapterSummaryInput): Promise<ChapterSummary> {
+    if (input.enabled !== false)
+      assertSummaryContextEligible(input.validationResult, input.validationStatus);
     if (getDbMode() === 'tauri') {
       const dto = await dbCall<unknown>('save_chapter_summary', {
         input: toTauriChapterSummaryInput(input),
@@ -290,7 +293,10 @@ export const chapterSummaryService = {
     const list = getAllLocal();
     const index = list.findIndex((item) => item.id === id);
     if (index === -1) return null;
-    list[index] = { ...list[index], ...input, id, updatedAt: nowISO() };
+    const merged = { ...list[index], ...input, id, updatedAt: nowISO() };
+    if (merged.enabled)
+      assertSummaryContextEligible(merged.validationResult, merged.validationStatus);
+    list[index] = merged;
     saveAllLocal(list);
     return list[index];
   },
@@ -303,6 +309,8 @@ export const chapterSummaryService = {
     const list = getAllLocal();
     const index = list.findIndex((item) => item.id === id);
     if (index === -1) return;
+    if (enabled)
+      assertSummaryContextEligible(list[index].validationResult, list[index].validationStatus);
     list[index].enabled = enabled;
     list[index].updatedAt = nowISO();
     saveAllLocal(list);

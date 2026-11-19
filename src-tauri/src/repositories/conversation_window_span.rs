@@ -304,7 +304,8 @@ fn load_authorizations(
 ) -> Result<Vec<ReviewAuthorizationRecord>, AppError> {
     let sql = format!(
         "SELECT a.authorization_id, a.artifact_id, a.chapter_id, a.novel_id, a.decision_id,
-                a.status, a.issued_at, a.consumed_at, a.consumed_by_draft_id
+                a.status, a.issued_at, a.consumed_at, a.consumed_by_draft_id,
+                a.renewed_from_authorization_id, a.renewal_preview_json
          FROM review_authorizations a
          JOIN artifact_decisions d ON d.decision_id=a.decision_id
          JOIN conversation_artifact_cards card

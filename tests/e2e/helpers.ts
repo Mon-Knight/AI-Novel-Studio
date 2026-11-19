@@ -6,6 +6,7 @@ export const EXPECTED_SQLITE_SOURCE_ID =
 
 export interface Diagnostics {
   enabled?: boolean;
+  processId?: number;
   dataDir?: string;
   databasePath?: string;
   networkBlocked?: boolean;
@@ -56,6 +57,10 @@ export const E2E_BRIDGE_CALL_TIMEOUT_MS = 15_000;
 
 export interface E2eChapterCoreAssetSeedInput {
   novelId: string;
+  appliedScenePlan?: {
+    chapterId: string;
+    scene: Record<string, unknown> & { id: string; targetCharacters: number };
+  };
   worldSetting: { title: string; content: string };
   ruleSystem: { title: string; content: string; forbiddenRules?: string };
   protagonist: { name: string; identity: string; personality: string; goal: string };
@@ -74,6 +79,7 @@ export interface E2eChapterCoreAssetSeedEvidence {
   ruleSystemId: string;
   protagonistId: string;
   chapterOutlineIds: string[];
+  appliedEngineeringStateId?: string;
   readiness: Array<{ chapterId: string; ready: boolean; missingAssets: string[] }>;
 }
 

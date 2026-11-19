@@ -7,6 +7,7 @@
 > 开发方式：VS Code + Copilot / Agent 辅助开发  
 > 文档目的：约束后续开发流程、目录结构、版本管理、GitHub 备份、UI 方向、AI 功能开发边界，避免项目在长期迭代中变成混乱的网页后台或不可维护的代码堆。
 > 阅读入口：[AGENTS.md](../AGENTS.md) 定义仓库开发总规则，[Agent 工作流](agent-workflow.md) 细化执行。本文保留详细规范与演进历史；开工检查、确认条件、分层验证和 Git 授权不另设重复规则。
+> UI 实现与验证的当前细则见 [UI 开发框架](ui-development-framework.md)；本文不再复制组件 API、可访问性和状态矩阵。
 > 时效说明：第 1～20 节大量保留早期 v0.x～v3.2.1 的形成过程和当前页面约束；v3.3.0+ 的主交互、Harness 复用与验证覆盖规则以第 24 节和 `docs/architecture/conversational-creative-workbench.md` 为准。
 
 ---

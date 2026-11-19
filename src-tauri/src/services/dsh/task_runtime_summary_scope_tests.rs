@@ -45,7 +45,10 @@ fn manual_fixture_with_fault(fault: &str) -> (Connection, StartTaskTurnInput) {
 fn manual_summary_scopes_a_persisted_user_request_without_formal_writes() {
     let (connection, input) = manual_fixture();
     let scope = resolve_session_scope(&connection, &input).expect("manual summary candidate scope");
-    assert_eq!(scope.novel_id, input.novel_id);
+    assert_eq!(
+        scope.novel_id.as_str(),
+        input.novel_id.as_deref().expect("fixture novel")
+    );
     assert_eq!(Some(scope.chapter_id.as_str()), input.chapter_id.as_deref());
     assert_eq!(scope.adopted_draft_id, "manual-summary-draft");
     assert_ne!(
@@ -87,7 +90,7 @@ fn manual_summary_rejects_missing_authority_target_adoption_and_hash_drift() {
         match failure {
             "turn" => input.turn_id = "missing-turn".to_string(),
             "conversation" => input.conversation_id = "other-conversation".to_string(),
-            "novel" => input.novel_id = "other-novel".to_string(),
+            "novel" => input.novel_id = Some("other-novel".to_string()),
             "chapter" => input.chapter_id = Some("other-chapter".to_string()),
             "role" => {
                 input.turn_id = "assistant-turn".to_string();
@@ -155,7 +158,10 @@ fn manual_summary_records_source_before_candidate_tools_or_provider_failure() {
     assert_eq!(contract.status, "succeeded");
     let source = &contract.arguments_summary["summarySource"];
     assert_eq!(source["version"], 1);
-    assert_eq!(source["novelId"], input.novel_id);
+    assert_eq!(
+        source["novelId"],
+        serde_json::json!(input.novel_id.as_deref())
+    );
     assert_eq!(source["chapterId"], input.chapter_id.unwrap());
     assert_eq!(source["adoptedDraftId"], "manual-summary-draft");
     assert_eq!(

@@ -35,7 +35,7 @@ test('the standard fault gate can only select isolated loopback, never a live pr
     plan.steps.map((step) => step.id),
     ['assets', 'production-carrier-build', 'isolated-writing-faults'],
   );
-  assert.ok(plan.steps[1].args.includes('none'));
+  assert.ok(plan.steps[1].args.includes('--no-bundle'));
   assert.ok(!plan.steps[1].args.includes('--features'));
   assert.equal(plan.steps[1].env.CARGO_TARGET_DIR, path.join(root, '.e2e-tools', 'target'));
   const carrier = plan.steps[2];

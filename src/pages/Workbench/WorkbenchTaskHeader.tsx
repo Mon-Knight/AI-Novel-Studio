@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   Database,
   FileText,
@@ -24,6 +25,7 @@ interface WorkbenchTaskHeaderProps {
   effectiveStatus: string;
   compressionBusy: boolean;
   bundleReady: boolean;
+  authorizationControl?: ReactNode;
   onSelectChapter: (chapterId: string) => void;
   onCreateChapter: () => void;
   onCompress: () => void;
@@ -48,6 +50,7 @@ export function WorkbenchTaskHeader({
   effectiveStatus,
   compressionBusy,
   bundleReady,
+  authorizationControl,
   onSelectChapter,
   onCreateChapter,
   onCompress,
@@ -207,6 +210,7 @@ export function WorkbenchTaskHeader({
           )}
         </div>
       </div>
+      {authorizationControl}
     </header>
   );
 }

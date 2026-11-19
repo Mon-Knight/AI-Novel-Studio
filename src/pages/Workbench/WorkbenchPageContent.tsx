@@ -19,6 +19,7 @@ import {
 } from './WorkbenchPageStates';
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
+import { WorkbenchTaskAuthorizationControl } from './WorkbenchTaskAuthorizationControl';
 import { WorkbenchChapterSummaryStatus } from './WorkbenchChapterSummaryStatus';
 import { WorkbenchChapterStageProgress } from './WorkbenchChapterStageProgress';
 import type { WorkbenchSidePanelState } from './hooks/useWorkbenchSidePanel';
@@ -191,6 +192,16 @@ export function WorkbenchPageContent({
               effectiveStatus={effectiveStatus}
               compressionBusy={compressionBusy}
               bundleReady={bundleReady}
+              authorizationControl={
+                <WorkbenchTaskAuthorizationControl
+                  conversation={selectedConversation}
+                  novelTitle={selectedNovel?.title || '小说项目'}
+                  chapters={chapters}
+                  activeChapterId={chapterId}
+                  bundle={bundle}
+                  bundleReady={bundleReady}
+                />
+              }
               onSelectChapter={onSelectChapter}
               onCreateChapter={onCreateChapter}
               onCompress={onCompress}
@@ -203,42 +214,55 @@ export function WorkbenchPageContent({
               onOpenContext={() => openReference('context')}
               onOpenArtifacts={() => openReference('artifacts')}
             />
-            <WorkbenchChapterStageProgress
-              novelId={selectedNovelId}
-              chapterId={selectedChapterId ?? chapterId}
-              chapterTitle={
-                chapters.find((chapter) => chapter.id === (selectedChapterId ?? chapterId))?.title
-              }
-              bundle={bundle}
-              bundleReady={bundleReady}
-              onLocateArtifact={onLocateArtifact}
-            />
-            <PanelErrorBoundary panelTitle="创作对话">
-              {streamProps ? (
-                <>
-                  {bundleStaleError ? (
-                    <div
-                      className="workbench-inline-error"
-                      role="alert"
-                      data-testid="workbench-bundle-stale"
-                    >
-                      <span>{bundleStaleError}</span>
-                      <button type="button" onClick={onRetryBundle}>
-                        重新读取
-                      </button>
-                    </div>
-                  ) : null}
-                  <WorkbenchMessageStream {...streamProps} />
-                </>
-              ) : conversationsError ? (
-                <WorkbenchFailureState message={conversationsError} onRetry={onRetryBundle} />
-              ) : (
-                <WorkbenchPreparingState
-                  label="正在恢复这项任务的对话与产物…"
-                  testId="workbench-bundle-loading"
+            {(() => {
+              const stageProgress = (
+                <WorkbenchChapterStageProgress
+                  novelId={selectedNovelId}
+                  chapterId={selectedChapterId ?? chapterId}
+                  chapterTitle={
+                    chapters.find((chapter) => chapter.id === (selectedChapterId ?? chapterId))
+                      ?.title
+                  }
+                  bundle={bundle}
+                  bundleReady={bundleReady}
+                  onLocateArtifact={onLocateArtifact}
                 />
-              )}
-            </PanelErrorBoundary>
+              );
+              return (
+                <PanelErrorBoundary panelTitle="创作对话">
+                  {streamProps ? (
+                    <>
+                      {bundleStaleError ? (
+                        <div
+                          className="workbench-inline-error"
+                          role="alert"
+                          data-testid="workbench-bundle-stale"
+                        >
+                          <span>{bundleStaleError}</span>
+                          <button type="button" onClick={onRetryBundle}>
+                            重新读取
+                          </button>
+                        </div>
+                      ) : null}
+                      <WorkbenchMessageStream {...streamProps} stageProgress={stageProgress} />
+                    </>
+                  ) : conversationsError ? (
+                    <>
+                      {stageProgress}
+                      <WorkbenchFailureState message={conversationsError} onRetry={onRetryBundle} />
+                    </>
+                  ) : (
+                    <>
+                      {stageProgress}
+                      <WorkbenchPreparingState
+                        label="正在恢复这项任务的对话与产物…"
+                        testId="workbench-bundle-loading"
+                      />
+                    </>
+                  )}
+                </PanelErrorBoundary>
+              );
+            })()}
             {streamProps && (
               <WorkbenchChapterSummaryStatus
                 state={streamProps.chapterSummaryOrchestration}

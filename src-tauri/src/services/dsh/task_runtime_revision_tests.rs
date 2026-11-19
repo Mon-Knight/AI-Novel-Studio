@@ -96,7 +96,7 @@ pub(super) fn candidate_source(
         .expect("exact candidate card");
     ArtifactRevisionSource {
         conversation_id: input.conversation_id.clone(),
-        novel_id: input.novel_id.clone(),
+        novel_id: input.novel_id.clone().expect("revision fixture novel"),
         chapter_id: input.chapter_id.clone(),
         card_id: card.card_id.clone(),
         artifact_id: artifact.artifact.artifact_id.clone(),
@@ -262,9 +262,13 @@ fn story_plan_revision_preserves_exact_novel_source_and_rejects_cross_type_or_sc
     assert!(validate_turn_contract(&wrong_type).is_err());
     let mut wrong_scope = source.clone();
     wrong_scope.chapter_id = Some("ch-1".to_string());
-    assert!(
-        source_authority::verify_source(&connection, &wrong_scope, &input.novel_id, None).is_err()
-    );
+    assert!(source_authority::verify_source(
+        &connection,
+        &wrong_scope,
+        input.novel_id.as_deref().expect("revision fixture novel"),
+        None
+    )
+    .is_err());
     decide(&mut connection, &source, "reject");
     assert!(revision_source::revalidate_frozen(&connection, &input).is_err());
     assert_no_formal_writes(&connection);
@@ -451,7 +455,7 @@ fn source_scope_hash_reference_and_decision_tampering_fail_closed() {
         source_authority::verify_source(
             &connection,
             &source,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("revision fixture novel"),
             input.chapter_id.as_deref()
         )
         .is_err(),
@@ -482,7 +486,7 @@ fn source_scope_hash_reference_and_decision_tampering_fail_closed() {
         assert!(source_authority::verify_source(
             &connection,
             &changed,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("revision fixture novel"),
             input.chapter_id.as_deref()
         )
         .is_err());
@@ -509,7 +513,7 @@ fn source_scope_hash_reference_and_decision_tampering_fail_closed() {
         source_authority::verify_source(
             &connection,
             &source,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("revision fixture novel"),
             input.chapter_id.as_deref()
         )
         .expect_err("raw source integrity gate")
@@ -536,5 +540,54 @@ fn malformed_envelopes_and_client_verified_content_are_not_trusted() {
     assert!(
         serde_json::from_value::<StartTaskTurnInput>(payload).is_err(),
         "identity rejects client content fields"
+    );
+}
+
+#[test]
+fn child_summary_after_revision_adoption_clears_revision_source_while_top_level_fails_closed() {
+    let (mut connection, mut input) = fixture();
+    let original = completed_candidate(&mut connection, &input, "summary-src", "首版待修改正文。");
+    let source = candidate_source(&connection, &input, &original);
+    decide(&mut connection, &source, "request_revision");
+    append_revision_turn(&mut connection, &mut input, Some(&source), "修订该候选");
+    revision_source::freeze_turn_revision(&connection, &mut input).expect("freeze revision turn");
+
+    let mut top_level_summary = input.clone();
+    top_level_summary.task_kind = "chapter_summary".to_string();
+    top_level_summary.expected_tool = Some("summarize_chapter".to_string());
+    top_level_summary.expected_artifact_type = Some("chapter_summary".to_string());
+    top_level_summary.execution = Some(
+        execution::RootExecution::new(&connection, &top_level_summary).expect("root execution"),
+    );
+    assert_eq!(
+        revision_source::freeze_turn_revision(&connection, &mut top_level_summary)
+            .expect_err("top-level summary on revision turn must fail closed")
+            .code,
+        "CHAPTER_REVISION_SOURCE_INVALID"
+    );
+
+    let mut child_summary = top_level_summary.clone();
+    child_summary
+        .execution
+        .as_mut()
+        .expect("root")
+        .parent_run_id = Some("revised-body-run".to_string());
+    revision_source::freeze_turn_revision(&connection, &mut child_summary)
+        .expect("host-parented child summary clears revision source");
+    assert_eq!(child_summary.goal, "总结本章");
+    assert!(child_summary.revision_source.is_none());
+    assert!(child_summary.verified_revision_source.is_none());
+    assert_eq!(
+        child_summary.model_snapshot["runtime"]["artifactRevision"],
+        json!({"version": 1, "source": Value::Null})
+    );
+    assert_eq!(
+        super::retry::model_identity(&input.model_snapshot),
+        super::retry::model_identity(&child_summary.model_snapshot)
+    );
+    child_summary.model_snapshot["modelId"] = json!("tampered-model");
+    assert_ne!(
+        super::retry::model_identity(&input.model_snapshot),
+        super::retry::model_identity(&child_summary.model_snapshot)
     );
 }

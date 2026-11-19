@@ -14,9 +14,11 @@ pub(super) fn empty_read_payload(
     tool: &str,
 ) -> Option<Value> {
     if tool == "novel.read_context" {
-        let snapshot =
-            crate::services::world_rule_governance::rule_set_snapshot(connection, &input.novel_id)
-                .expect("authoritative empty rule snapshot");
+        let snapshot = crate::services::world_rule_governance::rule_set_snapshot(
+            connection,
+            input.require_novel_id().expect("fixture novel scope"),
+        )
+        .expect("authoritative empty rule snapshot");
         assert!(
             snapshot.sources.is_empty(),
             "fixture must not conceal real rules"

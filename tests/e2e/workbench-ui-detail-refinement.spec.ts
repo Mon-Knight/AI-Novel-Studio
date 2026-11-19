@@ -18,8 +18,8 @@ import {
 import { requestViewportWidth } from './interaction-world-rules-fixture';
 
 const screenshotDirectory = path.resolve(
-  import.meta.dirname,
-  '../../test-results/ui-detail-refinement',
+  process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ??
+    path.join(import.meta.dirname, '../../test-results/ui-detail-refinement'),
 );
 
 async function waitForComposerIdle(): Promise<void> {
@@ -159,6 +159,77 @@ async function captureAt(width: number, height: number): Promise<void> {
   return;
 }
 
+async function captureContextPanelAt(width: number, height: number): Promise<void> {
+  const viewport = await requestViewportWidth(width, height);
+  const toggle = await waitForTestId('workbench-asset-scope-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await waitForTestId('workbench-asset-scope-panel');
+  await waitForTestId('workbench-asset-scope-summary');
+  await waitForTestId('workbench-asset-scope-details');
+  await browser.pause(220);
+
+  const metrics = await browser.execute(() => {
+    const read = (selector: string) => {
+      const node = document.querySelector<HTMLElement>(selector);
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        height: rect.height,
+        overflow: style.overflow,
+        overflowY: style.overflowY,
+        scrollHeight: node.scrollHeight,
+        clientHeight: node.clientHeight,
+      };
+    };
+    const groups = document.querySelector<HTMLElement>('.workbench-asset-scope-groups');
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      documentWidth: document.documentElement.scrollWidth,
+      panel: read('[data-testid="workbench-asset-scope-panel"]'),
+      details: read('[data-testid="workbench-asset-scope-details"]'),
+      extras: read('.workbench-composer-extras'),
+      input: read('[data-testid="workbench-composer-input"]'),
+      toolbar: read('.workbench-composer-toolbar'),
+      groupColumns: groups ? window.getComputedStyle(groups).gridTemplateColumns : '',
+      summaryText:
+        document.querySelector('[data-testid="workbench-asset-scope-summary"]')?.textContent ?? '',
+    };
+  });
+
+  fs.mkdirSync(screenshotDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(screenshotDirectory, `context-${width}x${height}.json`),
+    JSON.stringify({ viewport, metrics }, null, 2),
+  );
+  await browser.saveScreenshot(path.join(screenshotDirectory, `context-${width}x${height}.png`));
+
+  expect(metrics.documentWidth).toBeLessThanOrEqual(viewport.innerWidth);
+  expect(metrics.panel).not.toBeNull();
+  expect(metrics.details).not.toBeNull();
+  expect(metrics.extras).not.toBeNull();
+  expect(metrics.input).not.toBeNull();
+  expect(metrics.toolbar).not.toBeNull();
+  if (!metrics.panel || !metrics.details || !metrics.extras || !metrics.input || !metrics.toolbar) {
+    throw new Error('Context panel geometry is missing');
+  }
+  expect(metrics.panel.overflow).toBe('visible');
+  expect(metrics.panel.scrollHeight - metrics.panel.clientHeight).toBeLessThanOrEqual(1);
+  expect(metrics.extras.overflowY).toBe('auto');
+  expect(metrics.toolbar.bottom).toBeLessThanOrEqual(viewport.innerHeight);
+  expect(metrics.groupColumns.split(' ').length).toBeLessThanOrEqual(2);
+  expect(metrics.summaryText).toContain('生成前资产状态');
+
+  const collapse = await waitForTestId('workbench-asset-scope-collapse');
+  await collapse.click();
+  await browser.waitUntil(async () => (await toggle.getAttribute('aria-expanded')) === 'false', {
+    timeout: 5000,
+    timeoutMsg: 'Context panel did not collapse',
+  });
+}
+
 describe('workbench UI detail refinement', () => {
   it('keeps long tree rows, selected state and composer guidance aligned in real Tauri', async () => {
     await waitForTestId('app-shell');
@@ -207,6 +278,15 @@ describe('workbench UI detail refinement', () => {
       '根据当前章节目标推进雾港来信，保留人物动机与已确认线索。',
     );
     await waitForTestId('workbench-word-preview');
+
+    for (const viewport of [
+      { width: 1024, height: 700 },
+      { width: 1280, height: 832 },
+      { width: 1366, height: 768 },
+      { width: 1920, height: 1080 },
+    ]) {
+      await captureContextPanelAt(viewport.width, viewport.height);
+    }
 
     for (const viewport of [
       { width: 1440, height: 900 },

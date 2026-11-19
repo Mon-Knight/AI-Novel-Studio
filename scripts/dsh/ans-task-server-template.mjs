@@ -87,18 +87,52 @@ const NOVEL_MCP_TOOL_IDENTITIES = [
   { canonical: 'get_character_states', publicName: 'mcp__novel__get_character_states' },
   { canonical: 'generate_chapter', publicName: 'mcp__novel__generate_chapter' },
 ];
+function toolIdentityFromCanonical(canonical) {
+  return {
+    canonical,
+    dottedSuffix: canonical,
+    underscored: canonical.replaceAll('.', '_'),
+  };
+}
+
+function parseAllowedToolIdentities(rawAllowedTools) {
+  if (typeof rawAllowedTools !== 'string') return undefined;
+  const names = rawAllowedTools
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  if (names.length === 0) return undefined;
+  return names.map(toolIdentityFromCanonical);
+}
+
 const CANONICAL_MCP_TOOL_IDENTITIES = [
   { canonical: 'novel.read', dottedSuffix: 'novel.read', underscored: 'novel_read' },
   { canonical: 'structure.read', dottedSuffix: 'structure.read', underscored: 'structure_read' },
   { canonical: 'context.read', dottedSuffix: 'context.read', underscored: 'context_read' },
   { canonical: 'memory.search', dottedSuffix: 'memory.search', underscored: 'memory_search' },
 ];
-const CREATIVE_DIALOGUE_MCP_TOOL_IDENTITIES = [
-  { dottedSuffix: 'novel.read_context', underscored: 'novel_read_context' },
-  { dottedSuffix: 'chapter.read_outline', underscored: 'chapter_read_outline' },
-  { dottedSuffix: 'get_character_states', underscored: 'get_character_states' },
-  { dottedSuffix: 'search_memory', underscored: 'search_memory' },
-  { dottedSuffix: 'creative.plan_action', underscored: 'creative_plan_action' },
+const SCOPED_READ_MCP_TOOL_IDENTITIES = [
+  'novel.read_context',
+  'chapter.read_outline',
+  'get_character_states',
+  'search_memory',
+].map(toolIdentityFromCanonical);
+const SCOPED_TASK_ACTION_TOOL_IDENTITIES = [
+  'generate_chapter',
+  'polish_chapter',
+  'submit_chapter_stage',
+  'creative.plan_action',
+  'generate_outline',
+  'expand_settings',
+  'generate_characters',
+  'suggest_events',
+  'check_quality',
+  'summarize_chapter',
+  'domain.submit_candidate',
+].map(toolIdentityFromCanonical);
+const STAGED_MCP_TOOL_IDENTITIES = [
+  ...SCOPED_READ_MCP_TOOL_IDENTITIES,
+  toolIdentityFromCanonical('submit_chapter_stage'),
 ];
 
 function registeredToolMatchesCanonical(tool, identity) {
@@ -379,9 +413,10 @@ function safeExternalError(prefix, error) {
 }
 
 class AnsTaskServer {
-  constructor(ctx, transport) {
+  constructor(ctx, transport, { allowedTools } = {}) {
     this.ctx = ctx;
     this.transport = transport;
+    this.allowedToolIdentities = parseAllowedToolIdentities(allowedTools);
     this.cwd = process.cwd();
     this.defaultRoute = undefined;
     this.initialized = false;
@@ -572,6 +607,25 @@ class AnsTaskServer {
       (service) => !this.hasService(service),
     );
     const registeredTools = toolDirectory.globalTools;
+    const missingAllowedTools = this.allowedToolIdentities
+      ?.filter(
+        (identity) =>
+          !registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+      )
+      .map((identity) => identity.canonical);
+    const missingStagedTools = STAGED_MCP_TOOL_IDENTITIES.filter(
+      (identity) => !registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+    ).map((identity) => identity.canonical);
+    const stagedToolProfileLoaded =
+      registeredTools.some((tool) =>
+        registeredToolMatchesCanonical(tool, STAGED_MCP_TOOL_IDENTITIES.at(-1)),
+      ) && missingStagedTools.length === 0;
+    const scopedReadToolsLoaded = SCOPED_READ_MCP_TOOL_IDENTITIES.every((identity) =>
+      registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+    );
+    const scopedActionToolLoaded = SCOPED_TASK_ACTION_TOOL_IDENTITIES.some((identity) =>
+      registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+    );
     const missingNovelTools = NOVEL_MCP_TOOL_IDENTITIES.filter((identity) =>
       identity.publicName === undefined
         ? !registeredTools.some((tool) => tool.startsWith(identity.publicNamePrefix))
@@ -579,11 +633,17 @@ class AnsTaskServer {
     ).map((identity) => identity.canonical);
     const mcpNovelLoaded =
       toolDirectory.available &&
-      (missingNovelTools.length === 0 ||
-        hasCanonicalNovelTools(registeredTools) ||
-        CREATIVE_DIALOGUE_MCP_TOOL_IDENTITIES.every((identity) =>
-          registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
-        ));
+      (missingAllowedTools !== undefined
+        ? missingAllowedTools.length === 0
+        : missingNovelTools.length === 0 ||
+          hasCanonicalNovelTools(registeredTools) ||
+          stagedToolProfileLoaded ||
+          (scopedReadToolsLoaded && scopedActionToolLoaded));
+    const missingTools =
+      missingAllowedTools ??
+      (missingStagedTools.length <= missingNovelTools.length
+        ? missingStagedTools
+        : missingNovelTools);
     return [
       {
         id: 'sdk-jsonrpc-server',
@@ -634,7 +694,7 @@ class AnsTaskServer {
         kind: 'tool',
         status: status(mcpNovelLoaded),
         checks: ['tools.schemas'],
-        ...(mcpNovelLoaded ? {} : { missingTools: missingNovelTools }),
+        ...(mcpNovelLoaded ? {} : { missingTools }),
       },
     ];
   }
@@ -1061,7 +1121,9 @@ export function apply(ctx, config = {}) {
     });
   const rootFiber = ctx.root.fiber;
   const transport = new JsonRpcLineTransport(input, output);
-  const server = new AnsTaskServer(ctx, transport);
+  const allowedTools =
+    config.allowedTools === undefined ? process.env.ANS_ALLOWED_TOOLS : config.allowedTools;
+  const server = new AnsTaskServer(ctx, transport, { allowedTools });
   let exitTask;
 
   const disposeAndExit = () => {

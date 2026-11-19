@@ -10,6 +10,7 @@ const fixtures = vi.hoisted(() => ({
   rules: [] as Array<Record<string, unknown>>,
   chapters: [] as Array<Record<string, unknown>>,
   draft: null as Record<string, unknown> | null,
+  submit: vi.fn(),
   generate: vi.fn(),
   invoke: vi.fn(),
   saveWorld: vi.fn(),
@@ -23,6 +24,9 @@ vi.mock('../database/db', () => ({
   nowISO: () => 't',
   generateId: () => 'id',
   dbCall: fixtures.invoke,
+}));
+vi.mock('../autonomous-creation/productionAiEntryService', () => ({
+  submitProductionAiEntry: fixtures.submit,
 }));
 vi.mock('../ai/aiClient', () => ({
   createAiClient: () => ({ generate: fixtures.generate }),
@@ -116,6 +120,36 @@ beforeEach(() => {
 });
 
 describe('legacy suggestion native routing and rule evidence', () => {
+  it('submits one governed desktop task and only returns candidates linked to its artifact', async () => {
+    fixtures.submit.mockResolvedValue({ artifactIds: ['artifact'] });
+    fixtures.invoke.mockImplementation(async (command: string) => {
+      if (command === 'list_setting_suggestions')
+        return [
+          { ...fixtures.record, id: 'domain-setting-artifact-0', suggestionType: 'rule' },
+          { ...fixtures.record, id: 'unrelated-candidate', suggestionType: 'rule' },
+        ];
+      throw new Error('Unexpected native command: ' + command);
+    });
+    const result = await settingSuggestionService.generate(generation);
+    expect(fixtures.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        novelId: 'n',
+        entry: { kind: 'setting_suggestions', input: generation },
+      }),
+    );
+    expect(result.map((record) => record.id)).toEqual(['domain-setting-artifact-0']);
+    expect(fixtures.generate).not.toHaveBeenCalled();
+    expect(
+      fixtures.invoke.mock.calls.some(([command]) => command === 'save_setting_suggestions'),
+    ).toBe(false);
+  });
+  it('does not fall back to a direct client when the native host fails', async () => {
+    fixtures.submit.mockRejectedValueOnce(new Error('NATIVE_SCOPE_CONFLICT'));
+    await expect(settingSuggestionService.generate(generation)).rejects.toThrow(
+      'NATIVE_SCOPE_CONFLICT',
+    );
+    expect(fixtures.generate).not.toHaveBeenCalled();
+  });
   it('uses one native atomic adoption command rather than a target write plus decision', async () => {
     await settingSuggestionService.adopt('candidate', { name: 'Author edited' });
     expect(fixtures.invoke).toHaveBeenCalledWith(
@@ -168,7 +202,8 @@ describe('legacy suggestion native routing and rule evidence', () => {
       '证据不可用',
     );
   });
-  it('refuses to save model-returned candidates against a rule set changed during the request', async () => {
+  it('refuses to save browser-compatibility model candidates against a changed rule set', async () => {
+    fixtures.desktop = false;
     fixtures.generate.mockImplementation(async () => {
       fixtures.snapshot = { novelId: 'n', fingerprint: 'changed', sources: [] };
       return { text: '{"items":[{"name":"new law","content":"cost"}]}' };

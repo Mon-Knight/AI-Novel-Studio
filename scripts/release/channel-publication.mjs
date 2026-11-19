@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { assertUpdaterSignature, V1_COMPATIBLE_UPDATER_KINDS } from './release-artifacts.mjs';
 import { assertChannelVersion, assertRollback, compareVersions } from './release-version.mjs';
 
 export const CHANNEL_FILES = ['release.json', 'rollback.json', 'latest.json'];
@@ -53,6 +54,20 @@ export function validateChannelFiles(files, channel, repository) {
     !platform.signature?.trim()
   ) {
     throw new Error('Updater pointer and release manifest disagree.');
+  }
+  // Published v1 releases predate signed-version comments; validate the signature
+  // envelope here so existing channel metadata remains readable. New manifests
+  // additionally require `version:<version>` in build-release-manifest.
+  assertUpdaterSignature(platform.signature);
+  if (
+    !V1_COMPATIBLE_UPDATER_KINDS.some((kind) =>
+      release.updaterArtifact.fileName?.endsWith(`.${kind}.zip`),
+    )
+  ) {
+    throw new Error('Updater artifact is not a Tauri v1-compatible zipped installer.');
+  }
+  if (!/\.(?:msi|exe)$/iu.test(release.installerArtifact.fileName)) {
+    throw new Error('Retained installer is not an MSI or NSIS executable.');
   }
   for (const artifact of [release.updaterArtifact, release.installerArtifact]) {
     if (

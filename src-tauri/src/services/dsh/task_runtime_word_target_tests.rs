@@ -74,3 +74,97 @@ fn native_word_target_uses_persisted_current_author_and_earlier_task_scope() {
         "chapter-local override must not leak"
     );
 }
+
+#[test]
+fn native_word_setting_persists_a_completed_local_run_and_range_without_a_provider() {
+    let (mut connection, input) = native_word_setting_fixture();
+    let selected_model = input.model_snapshot.clone();
+    let outcome = coordinator::dispatch::persist_local_command(&mut connection, &input).unwrap();
+    let bundle = crate::repositories::conversation_repository::get_bundle(
+        &connection,
+        &input.conversation_id,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(outcome.runtime, "ans-native-local-command");
+    assert_eq!(bundle.runs.len(), 1);
+    assert_eq!(outcome.run.status, "completed");
+    assert_eq!(outcome.run.model_snapshot["providerId"], "ans-local");
+    assert_eq!(bundle.conversation.default_model, Some(selected_model));
+    let settings = bundle
+        .tool_events
+        .iter()
+        .find(|event| event.tool_name == "task.configure_word_target")
+        .unwrap();
+    assert_eq!(settings.status, "succeeded");
+    assert_eq!(
+        settings.arguments_summary["wordRange"],
+        json!({"target":3200,"minimum":2560,"maximum":3680})
+    );
+    assert_eq!(settings.result.as_ref().unwrap()["modelCalled"], false);
+    assert!(bundle.artifacts.is_empty());
+    assert_eq!(bundle.turns.len(), 2);
+    for value in ["3200", "2560", "3680"] {
+        assert!(bundle.turns[1].content.contains(value));
+    }
+    let requests: i64 = connection
+        .query_row("SELECT COUNT(*) FROM ai_request_reservations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(requests, 0);
+}
+
+#[test]
+fn native_word_setting_fails_closed_if_its_fact_does_not_commit() {
+    let (mut connection, input) = native_word_setting_fixture();
+    connection
+        .execute_batch(
+            "CREATE TEMP TRIGGER reject_word_setting_fact
+         BEFORE INSERT ON tool_call_events
+         WHEN NEW.tool_name='task.configure_word_target'
+         BEGIN SELECT RAISE(ABORT, 'isolated word-setting failure'); END;",
+        )
+        .unwrap();
+    assert!(coordinator::dispatch::persist_local_command(&mut connection, &input).is_err());
+    let bundle = crate::repositories::conversation_repository::get_bundle(
+        &connection,
+        &input.conversation_id,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(bundle.runs.len(), 1);
+    assert_eq!(bundle.runs[0].status, "failed");
+    assert!(bundle.runs[0].error.is_some());
+    assert_eq!(bundle.conversation.status, "failed");
+    assert_eq!(bundle.turns.len(), 1);
+    assert!(bundle.artifacts.is_empty());
+    assert!(bundle
+        .tool_events
+        .iter()
+        .all(|event| event.status == "succeeded"));
+}
+
+fn native_word_setting_fixture() -> (rusqlite::Connection, StartTaskTurnInput) {
+    let mut input = api_input(
+        "openai_compatible",
+        "fixture-model",
+        "http://127.0.0.1:8080",
+    );
+    input.goal = "本任务目标字数设为3200字".into();
+    input.chapter_word_range = None;
+    input.unified_runtime = Some(
+        serde_json::from_value(json!({
+            "version": 1,
+            "localCommand": {
+                "kind": "task_word_target",
+                "targetWordCount": 3200,
+                "wordRange": { "target": 3200, "minimum": 2560, "maximum": 3680 }
+            }
+        }))
+        .unwrap(),
+    );
+    let connection = chapter_length_connection(&input);
+    input.execution = Some(execution::RootExecution::new(&connection, &input).unwrap());
+    (connection, input)
+}

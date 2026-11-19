@@ -3,6 +3,31 @@
 > 文件：`docs/project-architecture.md`  
 > 用途：描述项目整体架构、技术选型理由、系统分层  
 > 适用：所有开发者 + AI Agent
+>
+> 当前覆盖层（2026-11-11）：统一原生 Agent Runtime 与任务级预授权处于 **INTEGRATION / NOT YET FULLY VERIFIED**，见下方「统一桌面执行内核」。第 13、16、17 节保留此前 Provider/Planner/Scheduler 分步演进，不能据此恢复桌面前端顶层编排；既有 Tauri 2 与模型/UI 改动保留，未升级版本或固定 DSH 载体。
+
+## 统一桌面执行内核
+
+```text
+工作台对话 / 规划 / 章节准备 / 设定推演 / 候选队列等桌面入口
+→ taskSessionAdapter + 统一模型快照 / productionAiEntryService
+→ 原生 task_runtime_coordinator
+   ├─ 根目标、阶段验证、上下文隔离、累计预算与取消
+   ├─ 主 Agent 的结构化能力请求
+   └─ Writing SubAgent / 规划、检查、总结等受控阶段
+→ AiTask / Attempt / Snapshot / Artifact / 校验
+→ 人工决定与审阅授权，或 task_authorization_service
+→ 原生版本/hash/CAS/幂等复验 + SQLite 事务 + 回执
+```
+
+- 桌面 API、Mock、本地模型使用同一生命周期；Mock 只适配结构化模型响应，本地能力不支持即报错，不静默更换模型或框架。固定 DSH commit `47f943859bef60e4160492346772ded9b24f765a`、`ans_task_session_v2` 保持。
+- React/Feature 只提交明确目标、范围输入与取消并展示投影，不承担阶段循环。既有 Scene/Beat 计划是阶段材料，不是改用另一写章宿主的开关。确定性 Writer 的编译/规则能力可复用，旧顶层编排仅限浏览器开发兼容。**Scene/Beat 原生阶段链源码已落地（`scene_plan → 每 Scene beat_plan → 每 Beat beat_write/beat_state → scene_close → chapter_assemble`），并有隔离 SQLite 单测；真实 Windows Tauri 逐阶段/跨重启仍 `NOT_VERIFIED`，整章携带计划不证明逐阶段功能对等或全部迁移完成。**
+- `TaskConversation / ConversationTurn / TaskRun / ToolCallEvent` 与 AiTask/Attempt/Artifact 继续是事实模型。`dsh.execution_contract` 记录根/父运行、阶段、预算纪元和冻结基线；没有平行任务状态系统。领域候选工具 `domain.submit_candidate` 不增加 Canonical exposure，也不授予任意 JSON 写入权。
+- 子任务独立阶段上下文、共享父取消与费用上限，不能扩 scope、换冻结模型或拆任务重置预算。宿主核对持久工具回执再转换阶段，助手普通回复不执行。有效计划及检查点继续复用，缺材料/冲突/超限进入明确待处理状态。
+- 新 `041_task_authorizations` 只保存有限权限与不可变写入回执；当前明确目标及受控后续阶段是权限范围，同会话后来的独立用户目标不继承。人工与预授权进入原生事务复验，自动记录不伪装 `authorReviewed=true`；精确提交回执是自身后续基线推进的唯一依据。`042_library_task_scope` 只增加资料库任务作用域，`043_host_terminal_native_facts` 只允许 `dsh.*` 原生控制事实在 Run 终态后 append；普通工具仍限活动 Run。迁移总计 001～043，041/042 已落地定义不改写，本批仅 043 新增 trigger。
+- 原生总结写入与上下文读取共用阻断/advisory/人工判断策略，不以高分覆盖 `passed=false`。备份 schema 13 恢复 active grant 为 expired，不恢复可执行权限或盲目重放模型请求。
+
+详细协议见 [Runtime 第 13 节](agent-runtime.md#13-统一原生执行与任务级预授权2026-11-11集成验证中)、[数据模型第 45 节](data-model.md#45-任务级预授权与总结应用策略2026-11-11)及[本批实施记录](../reports/unified-agent-2026-11-11/implementation.md)。入口覆盖、动态安全回归、完整 Rust、真实桌面与当前 EXE 均待最终门禁，R4 live 和文学效果未验证。
 
 ---
 
@@ -331,7 +356,7 @@ main.tsx
 
 规划页 Hook 只订阅和刷新当前计划，不负责进程启动恢复。Rust 初始化会先收敛过期 lease 与中断 run；恢复命令随后仍返回全部持久 `queued` run，确保 WebView 入口可以为它们获取新 owner/epoch，而不会因初始化阶段已执行过同一恢复事务而丢失接管列表。桌面 Worker 还以 15 秒间隔串行执行恢复扫描：若应用在旧 lease 的 TTL 内重启，旧 lease 到期后的下一轮扫描会完成 fenced recovery 和新 epoch 接管。Worker 已取得 lease 后若在 claim 前遇到计划读取或其他未处理异常，会先 heartbeat 复验 owner/epoch，再以最新 revision 暂停 run；pause 事务同时释放 active lease。heartbeat 或 CAS 失败表示 Worker 已被 fencing，此时不触碰替代 owner 的状态。浏览器 capability 返回非持久模式时，启动调用直接结束，不创建伪造 run。章节生成运行时通过 `autonomousChapterRuntimeLoader` 延迟加载；AI 设置的读取/规范化/保存位于不依赖执行管线的 `aiSettingsStore`，价格快照因此不形成 `aiTaskService → aiSettingsService → aiExecutionPipeline` 循环。
 
-Vite 生产输出固定拆分 `vendor-react / vendor-router / vendor-zustand / vendor-tauri`，并生成 manifest。`scripts/quality/check-bundle-size.mjs` 从 manifest 确认唯一入口、全部 JS 归属和 vendor 身份，再按真实字节与 gzip-9 执行入口和单 chunk 双预算；缺文件、额外 JS、路径逃逸或身份歧义均失败关闭。快速 CI、Windows 桌面质量工作流和签名发布共享该门禁，`release.yml` 必须等待可复用的完整 Windows 桌面 E2E 成功后才进入签名构建。
+Vite 生产输出固定拆分 `vendor-react / vendor-router / vendor-zustand / vendor-tauri`，并生成 main 与 legacy-storage-migration 两个入口的 manifest。`scripts/quality/check-bundle-size.mjs` 从 manifest 确认两个入口、全部 JS 归属和 vendor 身份，再按真实字节与 gzip-9 执行入口和单 chunk 双预算；缺文件、额外 JS、路径逃逸或身份歧义均失败关闭。快速 CI、Windows 桌面质量工作流和签名发布共享该门禁，`release.yml` 必须等待可复用的完整 Windows 桌面 E2E 成功后才进入签名构建。
 
 ---
 
@@ -386,8 +411,8 @@ Novel Domain Services + SQLite
 - 工作台是 UI 聚合层，小说仍是领域数据最高级对象；
 - 任务对话之间隔离消息、模型、运行、取消与产物，允许受治理并发；
 - 工具调用和错误作为持久执行事实投影到对话，不建立第二套真相源；
-- 普通回复不写正式事实，只有不可变产物经过用户决定和领域事务后才可应用；
-- 章节候选还需要单次审阅授权，在人工审阅/编辑器中显式采用；
+- 普通回复不写正式事实；不可变产物必须经过人工决定或当前目标的有效任务预授权，并由原生事务复验后才可应用；
+- 人工模式的章节候选继续使用单次审阅授权与显式编辑/保存/采用；预授权采用由独立原生授权服务执行，不伪造人工审阅；
 - DSH 可承担 Planner/Executor/Worker 职责，但 SQLite、预算门禁、验证与最终采用权继续留在 ANS；
 - Runtime 借鉴 DSH 的 Profile/Bundle 组合、作用域 Session/Agent、`turn → step → tool result → next step` 循环和追加事件投影，但不复制通用代码、Shell、Git 等能力；
 - 固定版本 DSH 作为 Headless Worker，ANS DSH Adapter 隔离其内部 API；不完整 Fork Harness，不嵌入 Harness Web UI，不把 DSH Session Log 当作小说事实源；

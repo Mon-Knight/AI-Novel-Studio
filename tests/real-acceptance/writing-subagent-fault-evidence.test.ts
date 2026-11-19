@@ -95,9 +95,17 @@ test('unowned artifacts and tool events fail evidence classification', () => {
   assert.match(errors, /tool event has no verified owning run/u);
 });
 
-test('only the identified completed local command without tools or artifacts is excluded', () => {
+test('only the identified completed local command with a host receipt is excluded', () => {
   const input = evidence();
   input.runs.unshift({ ...run('local'), providerId: 'ans-local', runtimeMode: 'local' });
+  assert.match(inspectWritingFaultRuns(input, 2, ['local']).failures.join(), /local command/u);
+  const receipt = {
+    ...event('local', 'task.configure_word_target'),
+    localWordTargetReceipt: false,
+  };
+  input.toolEvents.push(receipt);
+  assert.match(inspectWritingFaultRuns(input, 2, ['local']).failures.join(), /local command/u);
+  receipt.localWordTargetReceipt = true;
   assert.deepEqual(inspectWritingFaultRuns(input, 2, ['local']).failures, []);
   assert.match(inspectWritingFaultRuns(input, 2).failures.join(), /found 3/u);
   input.toolEvents.push(event('local', 'generate_chapter'));

@@ -15,7 +15,9 @@ const ACTIONS: [&str; 8] = [
 ];
 
 pub(super) fn retry_instruction(previous: usize) -> String {
-    if previous == 0 { return String::new(); }
+    if previous == 0 {
+        return String::new();
+    }
     "\n\n用户重试当前交流阶段：重新核对本次目标；需要执行时只允许调用 creative.plan_action 请求工作流。generate_chapter 等动作名只能作为该工具的 action 参数，不是本阶段可以直接调用的工具。不得沿用写作阶段的工具调用或宣称候选已完成。".into()
 }
 
@@ -52,7 +54,10 @@ fn validate_payload(novel: &str, payload: &Value) -> Result<PlannedAction, Strin
             | "check_quality"
             | "suggest_events"
     );
-    if planned.chapter_id.as_deref().is_some_and(|id| id.trim().is_empty() || id.chars().count()>160)
+    if planned
+        .chapter_id
+        .as_deref()
+        .is_some_and(|id| id.trim().is_empty() || id.chars().count() > 160)
         || (chapter_action && planned.chapter_id.is_none())
     {
         return Err("DSH_CREATIVE_ACTION_INVALID: 工作流章节超出本轮作用域".into());
@@ -77,7 +82,7 @@ pub(super) fn read_action(
     if input.task_kind != "creative_dialogue" {
         return Ok(None);
     }
-    read_persisted_action(connection, &input.novel_id, run_id)
+    read_persisted_action(connection, input.require_novel_id()?, run_id)
 }
 
 pub(super) fn read_persisted_action(
@@ -87,7 +92,9 @@ pub(super) fn read_persisted_action(
 ) -> Result<Option<PlannedAction>, String> {
     let mut statement = connection.prepare("SELECT event_id,result_json FROM tool_call_events WHERE run_id=?1 AND tool_name='creative.plan_action' AND status='succeeded' ORDER BY sequence").map_err(|e|e.to_string())?;
     let results = statement
-        .query_map([run_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_, Option<String>>(1)?)))
+        .query_map([run_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -97,7 +104,7 @@ pub(super) fn read_persisted_action(
     if results.len() != 1 {
         return Err("DSH_CREATIVE_ACTION_INVALID: 每轮只能请求一项工作流".into());
     }
-    let (event_id,result_json) = &results[0];
+    let (event_id, result_json) = &results[0];
     let summary: Value = serde_json::from_str(result_json.as_deref().unwrap_or(""))
         .map_err(|_| "DSH_CREATIVE_ACTION_INVALID: 缺少工作流结果".to_string())?;
     let reference = summary
@@ -105,7 +112,9 @@ pub(super) fn read_persisted_action(
         .and_then(Value::as_str)
         .ok_or("DSH_CREATIVE_ACTION_INVALID: 缺少工作流结果引用")?;
     let bound = connection.query_row("SELECT 1 FROM large_text_documents WHERE id=?1 AND target_type='tool_event' AND target_id=?2 AND field_name='result'",rusqlite::params![reference,event_id],|_|Ok(())).optional().map_err(|e|e.to_string())?.is_some();
-    if !bound { return Err("DSH_CREATIVE_ACTION_INVALID: 工作流结果引用未绑定本次工具事件".into()); }
+    if !bound {
+        return Err("DSH_CREATIVE_ACTION_INVALID: 工作流结果引用未绑定本次工具事件".into());
+    }
     let verified = large_text_repository::read_verified_document(connection, reference)
         .map_err(|e| e.to_string())?;
     if summary.get("contentHash").and_then(Value::as_str) != Some(verified.content_hash.as_str()) {
@@ -115,8 +124,18 @@ pub(super) fn read_persisted_action(
         .map_err(|_| "DSH_CREATIVE_ACTION_INVALID: 工作流结果不是 JSON".to_string())?;
     let planned = validate_payload(novel_id, &payload)?;
     if let Some(chapter) = planned.chapter_id.as_deref() {
-        let valid = connection.query_row("SELECT 1 FROM chapters WHERE id=?1 AND novel_id=?2",rusqlite::params![chapter,novel_id], |_|Ok(())).optional().map_err(|e|e.to_string())?.is_some();
-        if !valid { return Err("DSH_CREATIVE_ACTION_INVALID: 目标章节不属于本作品".into()); }
+        let valid = connection
+            .query_row(
+                "SELECT 1 FROM chapters WHERE id=?1 AND novel_id=?2",
+                rusqlite::params![chapter, novel_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .is_some();
+        if !valid {
+            return Err("DSH_CREATIVE_ACTION_INVALID: 目标章节不属于本作品".into());
+        }
     }
     Ok(Some(planned))
 }

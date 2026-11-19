@@ -43,7 +43,7 @@ cargoLock = replaceOnce(
 await write('src-tauri/Cargo.lock', cargoLock);
 
 const tauri = JSON.parse(await read('src-tauri/tauri.conf.json'));
-tauri.package.version = nextVersion;
+tauri.version = nextVersion;
 await write('src-tauri/tauri.conf.json', `${JSON.stringify(tauri, null, 2)}\n`);
 
 let versionSource = await read('src/constants/version.ts');

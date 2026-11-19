@@ -205,10 +205,17 @@ export function projectWorkbenchEvents(
     (event) => event.eventId,
     (event) => presentationTime(event.finishedAt, presentationTime(event.createdAt)),
   );
+  const internalHostBookkeepingTools = new Set([
+    'dsh.execution_contract',
+    'dsh.tool_dispatch',
+    'dsh.request_usage',
+    'task.configure_word_target',
+  ]);
   for (const event of events) {
     if (
-      event.toolName === 'dsh.execution_contract' &&
+      internalHostBookkeepingTools.has(event.toolName) &&
       event.status === 'succeeded' &&
+      !event.error &&
       event.argumentsSummary.source === 'ans-host'
     )
       continue;

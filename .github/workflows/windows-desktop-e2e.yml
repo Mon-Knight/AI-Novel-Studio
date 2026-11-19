@@ -76,15 +76,17 @@ jobs:
           if ($env:VERIFY_BASE) { $selectionArgs += @('--base', $env:VERIFY_BASE) }
           node @selectionArgs
           exit $LASTEXITCODE
-      - name: Select stable Rust
+      - name: Select pinned Rust
         if: steps.scope.outputs.rust == 'true'
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal
+          $toolchain = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          if (-not $toolchain) { throw 'Unable to read the pinned Rust toolchain.' }
+          rustup toolchain install $toolchain --profile minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          rustup default stable
+          rustup default $toolchain
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          rustup target add x86_64-pc-windows-msvc --toolchain stable
+          rustup target add x86_64-pc-windows-msvc --toolchain $toolchain
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustc --version
 
@@ -185,7 +187,7 @@ jobs:
 
       - name: Build production Tauri executable
         if: env.FULL_MATRIX == 'true'
-        run: npm run tauri:build -- --bundles none --ci
+        run: npm run tauri:build -- --no-bundle --ci
 
       - name: Verify scoped native and documentation changes
         if: env.FULL_MATRIX != 'true'
@@ -244,15 +246,17 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Select stable Rust
+      - name: Select pinned Rust
         if: env.RUN_DESKTOP == 'true'
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal
+          $toolchain = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          if (-not $toolchain) { throw 'Unable to read the pinned Rust toolchain.' }
+          rustup toolchain install $toolchain --profile minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          rustup default stable
+          rustup default $toolchain
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          rustup target add x86_64-pc-windows-msvc --toolchain stable
+          rustup target add x86_64-pc-windows-msvc --toolchain $toolchain
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustc --version
 
@@ -400,7 +404,7 @@ jobs:
           VITE_AI_NOVEL_STUDIO_E2E: '1'
         run: |
           $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE ".e2e-tools\target"
-          node node_modules/@tauri-apps/cli/tauri.js build --features e2e --bundles none --ci
+          node node_modules/@tauri-apps/cli/tauri.js build --features e2e --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify WebView2 and EdgeDriver still match

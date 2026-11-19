@@ -8,6 +8,7 @@ import type { EditorDocumentController } from './useEditorDocumentController';
 import type { ChapterOutlineEditor } from './useChapterOutlineEditor';
 import { EditorChapterContext } from './EditorChapterContext';
 import { ChapterSourceReview } from '../ChapterSourceReview';
+import { ReviewAuthorizationRenewalDialog } from '../ReviewAuthorizationRenewalDialog';
 import { formatChapterHeading } from '../../../utils/chapterHeading';
 
 interface EditorAreaViewProps {
@@ -60,11 +61,14 @@ export default function EditorAreaView({
     );
   }
   const ready = documentState === 'ready';
-  const busy = document.saving || document.adopting;
+  const busy = document.saving || document.adopting || document.reviewRenewal.busy;
   return (
     <div className="editor-content" data-document-state={documentState}>
       {ready && currentDraft && (
-        <details className="editor-document-metadata" key={`${chapter.id}:${currentDraft.id}`}>
+        <details
+          className="editor-document-metadata"
+          key={`metadata:${chapter.id}:${currentDraft.id}`}
+        >
           <summary>
             <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
             草稿信息 · v{currentDraft.versionNo}
@@ -123,14 +127,49 @@ export default function EditorAreaView({
                   重试采用
                 </button>
               )}
+              {document.reviewRenewal.canRenew && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy}
+                  onClick={() => void document.reviewRenewal.begin()}
+                >
+                  {document.reviewRenewal.uncertain
+                    ? '核对重新授权结果'
+                    : document.isDirty
+                      ? '保存当前修改并预览重新授权'
+                      : '预览重新授权当前草稿'}
+                </button>
+              )}
             </div>
           )}
         </div>
       )}
 
+      {ready && document.reviewRenewal.resumedDraftChanged && (
+        <p role="status">
+          当前显示上次重新授权后又经人工保存、且本次原生已核验的草稿版本；采用仍需明确确认。
+        </p>
+      )}
+      {document.reviewRenewal.notice && <p role="status">{document.reviewRenewal.notice}</p>}
+      {document.reviewRenewal.open && (
+        <ReviewAuthorizationRenewalDialog
+          preview={document.reviewRenewal.preview}
+          savedContent={document.reviewRenewal.savedContent}
+          formalContent={document.reviewRenewal.formalContent}
+          busy={document.reviewRenewal.busy}
+          committing={document.reviewRenewal.committing}
+          error={document.reviewRenewal.error}
+          uncertain={document.reviewRenewal.uncertain}
+          onConfirm={() => void document.reviewRenewal.confirm()}
+          onLookup={() => void document.reviewRenewal.lookup()}
+          onDismiss={document.reviewRenewal.dismiss}
+        />
+      )}
+
       {ready && currentDraft && (
         <ChapterSourceReview
-          key={`${chapter.id}:${currentDraft.id}`}
+          key={`source-review:${chapter.id}:${currentDraft.id}`}
           chapter={chapter}
           draft={currentDraft}
           original={originalCandidateContent}

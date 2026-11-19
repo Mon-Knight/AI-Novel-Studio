@@ -3,7 +3,7 @@
 use super::*;
 use rusqlite::{types::ValueRef, Connection, ToSql};
 
-pub(super) fn rows(
+pub(in super::super) fn rows(
     connection: &Connection,
     sql: &str,
     args: &[&dyn ToSql],
@@ -57,9 +57,9 @@ pub(in super::super) fn current(
     input: &StartTaskTurnInput,
 ) -> Result<Value, String> {
     let chapter_id = input.chapter_id.as_deref().ok_or("章节身份缺失")?;
-    let args: &[&dyn ToSql] = &[&input.novel_id, &chapter_id];
+    let args: &[&dyn ToSql] = &[&input.require_novel_id()?, &chapter_id];
     let chapter = crate::services::chapter_service::get_chapter(connection, chapter_id)?
-        .filter(|chapter| chapter.novel_id == input.novel_id)
+        .filter(|chapter| input.novel_id.as_deref() == Some(chapter.novel_id.as_str()))
         .ok_or("章节作用域已变化")?;
     let chapter_source = json!({"id":chapter.id,"volumeId":chapter.volume_id,"title":chapter.title,
         "outline":chapter.outline.unwrap_or_default(),"goal":chapter.goal.unwrap_or_default(),
@@ -70,25 +70,37 @@ pub(in super::super) fn current(
         )?;
     if engineering
         .as_ref()
-        .is_some_and(|state| state.novel_id != input.novel_id)
+        .is_some_and(|state| input.novel_id.as_deref() != Some(state.novel_id.as_str()))
     {
         return Err("章节工程作用域已变化".into());
     }
     let engineering = engineering.map(|state| json!({"activeVersion":state.active_version,"status":state.status,
         "chapterCard":state.chapter_card_json,"scenePlan":state.scene_plan_json,"generationConstraints":state.generation_constraints_json}));
     let adopted = if chapter.adopted_draft_id.is_some() {
-        let body = chapter_continuity::load_adopted(connection, &input.novel_id, chapter_id)?;
+        let body =
+            chapter_continuity::load_adopted(connection, input.require_novel_id()?, chapter_id)?;
         Some(json!({"draftId":body.draft_id,"contentHash":body.source_hash}))
     } else {
         None
     };
+    let eligible_summary_ids =
+        crate::services::summary_application_policy::eligible_summary_ids_json(
+            connection,
+            input.require_novel_id()?,
+        )
+        .map_err(|e| e.to_string())?;
+    let summary_args: &[&dyn ToSql] = &[
+        &input.require_novel_id()?,
+        &chapter_id,
+        &eligible_summary_ids,
+    ];
     let summaries = rows(connection, &format!("{ORDERED_CHAPTERS}
         SELECT c.id AS chapterId,c.title,c.order_index AS orderIndex,s.summary,
           COALESCE(s.key_events,'') AS keyEvents,COALESCE(s.character_changes,'') AS characterChanges,
           COALESCE(s.next_chapter_hints,'') AS nextChapterHints
         FROM ordered_chapters c JOIN chapter_summaries s ON s.chapter_id=c.id AND s.novel_id=?1
-        WHERE c.sequence_index<(SELECT sequence_index FROM ordered_chapters WHERE id=?2)
-        ORDER BY c.sequence_index DESC,s.created_at DESC,s.id DESC LIMIT 3"), args)?;
+        WHERE c.sequence_index<(SELECT sequence_index FROM ordered_chapters WHERE id=?2) AND s.id IN (SELECT value FROM json_each(?3))
+        ORDER BY c.sequence_index DESC,s.created_at DESC,s.id DESC LIMIT 3"), summary_args)?;
     let states = rows(connection, &format!("{ORDERED_CHAPTERS}
         SELECT cs.character_id AS characterId,cs.chapter_id AS chapterId,cs.state_summary AS stateSummary,
           COALESCE(cs.relationship_changes,'') AS relationshipChanges,COALESCE(cs.goal_changes,'') AS goalChanges,
@@ -99,7 +111,7 @@ pub(in super::super) fn current(
     let mut characters = rows(connection, "SELECT id,name,role_type AS roleType,is_protagonist AS isProtagonist,
         COALESCE(personality,'') AS personality,COALESCE(constraints,'') AS constraints,COALESCE(ability,'') AS ability,
         COALESCE(goals,'') AS goals,COALESCE(relation_to_protagonist,'') AS relationToProtagonist,faction
-        FROM characters WHERE novel_id=?1 AND is_active=1 ORDER BY protagonist_order,name,id", &[&input.novel_id])?;
+        FROM characters WHERE novel_id=?1 AND is_active=1 ORDER BY protagonist_order,name,id", &[&input.require_novel_id()?])?;
     for character in characters.as_array_mut().ok_or("人物材料无效")? {
         let state = states.as_array().and_then(|states| {
             states
@@ -121,14 +133,14 @@ pub(in super::super) fn current(
     Ok(json!({
         "novel": one(connection,"SELECT id,title,subtitle,genre,COALESCE(description,'') AS description,outline,
             main_character AS mainCharacter,protagonist_ability AS protagonistAbility,protagonist_mode AS protagonistMode,
-            target_word_count AS targetWordCount FROM novels WHERE id=?1 AND deleted_at IS NULL", &[&input.novel_id])?,
+            target_word_count AS targetWordCount FROM novels WHERE id=?1 AND deleted_at IS NULL", &[&input.require_novel_id()?])?,
         "chapters": rows(connection,"SELECT id,volume_id AS volumeId,title,COALESCE(goal,'') AS goal,order_index AS orderIndex,
-            adopted_draft_id AS adoptedDraftId FROM chapters WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id", &[&input.novel_id])?,
+            adopted_draft_id AS adoptedDraftId FROM chapters WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id", &[&input.require_novel_id()?])?,
         "volumes": rows(connection,"SELECT id,title,order_index AS orderIndex FROM volumes
-            WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id", &[&input.novel_id])?,
+            WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id", &[&input.require_novel_id()?])?,
         "chapter": chapter_source,
         "masterOutline": one(connection,"SELECT id,title,content,status,version,source_type AS sourceType FROM master_outlines
-            WHERE project_id=?1 AND is_active=1 ORDER BY version DESC LIMIT 1", &[&input.novel_id])?,
+            WHERE project_id=?1 AND is_active=1 ORDER BY version DESC LIMIT 1", &[&input.require_novel_id()?])?,
         "volumeOutline": one(connection,"SELECT id,master_outline_id AS masterOutlineId,volume_id AS volumeId,volume_index AS volumeIndex,
             title,content,status,version,source_type AS sourceType FROM volume_outlines WHERE project_id=?1
             AND volume_id=(SELECT volume_id FROM chapters WHERE id=?2) AND is_active=1 ORDER BY version DESC LIMIT 1",args)?,
@@ -141,7 +153,7 @@ pub(in super::super) fn current(
             FROM chapter_events WHERE novel_id=?1 AND chapter_id=?2 ORDER BY created_at,id",args)?,
         "previousChapterSummaries":summaries,
         "targetChapterSummary":one(connection,"SELECT summary,COALESCE(key_events,'') AS keyEvents,COALESCE(character_changes,'') AS characterChanges
-            FROM chapter_summaries WHERE novel_id=?1 AND chapter_id=?2 ORDER BY created_at DESC LIMIT 1",args)?,
+            FROM chapter_summaries WHERE novel_id=?1 AND chapter_id=?2 AND id IN (SELECT value FROM json_each(?3)) ORDER BY created_at DESC LIMIT 1",summary_args)?,
         "characters":characters,"stateTrack":states
     }))
 }
@@ -156,15 +168,16 @@ pub(in super::super) fn host_baseline(
         return Ok(Value::Null);
     }
     let chapter_id = input.chapter_id.as_deref().ok_or("章节身份缺失")?;
-    let previous = chapter_continuity::load_previous(connection, &input.novel_id, chapter_id)?;
+    let previous =
+        chapter_continuity::load_previous(connection, input.require_novel_id()?, chapter_id)?;
     let profiles = json!({
         "novel": rows(connection,"SELECT protagonist_mode,protagonists_json,dual_protagonist_relation_json,main_character,protagonist_ability
-            FROM novels WHERE id=?1 AND deleted_at IS NULL", &[&input.novel_id])?,
+            FROM novels WHERE id=?1 AND deleted_at IS NULL", &[&input.require_novel_id()?])?,
         "characters": rows(connection,"SELECT id,name,role_type,identity,faction,relation_to_protagonist,goal,background,ability,personality,
             constraints,behavior_limits,forbidden_behaviors,goals,is_protagonist,protagonist_key,protagonist_label,protagonist_order
-            FROM characters WHERE novel_id=?1 AND is_active=1 ORDER BY id", &[&input.novel_id])?,
+            FROM characters WHERE novel_id=?1 AND is_active=1 ORDER BY id", &[&input.require_novel_id()?])?,
         "legacy": rows(connection,"SELECT id,name,identity,personality,goal,special_ability,ability_limits,forbidden_behaviors
-            FROM protagonists WHERE novel_id=?1 ORDER BY id", &[&input.novel_id])?
+            FROM protagonists WHERE novel_id=?1 ORDER BY id", &[&input.require_novel_id()?])?
     });
     let empty_profiles = profiles["legacy"]
         .as_array()

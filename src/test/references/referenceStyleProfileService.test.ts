@@ -131,13 +131,36 @@ function savedProfile(input: CreateStyleProfileInput & { novelId: string }): Sty
     dialogueRatio: input.dialogueRatio ?? 0.35,
     descriptionRatio: input.descriptionRatio ?? 0.4,
     prohibitedStyles: input.forbiddenStyles ?? [],
-    isActive: true,
+    isActive: false,
     createdAt: '2026-07-28T00:00:00Z',
     updatedAt: '2026-07-28T00:00:00Z',
   };
 }
 
 describe('createReferenceStyleProfile', () => {
+  it('does not save a profile when cancellation wins after analysis', async () => {
+    const source = bundle();
+    const controller = new AbortController();
+    let saves = 0;
+    await expect(
+      createReferenceStyleProfile(
+        source,
+        { signal: controller.signal },
+        {
+          ...loaders(source),
+          analyze: async () => {
+            controller.abort();
+            return analysis();
+          },
+          saveProfile: async (input) => {
+            saves += 1;
+            return savedProfile(input);
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'AI_REQUEST_CANCELLED' });
+    expect(saves).toBe(0);
+  });
   it('persists only abstract analysis with replayable source provenance', async () => {
     const source = bundle();
     let savedInput: (CreateStyleProfileInput & { novelId: string }) | undefined;
@@ -171,6 +194,9 @@ describe('createReferenceStyleProfile', () => {
       promptVersion: 'style_analyze_layered_v1',
     });
     expect(result.profile.id).toBe('style-1');
+    expect(result.profile.isActive).toBe(false);
+    expect(savedInput).not.toHaveProperty('isActive');
+    expect(savedInput).not.toHaveProperty('authorReviewed');
   });
 
   it('rejects stale bundles and analyzers that echo the complete source', async () => {

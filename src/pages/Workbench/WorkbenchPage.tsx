@@ -4,7 +4,11 @@ import {
   buildCoreAssetEditPath,
   type ChapterCoreAsset,
 } from '../../services/conversation/chapterAssetReadiness';
-import { resolveWorkbenchModelDirectoryTarget } from '../../services/conversation/workbenchModelAvailability';
+import {
+  resolveWorkbenchModelDirectoryTarget,
+  shouldProbeConfiguredWorkbenchModel,
+  workbenchModelProbeKey,
+} from '../../services/conversation/workbenchModelAvailability';
 import { useWorkbenchTaskModelSelection } from '../../features/workbench/useWorkbenchTaskModelSelection';
 import { useWorkbenchChapterHandoff } from '../../features/workbench/useWorkbenchChapterHandoff';
 import { useWorkbenchTaskCreator } from './hooks/useWorkbenchTaskCreator';
@@ -225,11 +229,18 @@ export function WorkbenchPage() {
     selectedModel,
     taskCreator.model,
   );
+  const pluginProbeModelKey = workbenchModelProbeKey(pluginProbeModel);
+  const lastPluginProbeModelKeyRef = useRef('');
   useEffect(() => {
-    // Model selection does not initialize or test a runtime. Execution reports
-    // provider failures in the conversation after accepting the user message.
-    void refreshPlugins(undefined, false).catch(() => undefined);
-  }, [pluginProbeModel, refreshPlugins]);
+    if (lastPluginProbeModelKeyRef.current === pluginProbeModelKey) return;
+    lastPluginProbeModelKeyRef.current = pluginProbeModelKey;
+    // Register the saved API route with the isolated Runtime probe on entry and
+    // on model switches; Mock never probes and health stays descriptive.
+    const shouldProbe = shouldProbeConfiguredWorkbenchModel(pluginProbeModel);
+    void refreshPlugins(undefined, shouldProbe, shouldProbe ? pluginProbeModel : undefined).catch(
+      () => undefined,
+    );
+  }, [pluginProbeModel, pluginProbeModelKey, refreshPlugins]);
   useEffect(() => {
     if (!showPlugins) return;
     void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);

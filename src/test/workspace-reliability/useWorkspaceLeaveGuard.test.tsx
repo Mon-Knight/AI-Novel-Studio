@@ -19,11 +19,11 @@ const tauriHarness = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/api/window', () => ({
-  appWindow: {
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({
     close: tauriHarness.close,
     onCloseRequested: tauriHarness.onCloseRequested,
-  },
+  }),
 }));
 
 vi.mock('../../services/tauri/runtime', async (importOriginal) => {

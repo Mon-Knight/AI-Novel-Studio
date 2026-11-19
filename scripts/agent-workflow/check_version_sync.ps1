@@ -66,7 +66,7 @@ if (-not $cargoLockMatch.Success) { throw "Unable to read ai-novel-studio versio
 Assert-Equal "src-tauri/Cargo.lock" $expected $cargoLockMatch.Groups[1].Value
 
 $tauri = Read-Utf8Text "src-tauri/tauri.conf.json" | ConvertFrom-Json
-Assert-Equal "src-tauri/tauri.conf.json" $expected ([string]$tauri.package.version)
+Assert-Equal "src-tauri/tauri.conf.json" $expected ([string]$tauri.version)
 
 $versionSource = Read-Utf8Text "src/constants/version.ts"
 $versionMatch = [regex]::Match($versionSource, "APP_VERSION\s*=\s*'v([^']+)'")

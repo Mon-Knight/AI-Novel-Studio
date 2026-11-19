@@ -442,7 +442,7 @@ test('an accepted send clears the submitted draft while running and keeps newer 
   assert.match(runner.result.current.composerError, /模型生成失败/u);
 });
 
-test('real-model conversation persists and clears a vague creative brief before checking chapter assets', async () => {
+test('desktop conversation persists the brief without renderer chapter or asset scheduling', async () => {
   const tauriWindow = window as unknown as Record<string, unknown>;
   tauriWindow.__TAURI_INTERNALS__ = {};
   const model = {
@@ -493,18 +493,12 @@ test('real-model conversation persists and clears a vague creative brief before 
     );
     assert.equal(liveBundle.turns.filter((turn) => turn.role === 'user').length, 1);
     assert.equal(assetChecks, 0);
-    assert.ok(prepare);
-    await act(async () => {
-      assert.equal(
-        await prepare!({
-          action: 'generate_chapter',
-          instruction: '写已讨论的开篇',
-          chapterId: CHAPTER.id,
-        }),
-        null,
-      );
-    });
-    assert.ok(assetChecks > 0);
+    assert.equal(
+      prepare,
+      undefined,
+      'only the native root selects and validates later capabilities',
+    );
+    assert.equal(assetChecks, 0);
   } finally {
     delete tauriWindow.__TAURI_INTERNALS__;
     taskConversationWindow.listRunningTargets = originalTargets;
@@ -1542,4 +1536,117 @@ test('failed source revalidation preserves the draft and never appends a turn or
   assert.equal(providerGoals.length, 0);
   assert.equal(runner.result.current.draft, '修改所选章节正文候选');
   assert.equal(runner.result.current.revisionSource?.artifactId, selected.artifactId);
+});
+
+test('persistent task projection never starts a queued asset from a render effect', async () => {
+  taskConversationService.isPersistent = () => true;
+  chapterAssetRecoveryStore.set({
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: CHAPTER.id,
+    originalGoal: '生成下一章',
+    missingAssets: ['world_setting'],
+    modelSnapshot: MODEL,
+    orchestration: { phase: 'queued', asset: 'world_setting', updatedAt: MODEL.capturedAt },
+    createdAt: MODEL.capturedAt,
+    checkedAt: MODEL.capturedAt,
+  });
+  const runner = renderRunner();
+  await waitFor(() => assert.ok(runner.result.current.assetRecovery));
+  assert.deepEqual(providerGoals, []);
+  assert.equal(liveBundle.turns.length, 0);
+  runner.unmount();
+  const reopened = renderRunner();
+  await waitFor(() => assert.ok(reopened.result.current.assetRecovery));
+  assert.deepEqual(providerGoals, []);
+  assert.equal(liveBundle.turns.length, 0);
+});
+
+test('persistent adopted-summary projection requires native postcommit reconciliation rather than model replay', async (t) => {
+  taskConversationService.isPersistent = () => true;
+  const chapter = { ...CHAPTER, adoptedDraftId: 'adopted-current' };
+  liveBundle.authorizations = [
+    {
+      authorizationId: 'review-current',
+      artifactId: 'chapter-candidate',
+      chapterId: chapter.id,
+      novelId: chapter.novelId,
+      decisionId: 'decision-current',
+      status: 'consumed',
+      issuedAt: MODEL.capturedAt,
+      consumedAt: MODEL.capturedAt,
+      consumedByDraftId: chapter.adoptedDraftId,
+    },
+  ];
+  let followups = 0;
+  t.mock.method(artifactDecisionService, 'ensureChapterSummaryFollowUp', async () => {
+    followups++;
+    throw new Error('renderer must not schedule a desktop followup');
+  });
+  const runner = renderRunner([chapter]);
+  await waitFor(() =>
+    assert.equal(runner.result.current.chapterSummaryOrchestration.phase, 'ensure_turn'),
+  );
+  assert.equal(followups, 0);
+  assert.deepEqual(providerGoals, []);
+  assert.equal(liveBundle.turns.length, 0);
+  runner.unmount();
+  const reopened = renderRunner([chapter]);
+  await waitFor(() =>
+    assert.equal(reopened.result.current.chapterSummaryOrchestration.phase, 'ensure_turn'),
+  );
+  assert.equal(followups, 0);
+  assert.deepEqual(providerGoals, []);
+});
+
+test('summary policy stops task continuation from a blocked enabled summary in either persistence mode', async () => {
+  const chapter = { ...CHAPTER, adoptedDraftId: 'adopted-current' };
+  liveBundle.authorizations = [
+    {
+      authorizationId: 'review-current',
+      artifactId: 'chapter-candidate',
+      chapterId: chapter.id,
+      novelId: chapter.novelId,
+      decisionId: 'decision-current',
+      status: 'consumed',
+      issuedAt: MODEL.capturedAt,
+      consumedAt: MODEL.capturedAt,
+      consumedByDraftId: chapter.adoptedDraftId,
+    },
+  ];
+  chapterSummaryService.getByNovelId = async () => [
+    {
+      id: 'blocked-summary',
+      novelId: chapter.novelId,
+      chapterId: chapter.id,
+      adoptedDraftId: chapter.adoptedDraftId!,
+      summary: '含阻断性问题的历史总结',
+      enabled: true,
+      isExpired: false,
+      createdAt: MODEL.capturedAt,
+      updatedAt: MODEL.capturedAt,
+      validationResult: {
+        policyVersion: 1,
+        passed: false,
+        score: 99,
+        safeToContext: true,
+        problems: [{ type: 'character_error', message: '正文中不存在该角色。' }],
+      },
+    },
+  ];
+  for (const persistent of [false, true]) {
+    taskConversationService.isPersistent = () => persistent;
+    const runner = renderRunner([chapter, { ...CHAPTER, id: 'chapter-2', chapterNumber: 2 }]);
+    await waitFor(() =>
+      assert.equal(runner.result.current.chapterSummaryOrchestration.phase, 'failed'),
+    );
+    assert.equal(
+      runner.result.current.chapterSummaryOrchestration.stopReason,
+      'SUMMARY_BLOCKING_VALIDATION_ERROR',
+    );
+    assert.equal(runner.result.current.chapterSummaryOrchestration.nextChapterId, undefined);
+    assert.deepEqual(providerGoals, []);
+    assert.equal(liveBundle.turns.length, 0, 'blocked summary is not silently regenerated');
+    runner.unmount();
+  }
 });

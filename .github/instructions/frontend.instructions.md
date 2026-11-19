@@ -4,6 +4,7 @@
 > 优先级：高
 > 适用范围：`src/` 下所有 `.tsx` / `.ts` / `.css` 文件
 > 版本边界：v3.2.1 页面用于描述当前已发布行为；v3.3.0+ 目标以 `docs/architecture/conversational-creative-workbench.md` 为准
+> 实现细则：先读 [`docs/ui-development-framework.md`](../../docs/ui-development-framework.md)，本文只保留前端执行摘要
 
 ---
 
@@ -100,6 +101,9 @@ font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
 ---
 
 ## 4. 组件规范
+
+详细的组件 API、Token、状态矩阵、键盘/焦点、ARIA、测试查询和 Code review 清单以
+[`docs/ui-development-framework.md`](../../docs/ui-development-framework.md) 为准。以下目录和规则是本文件的前端执行摘要。
 
 ### 4.1 组件目录
 

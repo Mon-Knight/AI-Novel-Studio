@@ -286,60 +286,9 @@ fn validate_task_scope(scope: Option<&TaskScope>, arguments: &Value) -> Result<(
     Ok(())
 }
 
-fn bind_search_memory_target(
-    scope: Option<&TaskScope>,
-    arguments: &Value,
-) -> Result<Value, String> {
-    let Some(bound_chapter_id) = scope.and_then(|scope| scope.chapter_id.as_deref()) else {
-        return Ok(arguments.clone());
-    };
-    let mut object = arguments
-        .as_object()
-        .cloned()
-        .ok_or_else(|| TASK_CHAPTER_SCOPE_REJECTED.to_string())?;
-    for key in ["targetChapterId", "target_chapter_id"] {
-        if let Some(explicit_target) = object.get(key) {
-            if explicit_target.as_str() != Some(bound_chapter_id) {
-                return Err(TASK_CHAPTER_SCOPE_REJECTED.to_string());
-            }
-        }
-    }
-    if !object.contains_key("targetChapterId") && !object.contains_key("target_chapter_id") {
-        object.insert(
-            "targetChapterId".to_string(),
-            Value::String(bound_chapter_id.to_string()),
-        );
-    }
-    Ok(Value::Object(object))
-}
-
-fn bind_novel_candidate_target(
-    scope: Option<&TaskScope>,
-    arguments: &Value,
-) -> Result<Value, String> {
-    let Some(scope) = scope else {
-        return Ok(arguments.clone());
-    };
-    if scope.chapter_id.is_some() {
-        return Ok(arguments.clone());
-    }
-    let mut object = arguments
-        .as_object()
-        .cloned()
-        .ok_or_else(|| TASK_NOVEL_SCOPE_REJECTED.to_string())?;
-    match object.get("novelId") {
-        Some(value) if value.as_str() != Some(scope.novel_id.as_str()) => {
-            return Err(TASK_NOVEL_SCOPE_REJECTED.to_string())
-        }
-        Some(_) => {}
-        None => {
-            object.insert("novelId".to_string(), Value::String(scope.novel_id.clone()));
-        }
-    }
-    object.remove("chapterId");
-    object.remove("chapter_id");
-    Ok(Value::Object(object))
-}
+#[path="task_scope_binding.rs"]
+mod task_scope_binding;
+use task_scope_binding::{bind_search_memory_target,bind_novel_candidate_target};
 
 /// The `tools/list` payload.
 pub fn tool_list() -> Vec<Value> {
@@ -349,6 +298,7 @@ pub fn tool_list() -> Vec<Value> {
 fn legacy_tool_catalog() -> Vec<Value> {
     vec![
         creative_action::schema(),
+        crate::domain_candidate::tool_schema(),
         json!({
             "name": "novel.read_context",
             "description": "读取小说上下文与章节结构。只读。",
@@ -600,6 +550,7 @@ fn call_tool_with_security_context(
     security_context: Result<TaskSecurityContext, String>,
 ) -> Result<Value, String> {
     let security_context = security_context?;
+    crate::task_budget::authorize(name)?;
     if crate::secret_guard::contains_secret_value(arguments) {
         return Err("suspicious credential-like input rejected".to_string());
     }
@@ -643,6 +594,7 @@ fn call_tool_with_security_context(
     }
     match name {
         "creative.plan_action" => creative_action::plan(connection, arguments),
+        "domain.submit_candidate" => crate::domain_candidate::submit_candidate(connection, arguments),
         "submit_chapter_stage" => crate::stage_submission::call(
             arguments,
             security_context.allowed_tools.as_ref(),
@@ -3091,6 +3043,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
     }
 
     let target_sequence_index = chapter_sequence_index(connection, &novel_id, &chapter_id)?;
+    let eligible_summary_ids=crate::summary_context_policy::eligible_summary_ids_json(connection,&novel_id).map_err(|e|e.to_string())?;
     let mut previous_summaries = Vec::new();
     {
         let mut statement = connection
@@ -3124,13 +3077,13 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
                    JOIN chapter_summaries s
                      ON s.chapter_id = c.id
                     AND s.novel_id = ?1
-                  WHERE c.sequence_index < ?2
+                  WHERE c.sequence_index < ?2 AND s.id IN (SELECT value FROM json_each(?3))
                ORDER BY c.sequence_index DESC, s.created_at DESC, s.id DESC
                   LIMIT 3",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![novel_id, target_sequence_index], |row| {
+            .query_map(params![novel_id, target_sequence_index,eligible_summary_ids], |row| {
                 Ok(json!({
                     "chapterId": row.get::<_, String>(0)?,
                     "title": row.get::<_, String>(1)?,
@@ -3150,8 +3103,8 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
     let target_summary = connection
         .query_row(
             "SELECT summary, key_events, character_changes FROM chapter_summaries
-             WHERE novel_id = ?1 AND chapter_id = ?2 ORDER BY created_at DESC LIMIT 1",
-            params![novel_id, chapter_id],
+             WHERE novel_id = ?1 AND chapter_id = ?2 AND id IN (SELECT value FROM json_each(?3)) ORDER BY created_at DESC LIMIT 1",
+            params![novel_id, chapter_id,eligible_summary_ids],
             |row| {
                 Ok(json!({
                     "summary": clip_to(row.get::<_, String>(0)?, SUMMARY_FIELD_CLIP),
@@ -3823,7 +3776,9 @@ mod tests {
                 CREATE TABLE chapter_summaries (
                     id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
                     summary TEXT NOT NULL, key_events TEXT, character_changes TEXT,
-                    next_chapter_hints TEXT, created_at TEXT, updated_at TEXT
+                    next_chapter_hints TEXT, validation_status TEXT, validation_result TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1, is_expired INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT, updated_at TEXT
                 );
                 CREATE TABLE characters (
                     id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -4049,6 +4004,13 @@ mod tests {
                      0, 3000, '2026-08-21T00:02:00Z', '2026-08-21T00:02:00Z'),
                     ('chapter-4', 'novel-1', 'volume-2', '第四章', '', '', 2, 'adopted',
                      100, 3000, '2026-08-21T00:03:00Z', '2026-08-21T00:03:00Z');
+                INSERT INTO chapter_summaries (
+                    id, novel_id, chapter_id, summary, validation_status, enabled,
+                    is_expired, created_at, updated_at
+                ) VALUES (
+                    'summary-memory-2', 'novel-1', 'chapter-2', '第二章共享记忆', NULL, 1,
+                    0, '2026-08-21T00:01:00Z', '2026-08-21T00:01:00Z'
+                );
                 INSERT INTO memory_documents VALUES
                     ('memory-1', 'novel-1', 'adopted_draft', 'draft-memory-1', 1, 'active',
                      '2026-08-21T00:00:00Z'),
@@ -4117,7 +4079,10 @@ mod tests {
                      100, 3000, '2026-08-21T00:03:00Z', '2026-08-21T00:03:00Z'),
                     ('chapter-5', 'novel-1', 'volume-3', '第五章', '', '', 1, 'summarized',
                      100, 3000, '2026-08-21T00:04:00Z', '2026-08-21T00:04:00Z');
-                 INSERT INTO chapter_summaries VALUES
+                 INSERT INTO chapter_summaries (
+                    id, novel_id, chapter_id, summary, key_events, character_changes,
+                    next_chapter_hints, created_at, updated_at
+                 ) VALUES
                     ('summary-1', 'novel-1', 'chapter-1', '第一章事实', '', '', '',
                      '2026-08-21T00:00:01Z', '2026-08-21T00:00:01Z'),
                     ('summary-2', 'novel-1', 'chapter-2', '第二章事实', '', '', '',

@@ -4,6 +4,7 @@
  */
 import type { ChapterSummarizeResult, ChapterSummaryValidation } from '../../types/chapterSummary';
 import { validateSummaryGrounding } from './chapterSummaryGrounding';
+import { summaryIssueRequiresHumanReview } from './summaryApplicationPolicy';
 
 /**
  * 对章节总结进行一致性校验。
@@ -14,6 +15,7 @@ export function validateSummary(
   summaryResult: ChapterSummarizeResult,
 ): ChapterSummaryValidation {
   const problems: ChapterSummaryValidation['problems'] = [];
+  const advisories: NonNullable<ChapterSummaryValidation['advisories']> = [];
   const draftLower = draftContent.toLowerCase();
 
   // 1. 检查 keyEvents 中的关键实体是否在正文中出现
@@ -64,8 +66,9 @@ export function validateSummary(
       (kw) => kw.length >= 2 && draftLower.includes(kw.toLowerCase()),
     ).length;
     if (hookWords.length >= 3 && foundCount < hookWords.length * 0.3) {
-      problems.push({
-        type: 'speculation',
+      advisories.push({
+        code: 'SUMMARY_NEXT_CHAPTER_HOOK_SPECULATION',
+        path: '/nextChapterHook',
         message: '下一章衔接建议可能基于推测而非正文已有线索。',
       });
     }
@@ -73,20 +76,43 @@ export function validateSummary(
 
   const grounding = validateSummaryGrounding(draftContent, summaryResult);
   for (const issue of grounding.issues) {
-    problems.push({
-      type: issue.severity === 'error' ? 'fabrication' : 'speculation',
-      message: `${issue.path}：${issue.message}`,
-    });
+    if (issue.severity === 'error') {
+      problems.push({
+        type: 'fabrication',
+        message: `${issue.path}：${issue.message}`,
+      });
+    } else {
+      advisories.push({
+        code: issue.code,
+        path: issue.path,
+        message: issue.message,
+      });
+    }
   }
-  const score = Math.max(0, 100 - problems.length * 12);
+  const score = Math.max(0, 100 - (problems.length + advisories.length) * 12);
   const passed = problems.length === 0;
 
   return {
+    policyVersion: 1,
     passed,
     score,
     problems,
-    safeToContext: !grounding.issues.some((issue) => issue.severity === 'error') && score >= 70,
+    blockingIssues: problems.map((problem) => ({
+      code: `SUMMARY_${problem.type.toUpperCase()}`,
+      path: '/',
+      message: problem.message,
+    })),
+    advisories,
+    safeToContext: passed && score >= 70,
+    reviewRequirement: grounding.issues.some((issue) => summaryIssueRequiresHumanReview(issue.code))
+      ? 'human_required'
+      : 'none',
     semanticValidation: 'not_checked',
+    evidenceValidation: !summaryResult.grounding
+      ? 'missing'
+      : grounding.issues.some((issue) => issue.severity === 'error')
+        ? 'failed'
+        : 'passed',
     groundingIssues: grounding.issues,
   };
 }

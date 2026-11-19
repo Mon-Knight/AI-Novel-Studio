@@ -197,6 +197,39 @@ describe('workbench input content protection', () => {
     await act(async () => fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps the task creator model refresh notice concise', () => {
+    render(
+      <WorkbenchTaskCreator
+        novelTitle="刷新提示测试"
+        chapters={[]}
+        templates={[]}
+        plugins={[]}
+        pluginsLoading
+        pluginsError=""
+        contextPending={false}
+        contextFailed={false}
+        goal=""
+        chapterId=""
+        selectedModel={model}
+        creating={false}
+        error=""
+        onGoalChange={vi.fn()}
+        onChapterChange={vi.fn()}
+        onModelChange={vi.fn()}
+        onRetryModels={vi.fn()}
+        onOpenModelSettings={vi.fn()}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const notice = screen.getByTestId('workbench-new-task-model-status');
+    const noticeText = notice.textContent ?? '';
+    expect(noticeText).toContain('正在刷新模型列表');
+    expect(noticeText).not.toContain('仍可直接发送');
+    expect(noticeText).not.toContain('本地能力问答仍可创建');
+  });
 });
 function ComposerHarness({
   initial = '',
