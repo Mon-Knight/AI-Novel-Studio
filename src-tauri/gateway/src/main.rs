@@ -24,6 +24,10 @@ mod sql_column_contract;
 mod stage_submission;
 mod tool_allowlist;
 mod tools;
+mod task_budget;
+mod domain_candidate;
+#[path="../../shared/summary_application_policy.rs"]
+mod summary_context_policy;
 
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};

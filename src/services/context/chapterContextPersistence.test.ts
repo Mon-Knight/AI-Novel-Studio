@@ -94,13 +94,20 @@ const draftModule = (await vite.ssrLoadModule(
   '/src/services/database/draftVersionService.ts',
 )) as typeof import('../database/draftVersionService');
 
-after(async () => {
+function resetTauriMocks(): void {
   clearMocks();
+  // Tauri 2's mockIPC leaves an empty __TAURI_INTERNALS__ behind; remove it so
+  // browser-fallback tests observe a non-Tauri runtime again.
+  delete (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+}
+
+after(async () => {
+  resetTauriMocks();
   await vite.close();
 });
 
 beforeEach(() => {
-  clearMocks();
+  resetTauriMocks();
   storage.clear();
 });
 
@@ -283,6 +290,41 @@ test('browser bundle commits summary, contexts, character states and chapter sta
   assert.equal(JSON.parse(storage.getItem(KEYS.states) ?? '[]').length, 1);
 });
 
+test('unsafe summary validation blocks active context and character-state writes atomically', async () => {
+  seedBrowserOwners();
+  const before = snapshotAll();
+  const input = bundleInput();
+  input.summary.validationResult = {
+    passed: false,
+    score: 76,
+    safeToContext: true,
+    problems: [{ type: 'character_error', message: '角色不在原文' }],
+  };
+  for (const enabled of [true, false]) {
+    input.summary.enabled = enabled;
+    await assert.rejects(
+      bundleModule.chapterContextPersistenceService.save(input),
+      /SUMMARY_BLOCKING_VALIDATION_ERROR/,
+    );
+    assert.deepEqual(snapshotAll(), before);
+  }
+  input.contextRecords.forEach((record) => {
+    record.isActive = false;
+  });
+  await assert.rejects(
+    bundleModule.chapterContextPersistenceService.save(input),
+    /SUMMARY_BLOCKING_VALIDATION_ERROR/,
+  );
+  input.characterStates = [];
+  const result = await bundleModule.chapterContextPersistenceService.save(input);
+  assert.equal(result.summary.enabled, false);
+  await assert.rejects(
+    summaryModule.chapterSummaryService.setEnabled(result.summary.id, true),
+    /SUMMARY_BLOCKING_VALIDATION_ERROR/,
+  );
+  assert.equal(JSON.parse(storage.getItem(KEYS.summaries)!)[0].enabled, false);
+});
+
 test('browser bundle restores every key when a later localStorage write fails', async () => {
   seedBrowserOwners();
   const before = snapshotAll();
@@ -462,7 +504,8 @@ test('legacy migration cleans only IDs confirmed by SQLite and preserves ambiguo
 
   mockIPC((command, args) => {
     assert.equal(command, 'migrate_legacy_chapter_context');
-    const input = args.input as Record<string, unknown[]>;
+    const payload = (args ?? {}) as Record<string, unknown>;
+    const input = payload.input as Record<string, unknown[]>;
     assert.equal(input.chapterSummaries.length, 1);
     assert.equal(input.contextRecords.length, 1);
     return {

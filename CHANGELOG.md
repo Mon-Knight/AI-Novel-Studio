@@ -4,9 +4,53 @@
 
 ## Unreleased
 
+- **桌面任务字数设置（2026-11-19，未发布）**：修复独立字数设置一直显示排队的问题。纯设置在本地完成并显示目标与候选硬区间；后续写章沿用该任务设置及用户选定的模型，不修改正式章节目标，也不产生或采用正文。
+
+- **任务结束后收回剩余授权（2026-11-18，未发布）**：修复候选生成后补签授权、规划或总结已应用且根任务结束时，剩余额度仍显示有效的问题。只收回该根目标的余量，不撤销已提交结果，不影响其他目标或仍待总结的任务。固定 Mock 的 Windows 工作台已验证分阶段写章：在 Beat 状态中断后，重启不自动重放；显式重试复用三个阶段，最终只生成候选。证据边界和本地 EXE 见[实施记录](reports/unified-agent-2026-11-11/implementation.md#closeout-20261118)。
+
+- **统一 Agent 执行内核与任务级预授权（2026-11-11，非版本任务，集成验证中）**：桌面对话、规划、写章/修订、检查、总结及专用创作入口接入同一原生协调器，复用 TaskConversation/Turn/Run/ToolCallEvent 与 AiTask/Attempt/Artifact 事实；API、Mock、本地模型使用同一业务协议，旧确定性 Writer 顶层编排仅保留浏览器开发兼容。Writing SubAgent 纳入受控父子契约、根预算、取消与阶段验证，固定 DSH commit 与 `ans_task_session_v2` 不变。新增任务头授权入口：规划应用、正文采用、总结应用分别选择，绑定当前明确目标及受控后续阶段、章节/有限新建范围、次数、预算、有效期、模型与基线；每次原生事务复验并生成幂等回执，撤销不抹去已提交结果，自动采用不伪装成人工审阅。总结写入和上下文读取共用策略，阻断问题不能由高分放行，具体人工判断请求不能由预授权替代。兼容迁移总数为 001～043：`041_task_authorizations`、`042_library_task_scope`（nullable novel identity 安全重建）与 `043_host_terminal_native_facts`（仅 `dsh.*` 原生控制事实可在 Run 终态后 append，普通工具仍限活动 Run）；001～040 定义/checksum 保持，041/042 已落地定义不改写，本批仅 043 新增 trigger；项目备份 schema 13 恢复 active 授权为 expired。
+
+  11 月 13 日验证截面（后续见上方 11 月 18 日记录）：**INTEGRATION / NOT YET FULLY VERIFIED**。签发后待处理候选、提交后续接、父子隔离、竞争/恢复与真实桌面闭环仍以本批最终动态门禁为准；Scene/Beat 原生阶段链源码已落地（`scene_plan → 每 Scene beat_plan → 每 Beat beat_write/beat_state → scene_close → chapter_assemble`），并有隔离 SQLite 单测；真实 Windows Tauri 逐阶段/跨重启仍 `NOT_VERIFIED`，整章携带计划不等于功能对等。隔离 SQLite 动态复现确认旧 issued 人工审阅授权首次消费可在另一授权采用后切换采用指针，两份正文仍保留，并非正文丢失；已 consumed 重放原先已拒绝。041 新增不可变 `review_authorizations.native_baseline_hash`，首消费 guard 已接入主采用路径与旧 consume IPC，并有隔离 SQLite 回归；本次命令结果待实施记录回填。人工采用与预授权采用均接入 staged assembly evidence 复验，装配恢复复用完全匹配候选并补齐缺失 admission。新增完整验收入口可选 `verify_project.ps1 -NoBundle`，保留默认发布/脏工作树门禁，目标仅为仓库本地生产 EXE，不生成安装包或发布。实际命令、失败修复、未执行项和 EXE 对应关系由[实施记录](reports/unified-agent-2026-11-11/implementation.md)统一更新；历史证据不冒充本批通过，R4 live 与文学效果保持未验证。不升级应用版本、依赖或 DSH 载体，不自动提交、推送或发布。
+
+- **UI 开发框架文档规范（2026-10-30，非版本任务）**：新增 `docs/ui-development-framework.md`，统一
+  React/Tauri 桌面 UI 的 Token、组件分层、状态所有权、键盘/焦点/ARIA、IME、滚动、测试查询、Code review
+  和变更工作流，并附带 UI-01～UI-05 分阶段任务书；以公开组件库和测试工具的工程实践为参考，但保持现有
+  React、独立 CSS、主题 Token、路由与工作台单一输入入口不变。同步更新根 `AGENTS.md`、前端指令、Cursor UI
+  规则、开发规则、UI 参考和文档索引。
+
+- **Tauri 2 迁移遗漏收口（2026-10-29，非版本任务）**：补齐 Tauri 1 Windows
+  `http://tauri.localhost` 到 Tauri 2 `https://tauri.localhost` 的一次性 LocalStorage
+  迁移。隐藏 HTTP-origin 窗口读取 `ai_novel_studio_*` 偏好，经内存暂存和主窗口确认后再写入
+  HTTPS origin；只补缺失键、不覆盖新值，失败或崩溃保留旧 origin 数据，完成标记防重复。
+  同时将 `tauri-plugin-updater` 从临时 Git patch 切换到 crates.io 2.14.1（仍锁定
+  `zip 9.1.2`），新增原生 dialog/FS scope/notification 真实桌面规格，并用独立测试产品
+  完成真实签名下载、错误签名拒绝、3.7.0→3.7.1 安装与保留安装包回滚；正式发布密钥和
+  GitHub 正式通道仍由发布环境验收。详细证据见
+  [迁移遗漏收口报告](reports/tauri2-migration-completion-2026-10-29.md)。
+
+  验证：v1 LocalStorage Rust 单测 3/3、TypeScript 单测 4/4、真实 WebView2 迁移规格
+  4/4、原生插件桌面规格 4/4；updater 真实签名测试记录 3.7.0 检查、坏签名拒绝、
+  3.7.1 安装和 3.7.0 回滚；完整 Windows 桌面套件 27/27 通过。未升级版本，未提交、
+  推送或打 tag。
+
+- **模型设置与 DeepSeek Runtime 注册同步（2026-10-29，非版本任务）**：保存模型设置此前只持久化 Provider/凭据，Runtime 仅在打开“当前插件”或首次任务时懒初始化；普通目录刷新不带冻结快照，无法证明当前模型已注册，且前端、凭据与 Rust 路由各自拼接 Provider/Model/Endpoint 身份。现在 `saveSettings` 只负责持久化、治理与凭据同步，新增 `syncRuntimeModel` 通过隔离探针（`__ans_plugin_probe__`）用精确快照初始化 Runtime，只有投影中出现同一 `provider:model` 的 `loaded + initialized + available` 才报告已注册，失败在设置页显示原因与「重试 Runtime 初始化」。工作台进入、任务切换与模型切换会以当前快照触发同一探针，并用请求序列保证旧响应不覆盖新状态。新增 `src/services/conversation/modelIdentity.ts` 统一 Provider 别名/大小写/Endpoint 尾部斜杠，Rust `canonical_provider_identity` 使用同一规则后再校验 adapterProvider、baseUrl、modelId 与工具清单。Workbench 状态改为 `not_registered / initializing / ready / unavailable / error` 五态：目录只描述注册情况，发送前只拒绝缺少 Provider、模型或 Endpoint 的快照，路由与凭据仍由后端 Run 最终裁定；任务 Worker 与探针继续按 endpoint + provider + model + 凭据哈希 + 策略 + 作用域隔离，配置变化不会复用旧 Worker。
+
+  验证：`npx tsc --noEmit`、`npm run lint:ci`；`modelIdentity`/`currentPluginService`/`taskModelSnapshot`/`workbenchModelAvailability`/`workbenchSelectableModels`/`validateWorkbenchModelForSend`/`taskRuntimeService` 定向 55 项、`WorkbenchInputUX` 23 项、`WorkbenchComposer` + `useWorkbenchPlugins` 11 项、`WorkbenchPage` 71 项、`settingsNavigation` 7 项通过；`cargo check --locked` 通过，`provider_aliases_normalize`、`provider_transport_rejects_empty_remote_credentials_but_allows_loopback`、`idle_task_worker_health_requires_exact_selected_model_and_credential` 三个 Rust 定向测试通过；真实 Windows Tauri 隔离 SQLite 启动冒烟（`app-start.spec.ts`）1/1 通过。真实 Provider 的注册与调用闭环因无可用凭据未在本轮执行（NOT_VERIFIED），安装包与发布未生成。
+- **创作上下文展开面板与模型刷新提示（2026-10-28，非版本任务）**：创作上下文改为标题栏、生成前资产摘要和详细资产三层结构；可用、待准备、生成时核验与读取失败数量均来自现有资产状态，基础设定/故事结构摘要不新增业务判断。资产详情宽窗双列、窄窗单列，名称与值优先，状态居中，查看动作固定右侧，技术信息降权并保留完整 title。移除面板自身 `max-height`/`overflow:auto`，Composer 外层继续承担唯一滚动，右侧参考面板保留 body 滚动；标题与摘要 sticky，输入、模型选择和发送区保持可用。刷新模型列表提示精简为“正在刷新模型列表”，失败原因、重试/设置和发送策略保持不变。
+
+  验证：`npx tsc --noEmit`、`npx vitest run src/pages/Workbench/WorkbenchInputUX.test.tsx`（23/23）、`npx tsx --test --test-concurrency=1 src/pages/Workbench/WorkbenchAssetScopePanel.test.tsx src/pages/Workbench/WorkbenchComposer.test.tsx src/services/conversation/workbenchModelAvailability.test.ts`（16/16）、`npx tsx --test --test-concurrency=1 src/pages/Workbench/WorkbenchPage.test.tsx`（71/71）通过。
+
 - **创作工作台左侧列表与 Composer 细节修复（2026-10-28，非版本任务）**：项目/任务树统一单行与 24px 前导槽，标题独立收缩并省略，普通任务不再渲染更新时间；仅当前任务显示时间，所有项目/任务通过新增的无依赖 portal Tooltip 在悬停或键盘聚焦时披露完整名称、状态和更新时间，提示层固定出现在侧栏右侧，Escape、滚动、缩放与失焦关闭。父项目不再使用与当前任务相同的整行填充，当前项目仅以字重/项目标记细边区分，展开仅旋转箭头；当前任务保留中性选中底色与 2px 内嵌强调边，悬停和 2px 焦点环各自独立。Composer 将章节目标说明、模型状态/错误提示和正文统一到 16px gutter，目标说明通过 `aria-describedby` 关联输入；模型刷新改为 Spinner + 明确操作文案，失败保留 sanitized 原因与重试/设置动作，正常目录状态不持续占位。未新增依赖、数据库字段或业务状态，选择、展开、重命名、归档、发送与快捷键不变。
 
   验证：`Tooltip.test.tsx` 1、`WorkbenchNavigation.test.tsx` 3、`WorkbenchInputUX.test.tsx` 22、`WorkbenchComposer.test.tsx` + `workbenchModelAvailability.test.ts` 14、`WorkbenchPage.test.tsx` 71 通过；隔离生产构建浏览器视觉回归 4/4 通过（1440×900、1024×700、模型失败、悬停/键盘焦点/明暗主题与对比度）；真实 Windows Tauri 隔离 SQLite 专项 1/1 通过，覆盖长中文/英文/混排标题、父子层级、单行任务、当前任务时间、右侧 Tooltip、焦点与 Composer 对齐。`npm run build`、`lint:ci`、`test:component-size`、`test:style-budget`、`test:bundle-size`、`test:docs-sync`、`test:version-sync` 均通过。聚合 `verify:change --lane frontend` 的 coverage（2532 cases）、frontend-build、bundle-budget、component-size 通过；format 因工作树既有 `src-tauri/capabilities/{desktop,migrated}.json`、`src-tauri/tauri.conf.json` 不符合 Prettier 失败，聚合 lint 当时命中的临时诊断 spec 已移除后独立 lint 通过，未改动上述既有配置文件。
+
+- **Tauri 2 迁移与 updater 安全链（2026-10-28，非版本任务）**：桌面壳迁移至 Tauri Rust crate 2.12.5、CLI/API 2.12.4，前端 IPC、窗口、dialog/fs/notification/shell 与 Rust `WebviewWindow` / Emitter 全部切换至 v2 接口；配置迁移至 capabilities 最小授权，保留单一 sidecar 文件 scope 与自有更新 IPC。`useHttpsScheme: true` 保持 Windows 生产 origin；stable/beta 通道、安装前版本复验、下载进度事件和 RFC3339 发布日期保持兼容。发布改用 `TAURI_SIGNING_*`、`--no-bundle` / `--bundles msi,nsis` 与精确 v1Compatible 资产校验，旧 MSI 静态清单及回滚契约不变。updater 临时锁定官方 [plugins-workspace 修复提交](https://github.com/tauri-apps/plugins-workspace/commit/ba98bfadc4c868c9a7e1a226c83af528e1f11b89) 和 `zip 9.1.2`，消除 0367/0368/0369，待含同修复的正式发布后移除临时 patch。Rust MSRV 更新为 1.90，固定构建工具链仍为 1.95.0。
+
+  验证：`cargo audit --file src-tauri/Cargo.lock --target-os windows --target-arch x86_64 --no-fetch` 为 0 vulnerabilities（仅 6 个非阻断 warning）；`cargo tree -i zip` 只剩 `zip 9.1.2 → tauri-plugin-updater 2.14.0 (git rev ba98bfa)`；完整 Rust workspace 串行测试主应用 718 passed / 5 ignored，Gateway 79 + 7 + 1 passed；真实 Windows Tauri E2E 24/25 规格通过，新增 `tauri2-migration-regression` 3/3（HTTPS origin、最大化 ACL、Beta LocalStorage 跨刷新）。`chapter-context-persistence.spec.ts:132` 仍为迁移前已记录的既有失败（保留库显示总结校验失败且 `safeToContext=false`，上下文按设计停用），不计为通过。另使用一次性临时密钥实际生成 MSI/NSIS、双 v1Compatible updater ZIP 和 4 个带 `version:3.7.0` 的签名，发布选择器及 `latest.json`/`release.json`/`rollback.json` 校验通过；临时密钥已删除、产物不用于发布，真实签名下载安装、版本切换和回滚仍为 NOT_VERIFIED。完整前端 coverage 聚合通过（全量 lines/statements 62.66%、branches 80.78%、functions 66.4%；核心 87.77%/82.27%/82.14%；关键组件 90.62%/79.9%/87.5%）；同时把仍硬编码六万字的 sparse-idea 单测断言同步到用户已有的三万字验收配置，未改产品逻辑。
+
+- **章节总结非阻断审阅提示与状态修复（2026-10-28，非版本任务）**：`summaryValidator` 将 grounding error 与关键词阻断问题保留在 `problems`，把语义审阅、证据片段、确定性升级及下章推测提示归入独立 `advisories`；`passed` 只依据阻断问题，`safeToContext` 与 score 规则保持不变。非阻断提示继续在生成预览、持久化面板和工作台详情中展示；`validationStatus` 不再因 advisory 单独变为 `failed`，数据库 JSON 向后兼容。验证：`chapterSummaryGrounding.test.ts` 19 passed（含 4 个分类回归）、`worldStateTimeline.test.ts` 4 passed、`ChapterSummaryWorkflowNotice.test.tsx` 6 passed、`chapterContextPersistence.test.ts` 13 passed、`autonomousChapterWorkflow.test.ts` 9 passed；`chapter-context-persistence.spec.ts` 定向桌面复测 1/1 通过（20s），断言 `validation_status=passed`、advisory 持久化与面板展示。完整 25 规格套件未在本批重跑。
+
+- **章节上下文 Mock grounding 夹具修复（2026-10-28，非版本任务）**：`context_summarize` 的 Mock 响应改为从当前采用正文提取原句，并为全部非空内容字段生成 `grounding.claims`，不再因缺少原文依据把已保存总结判为 `safeToContext=false`。仅调整测试夹具，不放宽 `summaryValidator`、`safeToContext`、SQLite 原子保存或上下文启用规则；多段归并的 Mock 仍复用最后一个分段结果，真实 Provider 归并不变。验证：`chapter-context-persistence.spec.ts` 定向桌面复测 1/1 通过（保存、重启稳定、采用新正文后过期且不再读取），`npx tsc --noEmit`、改动文件 ESLint、Prettier、`npm run test:component-size` 通过；完整 25 规格套件未在本批重跑，不把定向通过写成 25/25。
 
 - **安全审计依赖补丁（2026-10-27，非版本任务）**：按定时 `dependency-audit` 失败日志更新 `quinn-proto`、`rustls`、`rustls-webpki`、`webpki-roots` 与 `tokio` 的兼容补丁版本，生产 `npm audit --omit=dev` 仍为 0 个漏洞。Tauri 1.8.3 的更新器仍固定 `zip 0.6.6`，其 RustSec 0367/0368/0369 需要 Tauri 2.x 或等价破坏性迁移才能消除；本次不通过新增忽略项或降级审计阈值掩盖，工作流对该阻断保持失败关闭，待单独评估迁移。
 

@@ -14,7 +14,7 @@ alwaysApply: true
 ```powershell
 Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
 npm run dsh:assets
-npx tauri build --bundles none
+npx tauri build --no-bundle
 ```
 
 - 必须更新 `AI Novel Studio.exe`（产品名），不能只留下 `ai-novel-studio.exe`

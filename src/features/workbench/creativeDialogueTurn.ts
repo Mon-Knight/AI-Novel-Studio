@@ -3,8 +3,12 @@ import { taskConversationService } from '../../services/conversation/taskConvers
 import type { TaskRuntimeInput } from '../../services/conversation/taskRuntimeAdapter';
 import { resolveWorkbenchChapterTarget } from '../../services/conversation/workbenchChapterTarget';
 import { creativeWorkflowGoal } from '../../services/dsh/taskSessionAdapter';
+import { isTauri } from '../../services/database/db';
 
-type CreativeTurnRequest = TaskRuntimeInput & { modelSnapshot: TaskModelSnapshot };
+type CreativeTurnRequest = TaskRuntimeInput & {
+  novelId: string;
+  modelSnapshot: TaskModelSnapshot;
+};
 
 export interface CreativeDialogueDependencies {
   clearSubmittedDraft: () => void;
@@ -39,6 +43,12 @@ export async function executeCreativeDialogueTurn(
   dependencies: Omit<CreativeDialogueDependencies, 'clearSubmittedDraft'>,
 ): Promise<void> {
   const { conversationId, novelId, chapterId, goal, modelSnapshot, turnId } = request;
+  if (isTauri()) {
+    // Chapter resolution, missing-asset stages and the model's requested capability
+    // are governed by the native root. UI callbacks never select another executor.
+    await dependencies.execute(request);
+    return;
+  }
   await dependencies.execute({
     ...request,
     conversationId,

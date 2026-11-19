@@ -51,6 +51,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     reviewAuthorizationId: props.reviewAuthorizationId,
     reviewArtifactId: props.reviewArtifactId,
     reviewLocked: props.reviewLocked,
+    onReviewAuthorizationRenewed: props.onReviewAuthorizationRenewed,
   });
   const outline = useChapterOutlineEditor({
     chapter: props.chapter,

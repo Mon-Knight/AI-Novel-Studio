@@ -73,3 +73,20 @@ test('workflow concurrency and release environment share the validated channel o
     /uses: \.\/\.github\/workflows\/windows-desktop-e2e\.yml[\s\S]*?suite: full/u,
   );
 });
+
+test('release workflow uses Tauri 2 signing variables and v1Compatible artifact selection', async () => {
+  const workflow = await readFile(
+    new URL('../../.github/workflows/release.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_PRIVATE_KEY \}\}/u);
+  assert.match(
+    workflow,
+    /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_KEY_PASSWORD \}\}/u,
+  );
+  assert.doesNotMatch(workflow, /^\s+TAURI_KEY_PASSWORD: \$\{\{/mu);
+  assert.match(workflow, /node scripts\/release\/select-release-artifacts\.mjs/u);
+  assert.match(workflow, /updates-\$env:RELEASE_CHANNEL\/latest\.json/u);
+  assert.match(workflow, /requireSignedVersion = \$true/u);
+  assert.doesNotMatch(workflow, /Where-Object \{ \$_\.Name -match '\\\.msi\\\.zip\$/u);
+});

@@ -3,7 +3,7 @@
 <!-- ans-current-canonical:start -->
 
 Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`novel.read@1`、`structure.read@1`。
-读取回合：`canonical-only`；生产写章：`writing-subagent`（桌面 + 真实 API 默认）与 `deterministic-writer`（mock / 本地 / 浏览器）；真实云端：`NOT_VERIFIED`。
+桌面统一执行：`unified-agent-runtime`（本批集成验证中）；只读阶段：`canonical-only`；受控写章：`writing-subagent`；`deterministic-writer` 仅限浏览器开发兼容；真实云端：`NOT_VERIFIED`。
 <!-- ans-current-canonical:end -->
 
 版本：v0.1.0 草案  
@@ -13,7 +13,7 @@ Canonical 当前模型可见工具：`context.read@1`、`memory.search@1`、`nov
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`；migration 040 增加章节写作阶段事实 `chapter_workflow_stages`。当前完整项目备份 schema 为 12。小说继续是领域数据最高级对象。第 43 节补充当前 v3.7.0 修复中的规则集、精确修订来源与采用回执；实现仍在集成、待统一验收，本轮不新增测试/桌面/live 通过结论或改写历史记录。
+> 文档演进说明：既有表和 migration 章节按其版本说明事实；第 40 节记录 v3.3.0+ 对话式工作台，032/033 保留作用域、状态边与不可变事实，036 保存人工决定/审阅授权，040 保存 `chapter_workflow_stages`。当前新增 `041_task_authorizations`、`042_library_task_scope` 与 `043_host_terminal_native_facts`；001～040 definition/checksum 不改，041/042 已落地定义不重写，本批仅 043 新增 trigger，完整项目备份 schema 为 13，见第 45 节。小说仍是领域最高级对象。第 43～44 节历史修复/验收范围不回写；统一内核与授权本批为 **INTEGRATION / NOT YET FULLY VERIFIED**，不据此报告完整测试、桌面或 live 通过。
 
 ---
 
@@ -3330,3 +3330,60 @@ checksum 为 `sha256(definition)`（`migrations.rs` 的 `checksum()`），与 `m
 
 - 旧文本描述“不重建表、只改一行 SQL、`writable_schema` 临时开启、`schema_version` 递增后重解析”——当前源码没有任何 `writable_schema` 路径；实际实现是上文的事务内 safe table rebuild。
 - 旧文本的 checksum `f85352a8…` 不属于当前 definition；以本节源码 definition 与 `sha256` 为准。
+
+# 45. 任务级预授权与总结应用策略（2026-11-11）
+
+> 状态：**INTEGRATION / NOT YET FULLY VERIFIED**。本节描述 `041_task_authorizations` 及后续 `042_library_task_scope`、`043_host_terminal_native_facts` 的当前源码，不报告迁移、竞争或恢复测试通过；001～040 的发布 definition/checksum 不改写，041/042 已落地定义不重写，本批仅 043 新增 trigger。第 44 节的数量与验收说明保持其历史批次语义，当前迁移总范围为 001～043，项目备份 schema 为 13。
+
+## 45.1 复用任务事实，不复制生命周期
+
+原生协调器继续使用 `task_conversations / conversation_turns / task_runs / tool_call_events`；请求与候选继续使用既有 AiTask、Attempt、Snapshot、ResultArtifact。根任务、根回合/运行、父运行、阶段、预算纪元和冻结基线保存在 `dsh.execution_contract` 事件中，不另建相同用途的任务/步骤状态表。任务等待、取消、失败、候选与应用结果仍从这些持久事实投影。
+
+## 45.2 `task_authorizations`：可信用户签发的有限权限
+
+| 字段组                                                           | 权威含义                                                                                             |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `authorization_id / conversation_id / novel_id / source_turn_id` | 授权身份与明确用户目标；源回合必须属于该任务、作品且为 user                                          |
+| `spec_json / spec_hash`                                          | 不可变动作/产物范围、章节 IDs、作品级规划开关、有限卷区间与新建数量、各动作/总写入限额、预算及有效期 |
+| `model_snapshot_json / model_snapshot_hash`                      | 原生读取的冻结模型与请求配置身份；变更须停止并重新授权                                               |
+| `baseline_json / baseline_hash`                                  | 原生冻结的作品/章节版本、采用稿、内容与规则基线；只能由已提交事务回执推进                            |
+| `status / revision / used_writes`                                | `active / revoked / expired / exhausted`；revision 单调加一，已用额度不能回退                        |
+| `issued_at / expires_at / revoked_at / revocation_reason`        | 有限期限与真实撤销记录；终态不复活                                                                   |
+
+允许动作精确为 `apply_planning → outline`、`adopt_chapter_text → chapter_text`、`apply_summary → chapter_summary`。`apply_planning` 当前不覆盖任意 `generic_json` 领域阶段候选；`domain.submit_candidate` 是受控候选协议，不授予正式写入。新建卷章必须同时有规划动作、作品级规划许可、卷序号区间和数量上限。新建章只能通过本任务成功创建回执纳入后续范围。
+
+授权涵盖当前 `sourceTurnId` 及原生执行契约验证的受控后续阶段，不涵盖同一对话后来的独立用户目标。模型输出、候选、提示词和前端自报 hash 都不能替代签发。签发时读取原生作品、回合、模型和基线；运行中的阶段不能追溯扩预算。多个可匹配活动授权存在歧义时失败关闭，用户先撤销旧授权。
+
+## 45.3 `task_authorization_receipts`：不可变提交事实
+
+每条回执保存 `receipt_id / authorization_id / operation_id / conversation_id / novel_id / artifact_id / card_id / action`、请求 hash、`before_hash / after_hash`、结果 JSON 与提交时间。`operation_id` 唯一；同参数回放读首次回执，不重复正式写入或扣额度，身份/参数不同不能借旧操作号通过。
+
+应用使用单一 `IMMEDIATE` 事务重新验证授权状态/期限、模型、目标和产物类型、源候选完整性、质量门禁、当前基线、累计预算及写入额度。正式资产或草稿采用、Memory 更新、决定、回执和授权额度/基线推进同事务提交，失败整体回滚。返回未知提交结果时先用相同操作身份核对权威回执，不能盲目重新生成或签发。
+
+自动结果的决定 actor/回执 authority 明确为 `task_preauthorized`；章节草稿与记忆保留授权回执来源，不创建假的人工审阅事实。原 `ReviewAuthorization` 人工审阅链保留。任务自身续接只能使用精确回执证明写入后的基线；用户编辑、其他任务采用或旧回执被后续改变时转人工处理，不用“重新读取最新状态”绕过冲突。
+
+本批隔离 SQLite 动态复现已确认：同章 A/B 两份 issued 人工审阅授权中，A 先采用后，旧 B 的**首次消费**原先可再次切换采用指针；两个草稿的正文均保留，不能称为正文丢失。已 consumed 授权在人工改采后的重放原先已拒绝。针对首次消费，041 同时给 `review_authorizations` 增加可空 `native_baseline_hash`（64 位十六进制）及不可变触发器，用于原生签发/采用复验；旧缺基线授权不得静默刷新。该首消费 guard 已接入主采用路径 `adopt_review_authorized_draft` 与旧 `consume_review_authorization` IPC，隔离 SQLite 回归覆盖两条路径；本次命令结果待实施记录回填，不在本文称为已修复通过。
+
+## 45.4 总结的结构校验、人工判断和应用来源
+
+新校验 JSON 使用 `policyVersion=1`，分开保存 `blockingIssues / advisories`、`evidenceValidation`、`semanticValidation=not_checked`、`reviewRequirement=none|human_required` 和应用来源 `applicationProvenance.mode=manual_review|task_preauthorization`。
+
+- `passed=false`、阻断问题或 grounding error 均不得仅凭分数、`safeToContext=true` 或人工标记放行；读写策略一致拒绝污染上下文。
+- 普通 advisory 不等于阻断，结构检查通过不等于语义正确；证据片段或确定性升级分别触发具体人工审阅要求，预授权不能自动满足。
+- 人工操作通过自身权威链后记录真实审阅；预授权记录自身 authorization/receipt，不能写成 `authorReviewed=true`。
+- 原生保存、结构化应用、重新启用与上下文/Memory 读取使用同一资格规则，并核对当前采用稿 ID/version/full hash；旧来源不能刷新为新稿。
+- 无新策略字段的实际旧人工审阅记录按窄兼容条件处理；历史独立人工上下文不批量改写、删除或清理。兼容不能替代新预授权要求的完整校验事实。
+
+## 45.5 备份 schema 13 与恢复
+
+schema 13 在 schema 12 的阶段事实之上增加两张授权表。042 的资料库任务作用域复用既有任务/候选表、043 只重建工具事件 insert trigger，均不改变本备份 schema。备份校验授权与原作品、user Turn、章节、候选、回执的归属及 hash；恢复到新作品时重映射身份、重算对应 hash，`active` 一律恢复为 `expired` 并记录原因，历史 revoked/expired/exhausted 与回执保留。恢复不重放模型调用、不恢复可执行权限，必须由用户重新签发。旧 schema 仍按已有兼容路径导入，不改写已发布 migration。
+
+实际实现分别见[迁移](../src-tauri/src/migrations_task_authorizations.rs)、[授权类型](../src/types/taskAuthorization.ts)、[原生事务](../src-tauri/src/services/task_authorization_apply.rs)、[备份授权校验](../src-tauri/src/project_backup/task_authorization.rs)与[共享总结资格策略](../src-tauri/shared/summary_application_policy.rs)。本批最终验证及未覆盖项统一记入[实施记录](../reports/unified-agent-2026-11-11/implementation.md)。
+
+## 45.6 `042_library_task_scope` 与 `043_host_terminal_native_facts`
+
+**INTEGRATION / NOT YET FULLY VERIFIED**。两项均为本批兼容迁移，只核对源码与用例落点，不报告迁移执行或桌面通过。
+
+- `042_library_task_scope` 允许“资料库（无作品）任务”复用同一任务、候选与产物事实，而非新增平行表。它对 `task_conversations / ai_tasks / result_artifacts` 做 nullable novel identity 的安全重建：事务前关闭外键，事务内重建三表并复制行，比较重建前后的行数与列内容指纹，要求 `pragma_foreign_key_check` 为 0，随后恢复依赖对象并新增 library 作用域约束。资料库任务只允许绑定不可变来源快照与 `style_analysis` 候选，不获得章节、正式写入或任务授权权限；旧作品行内容不被放宽或改写。
+- `043_host_terminal_native_facts` 只重建 `tool_call_events` 的 insert trigger：普通工具事件仍只能写入活动 Run（`queued / running / cancel_requested`）；`dsh.*` 原生控制事实可在所属 Run 终态（`completed / failed / cancelled`）后 append，且仅限 `succeeded / failed / cancelled` 状态，保持 append-only。它不开放普通工具写入，也不改变 Run 生命周期。
+- 证据边界：`042` 有独立隔离 SQLite 迁移用例（升级、回滚、外键与旧行保真），`043` 有内联隔离 SQLite trigger 用例；本次命令结果待[实施记录](../reports/unified-agent-2026-11-11/implementation.md)回填，不在本文称为通过。备份 schema 仍为 13。

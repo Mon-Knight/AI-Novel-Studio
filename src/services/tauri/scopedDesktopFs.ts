@@ -1,11 +1,10 @@
 /**
  * Narrow desktop file access.
  *
- * Tauri 1.8.3 (the locked crate) extends the runtime FS scope inside the dialog
- * command before it returns the path: a single file uses `Scopes::allow_file`,
- * a directory uses `Scopes::allow_directory`, and save uses `Scopes::allow_file`
- * (`tauri-1.8.3/src/endpoints/dialog.rs`). That grant is not persisted. The
- * static allowlist therefore stays the declared lifecycle sidecar file only.
+ * Tauri 2's dialog plugin extends the runtime FS scope when it returns a
+ * selected path: a file uses `allow_file`, a directory uses `allow_directory`,
+ * and save uses `allow_file`. That grant is not persisted. The static allowlist
+ * therefore stays the declared lifecycle sidecar file only.
  *
  * This module does not reimplement the Rust glob matcher and does not prove CSP.
  * It only refuses to hand the FS API any path other than the exact dialog result
@@ -35,7 +34,7 @@ export interface ScopedDesktopFsPorts {
   open(options: DesktopOpenFileOptions): Promise<string | string[] | null>;
   save(options: DesktopSaveFileOptions): Promise<string | null>;
   readTextFile(path: string): Promise<string>;
-  readBinaryFile(path: string): Promise<Uint8Array>;
+  readFile(path: string): Promise<Uint8Array>;
   writeTextFile(path: string, contents: string): Promise<void>;
   homeDir(): Promise<string>;
   join(home: string, fileName: string): Promise<string>;
@@ -198,21 +197,21 @@ function unusedPort(name: string): () => Promise<never> {
   };
 }
 
-async function openDialogPorts(): Promise<Pick<ScopedDesktopFsPorts, 'open' | 'readBinaryFile'>> {
+async function openDialogPorts(): Promise<Pick<ScopedDesktopFsPorts, 'open' | 'readFile'>> {
   const [{ open }, fs] = await Promise.all([
-    import('@tauri-apps/api/dialog'),
-    import('@tauri-apps/api/fs'),
+    import('@tauri-apps/plugin-dialog'),
+    import('@tauri-apps/plugin-fs'),
   ]);
   return {
     open,
-    readBinaryFile: (filePath) => fs.readBinaryFile(filePath),
+    readFile: (filePath) => fs.readFile(filePath),
   };
 }
 
 async function saveDialogPorts(): Promise<Pick<ScopedDesktopFsPorts, 'save' | 'writeTextFile'>> {
   const [{ save }, fs] = await Promise.all([
-    import('@tauri-apps/api/dialog'),
-    import('@tauri-apps/api/fs'),
+    import('@tauri-apps/plugin-dialog'),
+    import('@tauri-apps/plugin-fs'),
   ]);
   return {
     save,
@@ -222,7 +221,7 @@ async function saveDialogPorts(): Promise<Pick<ScopedDesktopFsPorts, 'save' | 'w
 
 async function sidecarPorts(): Promise<ScopedDesktopFsPorts> {
   const [fs, pathApi] = await Promise.all([
-    import('@tauri-apps/api/fs'),
+    import('@tauri-apps/plugin-fs'),
     import('@tauri-apps/api/path'),
   ]);
   return {
@@ -231,7 +230,7 @@ async function sidecarPorts(): Promise<ScopedDesktopFsPorts> {
     join: (home, fileName) => pathApi.join(home, fileName),
     open: unusedPort('open'),
     save: unusedPort('save'),
-    readBinaryFile: unusedPort('readBinaryFile'),
+    readFile: unusedPort('readFile'),
     writeTextFile: unusedPort('writeTextFile'),
   };
 }
@@ -259,7 +258,7 @@ export async function readBinaryFileFromOpenDialog(
     dialogGrant: selected,
   });
   if (!decision.allowed) throw new Error(decision.reason);
-  const bytes = asBytes(await active.readBinaryFile(decision.path));
+  const bytes = asBytes(await active.readFile(decision.path));
   return { path: decision.path, bytes };
 }
 

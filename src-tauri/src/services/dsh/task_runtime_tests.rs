@@ -14,7 +14,8 @@ mod revision_transaction_tests;
 fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput {
     StartTaskTurnInput {
         conversation_id: "c1".to_string(),
-        novel_id: "n1".to_string(),
+        novel_id: Some("n1".to_string()),
+        scope: None,
         turn_id: "t1".to_string(),
         goal: "test".to_string(),
         chapter_id: Some("ch-1".to_string()),
@@ -51,6 +52,8 @@ fn api_input(provider: &str, model: &str, base_url: &str) -> StartTaskTurnInput 
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     }
 }
 
@@ -130,7 +133,7 @@ fn chapter_summary_input() -> StartTaskTurnInput {
         "http://127.0.0.1:12074/v1/",
     );
     input.conversation_id = "conversation-summary".to_string();
-    input.novel_id = "novel-summary".to_string();
+    input.novel_id = Some("novel-summary".to_string());
     input.turn_id = "summary-generation-authorization-summary".to_string();
     input.chapter_id = Some("chapter-summary".to_string());
     input.goal = "总结本章".to_string();
@@ -455,7 +458,8 @@ fn automatic_protagonist_candidate_requires_exactly_one_primary_role() {
 fn greeting_turn_prompt_forbids_empty_generate_chapter() {
     let input = StartTaskTurnInput {
         conversation_id: "c1".to_string(),
-        novel_id: "n1".to_string(),
+        novel_id: Some("n1".to_string()),
+        scope: None,
         turn_id: "t1".to_string(),
         goal: "你好".to_string(),
         chapter_id: Some("ch-1".to_string()),
@@ -482,6 +486,8 @@ fn greeting_turn_prompt_forbids_empty_generate_chapter() {
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     };
     let prompt = workbench_turn_prompt(&input);
     assert!(prompt.contains("用户意图：你好"));
@@ -640,7 +646,7 @@ fn chapter_length_connection(input: &StartTaskTurnInput) -> rusqlite::Connection
         conversation_service::CreateInitializedConversationInput {
             conversation_id: input.conversation_id.clone(),
             turn_id: input.turn_id.clone(),
-            novel_id: input.novel_id.clone(),
+            novel_id: input.require_novel_id().expect("fixture novel").to_string(),
             title: "长度恢复".to_string(),
             goal: input.goal.clone(),
             default_model: input.model_snapshot.clone(),
@@ -783,7 +789,7 @@ fn chapter_length_run(
         "succeeded",
         Some(
             json!({"ok":true,"candidateOnly":true,"artifactType":"chapter_text", "data":{
-                "novelId":candidate_novel.unwrap_or(&input.novel_id),"chapterId":input.chapter_id,
+                "novelId":candidate_novel.unwrap_or(input.novel_id.as_deref().expect("fixture novel")),"chapterId":input.chapter_id,
                 "text":"字".repeat(words)
             }}),
         ),
@@ -1124,12 +1130,16 @@ fn chapter_length_recovery_shares_wall_budget_and_honors_cancel() {
         .contains("480 秒总预算已耗尽"));
     let summary =
         ChapterLengthRecovery::new_at(&chapter_summary_input(), start - Duration::from_secs(481));
+    assert!(summary
+        .timeout(Duration::from_secs(480), &cancelled)
+        .unwrap_err()
+        .contains("CANCELLED"));
     assert_eq!(
         summary
-            .timeout(Duration::from_secs(480), &cancelled)
+            .timeout(Duration::from_secs(480), &AtomicBool::new(false))
             .unwrap(),
         Duration::from_secs(480),
-        "summary keeps its existing supervisor cancellation and timeout semantics"
+        "summary keeps its existing supervisor timeout semantics when not cancelled"
     );
     assert!(summary.failure_message(&error, false).is_none());
 }
@@ -2333,6 +2343,28 @@ fn openai_compatible_snapshot_uses_exact_model_on_the_pinned_harness() {
 }
 
 #[test]
+fn provider_aliases_normalize_before_runtime_identity_and_health_projection() {
+    let input = api_input(
+        "OPENAI-COMPATIBLE",
+        "model-alias",
+        "http://127.0.0.1:12074/v1/",
+    );
+    let route = selected_model_route(&input).expect("provider alias should normalize");
+    assert_eq!(route.logical_provider, OPENAI_COMPATIBLE_PROVIDER);
+    assert_eq!(route.harness_provider, DEEPSEEK_HARNESS_PROVIDER);
+    assert_eq!(route.model, "model-alias");
+
+    let deepseek = api_input(
+        "DeepSeek-Official",
+        "deepseek-chat",
+        "https://api.deepseek.com/v1",
+    );
+    let deepseek_route = selected_model_route(&deepseek).expect("DeepSeek alias should normalize");
+    assert_eq!(deepseek_route.logical_provider, DEEPSEEK_HARNESS_PROVIDER);
+    assert_eq!(deepseek_route.harness_provider, DEEPSEEK_HARNESS_PROVIDER);
+}
+
+#[test]
 fn provider_transport_rejects_empty_remote_credentials_but_allows_loopback() {
     let mut remote = api_input(
         OPENAI_COMPATIBLE_PROVIDER,
@@ -2680,7 +2712,7 @@ fn novel_scoped_outline_projection_can_create_its_durable_ai_task() {
         request_hash: None,
         trace_id: None,
         task_type: "outline_generate".to_string(),
-        novel_id: "novel-1".to_string(),
+        novel_id: Some("novel-1".to_string()),
         chapter_id: None,
         draft_id: None,
         scope_type: "novel".to_string(),
@@ -2779,7 +2811,7 @@ fn chapter_scoped_setting_projection_uses_the_trusted_dsh_creation_boundary() {
         request_hash: None,
         trace_id: None,
         task_type: "setting_expand".to_string(),
-        novel_id: "novel-1".to_string(),
+        novel_id: Some("novel-1".to_string()),
         chapter_id: Some("chapter-1".to_string()),
         draft_id: None,
         scope_type: "chapter".to_string(),
@@ -3101,7 +3133,11 @@ fn read_turn_allowlist_is_canonical_only() {
     input.expected_tool = Some("generate_outline".to_string());
     input.expected_artifact_type = Some("outline".to_string());
     input.required_read_tools = vec!["novel.read_context".to_string()];
-    assert_eq!(turn_allowed_tools(&input), ALLOWED_TOOLS);
+    assert_eq!(turn_allowed_tools(&input), "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_outline");
+    assert!(
+        authorize_projected_tool("generate_chapter", turn_allowed_tools(&input)).is_err(),
+        "planning cannot invoke chapter writing in the same stage"
+    );
     assert_eq!(turn_context_read_tools(&input), CONTEXT_READ_TOOLS);
 }
 

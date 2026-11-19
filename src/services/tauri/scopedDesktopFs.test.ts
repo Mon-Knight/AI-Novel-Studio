@@ -150,7 +150,7 @@ function ports(partial: Partial<ScopedDesktopFsPorts>): ScopedDesktopFsPorts {
     open: fail,
     save: fail,
     readTextFile: fail,
-    readBinaryFile: fail,
+    readFile: fail,
     writeTextFile: fail,
     homeDir: fail,
     join: fail,
@@ -170,7 +170,7 @@ test('open dialog reads only the returned fixture path', async () => {
         assert.equal(options.recursive, false);
         return REFERENCE_FIXTURE;
       },
-      readBinaryFile: async (path) => {
+      readFile: async (path) => {
         calls.push(path);
         return bytes;
       },
@@ -185,7 +185,7 @@ test('cancelled, multiple, directory, and traversal selections do not read', asy
   let reads = 0;
   const idle = ports({
     open: async () => null,
-    readBinaryFile: async () => {
+    readFile: async () => {
       reads += 1;
       return new Uint8Array();
     },

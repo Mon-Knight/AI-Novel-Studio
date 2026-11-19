@@ -12,6 +12,13 @@ import { protagonistRepository } from '../database/protagonistRepository';
 import { settingRepository } from '../database/settingRepository';
 import { chapterAssetReadinessService } from '../conversation/chapterAssetReadiness';
 import { chapterOutlineService } from '../outlines/outlineService';
+import {
+  chapterEngineeringService,
+  createDefaultChapterCard,
+  createDefaultGenerationConstraints,
+  createDefaultQualityRules,
+  normalizeScenePlanV2,
+} from '../engineering/chapterEngineeringService';
 
 export interface E2eChapterCoreAssetSeedInput {
   novelId: string;
@@ -36,6 +43,24 @@ export interface E2eChapterCoreAssetSeedInput {
     outline: string;
     targetWordCount: number;
   }>;
+  appliedScenePlan?: {
+    chapterId: string;
+    scene: {
+      id: string;
+      sceneNo: number;
+      title: string;
+      goal: string;
+      location: string;
+      characters: string[];
+      conflict: string;
+      contextCapsule: string;
+      constraints: string[];
+      expectedEndState: string;
+      targetCharacters: number;
+      planVersion: 2;
+      beats: [];
+    };
+  };
 }
 
 export interface E2eChapterCoreAssetSeedEvidence {
@@ -45,6 +70,7 @@ export interface E2eChapterCoreAssetSeedEvidence {
   ruleSystemId: string;
   protagonistId: string;
   chapterOutlineIds: string[];
+  appliedEngineeringStateId?: string;
   readiness: Array<{
     chapterId: string;
     ready: boolean;
@@ -64,6 +90,8 @@ interface E2eChapterCoreAssetFixtureDependencies {
   saveChapterOutline?: typeof chapterOutlineService.save;
   setActiveChapterOutline?: typeof chapterOutlineService.setActive;
   inspectReadiness?: typeof chapterAssetReadinessService.inspect;
+  saveEngineeringDraft?: typeof chapterEngineeringService.saveDraft;
+  activateEngineeringState?: typeof chapterEngineeringService.activate;
 }
 
 function required(value: string, field: string): string {
@@ -209,6 +237,43 @@ export async function seedE2eChapterCoreAssets(
     chapterOutlineIds.push(outline.id);
   }
 
+  let appliedEngineeringStateId: string | undefined;
+  if (input.appliedScenePlan) {
+    const scenePlanInput = input.appliedScenePlan;
+    const chapter = input.chapters.find((item) => item.chapterId === scenePlanInput.chapterId);
+    if (!chapter) {
+      throw new Error('E2E applied Scene plan references an unknown chapter.');
+    }
+    const seed = {
+      title: chapter.title,
+      outline: chapter.outline,
+      goal: scenePlanInput.scene.goal,
+      targetWordCount: scenePlanInput.scene.targetCharacters,
+    };
+    const scenePlan = normalizeScenePlanV2([scenePlanInput.scene], seed);
+    if (scenePlan.length !== 1 || scenePlan[0].planVersion !== 2 || scenePlan[0].beats.length) {
+      throw new Error('E2E applied Scene plan must be a single Scene-only v2 plan.');
+    }
+    const saveDraft = dependencies.saveEngineeringDraft ?? chapterEngineeringService.saveDraft;
+    const activate = dependencies.activateEngineeringState ?? chapterEngineeringService.activate;
+    const draft = await saveDraft(
+      {
+        novelId,
+        chapterId: scenePlanInput.chapterId,
+        chapterCard: createDefaultChapterCard(seed),
+        scenePlan,
+        generationConstraints: createDefaultGenerationConstraints(seed),
+        qualityRules: createDefaultQualityRules(),
+      },
+      seed,
+    );
+    const active = await activate(draft.id, scenePlanInput.chapterId, seed);
+    if (active.status !== 'active') {
+      throw new Error('E2E applied Scene plan did not become the active engineering state.');
+    }
+    appliedEngineeringStateId = active.id;
+  }
+
   const readiness = await Promise.all(
     input.chapters.map(async ({ chapterId }) => {
       const result = await inspectReadiness({
@@ -234,6 +299,7 @@ export async function seedE2eChapterCoreAssets(
     ruleSystemId: ruleSystem.id,
     protagonistId: protagonist.id,
     chapterOutlineIds,
+    appliedEngineeringStateId,
     readiness,
   };
 }

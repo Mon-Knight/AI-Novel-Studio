@@ -1,7 +1,7 @@
 # Writing SubAgent 契约（candidate-only）
 
-> 状态：v3.7.0 起正式开放——桌面端 + 真实 API 模型的 `chapter_write` 默认走本契约；mock / 本地模型与浏览器模式走确定性 Writer，`localStorage['ai_novel_studio_writing_subagent_dsh']='0'` 可关闭。对应审计 `docs/audit-v2/agent_gap_report.md` GAP-01 / GAP-09，Gate E。
-> 本文保留分步接入历史；§3.1 / §3.2 的日期和范围不回写。本轮 v3.7.0 审计修复的两阶段候选门禁与前章复验见 §3.5，统一测试/桌面结果另记；实现或离线通过不代表 R4 live 云端 VERIFIED，生产持续学习另项实施。
+> 当前状态：Writing SubAgent 已纳入桌面统一原生 Runtime 的受控 candidate-only 阶段（2026-11-11，**INTEGRATION / NOT YET FULLY VERIFIED**）；API、Mock、本地模型共用生命周期，确定性 Writer 旧顶层仅限浏览器开发兼容。历史关闭开关不再为桌面新请求选择另一宿主，能力不支持时明确拒绝。
+> 本文保留 E-0～E-4 和 §3.1/§3.2 的原日期、配置与验收范围，不回写历史。当前受控父子与授权边界见 §3.7；§3.3～§3.6 保留来源/字数/准入安全要求，其中前端调度职责由本次原生协调器接管。历史或离线通过不代表本批整体验收、R4 live 云端 VERIFIED 或文学质量证明。
 
 ---
 
@@ -13,7 +13,7 @@
 
 ## 2. 契约定义
 
-契约代码：`src/services/agents/writingSubAgentContract.ts`（`WRITING_SUBAGENT_CONTRACT_VERSION = 'writing_subagent_contract_v1_draft'`）。
+契约代码：[writingSubAgentContract.ts](../../src/services/agents/writingSubAgentContract.ts)（`WRITING_SUBAGENT_CONTRACT_VERSION = 'writing_subagent_contract_v1_draft'`）。下表记录原 candidate-only 子任务约束；正式写入始终不属于子任务。当前根预算、原生准入与人工/预授权应用责任按 §3.7 解释，不能把旧 `adoptionPath` 描述理解为自动结果必须伪造人工审阅。
 
 | 维度     | 契约                                                                                                                                                                                                                         | 与现状的关系                                  |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -130,19 +130,33 @@ E-0～E-3 已在仓内落地并通过单测（E-0～E-4 期间开关默认关闭
 
 失败回合的成功规划不能替代正文成功。重试从已核验的执行事实恢复任务类型、原用户目标、必需读取、候选工具和字数范围；不同任务能力使用独立 DSH 会话，不能扩展创作讨论回合工具目录来处理正文重试。新宿主执行契约复用现有持久事件，未新增 migration；历史回合依据原用户消息、受验证规划和一致的原生范围证据恢复，缺少关键冻结范围时拒绝并提供明确的新请求路径。
 
-旧 DSH 写章或润色回合重试沿用原生宿主路径，当前 SubAgent 关闭开关只影响新请求。原生恢复结果缺少执行契约时停止，不回退到当前目标重新规划或确定性 Writer；原模型、硬区间、读取/候选工具和原生尝试预算继续复验。
+该历史批次中，旧 DSH 写章或润色回合重试沿用原生宿主路径，SubAgent 关闭开关只影响新请求。当前本批已取消用此开关选择另一桌面宿主，见 §3.7。原生恢复结果缺少执行契约时停止，不回退到当前目标重新规划或确定性 Writer；原模型、硬区间、读取/候选工具和原生尝试预算继续复验。
 
 长度恢复保存已验证作用域的失败完整稿，选择最接近目标的基稿，反馈实际增删差额、每次字数与保留内容要求。仍提交完整正文并由宿主计数，最多调用次数与冻结硬区间保持；改进修订提示不能保证模型必然收敛。界面区分等待模型、自动修正与候选验证，工具越权失败保留原错误链并说明当前阶段权限。
 
-## 4. 非目标
+### 3.7 统一 Runtime 中的受控写章（2026-11-11，集成验证中）
 
-- 不实现自动采用、批量写作或多章连写；
-- 不改变 `ReviewAuthorization + adopt_review_authorized_draft` 的采用事务；
-- 不新增数据库 migration；
-- 不把确定性 Writer 删除：它仍是 mock / 本地模型、浏览器模式与显式关闭开关时的生产路径，也是 SubAgent 不可用时的回退。
+当前状态 **INTEGRATION / NOT YET FULLY VERIFIED**。§2 的 candidate-only、精确来源、有限校验和正式写入禁止仍成立，但历史“SubAgent 自己控制完整生命周期、前端 draft/admit、关闭开关回到 Writer”的职责已收敛到原生根协调器：
+
+- 子阶段在同一用户目标下使用独立上下文/Session，执行契约记录根任务/回合/运行、父运行、阶段、预算纪元与冻结章基线；继续复用现有 Run/ToolCallEvent/AiTask/Attempt/Artifact，不新增平行任务系统。
+- 原生宿主验证阶段允许的工具、来源回执与结果，再决定读取、生成/修订、检查或等待应用。普通助手回复不是执行指令；子任务只能返回候选或验证结果，不能签发授权或调用正式采用旁路。
+- 子任务范围与模型不得扩大或改变，取消与时限继承父任务；请求、工具、Token、费用与修订次数累计到根目标。历史章节修复上限继续作为更窄门禁，不能通过新 Run/子任务恢复根预算。
+- 前端只提交任务与呈现持久投影。有限完整性检查与 `draft → admit` 调度由原生协调器完成；API、Mock、本地模型共用此路径。Mock 返回结构化工具响应，本地不兼容明确拒绝；历史关闭开关不把新桌面任务路由到确定性 Writer。
+- 已有 Scene/Beat 计划和来源是阶段输入，不更换执行宿主；**原生阶段链源码已落地（`scene_plan → 每 Scene beat_plan → 每 Beat beat_write/beat_state → scene_close → chapter_assemble`），并有隔离 SQLite 单测；真实 Windows Tauri 已以固定 Mock 覆盖 Beat 状态中断、显式续跑和两次重启，整章携带计划不等于 Scene/Beat 功能对等**。相关恢复/阶段证据以[本批实施记录](../../reports/unified-agent-2026-11-11/implementation.md)为准，齐全前不宣称完整迁移。
+- 候选准入后，默认走既有人工决定、审阅授权、编辑/保存/采用。若当前目标有有效 `adopt_chapter_text` 预授权，则由原生统一应用服务复验范围、模型、版本/hash、确定性门禁、预算/次数、期限与幂等后采用；SubAgent 仍无正式写入权，预授权结果记为 `task_preauthorized`，不伪造 `authorReviewed=true`。
+- 正文提交后的总结阶段与后续基线推进只认精确权威回执。新独立用户目标不继承旧授权；撤销/取消停止新授权写入，已提交事务保留。等待决定的进程内续接不等于跨重启自动模型重放。
+
+固定 DSH commit `47f943859bef60e4160492346772ded9b24f765a` 与 `ans_task_session_v2` 不变。当前新增 041～043 和备份 schema 13 属应用服务的权限/恢复事实，不改变 candidate-only 身份；043 仅允许 `dsh.*` 原生控制事实在 Run 终态后 append，普通工具仍限活动 Run。人工采用与预授权采用都复验 staged assembly evidence，装配恢复复用完全匹配候选并补齐缺失 admission。完整验证由[本批实施记录](../../reports/unified-agent-2026-11-11/implementation.md)维护，不挪用 §3.1/§3.2 历史 live/回环结果。
+
+## 4. 当前非目标与兼容边界
+
+- Writing SubAgent 不自行采用、签发任务授权、修改世界规则或绕过原生事务；有授权的自动采用由外层原生应用服务执行。
+- 保留人工 `ReviewAuthorization + adopt_review_authorized_draft` 链路；人工与预授权记录明确区分。
+- 本批兼容迁移为 `041_task_authorizations`（含原生人工审阅基线补充）、`042_library_task_scope` 与 `043_host_terminal_native_facts`；001～040 不改写，041/042 已落地定义不重写，本批仅 043 新增 trigger。详见[数据模型](../data-model.md#45-任务级预授权与总结应用策略2026-11-11)。
+- 不删除可复用 Writer 编译/校验能力；旧顶层编排只限浏览器开发兼容，不是桌面失败回退。浏览器没有任务预授权或真实共享原生 Runtime，不能作为桌面等价证据。
 
 ## 5. 与其他文档的关系
 
-- 产品/架构基线：`conversational-creative-workbench.md` §11、§14.5。v3.7.0 已开放桌面端 + 真实 API 的 Writing SubAgent，本文是现行契约，不是后置设计稿。
-- 审计：`docs/audit-v2/agent_gap_report.md` §7 处理记录。
-- 运行时：`agent-runtime.md`、`dual-model-creative-runtime.md`。
+- 产品/架构：以[对话工作台架构](conversational-creative-workbench.md)的 2026-11-11 当前覆盖层及本文 §3.7 为准；§14.5 和 E-4 记录继续保留其历史范围。
+- 审计历史：[Agent 缺口报告](../audit-v2/agent_gap_report.md) §7。
+- 运行时：[Agent Runtime](../agent-runtime.md) 第 13 节；[双模型历史设计](dual-model-creative-runtime.md)不授权恢复桌面双宿主。

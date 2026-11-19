@@ -54,6 +54,17 @@ function allLayers(
 }
 
 describe('selectLayeredStyleSamples', () => {
+  it('never cuts UTF-16 surrogate pairs at native-replayed sample boundaries', async () => {
+    const input = section(1, '离线 Unicode', '😀离线测试'.repeat(1000));
+    const samples = await selectLayeredStyleSamples([input], { sampleChars: 901 });
+    for (const sample of samples) {
+      expect(new TextDecoder().decode(new TextEncoder().encode(sample.content))).toBe(
+        sample.content,
+      );
+      expect(input.content.slice(sample.startUtf16, sample.endUtf16)).toBe(sample.content);
+      expect(sample.content.length).toBeLessThanOrEqual(901);
+    }
+  });
   it('deterministically covers all six semantic layers with bounded replayable ranges', async () => {
     const sections = fixtureSections();
     const first = await selectLayeredStyleSamples(sections, { sampleChars: 900 });

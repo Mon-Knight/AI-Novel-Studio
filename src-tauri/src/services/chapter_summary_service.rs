@@ -1,7 +1,11 @@
 use crate::domain::context::{ChapterSummaryDto, SaveChapterSummaryInput};
 use crate::repositories::{chapter_summary_repository, context_record_repository};
 use crate::services::memory_service;
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{params, Connection, Transaction, TransactionBehavior};
+
+#[path = "chapter_summary_validation.rs"]
+mod validation;
+use validation::validate_summary_references;
 
 pub fn validate_uuid(field: &str, value: &str) -> Result<(), String> {
     uuid::Uuid::parse_str(value)
@@ -29,39 +33,7 @@ pub fn validate_summary_ownership(
     if input.draft_version.is_some_and(|version| version < 0) {
         return Err("chapter_summary_draft_version_invalid".to_string());
     }
-    let novel_exists = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM novels WHERE id = ?1 AND deleted_at IS NULL)",
-            params![&input.novel_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(|error| format!("chapter_summary_novel_read_failed: {error}"))?;
-    if !novel_exists {
-        return Err("chapter_summary_novel_not_found".to_string());
-    }
-    let chapter = conn
-        .query_row(
-            "SELECT volume_id, adopted_draft_id FROM chapters
-             WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL",
-            params![&input.chapter_id, &input.novel_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|error| format!("chapter_summary_chapter_read_failed: {error}"))?
-        .ok_or_else(|| "chapter_summary_chapter_ownership_mismatch".to_string())?;
-    if input.volume_id.is_some() && input.volume_id != chapter.0 {
-        return Err("chapter_summary_volume_ownership_mismatch".to_string());
-    }
-    if require_current_adopted_draft
-        && chapter.1.as_deref() != Some(input.adopted_draft_id.as_str())
-    {
-        return Err("chapter_summary_adopted_draft_mismatch".to_string());
-    }
+    validate_summary_references(conn, input, require_current_adopted_draft)?;
     let draft_is_valid = conn
         .query_row(
             "SELECT EXISTS(
@@ -89,6 +61,13 @@ pub fn upsert_chapter_summary(
     input: &SaveChapterSummaryInput,
     now: &str,
 ) -> Result<ChapterSummaryDto, String> {
+    if input.enabled.unwrap_or(true) {
+        crate::services::summary_application_policy::ensure_context_eligible(
+            input.validation_result.as_deref(),
+            input.validation_status.as_deref(),
+            crate::services::summary_application_policy::SummaryApplicationMode::Context,
+        )?;
+    }
     let selected_existing_id = if let Some(id) = input.id.as_deref() {
         chapter_summary_repository::find_summary_ownership(conn, id)?
             .map(|ownership| {
@@ -233,6 +212,19 @@ pub fn update_chapter_summary_enabled(
     let now = chrono::Utc::now().to_rfc3339();
     let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|error| format!("chapter_summary_toggle_transaction_failed: {error}"))?;
+    if enabled {
+        let previous = chapter_summary_repository::find_chapter_summary_by_id(&transaction, id)?
+            .ok_or_else(|| "chapter_summary_not_found".to_string())?;
+        crate::services::summary_application_policy::ensure_context_eligible(
+            previous.validation_result.as_deref(),
+            previous.validation_status.as_deref(),
+            crate::services::summary_application_policy::SummaryApplicationMode::Context,
+        )?;
+        crate::services::summary_application_policy::ensure_current_source(
+            &transaction,
+            &previous,
+        )?;
+    }
     chapter_summary_repository::update_chapter_summary_enabled(&transaction, id, enabled, &now)?;
     let summary = chapter_summary_repository::find_chapter_summary_by_id(&transaction, id)?
         .ok_or_else(|| "chapter_summary_not_found".to_string())?;
@@ -357,6 +349,8 @@ mod tests {
         save_chapter_summary(conn, memory_backed_summary_input()).unwrap()
     }
 
+    include!("chapter_summary_policy_tests.rs");
+
     #[test]
     fn test_chapter_summary_crud() {
         let mut conn = setup_test_db();
@@ -443,7 +437,8 @@ mod tests {
         assert_eq!(after_enable, (1, 1));
 
         mark_chapter_context_expired(&mut conn, "22222222-2222-2222-2222-222222222222").unwrap();
-        update_chapter_summary_enabled(&conn, &summary.id, true).unwrap();
+        update_chapter_summary_enabled(&conn, &summary.id, true)
+            .expect_err("expired context must not be reenabled");
         let after_expire: (i64, i64) = conn
             .query_row(
                 "SELECT is_expired,

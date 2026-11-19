@@ -1,5 +1,8 @@
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
-import { getWorkbenchModelAvailability } from '../../services/conversation/workbenchModelAvailability';
+import {
+  getWorkbenchModelAvailability,
+  workbenchModelKey,
+} from '../../services/conversation/workbenchModelAvailability';
 import { listSelectableWorkbenchModels } from '../../services/conversation/workbenchSelectableModels';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import { Bot } from 'lucide-react';
@@ -25,7 +28,7 @@ export function WorkbenchModelSelect({
   testId,
   onChange,
 }: WorkbenchModelSelectProps) {
-  const selectedValue = `${selectedModel.providerId}:${selectedModel.modelId}`;
+  const selectedValue = workbenchModelKey(selectedModel);
   const availability = getWorkbenchModelAvailability({
     plugins,
     selectedModel,
@@ -34,16 +37,24 @@ export function WorkbenchModelSelect({
   });
   const choices = listSelectableWorkbenchModels(plugins);
   const selectedMissing = !choices.some((option) => option.key === selectedValue);
+  // Visual tone is separate from the five-state semantic status kept in
+  // data attributes, so CSS does not need a selector per state.
+  const statusTone =
+    availability.status === 'ready'
+      ? 'is-ready'
+      : availability.status === 'initializing'
+        ? 'is-initializing'
+        : 'is-unavailable';
   const statusTitle =
-    availability.status === 'available'
+    availability.status === 'ready'
       ? '模型已加载；实际可用性以调用结果为准'
-      : availability.status === 'refreshing'
+      : availability.status === 'initializing'
         ? '正在刷新模型目录'
         : availability.message || '模型不可用';
 
   return (
     <label
-      className={`workbench-model-control is-${availability.status}`}
+      className={`workbench-model-control ${statusTone}`}
       htmlFor={id}
       title={`选择后续回合使用的模型；历史运行与重试保留原来源 · ${statusTitle}`}
       data-model-status={availability.status}

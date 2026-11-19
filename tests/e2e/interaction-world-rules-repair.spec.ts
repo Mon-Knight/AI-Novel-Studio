@@ -139,16 +139,33 @@ async function expectCandidateCausality(bundle: RepairConversationBundle): Promi
         );
         const candidateEntry = candidate?.closest<HTMLElement>('[data-presentation-id]');
         const candidateIndex = candidateEntry ? entries.indexOf(candidateEntry) : -1;
-        const toolIndexes = entries.flatMap((node, index) => {
-          const containsTool =
-            node.matches('[data-testid="workbench-tool-event"]') ||
-            node.querySelector('[data-testid="workbench-tool-event"]') !== null;
-          return node.dataset.runId === runId && containsTool ? [index] : [];
+        const postAdmissionTools = new Set([
+          'dsh.candidate_admission',
+          'dsh.awaiting_decision',
+          'dsh.manual_application_receipt',
+          'dsh.auto_application_receipt',
+        ]);
+        const causalToolIndexes: number[] = [];
+        const postAdmissionIndexes: number[] = [];
+        entries.forEach((node, index) => {
+          if (node.dataset.runId !== runId) return;
+          const toolNodes = node.matches('[data-testid="workbench-tool-event"]')
+            ? [node]
+            : Array.from(
+                node.querySelectorAll<HTMLElement>('[data-testid="workbench-tool-event"]'),
+              );
+          if (toolNodes.length === 0) return;
+          const allPostAdmission = toolNodes.every((tool) =>
+            postAdmissionTools.has(tool.dataset.toolName ?? ''),
+          );
+          if (allPostAdmission) postAdmissionIndexes.push(index);
+          else causalToolIndexes.push(index);
         });
         return {
           ids: entries.map((node) => node.dataset.presentationId),
           candidateIndex,
-          toolIndexes,
+          causalToolIndexes,
+          postAdmissionIndexes,
           candidateTurn: candidateEntry?.dataset.turnId,
           candidateRun: candidateEntry?.dataset.runId,
           sourceBeforeCandidate: Boolean(
@@ -169,8 +186,12 @@ async function expectCandidateCausality(bundle: RepairConversationBundle): Promi
     expect(projection.candidateTurn).toBe(sourceTurnId);
     expect(projection.candidateRun).toBe(card.runId);
     expect(projection.sourceBeforeCandidate).toBe(true);
-    expect(projection.toolIndexes.length).toBeGreaterThan(0);
-    expect(projection.toolIndexes.every((index) => index < projection.candidateIndex)).toBe(true);
+    expect(projection.causalToolIndexes.length).toBeGreaterThan(0);
+    expect(projection.causalToolIndexes.every((index) => index < projection.candidateIndex)).toBe(
+      true,
+    );
+    const maxCausalToolIndex = Math.max(...projection.causalToolIndexes);
+    expect(projection.postAdmissionIndexes.every((index) => index > maxCausalToolIndex)).toBe(true);
   }
 }
 

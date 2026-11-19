@@ -43,15 +43,17 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **阶段：Writing SubAgent 开放与 ZCode 工作台**
 
-> 本次交互、候选与世界规则修复保持 v3.7.0，代码主体已落、仍在集成。以下新增说明是源码实现同步，不是测试、桌面或 live 验收结论；所有修复完成后才统一验收并由父任务写证据报告。既有历史验证记录不覆盖本批，R4 live 云端 **NOT VERIFIED** 不变。用户已明确授权新增兼容迁移 `039_result_artifacts_cross_task_lineage`（跨任务修订血缘，见[数据模型第 44 节](docs/data-model.md)），001～038 保持发布定义与 checksum；039 的旧库/新库升级与回滚验收属统一验收项，本轮不报告通过。
+> 2026-11-11：统一原生执行内核与任务级预授权保持 v3.7.0，状态为 **INTEGRATION / NOT YET FULLY VERIFIED**。对话、规划、写章/修订、检查、总结及专用创作入口使用同一原生协调器；API、Mock、本地模型不再切换桌面顶层业务宿主。默认人工流程保留，任务头可对当前明确目标及其受控后续阶段分别授予规划应用、正文采用、总结应用权限，范围、预算、有效期、冻结模型与每次写入复验见[创作工作流](docs/user/workflow-guide.md#21-可选为当前目标签发有限预授权)。迁移总数为 001～043（`041_task_authorizations`、`042_library_task_scope`、`043_host_terminal_native_facts`）；001～040 definition/checksum 保持，041/042 已落地定义不改写，本批仅 043 新增 trigger，备份 schema 13 恢复 active 授权为 expired。完整入口、安全动态回归、桌面与本地 EXE 仍以[实施记录](reports/unified-agent-2026-11-11/implementation.md)最终门禁为准；历史通过记录不覆盖本批，R4 live 与文学效果未验证。
 
-v3.6.0 是功能基线；v3.6.1 收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径；v3.7.0 把桌面 Agent 工作台重构为 ZCode 形态并正式开放 Writing SubAgent——桌面端使用真实 API 模型写章时，模型在只读工具 + 唯一候选工具的收窄 allowlist 内自主读取上下文并提交 candidate-only 正文，候选仍只进入人工审阅与原子采用；mock / 本地模型与浏览器模式继续走确定性 Writer。同版收口 LocalStorage/SQLite 双真相（migration 037）、TXT 导入单事务、大纲作用域校验，并为任务运行持久化章节目标（migration 038）。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
+> 既有交互、候选与世界规则批次说明保留：曾新增兼容迁移 `039_result_artifacts_cross_task_lineage`（见[数据模型第 44 节](docs/data-model.md#44-migration-039跨任务修订血缘兼容用户授权的兼容迁移)），后续 040 保存章节阶段事实；这些历史实现/验收状态不能代替 041～043 与统一内核本批验证。
+
+历史版本演进（双宿主描述仅指本批前）：v3.6.0 是功能基线；v3.6.1 收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径；v3.7.0 初次开放 Writing SubAgent 与 ZCode 工作台时，桌面真实 API 在只读工具 + 唯一候选工具 allowlist 内自主读取并提交 candidate-only 正文，Mock/本地/浏览器使用确定性 Writer。同版收口 LocalStorage/SQLite 双真相（037）、TXT 导入单事务、大纲作用域校验和任务章节目标（038）。当前统一内核替代桌面分流，具体实现与未验收边界以上方当前说明及本批记录为准，不回写历史证据。
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 
 应用默认进入创作工作台：壳层先显示稳定骨架，恢复会话和旧上下文在后台继续；提供搜索、重命名、归档/恢复与首条消息原子创建。会话拥有独立模型选择、运行与取消状态，同一会话可在回合间切换模型，保存后下一回合生效。工具、错误和带来源/基线/校验证据的候选产物在对话中内联显示。桌面真实 API 消息由实际模型交流、追问并请求创作工具；选择和发送不依赖模型目录验证，不发送 nonce 能力探针。实际执行先建立 Run，连接或工具错误显示在对话中。历史回合与重试保持原模型身份，不能借用不同模型的 endpoint 或会话凭据；不可用时不会自动换模型。明确的任务字数设置仍有本地回执。写作工作台保留章节审阅、编辑、保存、采用、草稿历史、章节准备与总结入口。
 
-生产写章按运行时分流：桌面端 + 真实 API 模型默认由 Writing SubAgent 经 DSH 提交 candidate-only 正文；mock / 本地模型与浏览器模式继续走确定性 Writer。可在任务对话发送「本任务目标字数设为 3200 字」并确认本地回执，再继续写章；也可合并发送「生成下一章，目标 3200 字」。目标字数与设置中心的验收比例分别控制生成目标和允许区间，不修改章节正式数据。四项 Canonical 只读能力 `novel.read / structure.read / context.read / memory.search` 已在共享 Manifest 中标为 `stable + working`，模型可见身份共 4 项；DSH `read` 回合已使用 Canonical-only allowlist，候选与审计链保留既有 legacy 工具边界。
+当前桌面写章由统一原生协调器调度 Writing SubAgent 提交 candidate-only 正文；API、Mock、本地模型共用生命周期，不因模型模式或已有计划切换顶层 Writer。确定性 Writer 的规则能力继续复用，旧顶层编排仅限浏览器开发兼容。可在任务对话发送「本任务目标字数设为 3200 字」并确认本地回执，再继续写章；也可合并发送「生成下一章，目标 3200 字」。目标字数与设置中心的验收比例分别控制生成目标和允许区间，不修改章节正式数据。四项 Canonical 只读能力 `novel.read / structure.read / context.read / memory.search` 仍在共享 Manifest 中标为 `stable + working`，模型可见身份保持 4 项；DSH `read` 阶段使用 Canonical-only allowlist，受控候选协议不扩大其 exposure。完整迁移与动态行为仍待本批门禁，不因入口统一就宣称功能全部对等。
 
 任务目录支持稳定分页、全目录搜索与归档筛选，最近有效任务可在第一页之外恢复。写作要求与有界记忆检索词分离；否定或含糊动作在模型调用前判定，持续约束按最新方向处理并在上下文回执标明预算遗漏。低置信语义提醒保留给人工审阅，硬完整性错误和正式采用门禁不放宽。项目备份附件在任何恢复写入前校验允许键及项目归属，拒绝借备份覆盖应用设置或其他作品缓存。
 
@@ -88,11 +90,11 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 **技术栈稳定：**
 
 - React 18 + TypeScript
-- Tauri 1.x + Rust
-- bundled SQLite 3.51.3（WAL）+ Migrations（001-040）
+- Tauri 2（Rust crate 2.12.5；CLI/API 2.12.4）+ Rust（MSRV 1.90，固定工具链 1.95.0）
+- bundled SQLite 3.51.3（WAL）+ Migrations（001-043；041～043 为本批兼容迁移，仅 043 新增 trigger，待完整验收）
 - HashRouter + Vite 5
 
-系统不会自动应用全书计划；夜间草稿与质量门禁模式也不会自动采用正文或沉淀章节分析，这些正式副作用继续保留用户确认。全书候选队列必须由用户显式启动，可暂停 / 继续，并由 SQLite Scheduler 通过持久 lease/epoch 在应用重启后接管；只有用户明确选择 `full_auto` 且冻结预算、专家阈值和采用前复验全部通过时，才允许自动采用与确认分析。
+默认人工模式不自动应用规划、采用正文或沉淀总结；候选队列仍需明确启动、暂停或继续。任务级预授权是独立的有限正式写入权限，必须覆盖当前明确目标、动作、章节/新建范围、预算与期限，并在每次事务中复验。既有 `full_auto` 调度策略、专家阈值或生成成功本身不替代这份权限；多章持续执行、Scene/Beat 真实桌面阶段对等与重启恢复仍待本批证据，不把旧策略名称当成整书无限授权或自动重放许可。
 
 ---
 
@@ -106,9 +108,8 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - **写作工作台**：左侧卷章树、中间正文编辑区，以及保存、采用、草稿历史和章节准备/总结；生成入口位于创作工作台任务对话。
 - **创作任务连续性**：任务树显示运行、等待处理、失败和完成事实；切换任务会分别保留未发送草稿、错误与上下文压缩候选，失败重试在原用户回合下追加新 Run，并保留每次模型、工具、错误和产物证据。
 - **AI 正文生成**：基于世界设定、角色、事件、风格和上下文逐章生成候选正文；既可生成下一章，也可由用户启动全书候选队列。
-- **独立本地章节模型**：可在设置中心配置 OpenAI-Compatible llama-server，仅将章节首次生成与 Autonomous 候选正文路由到本地 Scene 协议；改写、润色、质检等任务继续使用全局 Provider，服务不可用时不自动回退。
-- **Scene/Beat 工程编排**：章节工程可用全局 Provider 生成待确认的 Scene/Beat JSON 候选；应用后，首次正文与 Autonomous 候选通过统一编排器按 Beat 串行生成，每个 Beat 独立执行一次单 user 本地调用并携带前一 Beat 状态胶囊，合并前执行连续性与 required Beat 校验；用户显式重跑失败章节时，可在冻结上下文和模型路线未变且当前门禁复验通过的前提下复用最长连续 Beat 前缀，从首个问题 Beat 继续。若旧作业因校验规则误判而失败，已正常完成的外部 Beat 修稿 Artifact 也会按当前规则重新裁剪、复验后参与该前缀，不重复调用模型。
-- **分阶段 Scene／Beat 写章（集成中）**：已新增 Scene-only v2、按当前 Scene 细化 Beats、实际正文状态提取及串行执行内核；旧合并计划保留。040 阶段事实和备份 schema 12 已落，生产工作台／DSH 接入、原生安全收口及桌面验收仍在进行；只读进度树当前仅为组件，不代表默认写章路径已切换。详见[实施记录](reports/scene-beat-workflow-implementation.md)。
+- **本地模型适配**：设置中心保留 OpenAI-Compatible 本地模型配置；桌面执行使用本任务冻结模型和显式能力适配，不因初稿、修订、Mock 或本地模式切换另一业务宿主。不支持所需协议时明确报错，不静默切换云模型或执行框架。
+- **Scene/Beat 工程与阶段事实（迁移中）**：保留已应用计划、连续性/required Beat 校验和 040 阶段事实作为执行输入及恢复依据；此前的确定性逐 Beat 编排属于历史实现，当前正在实现统一原生逐阶段链。**整章生成携带计划上下文不等于 Scene/Beat 执行对等**，不得据此声称全部迁移、前缀复用或恢复已验收。旧合并计划、Scene-only v2、Beats 细化与正文状态提取的现有资产保留；历史边界见[Scene/Beat 实施记录](reports/scene-beat-workflow-implementation.md)，本批进展以[统一内核实施记录](reports/unified-agent-2026-11-11/implementation.md)为准。
 - **多版本草稿**：AI 初稿、重生成稿、用户编辑稿、润色稿互不覆盖。
 - **正文变更安全门**：AI 结果携带固定目标、来源草稿、基础版本 / 哈希与结果 ID；目标或基础正文变化时拒绝静默应用。
 - **安全保存与采用**：草稿零行更新视为冲突；正式采用验证草稿归属，并在同一 SQLite 事务中原子切换正文及过期旧章节上下文。
@@ -134,7 +135,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - **长章节分段二次处理**：润色与质量检查按最多 7,000 字符分段，携带前后 400 字衔接参考；润色逐段合并为新草稿，质检分数按段长加权并把问题位置映射回全文，不再静默只处理正文前缀。
 - **人物与世界演化**：已采用正文会生成待确认章节总结、人物状态变化和地点/规则候选；只有用户确认后才写入正式上下文，世界扩展仍停留在设定候选库等待处理。
 - **恢复与身份失效**：页面会用权威采用稿对账计划进度；改采另一草稿时旧分析和已确认人物节点失效，既有章节上下文按正文采用协议过期。
-- **协作事实与备份**：session、round、opinion 持久化到 migration 021～023，自主计划持久化到 migration 024；参考资料、混合语义 Memory、跨进程调度和正式故事资产分别由 migration 025～029 提供；任务对话、产物决定和审阅授权由 migration 032～036 提供。完整项目备份当前为 schema 12（schema 7 Memory、schema 8 Scheduler、schema 9 故事资产、schema 10 工作台对话事实、schema 11 产物决定/审阅授权、schema 12 章节阶段事实均可恢复），并重映射身份；恢复历史阶段不自动请求模型，也不产生新的采用授权。
+- **协作事实与备份**：session、round、opinion 持久化到 migration 021～023，自主计划持久化到 024；参考资料、Memory、跨进程调度和故事资产由 025～029 提供；任务对话、产物决定和人工审阅授权由 032～036 提供。完整项目备份当前为 schema 13，继续包含 schema 12 章节阶段事实，并新增 041 任务授权/回执；恢复重映射身份，active 任务授权变为 expired，不恢复可执行权限或自动请求模型。新增人工审阅基线与备份兼容仍待本批验证。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。
@@ -423,7 +424,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 详细分层、覆盖范围与静态检查边界见 [docs/technical/testing.md](docs/technical/testing.md)，桌面环境、隔离、失败产物和排障见 [docs/technical/desktop-e2e.md](docs/technical/desktop-e2e.md)。
 
-正式签名发布先调用可复用的完整 Windows 桌面质量/E2E 工作流，只有该门禁成功后才构建 NSIS `*-setup.exe`、MSI、签名 updater 和回滚清单；本地独立 EXE 验证使用 `tauri build --bundles none`，与安装包阶段分离。
+正式签名发布先调用可复用的完整 Windows 桌面质量/E2E 工作流，只有该门禁成功后才构建 NSIS `*-setup.exe`、MSI、签名 updater 和回滚清单；本地独立 EXE 验证使用 `tauri build --no-bundle`，与安装包阶段分离。
 
 ---
 
@@ -440,12 +441,12 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - 章节操作、HashRouter 导航与 Tauri 原生窗口关闭已共用可恢复 Leave Guard，但其他非正文工作流尚未统一接入。
 - `recovery-dialog` 当前只覆盖章节工程 `generation_jobs` 的应用重启中断；旧 `ai_task_records` 和其他异步业务尚未纳入同一恢复协议。
 - 参考资料库当前支持独立 TXT 版本导入、来源 hash、六层采样与置信度画像；EPUB/PDF/OCR/Markdown/DOCX 和自动 embedding、增量向量化、模型重建与召回评估仍属于后续增强。
-- migration 027 的跨进程调度提供夜间草稿、质量门禁与全自动三档策略。`full_auto` 只有在冻结预算、lease/epoch、六专家阈值和采用前复验全部通过时才可正式采用；其他策略继续保留人工确认。
+- migration 027 的夜间草稿、质量门禁与 `full_auto` 调度策略保留为领域输入；它们本身不签发任务写入权限。自动采用/总结必须另经当前目标的有限授权、预算、lease/epoch、质量与原生基线复验；多章队列的全部迁移与恢复对等尚待本批验证。
 - Scheduler Worker 仍依附桌面应用进程；系统托盘/定时唤醒、锁屏/睡眠/断网恢复、次日审核收件箱和凭据解锁生命周期尚未形成系统级无人值守体验。
 - 生产 Provider 任务仍使用冻结工具 allowlist，开放式模型 Tool Calling、项目驾驶舱、关系图/地图，以及 DOCX/EPUB/PDF 出版与最终校对属于后续独立版本目标。
 - Mock 模式用于确定性流程验收，不代表真实模型的文学质量；真实 API 模式复用用户当前 Provider 配置，发布自动化不会读取 API Key 或产生外部调用费用。
 - 势力、地点和关系现为 SQLite 正式资产；浏览器开发模式只展示持久化边界，不伪造这些桌面事务记录。
-- 应用内更新仅在签名发布流水线注入公钥后启用；普通本地构建保留显式未配置状态。Stable/Beta 索引、minisign 校验和上一版本回滚目标由 release workflow 生成。
+- 应用内更新仅在签名发布流水线注入公钥后启用；普通本地构建保留显式未配置状态。Stable/Beta 索引、minisign 校验和上一版本回滚目标由 release workflow 生成。Tauri 2 以 `v1Compatible` 保留旧 MSI 更新链；updater 已切换到 crates.io 2.14.1 并锁定 `zip 9.1.2`，不再依赖临时 Git patch。独立测试产品已完成真实签名升级、错误签名拒绝与保留安装包回滚；正式渠道升级仍以发布验收为准。
 - React Router 7.18.4 与 Vite 5 受技术栈约束；应用继续使用 HashRouter、固定内部路由和仅回环地址的开发服务器，不把外部输入直接交给导航或暴露开发服务器到公网。生产依赖审计在 moderate 级别失败关闭。
 
 ---

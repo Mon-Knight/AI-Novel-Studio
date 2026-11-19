@@ -172,7 +172,7 @@ pub(crate) fn verify_source(
             .ok_or_else(invalid_source)?;
     if artifact.artifact_type != source.artifact_type
         || artifact.schema_version != 1
-        || artifact.source_novel_id != novel_id
+        || artifact.source_novel_id.as_deref() != Some(novel_id)
         || artifact.source_chapter_id.as_deref() != chapter_id
         || artifact.source_draft_version != source.source_draft_version
         || artifact.content_hash != source.artifact_hash

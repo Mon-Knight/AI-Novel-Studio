@@ -271,3 +271,11 @@ pub(super) fn validate(
     }
     Ok(())
 }
+
+/// Local settings cannot swallow a simultaneous creative instruction.
+pub(super) fn setting_only(text: &str) -> Result<bool,String> {
+    let text=directive_text(text);
+    if text.contains(['?','？']) { return Ok(false); }
+    let clauses:Vec<_>=text.split(['，',',','；',';','。','！','!','\n']).filter(|c|!c.trim().is_empty()).collect();
+    Ok(clauses.len()==1 && clause_target(clauses[0])?.is_some())
+}

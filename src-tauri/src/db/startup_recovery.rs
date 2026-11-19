@@ -3,6 +3,16 @@ use std::time::Instant;
 
 pub(super) fn recover_interrupted_work(connection: &mut Connection, total_started_at: Instant) {
     let mut phase_started_at = Instant::now();
+    crate::services::ai_request_policy_service::recover_interrupted_reservations(connection)
+        .expect("Failed to recover interrupted AI request reservations");
+    super::record_e2e_startup_timing(
+        "database",
+        "ai_request_reservation_recovery",
+        phase_started_at,
+        total_started_at,
+    );
+
+    phase_started_at = Instant::now();
     crate::services::chapter_workflow_stage_service::recover_interrupted_stages(connection)
         .expect("Failed to recover interrupted chapter workflow stages");
     super::record_e2e_startup_timing(

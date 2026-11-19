@@ -24,7 +24,7 @@ pub(crate) fn freeze_continuity(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "DSH_CHAPTER_TARGET_REQUIRED".to_string())?;
-    let verified = load_previous(connection, &input.novel_id, chapter_id)?;
+    let verified = load_previous(connection, input.require_novel_id()?, chapter_id)?;
     match (&verified, &input.continuity_claim) {
         (None, Some(_)) => {
             return Err("DSH_PREVIOUS_CHAPTER_SCOPE_MISMATCH: 本章没有紧邻前章".to_string());
@@ -56,7 +56,7 @@ pub(crate) fn revalidate_now(
         return Ok(());
     }
     let chapter_id = input.chapter_id.as_deref().unwrap_or("");
-    let live = load_previous(connection, &input.novel_id, chapter_id)?;
+    let live = load_previous(connection, input.require_novel_id()?, chapter_id)?;
     match (&input.verified_continuity, &live) {
         (None, None) => Ok(()),
         (Some(frozen), Some(live))

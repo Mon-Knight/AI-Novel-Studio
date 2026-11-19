@@ -189,3 +189,93 @@ fn reject_cross_work_target_links(tx: &Transaction<'_>, novel_id: &str) -> Resul
 #[cfg(test)]
 #[path = "purge_tests.rs"]
 mod tests;
+
+pub(super) fn purge_conversation_workbench_facts(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
+    tx.execute("DELETE FROM task_authorization_receipts WHERE novel_id=?1",params![novel_id]).map_err(|e|format!("清理授权回执失败：{e}"))?;
+    tx.execute("DELETE FROM task_authorizations WHERE novel_id=?1",params![novel_id]).map_err(|e|format!("清理任务授权失败：{e}"))?;
+    tx.execute(
+        "DELETE FROM chapter_workflow_stages WHERE novel_id=?1",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理章节写作阶段失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM review_authorizations WHERE novel_id=?1",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理审阅授权失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM artifact_decisions
+         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理产物决定失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM conversation_artifact_cards
+         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务产物卡片失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM artifact_validation_issues
+         WHERE artifact_id IN (
+             SELECT artifact_id FROM result_artifacts
+             WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)
+         )",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务产物校验事实失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM result_artifacts
+         WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务 ResultArtifact 失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM ai_task_attempts
+         WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务 Attempt 失败：{error}"))?;
+    for table in [
+        "ai_input_snapshots",
+        "ai_context_snapshots",
+        "ai_constraint_snapshots",
+    ] {
+        tx.execute(
+            &format!(
+                "DELETE FROM {table} WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)"
+            ),
+            params![novel_id],
+        )
+        .map_err(|error| format!("清理任务 Snapshot 失败：{error}"))?;
+    }
+    tx.execute("DELETE FROM ai_tasks WHERE novel_id=?1", params![novel_id])
+        .map_err(|error| format!("清理 AI Task 失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM tool_call_events
+         WHERE run_id IN (
+             SELECT run_id FROM task_runs
+             WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)
+         )",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务工具事件失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM task_runs
+         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务运行失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM conversation_turns
+         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务回合失败：{error}"))?;
+    tx.execute(
+        "DELETE FROM task_conversations WHERE novel_id=?1",
+        params![novel_id],
+    )
+    .map_err(|error| format!("清理任务对话失败：{error}"))?;
+    Ok(())
+}

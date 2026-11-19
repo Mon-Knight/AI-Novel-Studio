@@ -1,10 +1,15 @@
-import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  assertArtifactVersion,
+  assertStoredArchiveContains,
+  assertUpdaterSignature,
+  publishedAssetName,
+  sha256File,
+} from './release-artifacts.mjs';
 import { parseVersion, assertChannelVersion, assertRollback } from './release-version.mjs';
 
 const MAX_RELEASE_NOTES_CHARS = 4_000;
-const MAX_SIGNATURE_CHARS = 16_000;
 
 function argumentsMap(argv) {
   const result = new Map();
@@ -51,14 +56,6 @@ function assertHttpsUrl(value, label) {
   return url.toString();
 }
 
-function publishedAssetName(fileName) {
-  const normalized = fileName.replaceAll(' ', '.');
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(normalized)) {
-    throw new Error(`Release asset name contains unsupported characters: ${fileName}`);
-  }
-  return normalized;
-}
-
 function downloadUrl(repository, tag, fileName) {
   return `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(fileName)}`;
 }
@@ -75,13 +72,12 @@ function sanitizeReleaseNotes(value) {
 }
 
 async function artifactMetadata(file, repository, tag) {
-  const bytes = await readFile(file);
   const metadata = await stat(file);
   const fileName = publishedAssetName(path.basename(file));
   return {
     fileName,
     byteLength: metadata.size,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
+    sha256: await sha256File(file),
     downloadUrl: downloadUrl(repository, tag, fileName),
   };
 }
@@ -107,29 +103,40 @@ const repository = assertRepository(
 const workspace = path.resolve(process.cwd());
 const artifact = assertWorkspacePath(workspace, artifactInput, 'Updater artifact');
 const signatureFile = assertWorkspacePath(workspace, signatureInput, 'Updater signature');
-if (!/\.(?:nsis|msi)\.zip$/u.test(path.basename(artifact))) {
+const artifactName = path.basename(artifact);
+if (!/\.(?:nsis|msi)\.zip$/u.test(artifactName)) {
   throw new Error('Windows updater artifact must end in .nsis.zip or .msi.zip.');
 }
-if (path.basename(signatureFile) !== `${path.basename(artifact)}.sig`) {
+// Reject non-publishable or stale artifacts before hashing multi-hundred-MB files.
+publishedAssetName(artifactName);
+assertArtifactVersion(artifactName, version, 'Updater artifact');
+if (path.basename(signatureFile) !== `${artifactName}.sig`) {
   throw new Error('Updater signature file must match the selected updater artifact.');
 }
 
-const signature = (await readFile(signatureFile, 'utf8')).trim();
-if (!signature || signature.length > MAX_SIGNATURE_CHARS || signature.includes('\0')) {
-  throw new Error('Updater signature is empty or malformed.');
+const signature = assertUpdaterSignature(await readFile(signatureFile, 'utf8'), { version });
+
+const installerInput = values.get('installer')?.trim();
+if (!installerInput) {
+  throw new Error('Missing --installer (the retained MSI/v1 installer for rollback).');
 }
+const installer = assertWorkspacePath(workspace, installerInput, 'Installer artifact');
+const installerName = path.basename(installer);
+if (!/\.(?:msi|exe)$/iu.test(installerName)) {
+  throw new Error('Installer artifact must end in .msi or .exe.');
+}
+publishedAssetName(installerName);
+assertArtifactVersion(installerName, version, 'Installer artifact');
+await assertStoredArchiveContains({
+  archivePath: artifact,
+  installerPath: installer,
+  expectedEntryName: installerName,
+});
 
 const tag = `v${version}`;
 const publishedAt = new Date().toISOString();
 const updaterArtifact = await artifactMetadata(artifact, repository, tag);
-const installerInput = values.get('installer')?.trim();
-const installerArtifact = installerInput
-  ? await artifactMetadata(
-      assertWorkspacePath(workspace, installerInput, 'Installer artifact'),
-      repository,
-      tag,
-    )
-  : undefined;
+const installerArtifact = await artifactMetadata(installer, repository, tag);
 
 const notesInput = values.get('notes-file')?.trim();
 let notes = `AI Novel Studio v${version}`;
@@ -153,6 +160,10 @@ assertRollback({ version, channel, previousVersion, previousInstallerUrl, reposi
 const outputDirectory = path.join(workspace, 'dist-release', 'channels', channel);
 await mkdir(outputDirectory, { recursive: true });
 
+// Tauri 2 "v1Compatible" keeps the Tauri 1 zipped-updater contract, and the v2
+// updater plugin (its default `zip` feature) installs those archives directly.
+// Keep the single v1 `windows-x86_64` platform entry so existing v1 MSI clients
+// keep updating through the same static latest.json URL.
 const latest = {
   version,
   notes,

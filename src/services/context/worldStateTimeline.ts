@@ -3,6 +3,7 @@ import type { ChapterSummary } from '../../types/chapterSummary';
 import type { ContextRecord, ContextRecordType } from '../../types/context';
 import type { Volume } from '../../types/volume';
 import { isContextCompressionRecord } from './contextRecordService';
+import { evaluateSummaryApplicationPolicy } from '../ai/summaryApplicationPolicy';
 
 const MAX_TIMELINE_CHAPTERS = 12;
 const MAX_TIMELINE_CHARS = 7_200;
@@ -58,8 +59,7 @@ function summaryIsEligible(summary: ChapterSummary): boolean {
   return (
     summary.enabled &&
     !summary.isExpired &&
-    summary.validationStatus !== 'failed' &&
-    summary.validationResult?.safeToContext !== false
+    evaluateSummaryApplicationPolicy(summary.validationResult, summary.validationStatus).eligible
   );
 }
 

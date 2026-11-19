@@ -27,8 +27,6 @@ export const LEGACY_TS_BASELINE = Object.freeze({
   'src/services/generation/generationContextCompiler.ts': 853,
   'src/services/ai/promptBuilder.ts': 845,
   'src/services/database/draftVersionService.ts': 804,
-  'src/services/generation/chapterCandidateIntegrity.ts': 701,
-  'src/components/workspace/editor-area/useEditorDocumentController.ts': 693,
   'src/services/ai/aiTaskService.ts': 682,
   'src/services/ai/orchestrator/beatRepairService.ts': 673,
   'src/services/capabilities/capabilityCatalog.ts': 635,

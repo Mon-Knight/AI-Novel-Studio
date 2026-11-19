@@ -6,6 +6,14 @@ import type { ContextRecordType } from './context';
 
 /** 校验结果 */
 export interface ChapterSummaryValidation {
+  /** Structural/context policy version, not semantic correctness. */
+  policyVersion?: 1;
+  blockingIssues?: Array<{ code: string; path: string; message: string }>;
+  reviewRequirement?: 'none' | 'human_required';
+  applicationProvenance?: {
+    mode: 'manual_review' | 'task_preauthorization';
+    authorizationId?: string;
+  };
   passed: boolean;
   score: number;
   problems: Array<{
@@ -19,10 +27,16 @@ export interface ChapterSummaryValidation {
       | 'quality_conflict';
     message: string;
   }>;
+  /** Non-blocking review hints that remain visible without failing validation. */
+  advisories?: Array<{
+    code: string;
+    path: string;
+    message: string;
+  }>;
   safeToContext: boolean;
   semanticValidation?: 'not_checked';
   authorReviewed?: boolean;
-  evidenceValidation?: 'passed' | 'missing';
+  evidenceValidation?: 'passed' | 'missing' | 'failed';
   groundingIssues?: Array<{
     severity: 'warning' | 'error';
     code: string;

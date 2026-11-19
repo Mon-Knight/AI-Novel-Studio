@@ -1,13 +1,10 @@
 import { getAiSettings } from '../ai/aiSettingsStore';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import type { AiSettings } from '../../types/ai';
+import { canonicalModelProviderId, normalizeModelBaseUrl, normalizeModelId } from './modelIdentity';
+import { isTauri } from '../database/db';
 
-function normalizeApiProviderId(providerId: string): string {
-  const normalized = providerId.trim();
-  return normalized === 'deepseek' || normalized === 'deepseek-official'
-    ? 'deepseek-official'
-    : normalized;
-}
+const normalizeApiProviderId = canonicalModelProviderId;
 
 /**
  * Restores runtime-only defaults for snapshots written by older releases.
@@ -25,16 +22,24 @@ export function hydrateTaskModelSnapshotRuntime(snapshot: TaskModelSnapshot): Ta
   const settings = getAiSettings();
   const providerId = normalizeApiProviderId(snapshot.providerId);
   const currentProviderId = normalizeApiProviderId(settings.provider);
+  const modelId = normalizeModelId(snapshot.modelId);
   const matchesCurrentIdentity =
-    providerId === currentProviderId && snapshot.modelId.trim() === settings.modelName.trim();
+    providerId === currentProviderId && modelId === normalizeModelId(settings.modelName);
   const baseUrl =
-    snapshot.baseUrl?.trim() || (matchesCurrentIdentity ? settings.baseUrl.trim() : '');
+    normalizeModelBaseUrl(snapshot.baseUrl ?? '') ||
+    (matchesCurrentIdentity ? normalizeModelBaseUrl(settings.baseUrl) : '');
   const needsRuntime = !snapshot.runtime?.adapterProtocol;
   const needsBaseUrl = !snapshot.baseUrl?.trim() && Boolean(baseUrl);
-  if (!needsRuntime && !needsBaseUrl && providerId === snapshot.providerId) return snapshot;
+  const needsProvider = providerId !== snapshot.providerId;
+  const needsModel = modelId !== snapshot.modelId;
+  const needsEndpoint = Boolean(snapshot.baseUrl?.trim()) && snapshot.baseUrl !== baseUrl;
+  if (!needsRuntime && !needsBaseUrl && !needsProvider && !needsModel && !needsEndpoint) {
+    return snapshot;
+  }
   return {
     ...snapshot,
     providerId,
+    modelId,
     ...(baseUrl ? { baseUrl } : {}),
     runtime: needsRuntime
       ? {
@@ -49,22 +54,28 @@ export function hydrateTaskModelSnapshotRuntime(snapshot: TaskModelSnapshot): Ta
   };
 }
 
-export function captureTaskModelSnapshot(providerId?: string, modelId?: string): TaskModelSnapshot {
-  const settings = getAiSettings();
+export function captureTaskModelSnapshotFromSettings(
+  settings: AiSettings,
+  providerId?: string,
+  modelId?: string,
+): TaskModelSnapshot {
   const useMock = providerId === 'mock' || (!providerId && settings.runtimeMode === 'mock');
   const runtimeMode = useMock ? 'mock' : 'api';
   const frozenProviderId = useMock
     ? 'mock'
     : normalizeApiProviderId(providerId || settings.provider);
-  const frozenModelId = modelId || (useMock ? 'Mock' : settings.modelName || 'default');
+  const frozenModelId = normalizeModelId(
+    modelId || (useMock ? 'Mock' : settings.modelName || 'default'),
+  );
   const configuration = useMock
     ? settings
     : resolveModelConfiguration(settings, frozenProviderId, frozenModelId);
+  const desktop = isTauri();
   return {
     providerId: frozenProviderId,
     modelId: frozenModelId,
     runtimeMode,
-    baseUrl: runtimeMode === 'api' ? configuration.baseUrl : undefined,
+    baseUrl: runtimeMode === 'api' ? normalizeModelBaseUrl(configuration.baseUrl) : undefined,
     capabilities: ['conversation_turn', 'chapter_generate'],
     options: {
       temperature: configuration.temperature,
@@ -85,14 +96,20 @@ export function captureTaskModelSnapshot(providerId?: string, modelId?: string):
           }
         : undefined,
     runtime: {
-      adapterProtocol: useMock ? 'ans_provider_fallback_v1' : 'ans_task_session_v2',
-      adapterProvider: useMock ? 'browser-fallback' : frozenProviderId,
-      dshSourceCommit: useMock ? undefined : '47f943859bef60e4160492346772ded9b24f765a',
-      bundle: useMock ? 'browser-deterministic' : 'pinned-dsh-carrier',
+      // New captures describe the host that will actually execute them. Hydration
+      // above deliberately preserves historical protocol/evidence instead.
+      adapterProtocol: desktop ? 'ans_task_session_v2' : 'ans_provider_fallback_v1',
+      adapterProvider: !desktop && useMock ? 'browser-fallback' : frozenProviderId,
+      dshSourceCommit: desktop ? '47f943859bef60e4160492346772ded9b24f765a' : undefined,
+      bundle: desktop ? 'pinned-dsh-carrier' : 'browser-deterministic',
       profile: 'conversational-workbench-v2',
     },
     capturedAt: new Date().toISOString(),
   };
+}
+
+export function captureTaskModelSnapshot(providerId?: string, modelId?: string): TaskModelSnapshot {
+  return captureTaskModelSnapshotFromSettings(getAiSettings(), providerId, modelId);
 }
 
 type ModelConfiguration = Pick<
@@ -112,14 +129,15 @@ function resolveModelConfiguration(
   modelId: string,
 ): ModelConfiguration {
   const matches = (provider: string, model: string) =>
-    normalizeApiProviderId(provider) === providerId && model.trim() === modelId.trim();
+    normalizeApiProviderId(provider) === providerId &&
+    normalizeModelId(model) === normalizeModelId(modelId);
   if (settings.runtimeMode === 'api' && matches(settings.provider, settings.modelName)) {
     return settings;
   }
   const profiles: ModelConfiguration[] = (settings.savedApiModels ?? []).filter((item) =>
     matches(item.provider, item.modelName),
   );
-  const endpoints = new Set(profiles.map((item) => item.baseUrl.trim().replace(/\/+$/, '')));
+  const endpoints = new Set(profiles.map((item) => normalizeModelBaseUrl(item.baseUrl)));
   if (profiles.length === 1) return profiles[0];
   if (profiles.length > 1 && endpoints.size === 1) {
     throw new Error(`模型 ${providerId}:${modelId} 有多个配置，请在设置中心选定该模型后重试。`);

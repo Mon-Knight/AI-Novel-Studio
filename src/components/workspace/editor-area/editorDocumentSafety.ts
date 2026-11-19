@@ -20,6 +20,9 @@ export function getEditorDocumentSourceKey(input: EditorDocumentSourceInput): st
       input.reviewCandidate.authorizationId,
       input.reviewCandidate.artifactId,
       input.reviewCandidate.contentHash,
+      input.reviewCandidate.reviewDraftBinding?.draftId ?? '',
+      input.reviewCandidate.reviewDraftBinding?.draftVersion ?? '',
+      input.reviewCandidate.reviewDraftBinding?.contentHash ?? '',
     ].join(':');
   }
   if (input.draft) {
@@ -47,6 +50,25 @@ export function resolveEditorDraftContent(
       input.reviewCandidate.chapterId !== input.chapterId
     ) {
       return { action: 'preserve', reason: '审阅候选与当前章节不一致，已阻止载入' };
+    }
+    const binding = input.reviewCandidate.reviewDraftBinding;
+    if (binding) {
+      const draft = input.draft;
+      if (
+        !draft ||
+        draft.novelId !== input.novelId ||
+        draft.chapterId !== input.chapterId ||
+        draft.id !== binding.draftId ||
+        draft.versionNo !== binding.draftVersion ||
+        draft.contentState?.status === 'unavailable' ||
+        (draft.contentState?.status === 'ready' &&
+          draft.contentState.contentHash !== binding.contentHash)
+      )
+        return {
+          action: 'preserve',
+          reason: '已保存审阅稿与原生绑定不一致，已阻止用原始候选覆盖人工编辑',
+        };
+      return { action: 'replace', content: draft.content, draft };
     }
     return { action: 'replace', content: input.reviewCandidate.content, draft: null };
   }

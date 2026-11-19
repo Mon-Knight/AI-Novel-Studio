@@ -1,5 +1,5 @@
 import { appLogger } from '../../services/observability/appLogger';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { confirmDanger } from '../../utils/nativeDialog';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
@@ -8,20 +8,25 @@ import {
   createFirstVolumeAndChapter,
   createChapterInVolume,
 } from '../../services/chapters/chapterCreationService';
-import {
-  outlineGenerateService,
-  type ChapterOutlineCandidate,
-  type VolumeOutlineCandidate,
+import type {
+  ChapterOutlineCandidate,
+  VolumeOutlineCandidate,
 } from '../../services/ai/outlineGenerateService';
 import { OutlineManagerView } from './OutlineManagerView';
+import { useOutlineManagerGeneration } from './useOutlineManagerGeneration';
 import type { Volume, CreateVolumeInput, UpdateVolumeInput } from '../../types/volume';
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
-import { cancelLoadingOperation, runWithLoading } from '../../lib/runWithLoading';
+import { runWithLoading } from '../../lib/runWithLoading';
 import { masterOutlineService } from '../../services/outlines/outlineService';
 import type { MasterOutline } from '../../types/outline';
 import { describeUnknownError } from '../../utils/errorMessage';
-
-const CHAPTER_OUTLINE_BATCH_SIZE = 3;
+import { isTauri } from '../../services/database/db';
+import {
+  applyNativeOutlineCandidate,
+  outlineSourceFromSnapshot,
+} from '../../services/outlines/outlineCandidateApplicationService';
+import type { OutlineGenerationEvidence } from '../../types/outlineGeneration';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 interface OutlineManagerProps {
   novelId: string;
@@ -44,6 +49,11 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   // v1.0.35: 大纲库选择
   const [masterOutlines, setMasterOutlines] = useState<MasterOutline[]>([]);
   const [selectedMasterOutlineId, setSelectedMasterOutlineId] = useState('');
+  const activeNovel = useRef(novelId);
+  activeNovel.current = novelId;
+  const [masterSource, setMasterSource] = useState<OutlineGenerationEvidence | null>(null);
+  const [volumeSource, setVolumeSource] = useState<OutlineGenerationEvidence | null>(null);
+  const [chapterSource, setChapterSource] = useState<OutlineGenerationEvidence | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -76,6 +86,22 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setMessage(msg);
     setTimeout(() => setMessage(''), 3000);
   };
+
+  const { handleGenerateNovelOutline, handleGenerateVolumeOutline, handleGenerateChapterOutlines } =
+    useOutlineManagerGeneration({
+      novelId,
+      volumes,
+      targetVolumeId,
+      activeNovel,
+      flash,
+      setAiLoading,
+      setNovelOutline,
+      setMasterSource,
+      setVolumeSource,
+      setChapterSource,
+      setVolumeCandidate,
+      setChapterCandidates,
+    });
 
   // v1.0.20 创建分卷：写入 + 反查 + 重载
   const handleCreateVolume = async (input: CreateVolumeInput) => {
@@ -174,36 +200,6 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     flash('章节已删除');
   };
 
-  const handleGenerateNovelOutline = async () => {
-    setAiLoading('novel');
-    setNovelOutline('');
-    setVolumeCandidate(null);
-    setChapterCandidates([]);
-    try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成作品总大纲',
-          initialMessage: '正在读取作品设定……',
-          successMessage: '作品总大纲已生成，请确认后保存',
-          errorMessage: '作品总大纲生成失败',
-          cancelable: true,
-        },
-        async ({ setStage, signal, operationId }) => {
-          setStage('正在分析世界观和角色……');
-          const outline = await outlineGenerateService.generateNovelOutline(novelId, {
-            signal,
-            cancel: () => cancelLoadingOperation(operationId),
-          });
-          setNovelOutline(outline);
-        },
-      );
-    } catch (e: unknown) {
-      flash('AI 作品总大纲生成失败：' + describeUnknownError(e, '未知错误'));
-    } finally {
-      setAiLoading('');
-    }
-  };
-
   const handleSaveNovelOutline = async () => {
     if (!novelOutline.trim()) return;
     try {
@@ -216,14 +212,27 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
           successAutoCloseMs: 800,
         },
         async () => {
-          await masterOutlineService.save({
-            projectId: novelId,
-            title: '作品总纲',
-            content: novelOutline,
-            sourceType: 'ai_generated',
-            saveAsNewVersion: false,
-          });
-          // Reload existing outlines after save
+          if (isTauri()) {
+            if (!masterSource || masterSource.novelId !== novelId)
+              throw new Error('OUTLINE_SOURCE_REQUIRED: 候选来源不属于当前作品，内容已保留。');
+            await applyNativeOutlineCandidate(masterSource, {
+              kind: 'outline_version',
+              outlineType: 'master',
+              title: '作品总纲',
+              content: novelOutline,
+              saveAsNewVersion: false,
+            });
+          } else {
+            await masterOutlineService.save({
+              projectId: novelId,
+              title: '作品总纲',
+              content: novelOutline,
+              sourceType: 'ai_generated',
+              saveAsNewVersion: false,
+            });
+          }
+          if (activeNovel.current !== novelId) return;
+          // Reload existing outlines after the committed save; saving is not adoption.
           const versions = await masterOutlineService.getVersions(novelId);
           setMasterOutlines(versions);
           if (versions.length > 0) setSelectedMasterOutlineId(versions[0].id);
@@ -237,47 +246,60 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
 
   const handleSetActiveMasterOutline = async () => {
     if (!selectedMasterOutlineId) return;
-    await masterOutlineService.setActive(selectedMasterOutlineId, novelId);
-    const versions = await masterOutlineService.getVersions(novelId);
-    setMasterOutlines(versions);
-    flash('已设为当前采用总纲');
-  };
-
-  const handleGenerateVolumeOutline = async () => {
-    const target = volumes.find((volume) => volume.id === targetVolumeId);
-    setAiLoading('volume');
-    setVolumeCandidate(null);
-    setChapterCandidates([]);
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成分卷大纲',
-          initialMessage: '正在读取当前采用总纲……',
-          successMessage: '分卷大纲已生成，请确认后保存',
-          errorMessage: '分卷大纲生成失败',
-          cancelable: true,
-        },
-        async ({ setStage, signal, operationId }) => {
-          setStage('正在基于总纲分析分卷结构……');
-          const candidate = await outlineGenerateService.generateVolumeOutline(
-            {
-              novelId,
-              volumeTitle: target?.title,
-            },
-            { signal, cancel: () => cancelLoadingOperation(operationId) },
-          );
-          setVolumeCandidate(candidate);
-        },
-      );
-    } catch (e: unknown) {
-      flash('AI 分卷大纲生成失败：' + describeUnknownError(e, '未知错误'));
-    } finally {
-      setAiLoading('');
+      const selected = masterOutlines.find((outline) => outline.id === selectedMasterOutlineId);
+      const source = isTauri() ? outlineSourceFromSnapshot(selected?.contextSnapshot) : null;
+      if (source && selected) {
+        if (source.novelId !== novelId) throw new Error('OUTLINE_SOURCE_SCOPE_MISMATCH');
+        const current = masterOutlines.find((outline) => outline.isActive);
+        await applyNativeOutlineCandidate(source, {
+          kind: 'adopt_outline_version',
+          outlineType: 'master',
+          outlineId: selected.id,
+          expectedVersion: selected.version,
+          expectedContentHash: await computeContentSha256(selected.content),
+          expectedActive: current
+            ? {
+                id: current.id,
+                version: current.version,
+                contentHash: await computeContentSha256(current.content),
+              }
+            : null,
+        });
+      } else {
+        await masterOutlineService.setActive(selectedMasterOutlineId, novelId);
+      }
+      if (activeNovel.current !== novelId) return;
+      const versions = await masterOutlineService.getVersions(novelId);
+      setMasterOutlines(versions);
+      flash('已设为当前采用总纲');
+    } catch (error) {
+      flash('采用失败：' + describeUnknownError(error, '未知错误'));
     }
   };
 
   const handleSaveVolumeCandidate = async () => {
     if (!volumeCandidate) return;
+    if (isTauri()) {
+      try {
+        if (!volumeSource || volumeSource.novelId !== novelId)
+          throw new Error('OUTLINE_SOURCE_REQUIRED: 候选来源不属于当前作品。');
+        const { title, summary, goal, mainConflict } = volumeCandidate;
+        await applyNativeOutlineCandidate(volumeSource, {
+          kind: 'volume',
+          targetVolumeId: targetVolumeId || undefined,
+          candidate: { title, summary, goal, mainConflict },
+        });
+        if (activeNovel.current !== novelId) return;
+        setVolumeCandidate(null);
+        setVolumeSource(null);
+        await loadData();
+        flash('分卷大纲已保存，原生回执已提交');
+      } catch (error) {
+        flash('保存失败：' + describeUnknownError(error, '未知错误'));
+      }
+      return;
+    }
     if (targetVolumeId) {
       await volumeRepository.update(targetVolumeId, {
         title: volumeCandidate.title,
@@ -297,40 +319,33 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     flash('分卷大纲已保存');
   };
 
-  const handleGenerateChapterOutlines = async () => {
-    const volumeId = targetVolumeId || volumes[0]?.id;
-    setAiLoading('chapters');
-    setChapterCandidates([]);
-    try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成章节大纲',
-          initialMessage: '正在读取当前采用分卷大纲和总纲……',
-          successMessage: '章节大纲已生成，请逐条确认保存',
-          errorMessage: '章节大纲生成失败',
-          cancelable: true,
-        },
-        async ({ setStage, signal, operationId }) => {
-          setStage('AI 正在基于上级大纲规划章节结构……');
-          const candidates = await outlineGenerateService.generateChapterOutlines(
-            {
-              novelId,
-              volumeId,
-              chapterCount: CHAPTER_OUTLINE_BATCH_SIZE,
-            },
-            { signal, cancel: () => cancelLoadingOperation(operationId) },
-          );
-          setChapterCandidates(candidates);
-        },
-      );
-    } catch (e: unknown) {
-      flash('AI 章节大纲生成失败：' + describeUnknownError(e, '未知错误'));
-    } finally {
-      setAiLoading('');
-    }
-  };
-
   const handleSaveChapterCandidate = async (candidate: ChapterOutlineCandidate) => {
+    if (isTauri()) {
+      try {
+        if (
+          !chapterSource ||
+          chapterSource.novelId !== novelId ||
+          !Number.isSafeInteger(candidate.runtimeIndex)
+        )
+          throw new Error('OUTLINE_SOURCE_REQUIRED: 章节候选来源或批次位置不可核对，内容已保留。');
+        const { title, outline, goal, targetWordCount } = candidate;
+        await applyNativeOutlineCandidate(chapterSource, {
+          kind: 'chapter',
+          targetVolumeId: targetVolumeId || volumes[0]?.id,
+          candidateIndex: candidate.runtimeIndex!,
+          candidate: { title, outline, goal, targetWordCount },
+        });
+        if (activeNovel.current !== novelId) return;
+        setChapterCandidates((previous) =>
+          previous.filter((item) => item.runtimeIndex !== candidate.runtimeIndex),
+        );
+        await loadData();
+        flash('章节大纲已保存为新章节，原生回执已提交');
+      } catch (error) {
+        flash('保存失败：' + describeUnknownError(error, '未知错误'));
+      }
+      return;
+    }
     let volumeId = targetVolumeId || volumes[0]?.id || '';
     if (!volumeId) {
       const created = await createFirstVolumeAndChapter(novelId, {

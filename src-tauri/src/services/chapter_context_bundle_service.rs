@@ -13,47 +13,9 @@ use crate::services::draft_service;
 use crate::services::memory_service;
 use rusqlite::{params, Connection, TransactionBehavior};
 
-pub fn validate_character_state_input(
-    conn: &Connection,
-    input: &SaveCharacterStateInput,
-) -> Result<(), String> {
-    if let Some(id) = input.id.as_deref() {
-        validate_uuid("character_state_id", id)?;
-    }
-    validate_uuid("character_state_novel_id", &input.novel_id)?;
-    validate_uuid("character_state_character_id", &input.character_id)?;
-    if let Some(chapter_id) = input.chapter_id.as_deref() {
-        validate_uuid("character_state_chapter_id", chapter_id)?;
-    }
-    if input.state_summary.trim().is_empty() {
-        return Err("character_state_summary_required".to_string());
-    }
-    let character_exists = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM characters
-             WHERE id = ?1 AND novel_id = ?2 AND is_active = 1)",
-            params![&input.character_id, &input.novel_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(|error| format!("character_state_character_read_failed: {error}"))?;
-    if !character_exists {
-        return Err("character_state_character_ownership_mismatch".to_string());
-    }
-    if let Some(chapter_id) = input.chapter_id.as_deref() {
-        let chapter_exists = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM chapters
-                 WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL)",
-                params![chapter_id, &input.novel_id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|error| format!("character_state_chapter_read_failed: {error}"))?;
-        if !chapter_exists {
-            return Err("character_state_chapter_ownership_mismatch".to_string());
-        }
-    }
-    Ok(())
-}
+#[path = "chapter_context_bundle_validation.rs"]
+mod validation;
+pub use validation::validate_character_state_input;
 
 pub fn upsert_bundle_context_record(
     conn: &Connection,
@@ -196,6 +158,19 @@ pub fn persist_chapter_context_bundle_in_transaction(
     }
 
     let mut summary_input = input.summary.clone();
+    if summary_input.enabled.unwrap_or(true)
+        || input
+            .context_records
+            .iter()
+            .any(|record| record.is_active.unwrap_or(true))
+        || !input.character_states.is_empty()
+    {
+        crate::services::summary_application_policy::ensure_context_eligible(
+            summary_input.validation_result.as_deref(),
+            summary_input.validation_status.as_deref(),
+            crate::services::summary_application_policy::SummaryApplicationMode::Context,
+        )?;
+    }
     validate_summary_ownership(conn, &summary_input, true)?;
     let draft = draft_repository::find_draft(conn, &input.adopted_draft_id)
         .map_err(|error| format!("chapter_context_draft_read_failed: {error}"))?
@@ -485,6 +460,8 @@ mod tests {
             .collect::<Result<Vec<String>, _>>()
             .unwrap()
     }
+
+    include!("chapter_context_summary_policy_tests.rs");
 
     #[test]
     fn test_save_chapter_context_bundle() {

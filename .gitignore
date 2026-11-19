@@ -39,6 +39,7 @@ Thumbs.db
 
 # Tauri
 src-tauri/target/
+src-tauri/gen/schemas/
 src-tauri/bin/
 src-tauri/.payload-staging/
 src-tauri/.payload-verify/

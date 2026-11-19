@@ -23,7 +23,10 @@ async function loadPlugin() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 }
 
-function createHarness(plugin, { persisted = false, attestationMode = 'valid', toolNames } = {}) {
+function createHarness(
+  plugin,
+  { persisted = false, attestationMode = 'valid', toolNames, allowedTools = null } = {},
+) {
   const input = new PassThrough();
   const output = new PassThrough();
   const listeners = new Map();
@@ -242,6 +245,7 @@ function createHarness(plugin, { persisted = false, attestationMode = 'valid', t
   plugin.apply(ctx, {
     input,
     output,
+    allowedTools,
     exit(code) {
       exitCode = code;
     },
@@ -532,6 +536,56 @@ test(
       /hidden system prompt|private chain of thought|must-not-cross-wire/,
     );
     assert.match(serialized, /visible answer/);
+  },
+);
+
+test(
+  'staged tool profile health requires every staged capability, not generate_chapter',
+  { skip: carrierUnavailable },
+  async () => {
+    const plugin = await loadPlugin();
+    const stagedTools = [
+      'mcp__novel__novel_read_context_1e2b3adf9a19',
+      'mcp__novel__chapter_read_outline_68634582eb55',
+      'mcp__novel__get_character_states',
+      'mcp__novel__search_memory',
+      'mcp__novel__submit_chapter_stage',
+    ];
+    const readyHarness = createHarness(plugin, { toolNames: stagedTools });
+    await readyHarness.rpc('initialize', initializeParams);
+    const ready = await readyHarness.rpc('runtime/health');
+    assert.equal(ready.ready, true);
+    assert.equal(ready.composition.find((entry) => entry.id === 'mcp-novel').status, 'loaded');
+
+    const missingHarness = createHarness(plugin, { toolNames: stagedTools.slice(0, -1) });
+    await missingHarness.rpc('initialize', initializeParams);
+    const missing = await missingHarness.rpc('runtime/health');
+    assert.equal(missing.ready, false);
+    const mcp = missing.composition.find((entry) => entry.id === 'mcp-novel');
+    assert.equal(mcp.status, 'failed');
+    assert.deepEqual(mcp.missingTools, ['submit_chapter_stage']);
+
+    const stagedAllowlist =
+      'novel.read_context,chapter.read_outline,get_character_states,search_memory,submit_chapter_stage';
+    const wrongActionHarness = createHarness(plugin, {
+      allowedTools: stagedAllowlist,
+      toolNames: [...stagedTools.slice(0, -1), 'mcp__novel__generate_chapter'],
+    });
+    await wrongActionHarness.rpc('initialize', initializeParams);
+    const wrongAction = await wrongActionHarness.rpc('runtime/health');
+    assert.equal(wrongAction.ready, false);
+    assert.deepEqual(
+      wrongAction.composition.find((entry) => entry.id === 'mcp-novel').missingTools,
+      ['submit_chapter_stage'],
+    );
+
+    const polishHarness = createHarness(plugin, {
+      allowedTools:
+        'novel.read_context,chapter.read_outline,get_character_states,search_memory,polish_chapter',
+      toolNames: [...stagedTools.slice(0, -1), 'mcp__novel__polish_chapter'],
+    });
+    await polishHarness.rpc('initialize', initializeParams);
+    assert.equal((await polishHarness.rpc('runtime/health')).ready, true);
   },
 );
 

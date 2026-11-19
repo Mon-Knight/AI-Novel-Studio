@@ -5,6 +5,10 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[path = "ai_request_policy_service/recovery.rs"]
+mod recovery;
+pub use recovery::recover_interrupted_reservations;
+
 const MINUTE_MS: i64 = 60_000;
 const MIN_TTL_MS: i64 = 60_000;
 const MAX_TTL_MS: i64 = 2 * 60 * 60_000;
@@ -160,7 +164,7 @@ struct PolicyRow {
     warning_percent: i64,
 }
 
-fn policy_error(code: &str, message: &str, retryable: bool) -> AppError {
+pub(super) fn policy_error(code: &str, message: &str, retryable: bool) -> AppError {
     AppError::new(code, message, retryable)
 }
 
@@ -168,7 +172,7 @@ fn invalid_input(message: &str) -> AppError {
     policy_error(codes::AI_REQUEST_POLICY_INPUT_INVALID, message, false)
 }
 
-fn current_clock() -> (i64, String) {
+pub(super) fn current_clock() -> (i64, String) {
     let now = Local::now();
     (now.timestamp_millis(), now.format("%Y-%m-%d").to_string())
 }
@@ -538,7 +542,7 @@ fn ensure_day(transaction: &Transaction<'_>, day_key: &str, now_ms: i64) -> Resu
     Ok(())
 }
 
-fn apply_usage(
+pub(super) fn apply_usage(
     transaction: &Transaction<'_>,
     day_key: &str,
     token_input: i64,
@@ -1181,10 +1185,7 @@ fn get_snapshot_at(
     )?
     .map(|budget| (cost_used_units + reserved_cost_units) as f64 / budget as f64)
     .unwrap_or(0.0);
-    let warning_percent = policy
-        .as_ref()
-        .map(|policy| policy.warning_percent)
-        .unwrap_or(80);
+    let warning_percent = policy.as_ref().map_or(80, |p| p.warning_percent);
     Ok(AiRequestBudgetSnapshotDto {
         policy: policy.as_ref().map(PolicyRow::dto),
         day: day_key.to_string(),
@@ -1198,10 +1199,8 @@ fn get_snapshot_at(
         unpriced_request_count,
         failed_request_count,
         expired_request_count,
-        token_budget: policy.as_ref().and_then(|policy| policy.daily_token_budget),
-        cost_budget_usd: policy
-            .as_ref()
-            .and_then(|policy| policy.daily_cost_budget_usd),
+        token_budget: policy.as_ref().and_then(|p| p.daily_token_budget),
+        cost_budget_usd: policy.as_ref().and_then(|p| p.daily_cost_budget_usd),
         warning_percent,
         warning: token_ratio.max(cost_ratio) * 100.0 >= warning_percent as f64,
     })

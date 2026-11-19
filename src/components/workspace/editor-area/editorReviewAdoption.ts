@@ -80,6 +80,7 @@ export interface EditorCandidateAdoptionOptions {
   setAdopting: (value: boolean) => void;
   setAdoptState: (value: DocumentAdoptState) => void;
   setAdoptMsg: (value: string) => void;
+  onAdoptionError?: (code: string) => void;
 }
 
 /**
@@ -108,6 +109,7 @@ export function useEditorCandidateAdoption(options: EditorCandidateAdoptionOptio
     handleSave,
     authorizationId,
     onBeforeAdopt,
+    onAdoptionError,
     onChapterUpdated,
     onDraftSaved,
     emitContentSnapshot,
@@ -132,6 +134,7 @@ export function useEditorCandidateAdoption(options: EditorCandidateAdoptionOptio
     )
       return;
     setFeedbackEpoch(requestEpoch);
+    onAdoptionError?.('');
     if (effectiveContentState?.status === 'unavailable') {
       setAdoptMsg('正文不可用，已阻止采用');
       setAdoptState('error');
@@ -242,6 +245,7 @@ export function useEditorCandidateAdoption(options: EditorCandidateAdoptionOptio
         liveDocument.chapterId === requestChapterId
       ) {
         const appError = normalizeAppError(error, '采用失败。');
+        onAdoptionError?.(appError.code);
         setAdoptMsg(`采用失败：${getAppErrorUserMessage(appError)}`);
         setAdoptState('error');
       }
@@ -268,6 +272,7 @@ export function useEditorCandidateAdoption(options: EditorCandidateAdoptionOptio
     liveDraftIdRef,
     novelId,
     onBeforeAdopt,
+    onAdoptionError,
     onChapterUpdated,
     onDraftSaved,
     reviewLocked,

@@ -7,7 +7,7 @@
 
 .workbench-chapter-stage-tree {
   width: min(100%, var(--workbench-content-width, 860px));
-  margin: var(--space-2) auto 0;
+  margin: 0 auto var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);

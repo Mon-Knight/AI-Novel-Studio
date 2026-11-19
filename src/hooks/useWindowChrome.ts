@@ -12,11 +12,11 @@ export interface WindowChrome {
   close: () => void;
 }
 
-type AppWindow = typeof import('@tauri-apps/api/window').appWindow;
+type AppWindow = ReturnType<typeof import('@tauri-apps/api/webviewWindow').getCurrentWebviewWindow>;
 
-// Loaded lazily: the module warns about missing Tauri metadata when imported in a browser.
+// Loaded lazily: getCurrentWebviewWindow() requires Tauri's injected window metadata.
 const loadAppWindow = (): Promise<AppWindow> =>
-  import('@tauri-apps/api/window').then((module) => module.appWindow);
+  import('@tauri-apps/api/webviewWindow').then((module) => module.getCurrentWebviewWindow());
 
 function reportChromeFailure(action: string, error: unknown): void {
   appLogger.warn('[WINDOW_CHROME] action failed', {

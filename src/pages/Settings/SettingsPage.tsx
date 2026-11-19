@@ -54,8 +54,13 @@ function SettingsPage() {
     null,
   );
   const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
+  const [runtimeSync, setRuntimeSync] = useState<{
+    status: 'idle' | 'syncing' | 'ready' | 'not_registered' | 'error';
+    message?: string;
+  }>({ status: 'idle' });
   const connectionAbortRef = useRef<AbortController | null>(null);
   const localHealthAbortRef = useRef<AbortController | null>(null);
+  const runtimeSyncSequenceRef = useRef(0);
 
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
@@ -119,6 +124,26 @@ function SettingsPage() {
     }
   };
 
+  const runRuntimeSync = async (source: AiSettings) => {
+    const sequence = runtimeSyncSequenceRef.current + 1;
+    runtimeSyncSequenceRef.current = sequence;
+    setRuntimeSync({ status: 'syncing' });
+    const result = await aiSettingsService.syncRuntimeModel(source);
+    if (runtimeSyncSequenceRef.current !== sequence) return;
+    if (result.status === 'ready') {
+      setRuntimeSync({ status: 'ready' });
+      return;
+    }
+    if (result.status === 'skipped') {
+      setRuntimeSync({ status: 'idle' });
+      return;
+    }
+    setRuntimeSync({
+      status: result.status === 'error' ? 'error' : 'not_registered',
+      message: result.message,
+    });
+  };
+
   const handleSave = async (nextSettings?: AiSettings) => {
     const source = nextSettings ?? settings;
     const final = { ...source, mockMode: source.runtimeMode === 'mock' };
@@ -127,6 +152,9 @@ function SettingsPage() {
       setSettings(aiSettingsService.getSettings());
       setPolicySnapshotVersion((version) => version + 1);
       setMessage(getCredentialStorageCopy().saved);
+      // Registration is a separate bounded step; the save itself never blocks
+      // on Worker startup, and the result stays visible until the next change.
+      void runRuntimeSync(final);
     } catch (error) {
       setMessage(`AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
     }
@@ -260,6 +288,32 @@ function SettingsPage() {
                 onStopTest={() => connectionAbortRef.current?.abort()}
                 handleSave={handleSave}
               />
+              {runtimeSync.status !== 'idle' && (
+                <div
+                  className="settings-result is-info"
+                  data-testid="ai-runtime-sync-status"
+                  data-status={runtimeSync.status}
+                  role="status"
+                >
+                  <span>
+                    {runtimeSync.status === 'syncing'
+                      ? '正在将当前模型同步到 DeepSeek Runtime…'
+                      : runtimeSync.status === 'ready'
+                        ? 'DeepSeek Runtime 已注册当前模型。'
+                        : `DeepSeek Runtime 初始化未完成：${runtimeSync.message ?? '请重试。'}`}
+                  </span>
+                  {(runtimeSync.status === 'error' || runtimeSync.status === 'not_registered') && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      data-testid="ai-runtime-sync-retry"
+                      onClick={() => void runRuntimeSync(settings)}
+                    >
+                      重试 Runtime 初始化
+                    </button>
+                  )}
+                </div>
+              )}
               <LocalChapterModelSettingsCard
                 settings={settings}
                 onChange={update}

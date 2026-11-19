@@ -51,7 +51,7 @@ export function writingFaultPlan({
         {
           id: 'production-carrier-build',
           executable: process.execPath,
-          args: ['node_modules/@tauri-apps/cli/tauri.js', 'build', '--bundles', 'none', '--ci'],
+          args: ['node_modules/@tauri-apps/cli/tauri.js', 'build', '--no-bundle', '--ci'],
           env: { ...environment, CARGO_TARGET_DIR: target },
         },
       ];

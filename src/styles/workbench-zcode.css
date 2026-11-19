@@ -769,7 +769,7 @@
   background: var(--color-success);
 }
 
-.workbench-model-control.is-refreshing .workbench-model-status-dot {
+.workbench-model-control.is-initializing .workbench-model-status-dot {
   background: var(--color-info);
   animation: workbench-status-pulse 1.4s ease-in-out infinite;
 }

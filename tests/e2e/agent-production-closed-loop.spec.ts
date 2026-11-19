@@ -127,9 +127,11 @@ interface ClosedLoopRoundEvidence {
   conversationId: string;
   generateRunId: string;
   revisionRunId: string;
+  summaryRunId: string;
   summaryTurnId: string;
   initialArtifactId: string;
   revisedArtifactId: string;
+  summaryArtifactId: string;
   decisionId: string;
   authorizationId: string;
   draftId: string;
@@ -150,6 +152,19 @@ function assertChapterArtifact(
 ): void {
   expect(bundle.artifact.artifactId).toBe(expected.artifactId);
   expect(bundle.artifact.artifactType).toBe('chapter_text');
+  expect(bundle.artifact.sourceNovelId).toBe(expected.novelId);
+  expect(bundle.artifact.sourceChapterId).toBe(expected.chapterId);
+  expect(['valid', 'valid_with_warnings']).toContain(bundle.artifact.processingStatus);
+  expect(bundle.rawContent.length).toBeGreaterThan(20);
+  expect(sha256(bundle.rawContent)).toBe(bundle.artifact.contentHash);
+}
+
+function assertSummaryArtifact(
+  bundle: ResultArtifactBundle,
+  expected: { artifactId: string; novelId: string; chapterId: string },
+): void {
+  expect(bundle.artifact.artifactId).toBe(expected.artifactId);
+  expect(bundle.artifact.artifactType).toBe('chapter_summary');
   expect(bundle.artifact.sourceNovelId).toBe(expected.novelId);
   expect(bundle.artifact.sourceChapterId).toBe(expected.chapterId);
   expect(['valid', 'valid_with_warnings']).toContain(bundle.artifact.processingStatus);
@@ -198,7 +213,8 @@ async function waitForRevisedChapterCandidate(
 }
 
 describe('Agent production closed loop & restart verification', () => {
-  it('executes 5-round multi-novel generation, revision, review authorization, adoption & survives restart', async () => {
+  it('executes 5-round multi-novel generation, revision, review authorization, adoption & survives restart', async function () {
+    this.timeout(360000);
     const roundEvidence: ClosedLoopRoundEvidence[] = [];
     const seenConversationIds = new Set<string>();
 
@@ -611,7 +627,7 @@ describe('Agent production closed loop & restart verification', () => {
         'get_task_conversation',
         { conversationId },
       );
-      expect(pendingSummaryBundle?.conversation.status).toBe('idle');
+      expect(pendingSummaryBundle?.conversation.status).toBe('waiting_user');
       const pendingSummaryTurns = pendingSummaryBundle?.turns.filter(
         (turn) => turn.turnId === summaryTurnId,
       );
@@ -622,14 +638,28 @@ describe('Agent production closed loop & restart verification', () => {
         0,
       );
       expect(
-        pendingSummaryBundle?.artifacts.filter((card) => card.artifactType === 'chapter_summary'),
-      ).toHaveLength(0);
+        pendingSummaryBundle?.turns.some(
+          (turn) =>
+            turn.turnId.startsWith('followup-error-') ||
+            turn.turnId.endsWith('-root-stop-message') ||
+            (turn.content ?? '').includes('CHAPTER_REVISION_SOURCE_INVALID'),
+        ),
+      ).toBe(false);
       const adoptedChapterTextCards = pendingSummaryBundle?.artifacts.filter(
         (card) => card.artifactType === 'chapter_text',
       );
       expect(adoptedChapterTextCards?.map((card) => card.artifactId).sort()).toEqual(
         [initialArtifactId, revisedArtifactId].sort(),
       );
+      const pendingSummaryCards = pendingSummaryBundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_summary',
+      );
+      expect(pendingSummaryCards).toHaveLength(1);
+      expect(pendingSummaryCards?.[0].status).toBe('candidate');
+      const summaryArtifactId = pendingSummaryCards?.[0].artifactId ?? '';
+      const summaryRunId = pendingSummaryCards?.[0].runId ?? '';
+      expect(summaryArtifactId).toBeTruthy();
+      expect(summaryRunId).toBeTruthy();
 
       // --- 第 8 步：核实数据库与授权状态 ---
       const chaptersInDb = await bridgeCall<ChapterRecord[]>('get_chapters_by_novel_id', {
@@ -668,7 +698,7 @@ describe('Agent production closed loop & restart verification', () => {
       expect(adoptedDraft?.content).toBe(modifiedText);
       expect(adoptedDraft?.versionNo).toBeGreaterThan(0);
 
-      // --- 第 9 步：返回创作工作台，验证 Mock 总结在创建 Run 前显式失败 ---
+      // --- 第 9 步：返回创作工作台，验证原生 Mock 总结产出了 candidate-only 总结卡片 ---
       await navigateHash('#/');
       await waitForTestId('creative-workbench');
       const summaryProjectRow = await findTestIdByAttribute(
@@ -691,44 +721,36 @@ describe('Agent production closed loop & restart verification', () => {
       }
       expect(await summaryChapterSelect.getValue()).toBe(task.chapterId);
 
-      const summaryFailureSelector =
-        '[data-testid="workbench-summary-orchestration"][data-phase="failed"]';
-      const composerFailureSelector = '[data-testid="workbench-composer-error"]';
+      const orchestrationSelector =
+        '[data-testid="workbench-summary-orchestration"][data-phase="awaiting_apply"]';
+      const summaryCardSelector = `[data-testid="workbench-artifact-card"][data-artifact-id="${summaryArtifactId}"]`;
       await browser.waitUntil(
         async () => {
-          const orchestration = await browser.$(summaryFailureSelector);
-          if (await orchestration.isExisting()) return true;
-          const composerFailure = await browser.$(composerFailureSelector);
-          return (
-            (await composerFailure.isExisting()) &&
-            (await composerFailure.getText()).includes('冻结模型快照 runtimeMode 必须是 api')
-          );
+          const orchestration = await browser.$(orchestrationSelector);
+          const summaryCard = await browser.$(summaryCardSelector);
+          return (await orchestration.isExisting()) && (await summaryCard.isExisting());
         },
         {
           timeout: 30000,
           interval: 200,
-          timeoutMsg: `Round ${task.round} 未显式呈现 Mock 总结的 pre-Run 失败`,
+          timeoutMsg: `Round ${task.round} 未呈现原生总结候选 awaiting_apply 状态`,
         },
       );
-      const failureSignals: string[] = [];
-      const summaryFailure = await browser.$(summaryFailureSelector);
-      if (await summaryFailure.isExisting()) failureSignals.push(await summaryFailure.getText());
-      const composerFailure = await browser.$(composerFailureSelector);
-      if (await composerFailure.isExisting()) failureSignals.push(await composerFailure.getText());
-      expect(failureSignals.join('\n')).toMatch(
-        /章节总结启动失败，请重试|冻结模型快照 runtimeMode 必须是 api/,
+      expect(await (await browser.$('[data-testid="workbench-composer-error"]')).isExisting()).toBe(
+        false,
       );
 
       const finalBundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
         conversationId,
       });
-      expect(finalBundle?.conversation.status).toBe('idle');
+      expect(finalBundle?.conversation.status).toBe('waiting_user');
       const finalSummaryTurns = finalBundle?.turns.filter((turn) => turn.turnId === summaryTurnId);
       expect(finalSummaryTurns).toHaveLength(1);
       expect(finalSummaryTurns?.[0].role).toBe('user');
       expect(finalSummaryTurns?.[0].content).toContain('总结本章');
-      expect(finalBundle?.runs.map((run) => run.runId).sort()).toEqual(
-        [generateRunId, revisionRunId].sort(),
+      expect(finalBundle?.runs.every((run) => run.status === 'completed')).toBe(true);
+      expect(finalBundle?.runs.map((run) => run.runId)).toEqual(
+        expect.arrayContaining([generateRunId!, revisionRunId!, summaryRunId]),
       );
       expect(finalBundle?.runs.filter((run) => run.turnId === summaryTurnId)).toHaveLength(0);
       const finalChapterTextCards = finalBundle?.artifacts.filter(
@@ -737,11 +759,25 @@ describe('Agent production closed loop & restart verification', () => {
       expect(finalChapterTextCards?.map((card) => card.artifactId).sort()).toEqual(
         [initialArtifactId, revisedArtifactId].sort(),
       );
-      expect(
-        finalBundle?.artifacts.filter((card) => card.artifactType === 'chapter_summary'),
-      ).toHaveLength(0);
-      expect(finalBundle?.artifacts).toHaveLength(2);
+      const finalSummaryCards = finalBundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_summary',
+      );
+      expect(finalSummaryCards).toHaveLength(1);
+      expect(finalSummaryCards?.[0]).toMatchObject({
+        artifactId: summaryArtifactId,
+        status: 'candidate',
+      });
+      expect(finalBundle?.artifacts).toHaveLength(3);
       expect(finalBundle?.decisions).toHaveLength(2);
+
+      const summaryArtifact = await bridgeCall<ResultArtifactBundle>('get_result_artifact', {
+        input: { artifactId: summaryArtifactId },
+      });
+      assertSummaryArtifact(summaryArtifact, {
+        artifactId: summaryArtifactId,
+        novelId: task.novelId,
+        chapterId: task.chapterId,
+      });
 
       const formalSummary = await bridgeCall<unknown | null>('get_chapter_summary', {
         chapterId: task.chapterId,
@@ -764,9 +800,11 @@ describe('Agent production closed loop & restart verification', () => {
         conversationId,
         generateRunId: generateRunId!,
         revisionRunId: revisionRunId!,
+        summaryRunId,
         summaryTurnId,
         initialArtifactId: initialArtifactId!,
         revisedArtifactId: revisedArtifactId!,
+        summaryArtifactId,
         decisionId: authRecord!.decisionId,
         authorizationId,
         draftId: savedDraftId,
@@ -814,20 +852,18 @@ describe('Agent production closed loop & restart verification', () => {
     );
     await browser.waitUntil(
       async () => {
-        const orchestration = await browser.$(
-          '[data-testid="workbench-summary-orchestration"][data-phase="failed"]',
+        const statusEl = await browser.$(
+          '[data-testid="workbench-conversation-status"][data-status="waiting_user"]',
         );
-        if (await orchestration.isExisting()) return true;
-        const composerFailure = await browser.$('[data-testid="workbench-composer-error"]');
-        return (
-          (await composerFailure.isExisting()) &&
-          (await composerFailure.getText()).includes('冻结模型快照 runtimeMode 必须是 api')
+        const summaryCard = await browser.$(
+          `[data-testid="workbench-artifact-card"][data-artifact-id="${restartTarget.summaryArtifactId}"]`,
         );
+        return (await statusEl.isExisting()) && (await summaryCard.isExisting());
       },
       {
         timeout: 30000,
         interval: 200,
-        timeoutMsg: '应用重启后未恢复 Mock 总结的 pre-Run 失败状态',
+        timeoutMsg: '应用重启后未恢复原生总结候选与 waiting_user 状态',
       },
     );
 
@@ -837,16 +873,16 @@ describe('Agent production closed loop & restart verification', () => {
     expect(afterPid).not.toBe(beforePid);
 
     const expectedRounds = roundEvidence.length;
-    const expectedRuns = expectedRounds * 2;
+    const expectedCards = expectedRounds * 3;
     // A cross-chapter revision may trigger one bounded integrity repair. The immutable
     // pre-repair artifact remains auditable without becoming a conversation card.
     const maximumRetainedRepairArtifacts = 1;
     expect({ ...afterState, processId: beforePid }).toEqual(beforeState);
     expect(afterState.conversationsCount).toBe(expectedRounds);
-    expect(afterState.runsCount).toBe(expectedRuns);
-    expect(afterState.resultArtifactsCount).toBeGreaterThanOrEqual(expectedRuns);
+    expect(afterState.runsCount).toBeGreaterThanOrEqual(expectedRounds * 4);
+    expect(afterState.resultArtifactsCount).toBeGreaterThanOrEqual(expectedCards);
     expect(afterState.resultArtifactsCount).toBeLessThanOrEqual(
-      expectedRuns + maximumRetainedRepairArtifacts,
+      expectedCards + maximumRetainedRepairArtifacts,
     );
     expect(afterState.artifactDecisionsCount).toBe(expectedRounds * 2);
     expect(afterState.reviewAuthorizationsCount).toBe(expectedRounds);
@@ -869,9 +905,13 @@ describe('Agent production closed loop & restart verification', () => {
       expect(bundle).toBeTruthy();
       expect(bundle?.conversation.conversationId).toBe(evidence.conversationId);
       expect(bundle?.conversation.novelId).toBe(evidence.novelId);
-      expect(bundle?.conversation.status).toBe('idle');
-      expect(bundle?.runs.map((run) => run.runId).sort()).toEqual(
-        [evidence.generateRunId, evidence.revisionRunId].sort(),
+      expect(bundle?.conversation.status).toBe('waiting_user');
+      expect(bundle?.runs.map((run) => run.runId)).toEqual(
+        expect.arrayContaining([
+          evidence.generateRunId,
+          evidence.revisionRunId,
+          evidence.summaryRunId,
+        ]),
       );
       expect(bundle?.runs.every((run) => run.status === 'completed')).toBe(true);
       expect(bundle?.turns.every((turn) => turn.conversationId === evidence.conversationId)).toBe(
@@ -884,13 +924,11 @@ describe('Agent production closed loop & restart verification', () => {
       expect(persistedSummaryTurns?.[0].role).toBe('user');
       expect(persistedSummaryTurns?.[0].content).toContain('总结本章');
       expect(bundle?.runs.filter((run) => run.turnId === evidence.summaryTurnId)).toHaveLength(0);
+      const runIds = new Set(bundle?.runs.map((run) => run.runId));
       expect(bundle?.toolEvents.length).toBeGreaterThan(0);
       expect(
         bundle?.toolEvents.every(
-          (event) =>
-            [evidence.generateRunId, evidence.revisionRunId].includes(event.runId) &&
-            event.status === 'succeeded' &&
-            !event.error,
+          (event) => runIds.has(event.runId) && event.status === 'succeeded' && !event.error,
         ),
       ).toBe(true);
       const persistedChapterTextCards = bundle?.artifacts.filter(
@@ -902,17 +940,18 @@ describe('Agent production closed loop & restart verification', () => {
       const persistedChapterTextRunIds = new Set(
         persistedChapterTextCards?.map((card) => card.runId).filter(Boolean),
       );
-      expect(
-        bundle?.runs
-          .filter((run) => persistedChapterTextRunIds.has(run.runId))
-          .map((run) => run.runId)
-          .sort(),
-      ).toEqual([evidence.generateRunId, evidence.revisionRunId].sort());
+      expect(persistedChapterTextRunIds.has(evidence.generateRunId)).toBe(true);
+      expect(persistedChapterTextRunIds.has(evidence.revisionRunId)).toBe(true);
       const persistedSummaryCards = bundle?.artifacts.filter(
         (card) => card.artifactType === 'chapter_summary',
       );
-      expect(persistedSummaryCards).toHaveLength(0);
-      expect(bundle?.artifacts).toHaveLength(2);
+      expect(persistedSummaryCards).toHaveLength(1);
+      expect(persistedSummaryCards?.[0]).toMatchObject({
+        artifactId: evidence.summaryArtifactId,
+        runId: evidence.summaryRunId,
+        status: 'candidate',
+      });
+      expect(bundle?.artifacts).toHaveLength(3);
       expect(
         bundle?.artifacts.every((card) => card.conversationId === evidence.conversationId),
       ).toBe(true);
@@ -951,6 +990,9 @@ describe('Agent production closed loop & restart verification', () => {
       const revisedArtifact = await bridgeCall<ResultArtifactBundle>('get_result_artifact', {
         input: { artifactId: evidence.revisedArtifactId },
       });
+      const summaryArtifact = await bridgeCall<ResultArtifactBundle>('get_result_artifact', {
+        input: { artifactId: evidence.summaryArtifactId },
+      });
       assertChapterArtifact(initialArtifact, {
         artifactId: evidence.initialArtifactId,
         novelId: evidence.novelId,
@@ -958,6 +1000,11 @@ describe('Agent production closed loop & restart verification', () => {
       });
       assertChapterArtifact(revisedArtifact, {
         artifactId: evidence.revisedArtifactId,
+        novelId: evidence.novelId,
+        chapterId: evidence.chapterId,
+      });
+      assertSummaryArtifact(summaryArtifact, {
+        artifactId: evidence.summaryArtifactId,
         novelId: evidence.novelId,
         chapterId: evidence.chapterId,
       });
@@ -1003,8 +1050,9 @@ describe('Agent production closed loop & restart verification', () => {
 
     expect(persistedTurns).toBe(afterState.turnsCount);
     expect(persistedRuns).toBe(afterState.runsCount);
+    expect(persistedRuns).toBeGreaterThanOrEqual(expectedRounds * 4);
     expect(persistedToolEvents).toBe(afterState.toolEventsCount);
-    expect(persistedCards).toBe(expectedRuns);
+    expect(persistedCards).toBe(expectedCards);
     expect(afterState.resultArtifactsCount - persistedCards).toBeLessThanOrEqual(
       maximumRetainedRepairArtifacts,
     );

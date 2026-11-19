@@ -10,6 +10,7 @@ import { nextRunnableStep, verifyChapterReadinessPlan } from './chapterReadiness
 export interface AgentPlanRuntimeDependencies {
   persistence: AgentPlanPersistence;
   registry: ToolRegistry;
+  executePlan?: (bundle: AgentPlanBundle, retryStepId?: string) => Promise<AgentPlanBundle>;
 }
 
 export interface AgentPlanProgressEvent {
@@ -70,6 +71,11 @@ export function createAgentPlanRuntime(dependencies: AgentPlanRuntimeDependencie
     let bundle = await persistence.get(planId);
     const manifest = await registry.getManifest();
     await verifyChapterReadinessPlan(bundle, manifest);
+    if (dependencies.executePlan) {
+      const result = await dependencies.executePlan(bundle);
+      options.onProgress?.({ bundle: result });
+      return result;
+    }
     if (
       bundle.plan.status === 'completed' ||
       bundle.plan.status === 'failed' ||
@@ -166,6 +172,14 @@ export function createAgentPlanRuntime(dependencies: AgentPlanRuntimeDependencie
       stepId: string,
       options: RunAgentPlanOptions = {},
     ): Promise<AgentPlanBundle> {
+      if (dependencies.executePlan) {
+        const current = await persistence.get(planId);
+        const manifest = await registry.getManifest();
+        await verifyChapterReadinessPlan(current, manifest);
+        const result = await dependencies.executePlan(current, stepId);
+        options.onProgress?.({ bundle: result });
+        return result;
+      }
       const bundle = await persistence.authorizeRetry(
         planId,
         stepId,
@@ -180,4 +194,24 @@ export function createAgentPlanRuntime(dependencies: AgentPlanRuntimeDependencie
 export const agentPlanRuntimeService = createAgentPlanRuntime({
   persistence: agentPlanPersistenceService,
   registry: productionToolRegistry,
+  async executePlan(bundle, retryStepId) {
+    const { submitProductionAiEntry } =
+      await import('../autonomous-creation/productionAiEntryService');
+    const owner = bundle.checkpoints.find(
+      (checkpoint) =>
+        checkpoint.eventType === 'lease_acquired' &&
+        typeof checkpoint.payloadJson.ownerId === 'string' &&
+        checkpoint.payloadJson.ownerId.startsWith('domain-task:'),
+    )?.payloadJson.ownerId;
+    await submitProductionAiEntry({
+      conversationId: typeof owner === 'string' ? owner.slice('domain-task:'.length) : undefined,
+      novelId: bundle.plan.novelId,
+      chapterId: bundle.plan.chapterId,
+      goal: retryStepId
+        ? '明确继续章节准备计划；只读检查，不调用模型。'
+        : '运行章节准备计划；只读检查，不调用模型。',
+      entry: { kind: 'chapter_readiness', planId: bundle.plan.planId, retryStepId },
+    });
+    return agentPlanPersistenceService.get(bundle.plan.planId);
+  },
 });

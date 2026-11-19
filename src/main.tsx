@@ -10,13 +10,13 @@ import { initializeTheme } from './store/themeStore';
 import { setSystemAccentColor } from './services/theme/themeRuntimeService';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
 import { startupCoordinator } from './services/startup/startupCoordinator';
+import { applyPendingLegacyLocalStorageMigration } from './services/startup/legacyLocalStorageMigration';
 import { restoreSessionModelCredentialsFromNative } from './services/ai/aiSettingsStore';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
 
 performance.mark('app-script-start');
-initializeTheme();
 installGlobalErrorHandlers();
 
 const STARTUP_SPLASH_FADE_MS = 220;
@@ -117,7 +117,20 @@ function handleShellReady(): void {
   window.setTimeout(startAutonomousSchedulerRecovery, 0);
 }
 
-function bootstrapApplication() {
+async function bootstrapApplication() {
+  try {
+    const migration = await applyPendingLegacyLocalStorageMigration();
+    if (migration.status === 'failed') {
+      appLogger.warn('[LEGACY_LOCAL_STORAGE_MIGRATION_FAILED]', {
+        message: migration.error,
+      });
+    }
+  } catch (error) {
+    appLogger.warn('[LEGACY_LOCAL_STORAGE_MIGRATION_FAILED]', {
+      message: describeUnknownError(error, '旧版本地设置迁移失败'),
+    });
+  }
+  initializeTheme();
   // Establish recovery gates synchronously, while every recovery task itself
   // remains asynchronous and does not delay the first React render.
   void startupCoordinator.start();

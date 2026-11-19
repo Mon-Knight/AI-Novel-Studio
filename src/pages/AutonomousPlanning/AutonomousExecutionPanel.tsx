@@ -52,6 +52,7 @@ export function AutonomousExecutionPanel({
     const current = next ? latestRuns.find((run) => run.chapterId === next.id) : undefined;
     const pending = latestRuns.find(
       (run) =>
+        (run.status === 'adopted' && !run.analysis) ||
         run.analysis?.status === 'pending_confirmation' ||
         run.analysis?.status === 'running' ||
         run.analysis?.status === 'cancelled' ||
@@ -203,6 +204,9 @@ export function AutonomousExecutionPanel({
         >
           <div>
             <span>第 {pendingAnalysisRun.chapterNumber} 章收束</span>
+            {!pendingAnalysisRun.analysis && (
+              <strong>等待明确开始章节分析；刷新不会自动重放模型调用</strong>
+            )}
             {pendingAnalysisRun.analysis?.status === 'running' && (
               <strong>正在提取人物变化与世界新增事实</strong>
             )}
@@ -230,7 +234,8 @@ export function AutonomousExecutionPanel({
                 停止分析
               </button>
             )}
-            {(pendingAnalysisRun.analysis?.status === 'failed' ||
+            {(!pendingAnalysisRun.analysis ||
+              pendingAnalysisRun.analysis?.status === 'failed' ||
               pendingAnalysisRun.analysis?.status === 'cancelled') && (
               <button
                 type="button"
@@ -238,7 +243,7 @@ export function AutonomousExecutionPanel({
                 disabled={analysisSaving}
                 onClick={() => onRetryAnalysis(pendingAnalysisRun)}
               >
-                重试分析
+                {pendingAnalysisRun.analysis ? '重试分析' : '开始章节分析'}
               </button>
             )}
             {pendingAnalysisRun.analysis?.status === 'pending_confirmation' && (

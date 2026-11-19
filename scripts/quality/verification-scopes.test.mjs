@@ -5,6 +5,33 @@ import { createVerificationPlan } from './verify-change.mjs';
 
 const owner = (file) => verificationScopes.find((scope) => scope.match.test(file));
 
+test('legacy-origin migration entries retain startup, native and real desktop ownership', () => {
+  const inventory = ['src/services/startup/legacyLocalStorageMigration.test.ts'];
+  for (const file of [
+    'legacy-storage-migration.html',
+    'src/legacyStorageMigration.ts',
+    'src/services/startup/legacyLocalStorageMigration.ts',
+    'src-tauri/src/legacy_local_storage.rs',
+    'src-tauri/src/legacy_local_storage_e2e.rs',
+    'src-tauri/src/legacy_local_storage_tests.rs',
+  ]) {
+    const plan = createVerificationPlan([file], inventory);
+    assert.equal(owner(file)?.name, 'Tauri legacy-origin storage migration', file);
+    assert.deepEqual(plan.tests, inventory, file);
+    assert.ok(plan.rustFilters.includes('legacy_local_storage::tests::'), file);
+    assert.ok(plan.e2e.includes('tauri2-migration-regression'), file);
+  }
+  assert.equal(owner('src-tauri/src/unrecognized_migration_runtime.rs'), undefined);
+});
+
+test('native startup paths retain focused native tests and a real app-start gate', () => {
+  const file = 'src-tauri/src/startup_paths.rs';
+  const plan = createVerificationPlan([file], []);
+  assert.equal(owner(file)?.name, 'native startup paths');
+  assert.deepEqual(plan.rustFilters, ['startup_paths::tests::']);
+  assert.deepEqual(plan.e2e, ['app-start']);
+});
+
 test('manual profile and chapter saves own guarded persistence and real navigation regressions', () => {
   for (const file of [
     'src-tauri/src/services/chapter_details_service.rs',
@@ -113,6 +140,25 @@ test('new world rule and verified revision native modules select real Rust safet
   }
 });
 
+test('terminal native host facts require full Rust and real app/workbench gates', () => {
+  const file = 'src-tauri/src/migrations_host_terminal_native_facts.rs';
+  const plan = createVerificationPlan([file], []);
+  assert.equal(owner(file)?.name, 'native terminal host facts');
+  assert.equal(plan.rustFull, true);
+  assert.ok(plan.e2e.includes('app-start'));
+  assert.ok(plan.e2e.includes('workbench-writing-smoke'));
+});
+
+test('domain candidate style schema retains unified runtime behavior ownership', () => {
+  const file = 'src-tauri/shared/domain_candidate_style_schema.rs';
+  const inventory = ['src/services/styles/styleRuntimeService.test.ts'];
+  const plan = createVerificationPlan([file], inventory);
+  assert.equal(owner(file)?.name, 'unified domain entry capabilities');
+  assert.equal(plan.rustFull, true);
+  assert.ok(plan.tests.includes(inventory[0]));
+  assert.ok(plan.e2e.includes('workbench-writing-smoke'));
+});
+
 test('structured world material and native save contracts cannot fall through to primitive-only tests', () => {
   const inventory = ['src/services/worldRules/worldRuleSchema.test.ts'];
   for (const file of [
@@ -155,6 +201,11 @@ test('previously size-only native modules have executable regression ownership',
     'src-tauri/src/services/structured_setting_apply.rs',
     'src-tauri/src/services/structured_artifact_rule_governance_tests.rs',
     'src-tauri/src/repositories/conversation_review_authorization.rs',
+    'src-tauri/src/services/chapter_context_bundle_validation.rs',
+    'src-tauri/src/services/chapter_summary_validation.rs',
+    'src-tauri/src/repositories/memory_repository_mapping.rs',
+    'src-tauri/src/services/placement_source.rs',
+    'src-tauri/src/services/dsh/task_runtime_retry_legacy.rs',
   ]) {
     const plan = createVerificationPlan([file], []);
     assert.ok(plan.rustFull || plan.rustFilters.length > 0, file);

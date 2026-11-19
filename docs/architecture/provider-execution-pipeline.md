@@ -3,6 +3,22 @@
 > 状态：首批入口已实现
 > 适用版本：v2.3.1
 > 边界：连接测试与只读设定候选，不包含 Apply、Planner、Memory 或 Multi-Agent
+>
+> 以上及第 1～8 节为 v2.3.1 历史批次边界，不代表当前桌面创作仍由前端执行第二套顶层管线。2026-11-11 的当前覆盖层见下节；状态为 **INTEGRATION / NOT YET FULLY VERIFIED**，不回写历史验收。
+
+## 当前覆盖层：统一 Runtime 下的模型适配
+
+桌面创作入口先冻结任务、目标、模型与请求配置，再由原生协调器选择当前阶段能力。API、Mock、本地模型不决定业务宿主：都通过同一工具输入/输出/错误协议进入固定 DSH 与候选事实层。前端负责提交与投影；Provider 适配器只处理模型响应，不在 Mock 模式另写业务编排，也不因 Scene 计划切换到确定性 Writer 顶层。
+
+- Mock 返回受控的结构化工具调用与候选响应，仍经过原生阶段 allowlist、作用域、来源读取、预算和候选校验；离线夹具通过不是云端或文学质量证据。
+- 本地模型使用冻结的显式能力适配；缺少工具调用/结构化协议时明确失败，不自动换云模型，也不恢复另一执行框架。
+- 根目标和受控子任务共用累计请求、工具、修订、Token、费用与时限；取消向子任务传播，迟到结果不能绕过候选或正式写入门禁。请求仍受既有全局 reservation/结算治理。
+- `Task / Attempt / Snapshot / ResultArtifact` 继续承载实际请求与响应证据；`TaskConversation / Turn / Run / ToolCallEvent` 承载统一生命周期投影，DSH 载体与 `ans_task_session_v2` 不变。
+- `domain.submit_candidate` 的 `generic_json` 仅是阶段绑定的候选信封，非通用 Safe Apply 权限。当前任务预授权动作只接受精确 `outline / chapter_text / chapter_summary`；候选产生与正式采用分离。
+- 正式写入由原生人工决定/审阅授权或有限任务授权复验后提交，生成适配器没有权威写入权。提交结果未知先核对幂等回执，不自动再次请求 Provider。
+- 浏览器的既有 Client/确定性 Writer 仅限开发兼容，不提供真实共享 Runtime 或任务预授权，不能冒充桌面 SQLite 事务。
+
+当前源码范围与待验收项见 [Agent Runtime](../agent-runtime.md#13-统一原生执行与任务级预授权2026-11-11集成验证中)及[实施记录](../../reports/unified-agent-2026-11-11/implementation.md)。R4 live 保持 `NOT_VERIFIED`。
 
 ## 1. 目标
 
@@ -61,7 +77,7 @@ Input、Context 与 Constraint 可能保存部分重复文本，以换取当前�
 
 - 相同 operationId 已完成且存在 Artifact：直接读取首次结果，Provider 调用次数为 0。
 - `DATABASE_COMMIT_UNKNOWN`：最多重放一次相同持久化操作，不重放网络请求。
-- Provider 失败：映射为稳定 timeout / cancelled / authentication / request-rejected / rate-limited / server / network / malformed AppError，再安全终结 Attempt；Tauri 1.x 的纯字符串拒绝会保留已脱敏的后端消息，输出 Token 截断归为可重试 malformed response 而不是网络错误。
+- Provider 失败：映射为稳定 timeout / cancelled / authentication / request-rejected / rate-limited / server / network / malformed AppError，再安全终结 Attempt；Tauri 命令的纯字符串拒绝会保留已脱敏的后端消息，输出 Token 截断归为可重试 malformed response 而不是网络错误。
 - 取消：同时触发现有 HTTP Abort 和持久 Task cancel；取消后到达的响应不能创建 Artifact。
 - Artifact 校验失败：完整模型正文仍保存在 invalid Artifact，入口可以展示原始候选，但不会把它当作正式业务数据。
 

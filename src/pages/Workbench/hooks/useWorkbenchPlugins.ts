@@ -4,6 +4,7 @@ import {
   safePluginErrorText,
   type CurrentPluginProjection,
 } from '../../../services/conversation/currentPluginService';
+import { DSH_PLUGIN_PROBE_CONVERSATION_ID } from '../../../services/dsh/taskRuntimeService';
 import type { TaskModelSnapshot } from '../../../types/conversation';
 
 export type WorkbenchPluginRefreshSource = 'foreground' | 'background';
@@ -50,7 +51,8 @@ export function useWorkbenchPlugins(taskCreatorOpen = false) {
       const isBackground = source === 'background';
       const requestId = requestSequenceRef.current + 1;
       requestSequenceRef.current = requestId;
-      const target = conversationId?.trim() || (allowProbe ? '__ans_plugin_probe__' : undefined);
+      const target =
+        conversationId?.trim() || (allowProbe ? DSH_PLUGIN_PROBE_CONVERSATION_ID : undefined);
       const publishToVisibleState =
         !isBackground ||
         (!taskCreatorOpenRef.current && activeForegroundRequestRef.current === null);

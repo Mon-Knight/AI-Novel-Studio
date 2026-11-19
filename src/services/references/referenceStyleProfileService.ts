@@ -172,6 +172,7 @@ export async function createReferenceStyleProfile(
     sections: analysisSections,
     options,
   });
+  throwIfAiRequestCancelled(options.signal);
   const metadata = JSON.stringify(analysis);
   if (analysisSections.some((section) => metadata.includes(section.content))) {
     throw new Error('分层风格画像意外包含参考原文，保存已终止。');

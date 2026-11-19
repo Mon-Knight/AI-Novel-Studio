@@ -11,15 +11,17 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod chapter_workflow_stage;
+mod task_authorization;
 mod large_text;
 #[path = "project_backup_local_storage.rs"]
 mod local_storage_policy;
 mod purge;
+use purge::purge_conversation_workbench_facts;
 mod restore_identity;
 mod rule_receipts;
 
 const BACKUP_TYPE: &str = "ai_novel_studio_project";
-const BACKUP_SCHEMA_VERSION: u32 = 12;
+const BACKUP_SCHEMA_VERSION: u32 = 13;
 const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION: u32 = 2;
 const SQLITE_BIND_BATCH_SIZE: usize = 900;
 
@@ -61,6 +63,8 @@ struct TableSpec {
 }
 
 const PROJECT_TABLES: &[TableSpec] = &[
+    TableSpec { name: "task_authorizations", filter: "novel_id = ?1" },
+    TableSpec { name: "task_authorization_receipts", filter: "novel_id = ?1" },
     TableSpec {
         name: "world_settings",
         filter: "novel_id = ?1",
@@ -362,6 +366,8 @@ const INSERT_ORDER: &[&str] = &[
     "conversation_artifact_cards",
     "artifact_decisions",
     "review_authorizations",
+    "task_authorizations",
+    "task_authorization_receipts",
     "reference_works",
     "reference_imports",
     "reference_sections",
@@ -470,6 +476,9 @@ const DELETE_ORDER: &[&str] = &[
 ];
 
 const REFERENCE_COLUMNS: &[&str] = &[
+    "renewed_from_authorization_id",
+    "receipt_id",
+    "source_turn_id",
     "id",
     "novel_id",
     "project_id",
@@ -562,6 +571,7 @@ const REFERENCE_COLUMNS: &[&str] = &[
 ];
 
 const IDENTITY_COLUMNS: &[&str] = &[
+    "receipt_id",
     "id",
     "session_id",
     "opinion_id",
@@ -588,6 +598,9 @@ const IDENTITY_COLUMNS: &[&str] = &[
 // values can include project record IDs that are not represented by SQLite
 // foreign keys, so they need the same remapping as direct reference columns.
 const STRUCTURED_JSON_COLUMNS: &[&str] = &[
+    "renewal_preview_json",
+    "spec_json",
+    "baseline_json",
     "protagonists_json",
     "dual_protagonist_relation_json",
     "structured_json",
@@ -873,6 +886,7 @@ fn table_names_for_schema(schema_version: u32) -> Vec<&'static str> {
                 || !matches!(*table, "artifact_decisions" | "review_authorizations")
         })
         .filter(|table| schema_version >= 12 || !chapter_workflow_stage::is_stage_table(table))
+        .filter(|table| schema_version >= 13 || !task_authorization::is_table(table))
         .collect()
 }
 
@@ -1049,7 +1063,8 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
         "tool_call_events" => has_non_empty_text("event_id"),
         "conversation_artifact_cards" => has_non_empty_text("card_id"),
         "artifact_decisions" => has_non_empty_text("decision_id"),
-        "review_authorizations" => has_non_empty_text("authorization_id"),
+        "review_authorizations" | "task_authorizations" => has_non_empty_text("authorization_id"),
+        "task_authorization_receipts" => has_non_empty_text("receipt_id"),
         "chapter_workflow_stages" => has_non_empty_text("stage_id"),
         "ai_tasks" => has_non_empty_text("task_id"),
         "ai_task_attempts" => has_non_empty_text("attempt_id"),
@@ -1188,6 +1203,7 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
                         .is_some_and(str::is_empty))
         }
         "chapter_workflow_stages" => chapter_workflow_stage::validate_row(row),
+        "task_authorizations" | "task_authorization_receipts" => task_authorization::validate_row(table,row),
         _ => true,
     };
     if !valid_workbench_row {
@@ -1271,6 +1287,7 @@ fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), Stri
     validate_backup_memory(backup)?;
     validate_backup_large_text_integrity(backup)?;
     rule_receipts::validate_references(backup)?;
+    task_authorization::validate(backup)?;
     Ok(())
 }
 
@@ -2116,6 +2133,7 @@ fn insert_rows(
     };
     for row in &ordered_rows {
         let mut row = remap_row(row, id_map);
+        if matches!(table,"artifact_decisions"|"review_authorizations") {row=task_authorization::restore_manual_review_row(table,row)?;}
         if table == "ai_tasks"
             && row
                 .get("result_artifact_id")
@@ -2131,7 +2149,9 @@ fn insert_rows(
                 JsonValue::String("validating".to_string()),
             );
         }
-        let row = if is_autonomous_story_table(table) {
+        let row = if task_authorization::is_table(table) {
+            task_authorization::restore_row(table,row)?
+        } else if is_autonomous_story_table(table) {
             refresh_restored_autonomous_plan(row)?
         } else if is_autonomous_scheduler_table(table) {
             refresh_restored_scheduler_row(table, row)?
@@ -2398,14 +2418,20 @@ fn leave_workbench_restore_mode(tx: &Transaction<'_>) -> Result<(), String> {
             BEGIN SELECT RAISE(ABORT, 'invalid task run scope or snapshot'); END;
          CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_validate_insert
             BEFORE INSERT ON tool_call_events
-            WHEN NEW.status NOT IN ('pending', 'queued', 'running')
+            WHEN (
+                    NEW.status NOT IN ('pending', 'queued', 'running')
+                    AND NOT (NEW.tool_name LIKE 'dsh.%' AND NEW.status IN ('succeeded', 'failed', 'cancelled'))
+                 )
               OR NEW.sequence < 0
               OR json_valid(NEW.arguments_summary_json) = 0
               OR json_type(NEW.arguments_summary_json) <> 'object'
               OR NOT EXISTS (
                   SELECT 1 FROM task_runs
                   WHERE run_id = NEW.run_id
-                    AND status IN ('queued', 'running', 'cancel_requested')
+                    AND (
+                        status IN ('queued', 'running', 'cancel_requested')
+                        OR (NEW.tool_name LIKE 'dsh.%' AND status IN ('completed', 'failed', 'cancelled'))
+                    )
               )
             BEGIN SELECT RAISE(ABORT, 'invalid tool call event'); END;",
     )
@@ -2489,6 +2515,10 @@ pub fn restore_project_backup_in_conn(
                 continue;
             }
             None if backup.schema_version < 12 && chapter_workflow_stage::is_stage_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 13 && task_authorization::is_table(table) => {
                 restored_records.insert((*table).to_string(), 0);
                 continue;
             }
@@ -2669,93 +2699,6 @@ fn delete_location_rows(tx: &Transaction<'_>, rows: &[BackupRow]) -> Result<(), 
     Ok(())
 }
 
-fn purge_conversation_workbench_facts(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
-    tx.execute(
-        "DELETE FROM chapter_workflow_stages WHERE novel_id=?1",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理章节写作阶段失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM review_authorizations WHERE novel_id=?1",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理审阅授权失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM artifact_decisions
-         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理产物决定失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM conversation_artifact_cards
-         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务产物卡片失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM artifact_validation_issues
-         WHERE artifact_id IN (
-             SELECT artifact_id FROM result_artifacts
-             WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)
-         )",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务产物校验事实失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM result_artifacts
-         WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务 ResultArtifact 失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM ai_task_attempts
-         WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务 Attempt 失败：{error}"))?;
-    for table in [
-        "ai_input_snapshots",
-        "ai_context_snapshots",
-        "ai_constraint_snapshots",
-    ] {
-        tx.execute(
-            &format!(
-                "DELETE FROM {table} WHERE task_id IN (SELECT task_id FROM ai_tasks WHERE novel_id=?1)"
-            ),
-            params![novel_id],
-        )
-        .map_err(|error| format!("清理任务 Snapshot 失败：{error}"))?;
-    }
-    tx.execute("DELETE FROM ai_tasks WHERE novel_id=?1", params![novel_id])
-        .map_err(|error| format!("清理 AI Task 失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM tool_call_events
-         WHERE run_id IN (
-             SELECT run_id FROM task_runs
-             WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)
-         )",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务工具事件失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM task_runs
-         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务运行失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM conversation_turns
-         WHERE conversation_id IN (SELECT conversation_id FROM task_conversations WHERE novel_id=?1)",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务回合失败：{error}"))?;
-    tx.execute(
-        "DELETE FROM task_conversations WHERE novel_id=?1",
-        params![novel_id],
-    )
-    .map_err(|error| format!("清理任务对话失败：{error}"))?;
-    Ok(())
-}
 
 pub(crate) fn purge_project_in_tx(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
     let backup = export_project_backup_in_conn(&*tx, novel_id)?;
@@ -3585,7 +3528,7 @@ mod tests {
                 request_hash: None,
                 trace_id: None,
                 task_type: "chapter_generate".to_string(),
-                novel_id: novel_id.to_string(),
+                novel_id: Some(novel_id.to_string()),
                 chapter_id: Some("chapter-1".to_string()),
                 draft_id: None,
                 scope_type: "chapter".to_string(),
@@ -4400,7 +4343,7 @@ mod tests {
         seed_story_asset_fixture(&source, "novel-source");
         let mut backup =
             export_project_backup_in_conn(&source, "novel-source").expect("export story assets");
-        assert_eq!(backup.schema_version, 12);
+        assert_eq!(backup.schema_version, 13);
 
         for (table, expected) in [
             ("factions", 2),
@@ -4665,7 +4608,7 @@ mod tests {
 
         let backup =
             export_project_backup_in_conn(&source, "novel-source").expect("export source plan");
-        assert_eq!(backup.schema_version, 12);
+        assert_eq!(backup.schema_version, 13);
         let plans = &backup.tables["autonomous_story_plans"];
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0]["plan_id"], "plan-source");

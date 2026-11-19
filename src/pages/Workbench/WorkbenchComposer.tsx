@@ -316,6 +316,7 @@ export function WorkbenchComposer({
                 error={assetScopeError}
                 onRefresh={onRefreshAssetScope}
                 onOpen={onOpenAssetScopePath}
+                onCollapse={() => setAssetScopeOpen(false)}
               />
             </div>
           )}

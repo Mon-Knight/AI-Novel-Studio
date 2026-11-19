@@ -153,9 +153,16 @@ describe('governed chapter summary entry', () => {
         createdAt: '2026-10-16',
         updatedAt: '2026-10-16',
         validationResult: {
-          passed: false,
-          score: 0,
+          passed: true,
+          score: 88,
           problems: [],
+          advisories: [
+            {
+              code: 'SUMMARY_SEMANTICS_REQUIRE_REVIEW',
+              path: '/grounding',
+              message: '引句位置与字段覆盖已核对，语义仍需作者审阅。',
+            },
+          ],
           safeToContext: true,
           authorReviewed: true,
           semanticValidation: 'not_checked',
@@ -174,8 +181,19 @@ describe('governed chapter summary entry', () => {
       '确认寄件人',
       '按约定查阅台账',
       '作者已审阅，语义未自动核实',
+      '审阅提示（非阻断）',
+      '引句位置与字段覆盖已核对，语义仍需作者审阅。',
     ])
       expect(screen.getByText(text)).toBeTruthy();
+    expect(screen.getByTestId('chapter-summary-validation-state').textContent).toContain(
+      '无阻断性校验错误',
+    );
+    expect(screen.getByTestId('chapter-summary-validation-state').textContent).toContain(
+      '可用于后续上下文',
+    );
+    expect(screen.getByTestId('chapter-summary-details-advisories').textContent).toContain(
+      '引句位置与字段覆盖已核对',
+    );
     expect(fixture.summarize).not.toHaveBeenCalled();
   });
   it('revalidates current adoption before enabling an old displayed summary', async () => {

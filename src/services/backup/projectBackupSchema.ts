@@ -3,7 +3,7 @@ import {
   validateLocalProjectBackupShape,
 } from './projectBackupLocalStoragePolicy.ts';
 
-export const PROJECT_BACKUP_SCHEMA_VERSION = 12;
+export const PROJECT_BACKUP_SCHEMA_VERSION = 13;
 export const MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION = 2;
 
 export type BackupValue =
@@ -168,6 +168,7 @@ export function isCompleteProjectBackup(data: unknown): data is CompleteProjectB
     ...(data.schemaVersion >= 10 ? CONVERSATION_WORKBENCH_TABLES : []),
     ...(data.schemaVersion >= 11 ? ARTIFACT_DECISION_TABLES : []),
     ...(data.schemaVersion >= 12 ? ['chapter_workflow_stages'] : []),
+    ...(data.schemaVersion >= 13 ? ['task_authorizations', 'task_authorization_receipts'] : []),
   ];
   const allowedTables = new Set<string>(requiredTables);
   try {

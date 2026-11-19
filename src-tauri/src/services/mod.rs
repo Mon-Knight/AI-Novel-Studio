@@ -32,6 +32,10 @@ pub mod project_service;
 pub mod quality_check_service;
 pub mod recovery_service;
 pub mod reference_library_service;
+pub mod summary_application_policy;
+pub mod task_authorization_contract;
+pub mod task_authorization_service;
+pub(crate) mod task_authorization_baseline;
 pub mod structured_artifact_apply_service;
 mod structured_summary_apply;
 pub mod summary_coverage;
@@ -44,3 +48,7 @@ pub mod world_rule_governance;
 pub mod world_rule_schema;
 pub mod world_setting_service;
 pub mod setting_suggestion_adoption_service;
+
+pub mod outline_candidate_apply;
+pub mod library_task_service;
+pub mod task_style_source;

@@ -217,6 +217,15 @@ pub fn comparison_corpus() -> Vec<ComparisonRow> {
 }
 
 pub fn insert_gateway(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute(
+            "INSERT INTO chapter_summaries(
+                id,novel_id,chapter_id,summary,validation_status,enabled,is_expired,created_at,updated_at
+             ) VALUES('chunk-summary','novel-1','chapter-1','铜钥匙写入章节总结',NULL,1,0,
+                      '2026-08-21T00:00:05Z','2026-08-21T00:00:05Z')",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
     for row in comparison_corpus() {
         connection
             .execute(

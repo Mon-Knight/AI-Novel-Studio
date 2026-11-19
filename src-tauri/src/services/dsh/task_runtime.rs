@@ -9,8 +9,7 @@
 use super::commands::{normalize_model_base_url, spawn_governed_proxy, ProxyGuard};
 use super::config::{runtime_root, task_cordis_yml, task_server_script};
 use super::governed_proxy::{
-    start_policy_server, GovernedProxyPolicy, GovernedProxyPolicyGuard,
-    GovernedRequestIdentityReader,
+    GovernedProxyPolicy, GovernedProxyPolicyGuard, GovernedRequestIdentityReader,
 };
 use super::launcher::{node_compatible_path, DshLaunchConfig, DshRuntimeLauncher, NodeDshRuntime};
 use super::supervisor::{RuntimeHandle, SessionEventObserver, SupervisorError};
@@ -52,22 +51,65 @@ mod revision_source;
 use crate::services::artifact_service::revision_source::{
     ArtifactRevisionSource, VerifiedRevisionSource,
 };
+#[path = "task_runtime_chapter_stage.rs"]
+mod chapter_stage;
 #[path = "task_runtime_context_coverage.rs"]
 mod context_coverage;
+#[path = "task_runtime_coordinator.rs"]
+mod coordinator;
 #[path = "task_runtime_creative_dialogue.rs"]
 mod creative_dialogue;
+#[path = "task_runtime_execution.rs"]
+pub(super) mod execution;
 #[path = "task_runtime_length_revision.rs"]
 mod length_revision;
 #[path = "task_runtime_length_sources.rs"]
 mod length_sources;
 #[path = "task_runtime_retry.rs"]
 pub mod retry;
+#[path = "task_runtime_start.rs"]
+mod stage_start;
 #[path = "task_runtime_summary_scope.rs"]
 mod summary_scope;
 #[path = "task_runtime_word_target.rs"]
 mod word_target;
-#[path = "task_runtime_chapter_stage.rs"]
-mod chapter_stage;
+pub use coordinator::start_with_observer;
+#[path = "task_runtime_admission.rs"]
+mod admission;
+#[path = "task_runtime_domain_entry.rs"]
+pub(crate) mod domain_entry;
+#[path = "task_runtime_mock_response.rs"]
+mod mock_response;
+pub use admission::validate_candidate_for_application;
+#[path = "task_runtime_child_revision.rs"]
+mod child_revision;
+pub use child_revision::bind_child_revision;
+#[path = "task_runtime_followup.rs"]
+mod followup;
+pub use followup::reconcile_task;
+#[path = "task_runtime_manual_receipt.rs"]
+mod manual_receipt;
+pub use manual_receipt::{record_manual_adoption, record_manual_structured_application};
+#[path = "task_runtime_assembly_evidence.rs"]
+mod assembly_evidence;
+#[path = "task_runtime_host_candidate.rs"]
+mod host_candidate;
+#[path = "task_runtime_staged_core.rs"]
+pub(crate) mod staged;
+pub(crate) use host_candidate::admit_host_candidate;
+#[path = "task_runtime_host_facts.rs"]
+mod host_facts;
+#[path = "task_runtime_scope.rs"]
+mod task_scope;
+pub use task_scope::TaskScope;
+#[path = "task_runtime_domain_projection.rs"]
+mod domain_projection;
+pub(crate) use domain_projection::validate_domain_projection;
+#[path = "task_runtime_stop.rs"]
+mod root_stop;
+#[path = "task_runtime_usage.rs"]
+pub(super) mod usage;
+pub use usage::{usage_for_root, RootUsage};
 
 pub const DSH_SOURCE_COMMIT: &str = "47f943859bef60e4160492346772ded9b24f765a";
 pub const DSH_PROTOCOL: &str = "ans_task_session_v2";
@@ -89,7 +131,7 @@ pub(super) const CHAPTER_WRITE_ALLOWED_TOOLS: &str =
 pub(super) const CHAPTER_POLISH_ALLOWED_TOOLS: &str =
     "novel.read_context,chapter.read_outline,get_character_states,search_memory,polish_chapter";
 const CANDIDATE_TOOLS: &str =
-    "generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
+    "domain.submit_candidate,generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
 const MAX_CANDIDATE_TOOL_ATTEMPTS: usize = 3;
 const MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES: usize = 2;
 const AUTOMATIC_PROTOCOL_RECOVERY_ERROR_CODES: &[&str] = &[
@@ -130,8 +172,11 @@ const CANONICAL_WORKBENCH_SYSTEM_PROMPT: &str = concat!(
 pub const PLUGIN_PROBE_CONVERSATION_ID: &str = "__ans_plugin_probe__";
 
 fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
+    if let Some(instruction) = domain_entry::instruction(input) {
+        return instruction;
+    }
     match input.task_kind.as_str() {
-        "creative_dialogue" => "先理解用户本次意思，结合既有对话自然回应或追问；已明确要执行时，可调用一次 creative.plan_action 请求既有工作流。不直接生成候选，不宣称已保存或采用。".to_string(),
+        "creative_dialogue" => "先理解用户本次意思，结合既有对话自然回应或追问；已明确要执行时，可调用一次 creative.plan_action 请求当前阶段允许的受控能力，由原生宿主验证并推进同一任务。不直接生成候选，不宣称已保存或采用。".to_string(),
         "read" => concat!(
             "本轮禁止候选工具；只可调用 novel.read、structure.read、context.read、memory.search；",
             "宿主列出的必需读取必须成功完成后才能答复；",
@@ -309,7 +354,7 @@ fn workbench_turn_prompt_for_attempt(
     let integrity_repair = chapter_gate::repair_prompt(input);
     format!(
         "小说 ID：{novel}\n章节 ID：{chapter}\n用户意图：{goal}\n\n宿主契约：\n- taskKind：{task_kind}\n- 唯一候选工具：{expected_tool}\n- 预期产物：{expected_artifact}\n- 必需读取：{required_reads}\n{execution_rule}\n宿主将校验工具、读取顺序、调用次数、作用域和产物。\n\n本轮最小要求：{task_instruction}{recovery_instruction}{retry_instruction}{revision_material}{continuity_material}{integrity_repair}",
-        novel = input.novel_id,
+        novel = input.novel_id.as_deref().unwrap_or("资料库任务（无小说作用域）"),
         chapter = chapter,
         goal = input.goal,
         task_kind = input.task_kind,
@@ -342,7 +387,10 @@ pub type TaskProjectionObserver =
 #[serde(rename_all = "camelCase")]
 pub struct StartTaskTurnInput {
     pub conversation_id: String,
-    pub novel_id: String,
+    #[serde(default)]
+    pub novel_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<TaskScope>,
     pub turn_id: String,
     pub goal: String,
     pub chapter_id: Option<String>,
@@ -378,6 +426,26 @@ pub struct StartTaskTurnInput {
     pub chapter_host_gate: Option<chapter_gate::ChapterHostGate>,
     #[serde(default)]
     pub retry_source_run_id: Option<String>,
+    #[serde(default)]
+    pub unified_runtime: Option<coordinator::UnifiedRuntimeInput>,
+    #[serde(skip)]
+    pub(super) execution: Option<execution::RootExecution>,
+}
+
+impl StartTaskTurnInput {
+    pub(crate) fn require_novel_id(&self) -> Result<&str, String> {
+        if self.scope.as_ref().is_some_and(TaskScope::is_library) {
+            return Err("DSH_NOVEL_SCOPE_REQUIRED: library任务不得调用作品能力".into());
+        }
+        self.novel_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| "DSH_NOVEL_SCOPE_REQUIRED: 缺少明确作品作用域".into())
+    }
+    fn require_novel(&self) -> Result<&str, AppError> {
+        self.require_novel_id()
+            .map_err(|e| AppError::new("DSH_NOVEL_SCOPE_REQUIRED", e, false))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -399,15 +467,23 @@ fn is_chapter_writing_turn(input: &StartTaskTurnInput) -> bool {
 
 fn is_canonical_only_turn(input: &StartTaskTurnInput) -> bool {
     input.conversation_id != PLUGIN_PROBE_CONVERSATION_ID
+        && input.novel_id.is_some()
         && input.task_kind == "read"
         && input.expected_tool.is_none()
 }
 
 fn turn_allowed_tools(input: &StartTaskTurnInput) -> &'static str {
+    if is_canonical_only_turn(input) {
+        return CANONICAL_ALLOWED_TOOLS;
+    }
+    if input.novel_id.is_none() {
+        return "";
+    }
+    if let Some(tools) = domain_entry::allowed_tools(input) {
+        return tools;
+    }
     if input.task_kind == "creative_dialogue" {
         creative_dialogue::ALLOWED
-    } else if is_canonical_only_turn(input) {
-        CANONICAL_ALLOWED_TOOLS
     } else if chapter_stage::is_stage_task(&input.task_kind) {
         chapter_stage::ALLOWED_TOOLS
     } else if input.task_kind == "chapter_write" {
@@ -415,7 +491,15 @@ fn turn_allowed_tools(input: &StartTaskTurnInput) -> &'static str {
     } else if input.task_kind == "chapter_polish" {
         CHAPTER_POLISH_ALLOWED_TOOLS
     } else {
-        ALLOWED_TOOLS
+        match input.task_kind.as_str() {
+            "story_plan_generate" | "outline_generate" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_outline",
+            "setting_expand" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,expand_settings",
+            "character_generate" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_characters",
+            "event_suggest" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,suggest_events",
+            "quality_check" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,check_quality",
+            "chapter_summary" => "novel.read_context,chapter.read_outline,get_character_states,search_memory,summarize_chapter",
+            _ => ALLOWED_TOOLS,
+        }
     }
 }
 
@@ -440,6 +524,9 @@ fn workbench_system_prompt(input: &StartTaskTurnInput) -> &'static str {
 fn expected_contract_for_task_kind(
     task_kind: &str,
 ) -> Result<Option<(&'static str, &'static str)>, String> {
+    if let Some(contract) = domain_entry::expected_contract(task_kind) {
+        return contract;
+    }
     if let Some(contract) = chapter_stage::expected_contract(task_kind) {
         return contract;
     }
@@ -645,6 +732,13 @@ fn task_session_id(
     run_id: &str,
     summary_scope: Option<&ChapterSummaryRecoveryScope>,
 ) -> String {
+    if input
+        .execution
+        .as_ref()
+        .is_some_and(|root| root.staged.is_some() || root.parent_run_id.is_some())
+    {
+        return format!("ans-stage-{run_id}");
+    }
     let identity = match summary_scope {
         Some(scope) => large_text_repository::sha256(&format!(
             "chapter-summary\0{}\0{}\0{}\0{}\0{}\0{}",
@@ -704,7 +798,8 @@ fn chapter_summary_recovery_scope(
         .3
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "DSH_PROTOCOL_RECOVERY_SCOPE_INVALID".to_string())?;
-    if authorization.0 != input.novel_id
+    let novel = input.require_novel_id()?;
+    if authorization.0 != novel
         || authorization.1 != input_chapter_id
         || authorization.2 != "consumed"
     {
@@ -716,7 +811,7 @@ fn chapter_summary_recovery_scope(
                 SELECT 1 FROM chapters
                 WHERE id=?1 AND novel_id=?2 AND adopted_draft_id=?3 AND deleted_at IS NULL
              )",
-            rusqlite::params![input_chapter_id, &input.novel_id, &adopted_draft_id],
+            rusqlite::params![input_chapter_id, &authorization.0, &adopted_draft_id],
             |row| row.get::<_, bool>(0),
         )
         .map_err(|_| "DSH_PROTOCOL_RECOVERY_STATE_READ_FAILED".to_string())?;
@@ -936,6 +1031,7 @@ struct WorkerProcess {
     credential_hash: String,
     _proxy_guard: ProxyGuard,
     _policy_guard: GovernedProxyPolicyGuard,
+    _mock_guard: Option<mock_response::MockResponseGuard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -960,6 +1056,7 @@ struct ProjectionTarget {
     notifier: Option<TaskProjectionObserver>,
     request_identity: GovernedRequestIdentityReader,
     allowed_tools: String,
+    staged_input: Option<Arc<StartTaskTurnInput>>,
 }
 
 static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveWorker>>> = OnceLock::new();
@@ -1294,6 +1391,12 @@ fn normalize_tool_name(name: &str) -> String {
         .or_else(|| name.strip_prefix("novel__"))
         .unwrap_or(name);
     let name = strip_tool_version(name);
+    if name == "domain.submit_candidate"
+        || name == "domain_submit_candidate"
+        || name.starts_with("domain_submit_candidate_")
+    {
+        return "domain.submit_candidate".into();
+    }
     if name == "creative.plan_action"
         || name == "creative_plan_action"
         || name.starts_with("creative_plan_action_")
@@ -1349,6 +1452,7 @@ fn tool_projection_metadata(
 ) -> (&'static str, &'static str, &'static str, &'static str) {
     match name {
         "creative.plan_action" => ("1", "novel", "none", "never"),
+        "domain.submit_candidate" => ("1", "novel", "candidate", "never"),
         "novel.read"
         | "novel.read_context"
         | "memory.search"
@@ -1482,6 +1586,7 @@ fn project_session_event(
     notifier: Option<&TaskProjectionObserver>,
     request_identity: &GovernedRequestIdentityReader,
     allowed_tools: &str,
+    staged_input: Option<&StartTaskTurnInput>,
 ) -> Result<(), String> {
     if notification
         .pointer("/params/sessionId")
@@ -1629,9 +1734,23 @@ fn project_session_event(
                 None
             };
             if record.tool_name == chapter_stage::TOOL_NAME && !is_error {
-                if let Err(error) =
-                    chapter_stage::accept_submission(&mut connection, run_id, &record.event_id, &content)
-                {
+                let accepted = if let Some(input) = staged_input {
+                    staged::accept_submission(
+                        &mut connection,
+                        input,
+                        run_id,
+                        &record.event_id,
+                        &content,
+                    )
+                } else {
+                    chapter_stage::accept_submission(
+                        &mut connection,
+                        run_id,
+                        &record.event_id,
+                        &content,
+                    )
+                };
+                if let Err(error) = accepted {
                     is_error = true;
                     error_message = Some(error);
                 }
@@ -1756,6 +1875,7 @@ fn project_session_event(
 }
 
 struct GeneratedChapterResult {
+    host_assembly: Option<assembly_evidence::AssemblySources>,
     text: String,
     structured: Value,
     provider_request_id: String,
@@ -1782,6 +1902,7 @@ fn artifact_projection_summary(
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ChapterBaseSnapshot {
     chapter_revision: String,
     draft_id: Option<String>,
@@ -1794,6 +1915,7 @@ fn validate_turn_execution_contract(
     input: &StartTaskTurnInput,
     run_id: &str,
 ) -> Result<Option<String>, AppError> {
+    let novel = input.require_novel()?;
     let mut statement = connection
         .prepare(
             "SELECT event_id, sequence, tool_name, status, arguments_summary_json
@@ -1850,18 +1972,11 @@ fn validate_turn_execution_contract(
             };
             persisted_response_position(event_id, tool, arguments_summary_json)?;
             if tool == "novel.read_context" {
-                context_coverage::validate_persisted_rule_coverage(
-                    connection,
-                    &input.novel_id,
-                    event_id,
-                )?;
+                context_coverage::validate_persisted_rule_coverage(connection, novel, event_id)?;
             } else if tool == "chapter.read_outline" {
                 if let Some(chapter_id) = input.chapter_id.as_deref() {
                     context_coverage::validate_persisted_engineering_coverage(
-                        connection,
-                        &input.novel_id,
-                        chapter_id,
-                        event_id,
+                        connection, novel, chapter_id, event_id,
                     )?;
                 }
             }
@@ -1971,17 +2086,12 @@ fn validate_turn_execution_contract(
             {
                 if tool == "novel.read_context" {
                     context_coverage::validate_persisted_rule_coverage(
-                        connection,
-                        &input.novel_id,
-                        event_id,
+                        connection, novel, event_id,
                     )?;
                 } else if tool == "chapter.read_outline" {
                     if let Some(chapter_id) = input.chapter_id.as_deref() {
                         context_coverage::validate_persisted_engineering_coverage(
-                            connection,
-                            &input.novel_id,
-                            chapter_id,
-                            event_id,
+                            connection, novel, chapter_id, event_id,
                         )?;
                     }
                 }
@@ -2328,6 +2438,7 @@ fn read_generated_chapter_result(
     run_id: &str,
     candidate_event_id: Option<&str>,
 ) -> Result<Option<GeneratedChapterResult>, AppError> {
+    let novel = input.require_novel()?;
     let Some(candidate_event_id) = candidate_event_id else {
         return Ok(None);
     };
@@ -2431,7 +2542,8 @@ fn read_generated_chapter_result(
         && structured.get("candidateOnly").and_then(Value::as_bool) == Some(true)
         && matches!(
             (candidate_tool.as_str(), artifact_type),
-            ("generate_chapter" | "polish_chapter", "chapter_text")
+            ("domain.submit_candidate", "generic_json")
+                | ("generate_chapter" | "polish_chapter", "chapter_text")
                 | ("generate_outline", "outline")
                 | ("generate_characters", "character_candidates")
                 | ("suggest_events", "event_candidates")
@@ -2439,8 +2551,7 @@ fn read_generated_chapter_result(
                 | ("check_quality", "quality_report")
                 | ("summarize_chapter", "chapter_summary")
         )
-        && structured.pointer("/data/novelId").and_then(Value::as_str)
-            == Some(input.novel_id.as_str())
+        && structured.pointer("/data/novelId").and_then(Value::as_str) == Some(novel)
         && (!requires_chapter
             || structured
                 .pointer("/data/chapterId")
@@ -2467,7 +2578,11 @@ fn read_generated_chapter_result(
         validate_primary_protagonist_candidate(text.unwrap_or_default())?;
     }
     validate_chapter_candidate_length(input, text.unwrap_or_default())?;
+    if candidate_tool == "domain.submit_candidate" {
+        validate_domain_candidate(input, text.unwrap_or_default())?;
+    }
     Ok(Some(GeneratedChapterResult {
+        host_assembly: None,
         text: text.unwrap_or_default().to_string(),
         structured,
         provider_request_id: provider_request_id.to_string(),
@@ -2600,14 +2715,20 @@ fn build_context_evidence(
         )
         .map_err(AppError::database)?;
     let rows = statement
-        .query_map(rusqlite::params![run_id, ALL_CONTEXT_READ_TOOLS], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
+        .query_map(
+            rusqlite::params![
+                run_id,
+                format!("{},domain.stage_context", ALL_CONTEXT_READ_TOOLS)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
         .map_err(AppError::database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::database)?;
@@ -2766,6 +2887,7 @@ fn create_artifact_projection(
     prompt_tokens: u64,
     completion_tokens: u64,
 ) -> Result<Option<String>, AppError> {
+    let novel = input.require_novel()?;
     revision_source::revalidate_frozen(connection, input)?;
     let artifact_type = generated
         .structured
@@ -2774,7 +2896,11 @@ fn create_artifact_projection(
         .unwrap_or("chapter_text");
     let chapter_id = input.chapter_id.as_deref();
     let base = if let Some(chapter_id) = chapter_id {
-        read_chapter_base_snapshot(connection, &input.novel_id, chapter_id)?
+        if let Some(root) = input.execution.as_ref() {
+            root.baseline(connection, novel, chapter_id)?
+        } else {
+            read_chapter_base_snapshot(connection, novel, chapter_id)?
+        }
     } else {
         ChapterBaseSnapshot {
             chapter_revision: now(),
@@ -2791,19 +2917,25 @@ fn create_artifact_projection(
             base.content_hash.as_deref(),
         )?;
     }
+    let evidence_run_id = generated
+        .host_assembly
+        .as_ref()
+        .map(|s| s.context_run_id.as_str())
+        .unwrap_or(run_id);
     let rule_read_event: String = connection.query_row(
         "SELECT event_id FROM tool_call_events WHERE run_id=?1 AND tool_name='novel.read_context'
          AND status='succeeded' ORDER BY sequence LIMIT 1",
-        rusqlite::params![run_id], |row| row.get(0),
+        rusqlite::params![evidence_run_id], |row| row.get(0),
     ).optional().map_err(AppError::database)?
         .ok_or_else(|| AppError::new("DSH_CONTEXT_INCOMPLETE", "候选缺少规则读取回执", false))?;
-    let expected_rule_set_fingerprint = context_coverage::validate_persisted_rule_coverage(
-        connection,
-        &input.novel_id,
-        &rule_read_event,
-    )?;
+    let expected_rule_set_fingerprint =
+        context_coverage::validate_persisted_rule_coverage(connection, novel, &rule_read_event)?;
     let operation_id = format!("workbench-{}", run_id);
-    let prompt_body = "你是 AI Novel Studio 的小说任务执行 Agent。只生成候选，不写入正式事实。";
+    let prompt_body = if generated.host_assembly.is_some() {
+        "原生确定性组装：严格按核验阶段顺序连接正文；本步骤不调用模型、不采用正式正文。"
+    } else {
+        "你是 AI Novel Studio 的小说任务执行 Agent。只生成候选，不写入正式事实。"
+    };
     let request_content = if input.revision_source.is_some() {
         workbench_turn_prompt(input)
     } else {
@@ -2813,8 +2945,20 @@ fn create_artifact_projection(
         serde_json::to_string(&json!({"messages":[{"role":"user","content":request_content}]}))
             .map_err(|error| AppError::new("TASK_RUNTIME_JSON", error.to_string(), false))?;
     let (mut context_manifest, compiled_context, context_budget, _generation_context) =
-        build_context_evidence(connection, run_id)?;
+        build_context_evidence(connection, evidence_run_id)?;
     let mut payload_json = json!({"goal": input.goal, "conversationId": input.conversation_id});
+    if let Some(assembly) = generated.host_assembly.as_ref() {
+        payload_json["nativeAssembly"] = assembly.manifest.clone();
+        context_manifest["nativeAssembly"] = assembly.manifest.clone();
+    }
+    if input.task_kind == "domain_candidate" {
+        let stage = domain_entry::context(input)
+            .map_err(|e| AppError::new("DSH_DOMAIN_PROJECTION_INVALID", e, false))?;
+        let hash = large_text_repository::sha256(
+            &crate::services::ai_fact_security::canonical_json(stage)?,
+        );
+        payload_json["controlledDomain"] = json!({"taskKind":"domain_candidate","tool":"domain.submit_candidate","entryKind":stage["entryKind"],"stageKey":stage["stageKey"],"contextHash":hash});
+    }
     let summary_markers = chapter_summary_snapshot_markers(artifact_type);
     if let Some(markers) = summary_markers.as_object() {
         for (key, value) in markers {
@@ -2834,6 +2978,7 @@ fn create_artifact_projection(
             "setting_candidates" => "setting_expand",
             "quality_report" => "quality_check",
             "chapter_summary" => "chapter_summary",
+            "generic_json" if input.task_kind == "domain_candidate" => "domain_candidate",
             _ => "chapter_generate",
         }
         .to_string(),
@@ -2900,19 +3045,30 @@ fn create_artifact_projection(
         ClaimAiTaskAttemptInput {
             task_id: task.task_id.clone(),
             attempt_id: queued.attempt.attempt_id.clone(),
-            provider_id: input
-                .model_snapshot
-                .get("providerId")
-                .and_then(Value::as_str)
-                .unwrap_or("dsh")
-                .to_string(),
-            model_id: input
-                .model_snapshot
-                .get("modelId")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            provider_request_id: Some(generated.provider_request_id.clone()),
+            provider_id: if generated.host_assembly.is_some() {
+                "ans-native-assembly".into()
+            } else {
+                input
+                    .model_snapshot
+                    .get("providerId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("dsh")
+                    .to_string()
+            },
+            model_id: if generated.host_assembly.is_some() {
+                "deterministic-join-v1".into()
+            } else {
+                input
+                    .model_snapshot
+                    .get("modelId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string()
+            },
+            provider_request_id: generated
+                .host_assembly
+                .is_none()
+                .then(|| generated.provider_request_id.clone()),
         },
     )?;
     let response_hash = large_text_repository::sha256(&generated.text);
@@ -2920,14 +3076,18 @@ fn create_artifact_projection(
         connection,
         &task.task_id,
         &attempt.attempt.attempt_id,
-        provider_response_metadata(
-            &input.model_snapshot,
-            &generated.provider_request_id,
-            &response_hash,
-            generated.text.chars().count(),
-            prompt_tokens,
-            completion_tokens,
-        ),
+        if generated.host_assembly.is_some() {
+            json!({"provider":"ans-native-assembly","model":"deterministic-join-v1","responseHash":response_hash,"responseLength":generated.text.chars().count(),"tokenInput":0,"tokenOutput":0,"tokenTotal":0,"finishReason":"native_assembly","durationMs":0})
+        } else {
+            provider_response_metadata(
+                &input.model_snapshot,
+                &generated.provider_request_id,
+                &response_hash,
+                generated.text.chars().count(),
+                prompt_tokens,
+                completion_tokens,
+            )
+        },
     )?;
     let create_artifact = if input.revision_source.is_some() {
         artifact_service::create_verified_revision_artifact
@@ -3046,7 +3206,9 @@ fn is_loopback_model_base_url(base_url: &str) -> bool {
 
 fn provider_transport(input: &StartTaskTurnInput) -> Result<ProviderTransport, String> {
     let route = selected_model_route(input)?;
-    let upstream_key = if input.api_key.trim().is_empty() {
+    let upstream_key = if route.logical_provider == "mock" {
+        "ans-offline-no-credentials".into()
+    } else if input.api_key.trim().is_empty() {
         if is_loopback_model_base_url(&route.base_url) {
             "local-no-key-required".to_string()
         } else {
@@ -3059,6 +3221,7 @@ fn provider_transport(input: &StartTaskTurnInput) -> Result<ProviderTransport, S
         input.api_key.clone()
     };
     let identity = serde_json::to_string(&json!({
+        "rootTransport":input.execution.as_ref().map(|e|&e.transport_epoch),
         "upstream":route.base_url,
         "logicalProvider":route.logical_provider,
         "harnessProvider":route.harness_provider,
@@ -3095,7 +3258,63 @@ fn exact_model_identity(value: &str, field: &str, max_len: usize) -> Result<Stri
     Ok(trimmed.to_string())
 }
 
+fn canonical_provider_identity(value: &str, field: &str) -> Result<String, String> {
+    let exact = exact_model_identity(value, field, 128)?;
+    let normalized = exact.to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "deepseek" | "deepseek_official" => Ok(DEEPSEEK_HARNESS_PROVIDER.to_string()),
+        "openai_compatible" => Ok(OPENAI_COMPATIBLE_PROVIDER.to_string()),
+        _ => Ok(normalized),
+    }
+}
+
 fn selected_model_route(input: &StartTaskTurnInput) -> Result<SelectedModelRoute, String> {
+    if input
+        .model_snapshot
+        .pointer("/runtime/dshSourceCommit")
+        .and_then(Value::as_str)
+        .is_some_and(|commit| commit != DSH_SOURCE_COMMIT)
+    {
+        return Err("DSH_CARRIER_SNAPSHOT_MISMATCH: 冻结载体版本不匹配当前固定载体".into());
+    }
+    if input
+        .model_snapshot
+        .get("runtimeMode")
+        .and_then(Value::as_str)
+        == Some("mock")
+    {
+        if input
+            .model_snapshot
+            .get("providerId")
+            .and_then(Value::as_str)
+            != Some("mock")
+        {
+            return Err("DSH_MOCK_MODEL_IDENTITY_INVALID".into());
+        }
+        if input
+            .model_snapshot
+            .pointer("/runtime/adapterProtocol")
+            .and_then(Value::as_str)
+            .is_some_and(|v| v != DSH_PROTOCOL)
+        {
+            return Err("DSH_MOCK_TRANSPORT_PROTOCOL_UNSUPPORTED".into());
+        }
+        let model = exact_model_identity(
+            input
+                .model_snapshot
+                .get("modelId")
+                .and_then(Value::as_str)
+                .ok_or("DSH_MOCK_MODEL_IDENTITY_INVALID")?,
+            "modelId",
+            256,
+        )?;
+        return Ok(SelectedModelRoute {
+            logical_provider: "mock".into(),
+            harness_provider: DEEPSEEK_HARNESS_PROVIDER.into(),
+            model,
+            base_url: "http://127.0.0.1:0/ans-offline-mock".into(),
+        });
+    }
     if input
         .model_snapshot
         .get("runtimeMode")
@@ -3104,20 +3323,14 @@ fn selected_model_route(input: &StartTaskTurnInput) -> Result<SelectedModelRoute
     {
         return Err("冻结模型快照 runtimeMode 必须是 api".to_string());
     }
-    let logical_provider = exact_model_identity(
+    let logical_provider = canonical_provider_identity(
         input
             .model_snapshot
             .get("providerId")
             .and_then(Value::as_str)
             .ok_or_else(|| "冻结模型快照缺少精确 providerId".to_string())?,
         "providerId",
-        128,
     )?;
-    let logical_provider = if logical_provider == "deepseek" {
-        DEEPSEEK_HARNESS_PROVIDER.to_string()
-    } else {
-        logical_provider
-    };
     let model = exact_model_identity(
         input
             .model_snapshot
@@ -3146,14 +3359,7 @@ fn selected_model_route(input: &StartTaskTurnInput) -> Result<SelectedModelRoute
         .pointer("/runtime/adapterProvider")
         .and_then(Value::as_str)
     {
-        Some(value) => {
-            let value = exact_model_identity(value, "adapterProvider", 128)?;
-            if value == "deepseek" {
-                DEEPSEEK_HARNESS_PROVIDER.to_string()
-            } else {
-                value
-            }
-        }
+        Some(value) => canonical_provider_identity(value, "adapterProvider")?,
         None => logical_provider.clone(),
     };
     if logical_provider != adapter_provider {
@@ -3240,26 +3446,44 @@ fn spawn_worker_process(
     let pricing = input.model_snapshot.get("pricing");
     let owner_hash = large_text_repository::sha256(&input.conversation_id);
     let transport_instance_id = uuid::Uuid::new_v4().simple().to_string();
-    let policy_guard = start_policy_server(GovernedProxyPolicy {
-        owner_id: format!("dsh-workbench:{}", &owner_hash[..32]),
-        max_requests_per_minute: input.request_policy.max_requests_per_minute,
-        max_concurrent_requests: input.request_policy.max_concurrent_requests,
-        daily_token_budget: input.request_policy.daily_token_budget,
-        daily_cost_budget_usd: input.request_policy.daily_cost_budget_usd,
-        input_price_per_million_tokens: pricing
-            .and_then(|value| value.get("inputPricePerMillionTokens"))
-            .and_then(Value::as_f64),
-        output_price_per_million_tokens: pricing
-            .and_then(|value| value.get("outputPricePerMillionTokens"))
-            .and_then(Value::as_f64),
-        warning_percent: input.request_policy.warning_percent,
-        ttl_ms: (input.request_policy.timeout_seconds.max(1) * 1_000 + 60_000)
-            .clamp(60_000, 2 * 60 * 60_000),
-    })?;
+    let policy_guard = super::governed_proxy::start_policy_server_with_root(
+        GovernedProxyPolicy {
+            owner_id: input
+                .execution
+                .as_ref()
+                .map(|e| e.owner_id.clone())
+                .unwrap_or_else(|| format!("dsh-workbench:{}", &owner_hash[..32])),
+            max_requests_per_minute: input.request_policy.max_requests_per_minute,
+            max_concurrent_requests: input.request_policy.max_concurrent_requests,
+            daily_token_budget: input.request_policy.daily_token_budget,
+            daily_cost_budget_usd: input.request_policy.daily_cost_budget_usd,
+            input_price_per_million_tokens: pricing
+                .and_then(|value| value.get("inputPricePerMillionTokens"))
+                .and_then(Value::as_f64)
+                .or_else(|| is_loopback_model_base_url(&model_route.base_url).then_some(0.0)),
+            output_price_per_million_tokens: pricing
+                .and_then(|value| value.get("outputPricePerMillionTokens"))
+                .and_then(Value::as_f64)
+                .or_else(|| is_loopback_model_base_url(&model_route.base_url).then_some(0.0)),
+            warning_percent: input.request_policy.warning_percent,
+            ttl_ms: (input.request_policy.timeout_seconds.max(1) * 1_000 + 60_000)
+                .clamp(60_000, 2 * 60 * 60_000),
+        },
+        input.execution.clone(),
+    )?;
+    let mock_guard = if model_route.logical_provider == "mock" {
+        Some(mock_response::start(input)?)
+    } else {
+        None
+    };
+    let upstream_base = mock_guard
+        .as_ref()
+        .map(|g| g.base_url())
+        .unwrap_or_else(|| model_route.base_url.clone());
     let (proxy_guard, base_url) = spawn_governed_proxy(
         &work,
         upstream_key,
-        &model_route.base_url,
+        &upstream_base,
         &model_route.model,
         &policy_guard.url(),
         &format!("dsh:{}:{}", &owner_hash[..32], transport_instance_id),
@@ -3275,9 +3499,10 @@ fn spawn_worker_process(
         system_prompt: workbench_system_prompt(input).to_string(),
         cwd: work,
         allowed_tools: Some(turn_allowed_tools(input).to_string()),
-        task_novel_id: Some(input.novel_id.clone()),
+        task_novel_id: input.novel_id.clone(),
         task_chapter_id: input.chapter_id.clone(),
         candidate_policy: candidate_validation_policy(input),
+        task_budget_url: input.execution.as_ref().map(|_| policy_guard.url()),
     };
     let child = NodeDshRuntime
         .launch(&config)
@@ -3301,6 +3526,7 @@ fn spawn_worker_process(
                 target.notifier.as_ref(),
                 &target.request_identity,
                 &target.allowed_tools,
+                target.staged_input.as_deref(),
             )
         })
     };
@@ -3315,6 +3541,7 @@ fn spawn_worker_process(
         credential_hash: large_text_repository::sha256(upstream_key),
         _proxy_guard: proxy_guard,
         _policy_guard: policy_guard,
+        _mock_guard: mock_guard,
     }))
 }
 
@@ -3324,13 +3551,13 @@ fn ensure_worker_process(
     process_holder: &Arc<Mutex<Option<Arc<WorkerProcess>>>>,
     projection: Arc<Mutex<Option<ProjectionTarget>>>,
 ) -> Result<Arc<WorkerProcess>, String> {
+    let transport = provider_transport(input)?;
     let descriptor = describe_runtime();
     if !carrier_files_ready(&descriptor.status) {
         return Err(descriptor
             .error
             .unwrap_or_else(|| "DSH 运行时不可用".to_string()));
     }
-    let transport = provider_transport(input)?;
     let mut holder = process_holder
         .lock()
         .map_err(|_| "Worker 进程锁失败".to_string())?;
@@ -3345,6 +3572,9 @@ fn ensure_worker_process(
                 .as_deref()
                 == Some(DSH_SOURCE_COMMIT);
         if healthy {
+            if let Some(mock) = &existing._mock_guard {
+                mock.set_input(input)?;
+            }
             return Ok(existing.clone());
         }
         if let Some(previous) = holder.take() {
@@ -3533,372 +3763,27 @@ pub fn start(input: StartTaskTurnInput) -> Result<TaskRuntimeResult, String> {
     start_with_observer(input, None)
 }
 
-pub fn start_with_observer(
-    mut input: StartTaskTurnInput,
-    notifier: Option<TaskProjectionObserver>,
-) -> Result<TaskRuntimeResult, String> {
-    required(&input.conversation_id, "conversationId")?;
-    required(&input.novel_id, "novelId")?;
-    required(&input.turn_id, "turnId")?;
-    required(&input.goal, "goal")?;
-    if !input.model_snapshot.is_object()
-        || crate::services::ai_fact_security::contains_secret_value(&input.model_snapshot)
-    {
-        return Err("modelSnapshot 无效或包含凭据字段".to_string());
-    }
-    selected_model_route(&input)?;
-    let book_word_goal = {
-        let connection = crate::db::get_connection()
-            .lock()
-            .map_err(|_| "数据库锁失败".to_string())?;
-        conversation_service::validate_task_runtime_scope(
-            &connection,
-            &input.conversation_id,
-            &input.turn_id,
-            &input.novel_id,
-            input.chapter_id.as_deref(),
-        )
-        .map_err(|error| error.to_string())?;
-        retry::validate_retry(&connection, &input)?;
-        revision_source::freeze_turn_revision(&connection, &mut input)
-            .map_err(|error| error.to_string())?;
-        word_target::validate(&connection, &input)?;
-        chapter_continuity::freeze_continuity(&connection, &mut input)?;
-        let book_word_goal = if input.task_kind == "story_plan_generate" {
-            ai_task_service::authoritative_book_word_goal(&connection, &input.conversation_id)
-                .map_err(|error| error.to_string())?
-        } else {
-            None
-        };
-        book_word_goal
-    };
-    input.book_word_goal = book_word_goal;
-    validate_turn_contract(&input)?;
-    if chapter_gate::is_admit(&input) {
-        return chapter_gate::admit(input, notifier);
-    }
-    if let Some(runtime) = input
-        .model_snapshot
-        .get_mut("runtime")
-        .and_then(Value::as_object_mut)
-    {
-        runtime.remove("toolCallingAttestation");
-    }
-    {
-        let mut connection = crate::db::get_connection()
-            .lock()
-            .map_err(|_| "数据库锁失败".to_string())?;
-        chapter_gate::fail_abandoned_withheld(&mut connection, &input.conversation_id)?;
-    }
-    let gated_budget = if is_chapter_writing_turn(&input) {
-        Some(chapter_budget::bind_draft_attempt(&mut input)?)
-    } else {
-        None
-    };
-    let summary_session_scope = if input.task_kind == "chapter_summary" {
-        let connection = crate::db::get_connection()
-            .lock()
-            .map_err(|_| "数据库锁失败".to_string())?;
-        Some(summary_scope::resolve_session_scope(&connection, &input)?)
-    } else {
-        None
-    };
-    let mut run_id = uuid::Uuid::new_v4().to_string();
-    let identity = large_text_repository::sha256(&input.conversation_id);
-    let stable_worker_id = format!("worker-{}", &identity[..32]);
-    let initial_session_id = task_session_id(&input, &run_id, summary_session_scope.as_ref());
-    let cancel = Arc::new(AtomicBool::new(false));
-    let (worker_id, process, projection) = {
-        let mut workers = active()
-            .lock()
-            .map_err(|_| "Worker 状态锁失败".to_string())?;
-        if let Some(worker) = workers.get_mut(&input.conversation_id) {
-            if matches!(
-                worker.status.as_str(),
-                "attesting" | "queued" | "running" | "cancel_requested"
-            ) {
-                return Err("当前任务已有活动运行".to_string());
-            }
-            worker.run_id = run_id.clone();
-            worker.cancel = cancel.clone();
-            worker.status = "queued".to_string();
-            worker.error = None;
-            worker.notifier = notifier.clone();
-            worker.session_id = initial_session_id.clone();
-            (
-                worker.worker_id.clone(),
-                worker.process.clone(),
-                worker.projection.clone(),
-            )
-        } else {
-            let process = Arc::new(Mutex::new(None));
-            let projection = Arc::new(Mutex::new(None));
-            workers.insert(
-                input.conversation_id.clone(),
-                ActiveWorker {
-                    run_id: run_id.clone(),
-                    session_id: initial_session_id.clone(),
-                    worker_id: stable_worker_id.clone(),
-                    cancel: cancel.clone(),
-                    process: process.clone(),
-                    projection: projection.clone(),
-                    notifier: notifier.clone(),
-                    status: "queued".to_string(),
-                    error: None,
-                },
-            );
-            (stable_worker_id, process, projection)
-        }
-    };
-    // No capability or connectivity probe. The actual request owns the model
-    // outcome, after its Run exists and can retain an actionable dialogue error.
-    let mut protocol_recovery_retry = 0usize;
-    let mut chapter_recovery = if let Some(usage) = gated_budget {
-        let mut recovery = ChapterLengthRecovery::new_with_remaining(&input, usage.remaining);
-        recovery.seed(usage.calls, usage.length_repairs);
-        recovery
-    } else {
-        ChapterLengthRecovery::new(&input)
-    };
-    let history_restored = (|| {
-        let connection = crate::db::get_connection()
-            .lock()
-            .map_err(|_| "数据库锁失败".to_string())?;
-        chapter_recovery.restore_history(&connection, &input)
-    })();
-    if let Err(error) = history_restored {
-        update_active(&input.conversation_id, "idle", Some(error.clone()));
-        return Err(error);
-    }
-    loop {
-        let run_session_id = task_session_id(&input, &run_id, summary_session_scope.as_ref());
-        let run_created = (|| {
-            let mut workers = active()
-                .lock()
-                .map_err(|_| "Worker 状态锁失败".to_string())?;
-            let worker = workers
-                .get_mut(&input.conversation_id)
-                .ok_or_else(|| "当前任务没有活动运行".to_string())?;
-            if cancel.load(Ordering::SeqCst) || worker.status == "cancel_requested" {
-                worker.status = "idle".to_string();
-                worker.error = Some("DSH_TASK_CANCELLED".to_string());
-                return Err("DSH_TASK_CANCELLED".to_string());
-            }
-            worker.run_id = run_id.clone();
-            worker.session_id = run_session_id.clone();
-            worker.error = None;
-            let mut connection = crate::db::get_connection()
-                .lock()
-                .map_err(|_| "数据库锁失败".to_string())?;
-            revision_source::freeze_turn_revision(&connection, &mut input)
-                .map_err(|error| error.to_string())?;
-            chapter_continuity::freeze_continuity(&connection, &mut input)?;
-            let previous_terminal_runs =
-                previous_terminal_run_count(&connection, &input.conversation_id, &input.turn_id)?;
-            conversation_service::create_run(
-                &mut connection,
-                CreateRunInput {
-                    run_id: run_id.clone(),
-                    conversation_id: input.conversation_id.clone(),
-                    turn_id: input.turn_id.clone(),
-                    model_snapshot: input.model_snapshot.clone(),
-                    worker_id: worker_id.clone(),
-                    chapter_id: input.chapter_id.clone(),
-                    created_at: now(),
-                },
-            )
-            .map_err(|error| error.to_string())?;
-            conversation_service::update_run(
-                &mut connection,
-                UpdateRunInput {
-                    run_id: run_id.clone(),
-                    status: "running".to_string(),
-                    error: None,
-                    updated_at: now(),
-                    started_at: Some(now()),
-                    finished_at: None,
-                },
-            )
-            .map_err(|error| error.to_string())?;
-            retry::record_contract(&mut connection, &input, &run_id)?;
-            chapter_recovery.record_history_notice(&mut connection, &input, &run_id)?;
-            worker.status = "running".to_string();
-            Ok::<usize, String>(previous_terminal_runs)
-        })();
-        let previous_terminal_runs = match run_created {
-            Ok(count) => count,
-            Err(error) => {
-                update_active(&input.conversation_id, "idle", Some(error.clone()));
-                return Err(error);
-            }
-        };
-        notify_projection(notifier.as_ref(), &input.conversation_id, &run_id, "run")?;
-        let result = ensure_worker_process(&input, &worker_id, &process, projection.clone())
-            .and_then(|worker_process| {
-                execute(
-                    input.clone(),
-                    run_id.clone(),
-                    worker_id.clone(),
-                    run_session_id,
-                    worker_process,
-                    projection.clone(),
-                    cancel.clone(),
-                    notifier.clone(),
-                    None,
-                    protocol_recovery_retry,
-                    previous_terminal_runs,
-                    &mut chapter_recovery,
-                )
-            });
-        let raw_error = match result {
-            Ok(outcome) => {
-                update_active(&input.conversation_id, "idle", None);
-                return Ok(outcome);
-            }
-            Err(raw_error) => raw_error,
-        };
-        if chapter_recovery
-            .remaining_at(std::time::Instant::now())
-            .is_zero()
-        {
-            if let Ok(holder) = process.lock() {
-                if let Some(worker_process) = holder.as_ref() {
-                    worker_process.runtime.kill();
-                }
-            }
-        }
-        let error = runtime_error_for_persistence(&raw_error);
-        let cancelled = active()
-            .lock()
-            .ok()
-            .and_then(|workers| {
-                workers
-                    .get(&input.conversation_id)
-                    .map(|worker| worker.cancel.load(Ordering::SeqCst))
-            })
-            .unwrap_or(false);
-        let process_healthy = process
-            .lock()
-            .ok()
-            .and_then(|holder| holder.as_ref().cloned())
-            .is_some_and(|process| {
-                chapter_recovery
-                    .timeout(Duration::from_secs(3), &cancel)
-                    .ok()
-                    .is_some_and(|timeout| {
-                        process
-                            .runtime
-                            .request("runtime/health", None, timeout)
-                            .is_ok()
-                    })
-            });
-        let recovery_candidate = !cancelled
-            && process_healthy
-            && is_automatic_protocol_recovery_candidate(&input, &raw_error);
-        let terminal_status = if cancelled { "cancelled" } else { "failed" };
-        let mut next_protocol_recovery_retry = None;
-        let mut next_chapter_length_repair = false;
-        if let Ok(mut connection) = crate::db::get_connection().lock() {
-            let finished_at = now();
-            let tools_terminalized = conversation_service::terminalize_open_tool_events(
-                &mut connection,
-                &run_id,
-                if cancelled { "cancelled" } else { "failed" },
-                if cancelled {
-                    "DSH Worker 已取消，工具调用未完成。"
-                } else {
-                    "DSH Worker 故障，工具调用未完成。"
-                },
-                &finished_at,
-            )
-            .is_ok();
-            let run_terminalized = conversation_service::update_run(
-                &mut connection,
-                UpdateRunInput {
-                    run_id: run_id.clone(),
-                    status: terminal_status.to_string(),
-                    error: Some(error.clone()),
-                    updated_at: finished_at.clone(),
-                    started_at: None,
-                    finished_at: Some(finished_at.clone()),
-                },
-            )
-            .is_ok();
-            if recovery_candidate && tools_terminalized && run_terminalized {
-                next_protocol_recovery_retry =
-                    automatic_protocol_recovery_retry_number(&connection, &input, &raw_error)
-                        .ok()
-                        .flatten();
-            }
-            if tools_terminalized && run_terminalized {
-                next_chapter_length_repair =
-                    chapter_recovery.try_repair(&input, &raw_error, cancelled, process_healthy);
-            }
-            let failure_turn_id = stable_projection_id(
-                "dsh-message",
-                &run_id,
-                if cancelled {
-                    "assistant:cancelled"
-                } else {
-                    "assistant:failed"
-                },
-            );
-            let failure_message = if cancelled {
-                "任务已取消。".to_string()
-            } else if let Some(message) =
-                chapter_recovery.failure_message(&error, next_chapter_length_repair)
-            {
-                message
-            } else if let Some(retry_number) = next_protocol_recovery_retry {
-                format!(
-                    "任务运行失败：{}。检测到可恢复的自动总结运行错误，正在使用同一回合与冻结模型自动重试（{}/{}）。",
-                    error,
-                    retry_number,
-                    MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES
-                )
-            } else {
-                format!("任务运行失败：{}", error)
-            };
-            let _ = conversation_service::append_runtime_assistant_turn(
-                &mut connection,
-                &failure_turn_id,
-                &input.conversation_id,
-                &run_id,
-                &failure_message,
-                &finished_at,
-            );
-        }
-        let _ = notify_projection(
-            notifier.as_ref(),
-            &input.conversation_id,
-            &run_id,
-            "terminal",
-        );
-        if let Ok(mut target) = projection.lock() {
-            *target = None;
-        }
-        if !process_healthy {
-            if let Ok(mut holder) = process.lock() {
-                if let Some(dead) = holder.take() {
-                    dead.runtime.kill();
-                }
-            }
-        }
-        if next_chapter_length_repair {
-            run_id = uuid::Uuid::new_v4().to_string();
-            continue;
-        }
-        if let Some(retry_number) = next_protocol_recovery_retry {
-            protocol_recovery_retry = retry_number;
-            run_id = uuid::Uuid::new_v4().to_string();
-            continue;
-        }
-        update_active(&input.conversation_id, "idle", Some(error.clone()));
-        return Err(error);
-    }
-}
-
 pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
+    let before = status(conversation_id);
+    let controlled = coordinator::request_cancel(conversation_id);
+    let waiting = followup::cancel_pending(conversation_id);
+    if let Ok(connection) = crate::db::get_connection().lock() {
+        crate::services::task_authorization_service::revoke_for_task(
+            &connection,
+            conversation_id,
+            "任务已取消",
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if waiting {
+        return before
+            .map(|mut s| {
+                s.status = "idle".into();
+                s.error = Some("DSH_TASK_CANCELLED: 停止后续执行，已提交结果保留".into());
+                s
+            })
+            .ok_or_else(|| "当前任务没有活动运行".into());
+    }
     let mut workers = active()
         .lock()
         .map_err(|_| "Worker 状态锁失败".to_string())?;
@@ -3906,6 +3791,14 @@ pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
         .get_mut(conversation_id)
         .ok_or_else(|| "当前任务没有活动运行".to_string())?;
     if !matches!(worker.status.as_str(), "attesting" | "queued" | "running") {
+        if controlled {
+            return before
+                .map(|mut s| {
+                    s.status = "cancel_requested".into();
+                    s
+                })
+                .ok_or_else(|| "当前任务没有活动运行".into());
+        }
         return Err("当前任务没有活动运行".to_string());
     }
     let initializing = matches!(worker.status.as_str(), "attesting" | "queued");
@@ -3959,40 +3852,46 @@ pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
 }
 
 pub fn status(conversation_id: &str) -> Option<TaskRuntimeStatus> {
-    active()
-        .lock()
-        .ok()?
-        .get(conversation_id)
-        .map(|worker| TaskRuntimeStatus {
-            conversation_id: conversation_id.to_string(),
-            run_id: worker.run_id.clone(),
-            session_id: worker.session_id.clone(),
-            worker_id: worker.worker_id.clone(),
-            status: worker.status.clone(),
-            runtime: "dsh-headless-persistent".to_string(),
-            error: worker.error.clone(),
+    if let Some(waiting) = followup::pending_status(conversation_id) {
+        return Some(waiting);
+    }
+    let worker = active().lock().ok().and_then(|workers| {
+        workers.get(conversation_id).map(|w| TaskRuntimeStatus {
+            conversation_id: conversation_id.into(),
+            run_id: w.run_id.clone(),
+            session_id: w.session_id.clone(),
+            worker_id: w.worker_id.clone(),
+            status: w.status.clone(),
+            runtime: "dsh-headless-persistent".into(),
+            error: w.error.clone(),
         })
+    });
+    if worker
+        .as_ref()
+        .is_some_and(|w| runtime_status_owns_active_run(&w.status))
+    {
+        worker
+    } else {
+        coordinator::root_status(conversation_id).or(worker)
+    }
 }
 
 pub fn list_statuses() -> Vec<TaskRuntimeStatus> {
-    active()
+    let mut ids = active()
         .lock()
-        .ok()
-        .map(|workers| {
-            workers
-                .iter()
-                .map(|(conversation_id, worker)| TaskRuntimeStatus {
-                    conversation_id: conversation_id.clone(),
-                    run_id: worker.run_id.clone(),
-                    session_id: worker.session_id.clone(),
-                    worker_id: worker.worker_id.clone(),
-                    status: worker.status.clone(),
-                    runtime: "dsh-headless-persistent".to_string(),
-                    error: worker.error.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        .map(|w| w.keys().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
+    ids.extend(
+        coordinator::root_statuses()
+            .into_iter()
+            .map(|s| s.conversation_id),
+    );
+    ids.extend(
+        followup::pending_statuses()
+            .into_iter()
+            .map(|s| s.conversation_id),
+    );
+    ids.into_iter().filter_map(|id| status(&id)).collect()
 }
 
 fn runtime_status_owns_active_run(status: &str) -> bool {
@@ -4169,7 +4068,8 @@ fn probe_input(
     };
     let input = StartTaskTurnInput {
         conversation_id: PLUGIN_PROBE_CONVERSATION_ID.to_string(),
-        novel_id: "plugin-probe".to_string(),
+        novel_id: Some("plugin-probe".to_string()),
+        scope: None,
         turn_id: "plugin-probe".to_string(),
         goal: "plugin-probe".to_string(),
         chapter_id: None,
@@ -4196,6 +4096,8 @@ fn probe_input(
         continuity_checked: false,
         chapter_host_gate: None,
         retry_source_run_id: None,
+        unified_runtime: None,
+        execution: None,
     };
     selected_model_route(&input)?;
     Ok(input)
@@ -4301,4 +4203,25 @@ fn read_matching_plugin_probe_health(
         }
     }
     Ok(None)
+}
+
+fn validate_domain_candidate(input: &StartTaskTurnInput, text: &str) -> Result<(), AppError> {
+    let invalid = |message: String| AppError::new("DOMAIN_CANDIDATE_INVALID", message, false);
+    let stage = domain_entry::context(input).map_err(invalid)?;
+    let value: Value = serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
+    if value.get("entryKind") != stage.get("entryKind")
+        || value.get("stageKey") != stage.get("stageKey")
+    {
+        return Err(invalid("候选阶段不匹配".into()));
+    }
+    let kind = value
+        .get("entryKind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("缺少领域".into()))?;
+    let key = value
+        .get("stageKey")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("缺少阶段".into()))?;
+    let schema = domain_entry::candidate_schema::schema(kind, key).map_err(invalid)?;
+    domain_entry::candidate_schema::validate(&schema, &value["payload"]).map_err(invalid)
 }

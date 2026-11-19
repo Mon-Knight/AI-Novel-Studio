@@ -30,7 +30,7 @@ export const REAL_ACCEPTANCE_GATE_INSTRUCTIONS = [
   '继续写',
   '继续写',
 ] as const;
-export const REAL_ACCEPTANCE_SPARSE_IDEA = '写个六万字左右的悬疑故事。';
+export const REAL_ACCEPTANCE_SPARSE_IDEA = '写个三万字左右的悬疑故事。';
 export const REAL_ACCEPTANCE_PROVIDER_REQUEST_EVIDENCE_SCHEMA_VERSION =
   'real_conversation_provider_request_evidence_v1' as const;
 export const REAL_ACCEPTANCE_PREPARED_FIXTURE_CANARIES = [

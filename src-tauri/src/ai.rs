@@ -738,13 +738,12 @@ pub async fn ai_chat_completion(
 
 #[tauri::command]
 pub async fn ai_chat_completion_stream(
-    window: tauri::Window,
+    window: tauri::WebviewWindow,
     request: AiChatCompletionRequest,
 ) -> Result<AiChatCompletionResponse, String> {
     let registration = reserve_and_verify_governed_request(&request, verify_request_policy_lease)?;
     let emitter: StreamEmitter = Arc::new(move |event| {
-        window
-            .emit(AI_STREAM_EVENT_NAME, event)
+        tauri::Emitter::emit(&window, AI_STREAM_EVENT_NAME, event)
             .map_err(|_| "AI_STREAM_EVENT_EMIT_FAILED".to_string())
     });
     execute_registered_ai_chat_completion_stream(

@@ -268,14 +268,14 @@ test('composer distinguishes model refresh from a failed model directory', () =>
   const refreshing = renderComposer(summary, true, {
     pluginsLoading: true,
   });
-  assert.match(refreshing, /data-status="refreshing"/u);
+  assert.match(refreshing, /data-status="initializing"/u);
   assert.match(refreshing, /lucide-loader-circle/u);
   assert.doesNotMatch(refreshing, /data-status="unavailable"/u);
 
   const failed = renderComposer(summary, true, {
     pluginsError: 'Runtime 模型目录刷新失败',
   });
-  assert.match(failed, /data-status="unavailable"/u);
+  assert.match(failed, /data-status="error"/u);
   assert.match(failed, /lucide-circle-alert/u);
   assert.match(failed, /role="alert"/u);
   assert.match(failed, /aria-label="重试模型目录"/u);

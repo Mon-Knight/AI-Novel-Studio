@@ -201,7 +201,7 @@ function mapProviderError(
   }
   const normalized = normalizeAppError(error, 'AI Provider 执行失败。', context);
   if (normalized.code !== 'UNKNOWN_ERROR') return toExecutionError(normalized);
-  // Tauri 1.x commands may reject with a plain string instead of an Error.
+  // Tauri commands may reject with a plain string instead of an Error.
   // Preserve that already-sanitized backend message so HTTP/config failures do
   // not collapse into the generic network bucket.
   const message = typeof error === 'string' && error.trim() ? error.trim() : normalized.message;

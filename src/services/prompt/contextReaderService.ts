@@ -10,6 +10,7 @@ import {
   isContextCompressionRecord,
 } from '../context/contextRecordService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
+import { evaluateSummaryApplicationPolicy } from '../ai/summaryApplicationPolicy';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { dbCall, getDbMode } from '../database/db';
@@ -182,6 +183,14 @@ export async function getContextForChapterTask(params: {
       if (previousSummary.novelId !== novelId || previousSummary.chapterId !== previousChapter.id) {
         warnings.push('紧邻前章上下文归属不一致，未纳入本次 AI 任务。');
         skippedIds.push(previousSummary.id);
+      } else if (
+        !evaluateSummaryApplicationPolicy(
+          previousSummary.validationResult,
+          previousSummary.validationStatus,
+        ).eligible
+      ) {
+        warnings.push('紧邻前章总结存在阻断性错误或应用条件未满足，未纳入本次 AI 任务。');
+        skippedIds.push(previousSummary.id);
       } else if (previousSummary.enabled && !previousSummary.isExpired) {
         chapterSummaries.push(previousSummary);
         usedIds.push(previousSummary.id);
@@ -307,7 +316,20 @@ export async function getContextForVolumeTask(params: {
   const chapterSummaries: ChapterSummary[] = [];
   for (const ch of volChapters) {
     const s = await chapterSummaryService.getByChapterId(ch.id);
-    if (s && s.enabled && !s.isExpired) chapterSummaries.push(s);
+    if (
+      s &&
+      s.enabled &&
+      !s.isExpired &&
+      evaluateSummaryApplicationPolicy(s.validationResult, s.validationStatus).eligible
+    )
+      chapterSummaries.push(s);
+    else if (
+      s &&
+      !evaluateSummaryApplicationPolicy(s.validationResult, s.validationStatus).eligible
+    )
+      warnings.push(
+        `第 ${ch.chapterNumber} 章总结存在阻断性错误或应用条件未满足，未纳入卷上下文。`,
+      );
   }
 
   const chapterContexts: ContextRecord[] = chapterSummaries.map((s) => ({

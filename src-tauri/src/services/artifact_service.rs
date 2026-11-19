@@ -410,7 +410,7 @@ fn create_artifact_internal(
         issues.extend(
             crate::services::summary_grounding_source::validate_candidate(
                 &transaction,
-                &task.novel_id,
+                task.novel_id.as_deref().filter(|id| !id.is_empty() && *id != "system").ok_or_else(|| AppError::new("ARTIFACT_NOVEL_SCOPE_REQUIRED", "章节总结必须属于真实作品；library 任务不能进入正文或总结写入链", false))?,
                 task.chapter_id.as_deref(),
                 input_snapshot.source_draft_id.as_deref(),
                 input_snapshot.base_content_hash.as_deref(),
@@ -479,7 +479,7 @@ fn create_artifact_internal(
             display_content_hash: display_document.as_ref().map(|value| value.1.as_str()),
             structured_payload_ref_id: structured_document.as_ref().map(|value| value.0.as_str()),
             structured_payload_hash: structured_document.as_ref().map(|value| value.1.as_str()),
-            source_novel_id: &task.novel_id,
+            source_novel_id: task.novel_id.as_deref(),
             source_chapter_id: task.chapter_id.as_deref(),
             source_draft_id: input_snapshot.source_draft_id.as_deref(),
             source_draft_version: input_snapshot.source_draft_version,

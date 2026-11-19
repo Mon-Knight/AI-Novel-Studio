@@ -6,8 +6,12 @@ pub use conversation_window::{
     get_conversation_window, list_running_task_targets, ConversationWindowInput, RunningTaskTarget,
     TaskConversationWindow,
 };
-use review_authorization::validate_review_rule_baseline;
+use review_authorization::validate_review_chapter_baseline;
+pub(crate) use review_authorization::{validate_review_rule_baseline, issue_review_authorization_in_transaction};
 pub use review_authorization::{issue_review_authorization, consume_review_authorization, get_review_authorization};
+#[cfg(test)]
+#[path = "conversation_authorization_baseline_tests.rs"]
+mod authorization_baseline_tests;
 #[cfg(test)]
 #[path = "conversation_lifecycle_tests.rs"]
 mod lifecycle_tests;
@@ -20,11 +24,19 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
+pub enum TaskScope {
+    Novel { novel_id: String },
+    Library { source_id: String, source_hash: String },
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskConversationRecord {
     pub conversation_id: String,
-    pub novel_id: String,
+    pub novel_id: Option<String>,
+    pub scope: TaskScope,
     pub title: String,
     pub status: String,
     pub default_model: Option<Value>,
@@ -157,6 +169,10 @@ pub struct ReviewAuthorizationRecord {
     pub issued_at: String,
     pub consumed_at: Option<String>,
     pub consumed_by_draft_id: Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub renewed_from_authorization_id:Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub review_draft_binding:Option<crate::services::task_authorization_contract::ReviewSavedDraft>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -599,9 +615,24 @@ fn decision_fallback_status(
 }
 
 fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskConversationRecord> {
+    let novel_id: Option<String> = row.get(1)?;
+    let scope_type: String = row.get(8)?;
+    let scope = match (scope_type.as_str(), novel_id.as_ref()) {
+        ("novel", Some(id)) => TaskScope::Novel { novel_id: id.clone() },
+        ("library", None) => {
+            let raw: String = row.get(9)?;
+            let source: Value = serde_json::from_str(&raw).map_err(|error| rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(error)))?;
+            TaskScope::Library {
+                source_id: source["sourceId"].as_str().ok_or(rusqlite::Error::InvalidQuery)?.to_string(),
+                source_hash: source["sourceHash"].as_str().ok_or(rusqlite::Error::InvalidQuery)?.to_string(),
+            }
+        }
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
     Ok(TaskConversationRecord {
         conversation_id: row.get(0)?,
-        novel_id: row.get(1)?,
+        novel_id,
+        scope,
         title: row.get(2)?,
         status: row.get(3)?,
         default_model: parse_json(row.get(4)?),
@@ -723,7 +754,7 @@ pub fn create_initialized_conversation(
         .map_err(AppError::database)?;
     let conversation = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -784,7 +815,7 @@ pub fn list_conversations_page(
     let mut statement = connection
         .prepare(
             "SELECT c.conversation_id, c.novel_id, c.title, c.status, c.default_model_json,
-                c.created_at, c.updated_at, c.archived_at
+                c.created_at, c.updated_at, c.archived_at, c.scope_type, c.source_snapshot_json
          FROM task_conversations c JOIN novels n ON n.id=c.novel_id
          WHERE (?1 IS NULL OR c.novel_id=?1)
            AND (?2='all' OR (?2='active' AND c.archived_at IS NULL AND c.status<>'archived')
@@ -815,7 +846,7 @@ pub fn get_conversation(
     connection: &Connection,
     id: &str,
 ) -> Result<Option<TaskConversationRecord>, AppError> {
-    connection.query_row("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1", params![id], conversation_from_row).optional().map_err(AppError::database)
+    connection.query_row("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1", params![id], conversation_from_row).optional().map_err(AppError::database)
 }
 
 pub fn validate_task_runtime_scope(
@@ -836,12 +867,12 @@ pub fn validate_task_runtime_scope(
         .query_row(
             "SELECT novel_id FROM task_conversations WHERE conversation_id=?1",
             params![conversation_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()
         .map_err(AppError::database)?
         .ok_or_else(&scope_mismatch)?;
-    if authoritative_novel_id != novel_id {
+    if authoritative_novel_id.as_deref() != Some(novel_id) {
         return Err(scope_mismatch());
     }
     let authoritative_goal = connection
@@ -952,7 +983,7 @@ pub fn set_conversation_archived(
     let transaction = connection.transaction().map_err(AppError::database)?;
     let current = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -992,7 +1023,7 @@ pub fn set_conversation_archived(
 
     let updated = transaction
         .query_row(
-            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at, scope_type, source_snapshot_json FROM task_conversations WHERE conversation_id=?1",
             params![input.conversation_id],
             conversation_from_row,
         )
@@ -1693,6 +1724,9 @@ pub(crate) fn decision_from_row(
 }
 
 fn authorization_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewAuthorizationRecord> {
+    let raw:Option<String>=row.get(10)?;
+    let preview=raw.map(|raw|serde_json::from_str::<crate::services::task_authorization_contract::ReviewRenewalPreview>(&raw)
+        .map_err(|e|rusqlite::Error::FromSqlConversionFailure(10,rusqlite::types::Type::Text,Box::new(e)))).transpose()?;
     Ok(ReviewAuthorizationRecord {
         authorization_id: row.get(0)?,
         artifact_id: row.get(1)?,
@@ -1703,6 +1737,8 @@ fn authorization_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewAut
         issued_at: row.get(6)?,
         consumed_at: row.get(7)?,
         consumed_by_draft_id: row.get(8)?,
+        renewed_from_authorization_id:row.get(9)?,
+        review_draft_binding:preview.and_then(|preview|preview.saved_draft),
     })
 }
 
@@ -1803,7 +1839,7 @@ pub fn record_artifact_decision(
     Ok(decision)
 }
 
-fn validate_review_decision_scope(
+pub(crate) fn validate_review_decision_scope(
     connection: &Connection,
     decision_id: &str,
     artifact_id: &str,
@@ -1890,7 +1926,7 @@ fn validate_review_decision_scope(
             artifact.processing_status.as_str(),
             "valid" | "valid_with_warnings"
         )
-        || artifact.source_novel_id != novel_id
+        || artifact.source_novel_id.as_deref() != Some(novel_id)
         || artifact.source_chapter_id.as_deref() != Some(chapter_id)
         || artifact.content_hash != decision.artifact_hash
     {
@@ -2048,7 +2084,7 @@ pub fn ensure_chapter_summary_follow_up_for_authorization(
     let transaction = connection.transaction().map_err(AppError::database)?;
     let authorization = transaction
         .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
              FROM review_authorizations WHERE authorization_id=?1",
             params![authorization_id],
             authorization_from_row,
@@ -2125,10 +2161,10 @@ pub fn adopt_review_authorized_draft(
     input: AdoptReviewAuthorizedDraftInput,
 ) -> Result<AdoptReviewAuthorizedDraftResult, AppError> {
     let now = chrono::Utc::now().to_rfc3339();
-    let transaction = connection.transaction().map_err(AppError::database)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(AppError::database)?;
 
     let authorization = match transaction.query_row(
-        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
          FROM review_authorizations WHERE authorization_id=?1",
         params![&input.authorization_id],
         authorization_from_row,
@@ -2223,12 +2259,10 @@ pub fn adopt_review_authorized_draft(
             complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
             let summary_follow_up =
                 ensure_chapter_summary_follow_up(&transaction, &authorization, &draft.id, &now)?;
+            let result = AdoptReviewAuthorizedDraftResult { authorization, adopted_draft: draft, summary_follow_up };
+            crate::services::dsh::task_runtime::record_manual_adoption(&transaction, &result)?;
             transaction.commit().map_err(AppError::database)?;
-            return Ok(AdoptReviewAuthorizedDraftResult {
-                authorization,
-                adopted_draft: draft,
-                summary_follow_up,
-            });
+            return Ok(result);
         }
         return Err(AppError::new(
             "REVIEW_AUTHORIZATION_CONSUMED",
@@ -2244,7 +2278,10 @@ pub fn adopt_review_authorized_draft(
         ));
     }
 
+    validate_review_chapter_baseline(&transaction, &authorization.authorization_id, &authorization.novel_id, &authorization.chapter_id)?;
     validate_review_rule_baseline(&transaction, &authorization.artifact_id, &authorization.novel_id)?;
+    crate::services::dsh::task_runtime::staged::validate_application_artifact(&transaction, &authorization.artifact_id)?;
+    crate::services::task_authorization_service::validate_review_draft_binding(&transaction, &authorization, &input.draft_id)?;
     let adopted_draft = crate::services::chapter_service::adopt_chapter_draft_in_transaction(
         &transaction,
         &input.draft_id,
@@ -2284,20 +2321,17 @@ pub fn adopt_review_authorized_draft(
 
     let updated_auth = transaction
         .query_row(
-            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json
              FROM review_authorizations WHERE authorization_id=?1",
             params![&input.authorization_id],
             authorization_from_row,
         )
         .map_err(AppError::database)?;
 
+    let result = AdoptReviewAuthorizedDraftResult { authorization: updated_auth, adopted_draft, summary_follow_up };
+    crate::services::dsh::task_runtime::record_manual_adoption(&transaction, &result)?;
     transaction.commit().map_err(AppError::database)?;
-
-    Ok(AdoptReviewAuthorizedDraftResult {
-        authorization: updated_auth,
-        adopted_draft,
-        summary_follow_up,
-    })
+    Ok(result)
 }
 
 pub fn get_bundle(
@@ -2317,7 +2351,7 @@ pub fn get_bundle(
     }
     let artifacts = connection.prepare("SELECT card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at FROM conversation_artifact_cards WHERE conversation_id=?1 ORDER BY created_at").map_err(AppError::database)?.query_map(params![id], artifact_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     let decisions = connection.prepare("SELECT decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision, idempotency_key, actor, target_type, target_id, base_revision, apply_transaction_id, conflict_code, created_at FROM artifact_decisions WHERE conversation_id=?1 ORDER BY created_at").map_err(AppError::database)?.query_map(params![id], decision_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-    let authorizations = connection.prepare("SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id FROM review_authorizations WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE conversation_id=?1) ORDER BY issued_at").map_err(AppError::database)?.query_map(params![id], authorization_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+    let authorizations = connection.prepare("SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id, renewed_from_authorization_id, renewal_preview_json FROM review_authorizations WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE conversation_id=?1) ORDER BY issued_at").map_err(AppError::database)?.query_map(params![id], authorization_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     turns.shrink_to_fit();
     Ok(Some(TaskConversationBundle {
         conversation,

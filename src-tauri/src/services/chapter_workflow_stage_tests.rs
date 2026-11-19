@@ -214,7 +214,7 @@ fn seed_mock_artifact(
             request_hash: None,
             trace_id: Some(format!("trace-{operation}")),
             task_type: "chapter_generate".to_string(),
-            novel_id: scope.novel_id.clone(),
+            novel_id: Some(scope.novel_id.clone()),
             chapter_id: Some(scope.chapter_id.clone()),
             draft_id: None,
             scope_type: "chapter".to_string(),
@@ -1157,7 +1157,7 @@ fn backup_schema_twelve_round_trips_stage_and_result_document() {
         complete_stage(&mut source, complete_large(&running, &prose)).expect("complete stage");
     let backup = crate::project_backup::export_project_backup_in_conn(&source, &scope.novel_id)
         .expect("export project backup");
-    assert_eq!(backup.schema_version, 12);
+    assert_eq!(backup.schema_version, 13);
     assert_eq!(backup.tables["chapter_workflow_stages"].len(), 1);
 
     let mut target = connection();

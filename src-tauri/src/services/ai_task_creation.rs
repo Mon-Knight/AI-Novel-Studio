@@ -30,14 +30,14 @@ pub(super) fn create_task_after_validation(
             .as_ref()
             .and_then(|hint| hint.get("nativeRuleSet"))
             .cloned()
-    } else if input.scope_type == "system" {
-        None // Connection probes have no novel/rule-set authority.
+    } else if matches!(input.scope_type.as_str(), "system" | "library") || input.task_type == "style_analyze" {
+        None // Source-only analysis and probes acquire no novel/rule-set authority.
     } else {
         validate_target(&transaction, &input)?;
         Some(
             serde_json::to_value(crate::services::world_rule_governance::rule_set_snapshot(
                 &transaction,
-                &input.novel_id,
+                input.novel_id.as_deref().ok_or_else(|| compilation_error("规则快照要求真实作品身份"))?,
             )?)
             .map_err(|_| AppError::new(codes::AI_TASK_INPUT_INVALID, "规则基线无法冻结", false))?,
         )
@@ -167,7 +167,7 @@ pub(super) fn create_task_after_validation(
         &ai_task_repository::NewTask {
             task_id: &task_id,
             task_type: &input.task_type,
-            novel_id: &input.novel_id,
+            novel_id: input.novel_id.as_deref(),
             chapter_id: input.chapter_id.as_deref(),
             draft_id: input.draft_id.as_deref(),
             scope_type: &input.scope_type,

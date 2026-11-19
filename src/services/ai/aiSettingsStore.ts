@@ -24,6 +24,11 @@ import {
 } from './savedOptionalModels';
 import { lsGet, lsSet } from '../database/db';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
+import {
+  canonicalModelProviderId,
+  normalizeModelBaseUrl,
+  normalizeModelId,
+} from '../conversation/modelIdentity';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -44,21 +49,16 @@ export interface SessionModelCredentialIdentity {
 const sessionModelCredentials = new Map<string, string>();
 let nativeCredentialRestorePromise: Promise<void> | null = null;
 
-function canonicalProviderId(providerId: string): string {
-  const normalized = providerId.trim().toLowerCase();
-  return normalized === 'deepseek' || normalized === 'deepseek-official'
-    ? 'deepseek-official'
-    : normalized;
-}
+const canonicalProviderId = canonicalModelProviderId;
 
 function normalizedBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, '');
+  return normalizeModelBaseUrl(baseUrl);
 }
 
 function credentialIdentityKey(identity: SessionModelCredentialIdentity): string | undefined {
   const providerId = canonicalProviderId(identity.providerId);
   const baseUrl = normalizedBaseUrl(identity.baseUrl);
-  const modelId = identity.modelId.trim();
+  const modelId = normalizeModelId(identity.modelId);
   if (!providerId || providerId === 'mock' || !baseUrl || !modelId) return undefined;
   return JSON.stringify([identity.scope, providerId, baseUrl, modelId]);
 }

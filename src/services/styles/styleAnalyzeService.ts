@@ -5,7 +5,9 @@ import { createAiClient, aiSettingsService } from '../ai/aiClient';
 import { aiTaskService } from '../ai/aiTaskService';
 import type { StyleAnalyzeResult } from '../../types/style';
 import { extractJsonObject } from '../ai/jsonUtils';
-import type { AiGenerateOptions } from '../../types/ai';
+import type { AiGenerateOptions, AiSettings } from '../../types/ai';
+import { isTauri } from '../database/db';
+import { analyzeStyleSource, globalStyleSource } from './styleRuntimeService';
 import { throwIfAiRequestCancelled } from '../ai/aiCancellation';
 import { bindAiTaskCancellation, settleAiTaskError } from '../ai/aiTaskCancellation';
 import styleAnalyzeTemplate from '../../../prompts/style_analyze.md?raw';
@@ -28,13 +30,28 @@ export async function analyzeStyle(
   text: string,
   options: AiGenerateOptions = {},
 ): Promise<StyleAnalyzeResult> {
+  throwIfAiRequestCancelled(options.signal);
+  if (isTauri()) {
+    const source = await globalStyleSource(text);
+    const result = await analyzeStyleSource(source, { signal: options.signal });
+    return result.profiles[0];
+  }
+  return analyzeStyleBrowser(text, options, aiSettingsService.getSettings());
+}
+
+/** Browser development compatibility only; remove after its offline preview replacement. */
+export async function analyzeStyleBrowser(
+  text: string,
+  options: AiGenerateOptions,
+  settings: AiSettings,
+): Promise<StyleAnalyzeResult> {
+  if (isTauri()) throw new Error('桌面风格分析不得进入浏览器兼容执行器。');
   if (!text.trim()) throw new Error('参考文本为空，请提供文本内容。');
   if (text.length > MAX_TEXT_LENGTH)
     throw new Error(
       `文本过长（${text.length} 字），请截取代表性片段（不超过 ${MAX_TEXT_LENGTH} 字）。`,
     );
 
-  const settings = aiSettingsService.getSettings();
   const task = await aiTaskService
     .create('style_analyze', {
       runtimeMode: settings.runtimeMode,

@@ -39,8 +39,11 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const { saveAiSettings, getDefaultLocalChapterModelSettings, resolveSessionModelApiKey } =
   await import('../ai/aiSettingsStore');
-const { captureTaskModelSnapshot, hydrateTaskModelSnapshotRuntime } =
-  await import('./taskModelSnapshot');
+const {
+  captureTaskModelSnapshot,
+  captureTaskModelSnapshotFromSettings,
+  hydrateTaskModelSnapshotRuntime,
+} = await import('./taskModelSnapshot');
 const { findAvailableWorkbenchModel } = await import('./workbenchModelAvailability');
 
 const deepseekSettings: AiSettings = {
@@ -94,6 +97,22 @@ test('explicit DeepSeek aliases freeze to one provider identity', () => {
   assert.equal(runtimeAlias.providerId, 'deepseek-official');
   assert.equal(configuredAlias.runtime?.adapterProvider, configuredAlias.providerId);
   assert.equal(runtimeAlias.runtime?.adapterProvider, runtimeAlias.providerId);
+});
+
+test('provider case and endpoint aliases freeze to one routing identity', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    provider: 'openai_compatible',
+    baseUrl: 'https://provider.invalid/v1///',
+    modelName: 'custom-model',
+  });
+
+  const snapshot = captureTaskModelSnapshot('OPENAI-COMPATIBLE', ' custom-model ');
+
+  assert.equal(snapshot.providerId, 'openai_compatible');
+  assert.equal(snapshot.modelId, 'custom-model');
+  assert.equal(snapshot.baseUrl, 'https://provider.invalid/v1');
+  assert.equal(snapshot.runtime?.adapterProvider, 'openai_compatible');
 });
 
 test('openai_compatible provider identity remains unchanged', () => {
@@ -260,4 +279,103 @@ test('legacy snapshots never borrow a baseUrl from a different frozen model iden
   assert.equal(hydrated.baseUrl, undefined);
   assert.equal(hydrated.modelId, 'older-frozen-model');
   assert.equal(hydrated.runtime?.adapterProtocol, 'ans_task_session_v2');
+});
+
+test('new desktop Mock and API snapshots identify the same native host without changing models', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: {} },
+  });
+  try {
+    const snapshots = [
+      captureTaskModelSnapshotFromSettings(deepseekSettings),
+      captureTaskModelSnapshotFromSettings({
+        ...deepseekSettings,
+        runtimeMode: 'mock',
+        mockMode: true,
+      }),
+    ];
+    assert.equal(snapshots[0].providerId, 'deepseek-official');
+    assert.equal(snapshots[0].modelId, 'deepseek-chat');
+    assert.equal(snapshots[0].runtimeMode, 'api');
+    assert.equal(snapshots[1].providerId, 'mock');
+    assert.equal(snapshots[1].modelId, 'Mock');
+    assert.equal(snapshots[1].runtimeMode, 'mock');
+    for (const snapshot of snapshots) {
+      assert.equal(snapshot.runtime?.adapterProtocol, 'ans_task_session_v2');
+      assert.equal(snapshot.runtime?.adapterProvider, snapshot.providerId);
+      assert.equal(snapshot.runtime?.bundle, 'pinned-dsh-carrier');
+      assert.equal(snapshot.runtime?.dshSourceCommit, '47f943859bef60e4160492346772ded9b24f765a');
+      assert.equal(snapshot.runtime?.toolCallingAttestation, undefined);
+      assert.doesNotMatch(JSON.stringify(snapshot), /session-only-key|apiKey/);
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('new browser captures remain explicit fallback and never claim a loaded desktop carrier', () => {
+  for (const settings of [
+    deepseekSettings,
+    { ...deepseekSettings, runtimeMode: 'mock' as const, mockMode: true },
+  ]) {
+    const snapshot = captureTaskModelSnapshotFromSettings(settings);
+    assert.equal(snapshot.runtime?.adapterProtocol, 'ans_provider_fallback_v1');
+    assert.equal(snapshot.runtime?.bundle, 'browser-deterministic');
+    assert.equal(snapshot.runtime?.dshSourceCommit, undefined);
+    assert.equal(snapshot.runtime?.toolCallingAttestation, undefined);
+  }
+});
+
+test('desktop hydration does not relabel historical Mock or API execution metadata as unified evidence', () => {
+  saveAiSettings(deepseekSettings);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: {} },
+  });
+  try {
+    for (const historical of [
+      {
+        providerId: 'mock',
+        modelId: 'Mock',
+        runtimeMode: 'mock' as const,
+        capabilities: [],
+        options: {},
+        capturedAt: '2026-08-01T00:00:00Z',
+        runtime: {
+          adapterProtocol: 'ans_provider_fallback_v1',
+          adapterProvider: 'browser-fallback',
+          bundle: 'browser-deterministic',
+          profile: 'conversational-workbench-v2',
+        },
+      },
+      {
+        providerId: 'deepseek-official',
+        modelId: 'deepseek-chat',
+        runtimeMode: 'api' as const,
+        baseUrl: deepseekSettings.baseUrl,
+        capabilities: [],
+        options: {},
+        capturedAt: '2026-08-01T00:00:00Z',
+        runtime: {
+          adapterProtocol: 'ans_task_session_v2',
+          adapterProvider: 'deepseek-official',
+          bundle: 'pinned-dsh-carrier',
+          profile: 'conversational-workbench-v2',
+        },
+      },
+    ]) {
+      const hydrated = hydrateTaskModelSnapshotRuntime(historical);
+      assert.deepEqual(hydrated.runtime, historical.runtime);
+      assert.equal(hydrated.capturedAt, historical.capturedAt);
+      assert.equal(hydrated.providerId, historical.providerId);
+      assert.equal(hydrated.modelId, historical.modelId);
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
 });

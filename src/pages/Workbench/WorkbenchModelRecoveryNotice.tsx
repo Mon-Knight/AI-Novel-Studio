@@ -27,20 +27,22 @@ export function WorkbenchModelRecoveryNotice({
   onCreateTask,
 }: WorkbenchModelRecoveryNoticeProps) {
   const [expanded, setExpanded] = useState(false);
-  if (!message || status === 'available') return null;
+  if (!message || status === 'ready') return null;
 
   const unavailable = status === 'unavailable';
-  const refreshingStatus = status === 'refreshing';
+  const error = status === 'error';
+  const initializing = status === 'initializing';
+  const actionable = !initializing;
 
   return (
     <div
-      className={`workbench-readiness-hint workbench-model-status${unavailable ? ' is-warning' : ''}${expanded ? ' is-expanded' : ''}`}
+      className={`workbench-readiness-hint workbench-model-status${unavailable || error ? ' is-warning' : ''}${expanded ? ' is-expanded' : ''}`}
       data-testid={testId}
       data-status={status}
-      role={unavailable ? 'alert' : 'status'}
-      aria-busy={refreshing}
+      role={unavailable || error ? 'alert' : 'status'}
+      aria-busy={refreshing || initializing}
     >
-      {refreshingStatus ? (
+      {initializing ? (
         <LoaderCircle
           className="workbench-readiness-icon is-spinning"
           aria-hidden="true"
@@ -68,7 +70,7 @@ export function WorkbenchModelRecoveryNotice({
       >
         <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
       </button>
-      {unavailable && (
+      {actionable && (
         <div className="workbench-recovery-actions">
           {onCreateTask && (
             <button

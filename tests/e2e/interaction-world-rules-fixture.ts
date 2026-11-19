@@ -712,12 +712,8 @@ export async function expectFocusedAriaLabel(label: string): Promise<void> {
 }
 
 export const UX_EVIDENCE_DIR = path.resolve(
-  import.meta.dirname,
-  '..',
-  '..',
-  'reports',
-  'ux-round2-validation',
-  'desktop-ux-round2',
+  process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ??
+    path.join(import.meta.dirname, '../../reports/ux-round2-validation/desktop-ux-round2'),
 );
 
 function ensureEvidenceDirectory(): string {

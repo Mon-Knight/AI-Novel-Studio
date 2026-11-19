@@ -4,7 +4,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
-const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 40] = [
+const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 43] = [
     (
         "001_schema_migrations",
         "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -165,6 +165,9 @@ const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 40] = [
         "040_chapter_workflow_stages",
         "64771361d6918a3ddc86a3a311fc29d1de75664e31c1d77992e59ec85acbcad5",
     ),
+    ("041_task_authorizations", "6bc1ce65d3040caeb43bee924bc6a04207dc4c11c39257e6ab6806a6ca02c9cf"),
+    ("042_library_task_scope", "7b91d2e395c34558d636300bd27e3556c16d89cea0efce37057074c6bd0372d1"),
+    ("043_host_terminal_native_facts", "396ec0c085028bd062e2ba0361cea3e56f20bf4a880a4fb620d745ce2cb3912d"),
 ];
 
 include!("migrations_cross_task_lineage_tests.rs");
@@ -927,14 +930,13 @@ fn concurrent_startup_migrations_serialize_before_reading_the_ledger(
         uuid::Uuid::new_v4()
     ));
     {
-        let mut connection = Connection::open(&path)?;
+        let connection = Connection::open(&path)?;
         connection.busy_timeout(Duration::from_secs(10))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         // The single-instance fence serializes the legacy pre-ledger schema bootstrap in
-        // production. Seed that base once here, then remove only the ledger rows so the two
-        // connections below exercise the cross-connection migration ledger race itself.
-        crate::db::create_tables(&mut connection)?;
-        connection.execute("DELETE FROM schema_migrations", [])?;
+        // production. Seed that released base once here, without applying the ledger
+        // migrations, so the two connections below exercise the migration ledger race itself.
+        legacy_schema(&connection)?;
     }
 
     let barrier = Arc::new(Barrier::new(2));

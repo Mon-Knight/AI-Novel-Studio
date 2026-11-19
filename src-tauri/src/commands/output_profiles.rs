@@ -179,7 +179,7 @@ fn validate_input(input: &SaveOutputProfileInput) -> Result<(), String> {
     )
 }
 
-fn list_with(
+pub(crate) fn list_with(
     connection: &Connection,
     project_id: Option<&str>,
 ) -> Result<Vec<OutputProfileDto>, String> {

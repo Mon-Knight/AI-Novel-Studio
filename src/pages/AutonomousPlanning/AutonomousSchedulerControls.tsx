@@ -26,7 +26,8 @@ const MODES: Array<{ id: AutonomousAutomationMode; title: string; detail: string
   {
     id: 'full_auto',
     title: '全自动',
-    detail: '质量、预算与采用前复验通过后，自动采用正文并确认章节分析。',
+    detail:
+      '仅在另行签发的任务授权、质量门禁与写入复验均通过时自动采用正文和应用总结；否则等待人工决定。',
   },
 ];
 
@@ -307,7 +308,7 @@ export function AutonomousSchedulerControls({
           >
             启动无人值守任务
           </button>
-        ) : run.status === 'paused' ? (
+        ) : run.status === 'paused' || (run.status === 'queued' && !scheduler.workerActive) ? (
           <button
             type="button"
             className="btn btn-primary"

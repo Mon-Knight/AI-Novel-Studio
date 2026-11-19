@@ -1,6 +1,5 @@
 import { useBlocker, type BlockerFunction } from 'react-router-dom';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
-import { appWindow } from '@tauri-apps/api/window';
 import WorkspaceLeaveDialog from '../components/workspace/WorkspaceLeaveDialog';
 import type {
   LeaveDecision,
@@ -14,6 +13,13 @@ import {
   logWorkspaceWarning,
 } from '../services/workspace/workspaceErrorService';
 import { getAppErrorUserMessage, normalizeAppError } from '../types/appError';
+
+type AppWindow = ReturnType<typeof import('@tauri-apps/api/webviewWindow').getCurrentWebviewWindow>;
+
+// Loaded lazily: getCurrentWebviewWindow() requires Tauri's injected window metadata,
+// so importing this hook in browser development or tests must not create it eagerly.
+const loadAppWindow = (): Promise<AppWindow> =>
+  import('@tauri-apps/api/webviewWindow').then((module) => module.getCurrentWebviewWindow());
 
 interface UseWorkspaceLeaveGuardOptions {
   shouldGuard: boolean;
@@ -221,38 +227,40 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void appWindow
-      .onCloseRequested((event) => {
-        if (bypassCloseGuardRef.current) {
-          bypassCloseGuardRef.current = false;
-          return;
-        }
-        if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return;
-        event.preventDefault();
-        if (activeRef.current) return;
-        void requestWorkspaceLeave({
-          reason: 'window_close',
-          continueAction: async () => {
-            bypassCloseGuardRef.current = true;
-            try {
-              await appWindow.close();
-            } catch (error) {
-              // close() can reject before Tauri emits the recursive close event.
-              // Never leave the one-shot bypass armed for the next user request.
-              bypassCloseGuardRef.current = false;
-              throw error;
-            }
-          },
-        }).catch((error) => {
-          // The document-guard path converts continueAction failures into
-          // save_failed. Goal-only preflight closes execute directly and can
-          // reject, so contain and record that promise here as well.
-          bypassCloseGuardRef.current = false;
-          logWorkspaceError('window_close_failed', error, {
-            traceId: createTraceId('window-close'),
+    void loadAppWindow()
+      .then((appWindow) =>
+        appWindow.onCloseRequested((event) => {
+          if (bypassCloseGuardRef.current) {
+            bypassCloseGuardRef.current = false;
+            return;
+          }
+          if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return;
+          event.preventDefault();
+          if (activeRef.current) return;
+          void requestWorkspaceLeave({
+            reason: 'window_close',
+            continueAction: async () => {
+              bypassCloseGuardRef.current = true;
+              try {
+                await appWindow.close();
+              } catch (error) {
+                // close() can reject before Tauri emits the recursive close event.
+                // Never leave the one-shot bypass armed for the next user request.
+                bypassCloseGuardRef.current = false;
+                throw error;
+              }
+            },
+          }).catch((error) => {
+            // The document-guard path converts continueAction failures into
+            // save_failed. Goal-only preflight closes execute directly and can
+            // reject, so contain and record that promise here as well.
+            bypassCloseGuardRef.current = false;
+            logWorkspaceError('window_close_failed', error, {
+              traceId: createTraceId('window-close'),
+            });
           });
-        });
-      })
+        }),
+      )
       .then((stop) => {
         if (disposed) stop();
         else unlisten = stop;

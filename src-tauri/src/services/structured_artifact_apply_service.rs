@@ -61,6 +61,9 @@ pub struct ApplyStructuredArtifactInput {
 #[path = "structured_rule_apply_receipt.rs"]
 mod rule_receipt;
 
+#[derive(Clone, Copy)]
+pub(crate) enum ApplicationAuthority<'a> { ManualReview, TaskPreauthorization { authorization_id: &'a str, receipt_id: &'a str } }
+
 enum DomainOutcome {
     Applied,
     AppliedWithReceipt(String),
@@ -289,6 +292,13 @@ fn candidate_value(bundle: &artifact_service::ResultArtifactBundle) -> Option<Va
         }
     }
     parse_loose_json(&candidate_text(bundle)).or_else(|| structured.cloned())
+}
+
+pub(crate) fn preauthorized_plan_chapter_counts(bundle: &artifact_service::ResultArtifactBundle) -> Result<Option<Vec<i64>>, AppError> {
+    let Some(candidate) = candidate_value(bundle) else { return Ok(None); };
+    if candidate.get("planKind").and_then(Value::as_str) != Some("story_plan") { return Ok(None); }
+    let plan = parse_story_plan(&candidate).map_err(|code| AppError::new(code, "规划候选无效，未授予新建权限", false))?;
+    Ok(Some(plan.volumes.iter().map(|volume| volume.chapters.len() as i64).collect()))
 }
 
 fn candidate_items(value: &Value, keys: &[&str], identity_key: &str) -> Vec<Value> {
@@ -962,9 +972,21 @@ fn existing_decision(
         .map_err(AppError::database)
 }
 
-fn validate_static_scope(
+fn validate_static_scope(connection: &Connection, input: &ApplyStructuredArtifactInput) -> Result<artifact_service::ResultArtifactBundle, AppError> {
+    validate_static_scope_with_authority(connection, input, ApplicationAuthority::ManualReview)
+}
+
+pub(crate) fn validate_preauthorized_base(connection: &Connection, input: &ApplyStructuredArtifactInput, bundle: &artifact_service::ResultArtifactBundle) -> Result<(), AppError> {
+    if let Some(code) = validate_dynamic_base(connection, input, bundle)? {
+        return Err(AppError::new(code, "候选生成基线已变化，授权写入已停止", false));
+    }
+    Ok(())
+}
+
+fn validate_static_scope_with_authority(
     connection: &Connection,
     input: &ApplyStructuredArtifactInput,
+    authority: ApplicationAuthority<'_>,
 ) -> Result<artifact_service::ResultArtifactBundle, AppError> {
     for (value, field) in [
         (&input.decision_id, "decisionId"),
@@ -979,7 +1001,8 @@ fn validate_static_scope(
     ] {
         required(value, field)?;
     }
-    if input.actor != "user" || input.target_type != "asset" {
+    let expected_actor = match authority { ApplicationAuthority::ManualReview => "user", ApplicationAuthority::TaskPreauthorization { .. } => "task_preauthorized" };
+    if input.actor != expected_actor || input.target_type != "asset" {
         return Err(invalid_input("actorOrTargetType"));
     }
 
@@ -1011,7 +1034,7 @@ fn validate_static_scope(
         || card_conversation_id != input.conversation_id
         || card_artifact_type != artifact.artifact_type
         || conversation_novel_id != input.novel_id
-        || artifact.source_novel_id != input.novel_id
+        || artifact.source_novel_id.as_deref() != Some(input.novel_id.as_str())
         || artifact.source_chapter_id != input.chapter_id
         || artifact.content_hash != input.artifact_hash
         || artifact.schema_version != 1
@@ -2367,178 +2390,9 @@ fn summary_context_records(
     Ok(records)
 }
 
-fn apply_summary(
-    connection: &Connection,
-    input: &ApplyStructuredArtifactInput,
-    bundle: &artifact_service::ResultArtifactBundle,
-) -> Result<DomainOutcome, AppError> {
-    let Some(chapter_id) = input.chapter_id.as_deref() else {
-        return Ok(DomainOutcome::Conflict("CHAPTER_TARGET_REQUIRED"));
-    };
-    let (volume_id, adopted_draft_id) = connection
-        .query_row(
-            "SELECT volume_id, adopted_draft_id FROM chapters
-             WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
-            params![chapter_id, input.novel_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
-        )
-        .map_err(AppError::database)?;
-    let Some(adopted_draft_id) = adopted_draft_id else {
-        return Ok(DomainOutcome::Conflict(
-            "CHAPTER_SUMMARY_ADOPTED_DRAFT_REQUIRED",
-        ));
-    };
-    if bundle.artifact.source_draft_id.as_deref() != Some(adopted_draft_id.as_str()) {
-        return Ok(DomainOutcome::Conflict(
-            "CHAPTER_SUMMARY_ADOPTED_DRAFT_MISMATCH",
-        ));
-    }
-    let value = candidate_value(bundle).unwrap_or_else(|| json!({}));
-    let summary_snapshot = crate::repositories::ai_task_repository::find_input_snapshot(
-        connection,
-        &bundle.artifact.task_id,
-    )?;
-    let grounding_required = summary_snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.payload_json.get("summaryGroundingVersion"))
-        .and_then(Value::as_i64)
-        == Some(1)
-        || bundle
-            .issues
-            .iter()
-            .any(|issue| issue.validator_version == "artifact-validator-m1-v3-summary-grounding");
-    let grounding_issues = crate::services::summary_grounding_source::validate_candidate(
-        connection,
-        &input.novel_id,
-        Some(chapter_id),
-        Some(&adopted_draft_id),
-        bundle.artifact.source_base_content_hash.as_deref(),
-        &value,
-        grounding_required,
-    )?;
-    if grounding_issues
-        .iter()
-        .any(|issue| issue.severity == "error")
-    {
-        return Ok(DomainOutcome::Conflict("SUMMARY_GROUNDING_REVIEW_REQUIRED"));
-    }
-    let coverage_required = crate::services::summary_coverage::required_by_snapshot(
-        summary_snapshot
-            .as_ref()
-            .map(|snapshot| &snapshot.payload_json),
-    );
-    let coverage_issues = crate::services::summary_coverage::validate(
-        &value,
-        coverage_required,
-        crate::services::summary_coverage::Depth::Complete,
-    );
-    if coverage_issues
-        .iter()
-        .any(|issue| issue.severity == "error")
-    {
-        return Ok(DomainOutcome::Conflict("SUMMARY_COVERAGE_INCOMPLETE"));
-    }
-    let object = value.as_object();
-    let summary = object
-        .and_then(|object| trimmed_text(object.get("summary"), MAX_FIELD_CHARS))
-        .unwrap_or_else(|| candidate_text(bundle).trim().to_string());
-    if summary.is_empty() || summary.chars().count() > MAX_FIELD_CHARS {
-        return Ok(DomainOutcome::Conflict("EMPTY_CANDIDATE"));
-    }
-    let draft_version = bundle.artifact.source_draft_version;
-    let input_summary = SaveChapterSummaryInput {
-        id: None,
-        novel_id: input.novel_id.clone(),
-        chapter_id: chapter_id.to_string(),
-        volume_id,
-        adopted_draft_id,
-        summary,
-        key_events: object.and_then(|value| stored_field(value, "keyEvents")),
-        character_changes: object.and_then(|value| stored_field(value, "characterChanges")),
-        relationship_changes: object.and_then(|value| stored_field(value, "relationshipChanges")),
-        new_foreshadows: object.and_then(|value| stored_field(value, "newForeshadows")),
-        resolved_foreshadows: object.and_then(|value| stored_field(value, "resolvedForeshadows")),
-        next_chapter_hints: object.and_then(|value| stored_field(value, "nextChapterHints")),
-        core_events: object.and_then(|value| stored_field(value, "coreEvents")),
-        protagonist_state_change: object
-            .and_then(|value| stored_field(value, "protagonistStateChange")),
-        important_character_changes: object
-            .and_then(|value| stored_field(value, "importantCharacterChanges")),
-        setting_changes: object.and_then(|value| stored_field(value, "settingChanges")),
-        new_locations: object.and_then(|value| stored_field(value, "newLocations")),
-        new_items_or_abilities: object.and_then(|value| stored_field(value, "newItemsOrAbilities")),
-        foreshadowing: object.and_then(|value| stored_field(value, "foreshadowing")),
-        unresolved_questions: object.and_then(|value| stored_field(value, "unresolvedQuestions")),
-        facts_must_remember: object.and_then(|value| stored_field(value, "factsMustRemember")),
-        next_chapter_hook: object.and_then(|value| stored_field(value, "nextChapterHook")),
-        validation_status: Some("pending".to_string()),
-        validation_result: Some(json!({
-            "passed": false, "safeToContext": true, "score": 0,
-            "semanticValidation": "not_checked", "authorReviewed": true,
-            "evidenceValidation": if value.get("grounding").is_some() { "passed" } else { "missing" },
-            "grounding": value.get("grounding"),
-            "groundingIssues": grounding_issues.iter().map(|issue| json!({
-                "severity": issue.severity, "code": issue.code,
-                "path": issue.json_path, "message": issue.message,
-            })).collect::<Vec<_>>(),
-            "summaryCoverageVersion": if coverage_required {
-                json!(crate::services::summary_coverage::VERSION)
-            } else {
-                Value::Null
-            },
-            "coverageValidation": if coverage_required { "passed" } else { "legacy_not_required" },
-            "problems": [{"type": "speculation", "message": "作者已审阅应用；原文依据核对不等于语义证明。"}]
-        }).to_string()),
-        enabled: Some(true),
-        content_hash: bundle.artifact.source_base_content_hash.clone(),
-        draft_version,
-        ai_task_id: Some(bundle.artifact.task_id.clone()),
-    };
-    let context_records = summary_context_records(
-        connection,
-        input,
-        object,
-        input_summary.volume_id.as_deref(),
-        &input_summary.summary,
-        input_summary.content_hash.as_deref(),
-        input_summary.draft_version,
-    )?;
-    let character_states = match structured_summary_apply::summary_character_states(
-        connection,
-        input,
-        object,
-        coverage_required,
-    )? {
-        structured_summary_apply::CharacterStatesOutcome::Ready(states) => states,
-        structured_summary_apply::CharacterStatesOutcome::Conflict(code) => {
-            return Ok(DomainOutcome::Conflict(code));
-        }
-    };
-    chapter_context_bundle_service::persist_chapter_context_bundle_in_transaction(
-        connection,
-        &SaveChapterContextBundleInput {
-            novel_id: input.novel_id.clone(),
-            chapter_id: chapter_id.to_string(),
-            adopted_draft_id: input_summary.adopted_draft_id.clone(),
-            summary: input_summary,
-            context_records,
-            character_states,
-        },
-        &input.created_at,
-    )
-    .map_err(|reason| {
-        domain_failure("summary_bundle_insert").with_details(json!({
-            "stage": "summary_bundle_insert",
-            "reason": reason,
-        }))
-    })?;
-    Ok(DomainOutcome::Applied)
-}
+#[path = "structured_summary_commit.rs"]
+mod summary_commit;
+use summary_commit::apply_summary;
 
 fn apply_context_compression(
     connection: &Connection,
@@ -2624,13 +2478,14 @@ fn apply_domain(
     connection: &Connection,
     input: &ApplyStructuredArtifactInput,
     bundle: &artifact_service::ResultArtifactBundle,
+    authority: ApplicationAuthority<'_>,
 ) -> Result<DomainOutcome, AppError> {
     match bundle.artifact.artifact_type.as_str() {
         "outline" => apply_outline(connection, input, bundle),
         "character_candidates" => apply_characters(connection, input, bundle),
         "event_candidates" => apply_events(connection, input, bundle),
         "setting_candidates" => apply_settings(connection, input, bundle),
-        "chapter_summary" => apply_summary(connection, input, bundle),
+        "chapter_summary" => apply_summary(connection, input, bundle, authority),
         "generic_json" => apply_context_compression(connection, input, bundle),
         _ => Ok(DomainOutcome::Conflict(
             "STRUCTURED_ARTIFACT_TYPE_UNSUPPORTED",
@@ -2645,7 +2500,17 @@ pub fn apply_structured_artifact(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(AppError::database)?;
-    let bundle = validate_static_scope(&transaction, &input)?;
+    let result = apply_in_transaction(&transaction, input, ApplicationAuthority::ManualReview)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(result)
+}
+
+pub(crate) fn apply_in_transaction(
+    transaction: &Connection,
+    input: ApplyStructuredArtifactInput,
+    authority: ApplicationAuthority<'_>,
+) -> Result<crate::repositories::conversation_repository::ArtifactDecisionRecord, AppError> {
+    let bundle = validate_static_scope_with_authority(transaction, &input, authority)?;
     if let Some(existing) = existing_decision(&transaction, &input)? {
         validate_existing_identity(&existing, &input)?;
         if bundle.artifact.artifact_type == "setting_candidates"
@@ -2663,7 +2528,9 @@ pub fn apply_structured_artifact(
             },
             &existing.created_at,
         )?;
-        transaction.commit().map_err(AppError::database)?;
+        if matches!(authority, ApplicationAuthority::ManualReview) && existing.apply_transaction_id.is_some() && existing.conflict_code.is_none() {
+            crate::services::dsh::task_runtime::record_manual_structured_application(transaction, &existing)?;
+        }
         return Ok(existing);
     }
 
@@ -2671,10 +2538,10 @@ pub fn apply_structured_artifact(
     let outcome = if let Some(conflict) = base_conflict {
         DomainOutcome::Conflict(conflict)
     } else {
-        apply_domain(&transaction, &input, &bundle)?
+        apply_domain(transaction, &input, &bundle, authority)?
     };
     let (apply_transaction_id, conflict_code) = match outcome {
-        DomainOutcome::Applied => (Some(format!("apply-{}", uuid::Uuid::new_v4())), None),
+        DomainOutcome::Applied => (Some(match authority { ApplicationAuthority::ManualReview => format!("apply-{}", uuid::Uuid::new_v4()), ApplicationAuthority::TaskPreauthorization { receipt_id, .. } => receipt_id.to_string() }), None),
         DomainOutcome::AppliedWithReceipt(receipt_id) => (Some(receipt_id), None),
         DomainOutcome::Conflict(code) => (None, Some(code)),
     };
@@ -2694,7 +2561,9 @@ pub fn apply_structured_artifact(
         },
         &input.created_at,
     )?;
-    transaction.commit().map_err(AppError::database)?;
+    if matches!(authority, ApplicationAuthority::ManualReview) && decision.apply_transaction_id.is_some() && decision.conflict_code.is_none() {
+        crate::services::dsh::task_runtime::record_manual_structured_application(transaction, &decision)?;
+    }
     Ok(decision)
 }
 
@@ -3010,7 +2879,7 @@ mod tests {
         let mut task_input =
             ai_task_service::tests::system_task_input(&format!("apply-{suffix}"), artifact_type);
         task_input.task_type = "context_summarize".to_string();
-        task_input.novel_id = NOVEL_ID.to_string();
+        task_input.novel_id = Some(NOVEL_ID.to_string());
         task_input.chapter_id = Some(CHAPTER_ID.to_string());
         task_input.draft_id = Some(DRAFT_ID.to_string());
         task_input.scope_type = "draft".to_string();

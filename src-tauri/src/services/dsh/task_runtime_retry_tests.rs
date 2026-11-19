@@ -53,7 +53,7 @@ fn retry_restores_verified_full_stage_contract_and_rejects_scope_model_and_range
     let resolution = retry::resolve_connection(
         &connection,
         &input.conversation_id,
-        &input.novel_id,
+        input.novel_id.as_deref().expect("retry fixture novel"),
         "source",
     )
     .unwrap();
@@ -69,7 +69,13 @@ fn retry_restores_verified_full_stage_contract_and_rejects_scope_model_and_range
     changed.model_snapshot = input.model_snapshot.clone();
     changed.chapter_word_range.as_mut().unwrap().minimum = 100;
     assert!(retry::validate_retry(&connection, &changed).is_err());
-    assert!(retry::resolve_connection(&connection, "other", &input.novel_id, "source").is_err());
+    assert!(retry::resolve_connection(
+        &connection,
+        "other",
+        input.novel_id.as_deref().expect("retry fixture novel"),
+        "source"
+    )
+    .is_err());
     assert!(
         retry::resolve_connection(&connection, &input.conversation_id, "other", "source").is_err()
     );
@@ -77,7 +83,7 @@ fn retry_restores_verified_full_stage_contract_and_rejects_scope_model_and_range
     assert!(retry::resolve_connection(
         &connection,
         &input.conversation_id,
-        &input.novel_id,
+        input.novel_id.as_deref().expect("retry fixture novel"),
         "source"
     )
     .is_err());
@@ -120,7 +126,7 @@ fn retry_skips_only_completed_planning_and_refuses_active_unknown_success_or_exi
         let result = retry::resolve_connection(
             &connection,
             &input.conversation_id,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("retry fixture novel"),
             "source",
         );
         assert_eq!(result.is_ok(), case == "planner", "{case}: {result:?}");
@@ -180,7 +186,7 @@ fn retry_legacy_failed_replanning_restores_original_goal_and_consistent_prior_na
     let restored = retry::resolve_connection(
         &connection,
         &input.conversation_id,
-        &input.novel_id,
+        input.novel_id.as_deref().expect("retry fixture novel"),
         "source",
     )
     .unwrap()
@@ -228,7 +234,7 @@ fn retry_legacy_never_guesses_missing_range_or_borrows_other_model_or_later_plan
         let error = retry::resolve_connection(
             &connection,
             &input.conversation_id,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("retry fixture novel"),
             "source",
         )
         .expect_err(case);
@@ -274,7 +280,7 @@ fn retry_legacy_setting_revision_uses_verified_turn_source_without_replanning() 
     let resolved = retry::resolve_connection(
         &connection,
         &input.conversation_id,
-        &input.novel_id,
+        input.novel_id.as_deref().expect("retry fixture novel"),
         "interrupted",
     )
     .unwrap();
@@ -287,7 +293,7 @@ fn retry_legacy_setting_revision_uses_verified_turn_source_without_replanning() 
     assert!(retry::resolve_connection(
         &connection,
         &input.conversation_id,
-        &input.novel_id,
+        input.novel_id.as_deref().expect("retry fixture novel"),
         "interrupted"
     )
     .is_err());

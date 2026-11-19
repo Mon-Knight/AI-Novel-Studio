@@ -226,7 +226,7 @@ fn length_history_existing_isolated_failure_is_read_only_recoverable() {
     let execution = resolution.execution.unwrap();
     let mut input = chapter_write_input();
     input.conversation_id = conversation;
-    input.novel_id = novel;
+    input.novel_id = Some(novel);
     input.turn_id = resolution.turn_id;
     input.chapter_id = resolution.chapter_id;
     input.model_snapshot = resolution.model_snapshot;

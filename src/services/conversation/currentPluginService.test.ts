@@ -292,6 +292,35 @@ test('healthy runtime rows load provider, model, composition and workbench scope
   assert.doesNotMatch(JSON.stringify(rows), /must-never-project/);
 });
 
+test('runtime model aliases project to the canonical Workbench identity', () => {
+  const rows = buildCurrentPluginProjection({
+    desktop: true,
+    settings: settings({
+      runtimeMode: 'api',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-chat',
+      mockMode: false,
+    }),
+    manifest: manifest(),
+    runtimeRows: [
+      runtimeRow({
+        id: 'model:DEEPSEEK:deepseek-chat',
+        name: 'DeepSeek Chat',
+        category: 'model',
+        status: 'loaded',
+        initialization: 'initialized',
+        health: 'unknown',
+      }),
+    ],
+  });
+
+  assert.equal(
+    rows.find((row) => row.category === 'model' && row.name === 'DeepSeek Chat')?.id,
+    'model:deepseek-official:deepseek-chat',
+  );
+});
+
 test('malformed runtime rows are ignored and cannot manufacture loaded state', () => {
   const rows = buildCurrentPluginProjection({
     desktop: true,

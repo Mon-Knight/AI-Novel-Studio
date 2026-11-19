@@ -1,11 +1,11 @@
 use super::memory_comparison_corpus;
 use super::memory_lexical_retrieval::{search_lexical, LexicalSearchRequest};
-use crate::errors::codes;
-use rusqlite::{params, Connection};
 use super::{
     retrieve, MemoryRetrievalFilters, QueryEmbeddingInput, RetrieveMemoryInput,
     RetrieveMemoryOutput,
 };
+use crate::errors::codes;
+use rusqlite::{params, Connection};
 
 const NO_FTS_ORDER: &[&str] = &[
     "chunk-long",
@@ -89,6 +89,10 @@ fn open_comparison_db(with_fts: bool) -> Result<Connection, String> {
         )
         .map_err(|error| error.to_string())?;
     memory_comparison_corpus::insert_app(&connection)?;
+    connection.execute_batch("CREATE TABLE chapter_summaries (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,validation_result TEXT,validation_status TEXT,enabled INTEGER NOT NULL,is_expired INTEGER NOT NULL);
+        INSERT INTO chapter_summaries(id,novel_id,validation_result,validation_status,enabled,is_expired)
+        SELECT DISTINCT source_id,novel_id,NULL,NULL,1,0 FROM memory_documents WHERE source_type='chapter_summary';")
+        .map_err(|error| error.to_string())?;
     if with_fts {
         memory_comparison_corpus::install_fts(&connection)?;
     }
@@ -148,6 +152,46 @@ fn item_ids(output: &RetrieveMemoryOutput) -> Vec<String> {
         .iter()
         .map(|item| item.chunk_id.clone())
         .collect()
+}
+
+#[test]
+fn known_blocking_summary_sources_are_filtered_before_read_limits_without_cleanup(
+) -> Result<(), String> {
+    for with_fts in [false, true] {
+        let mut connection = open_comparison_db(with_fts)?;
+        let unsafe_validation = serde_json::json!({"passed":false,"safeToContext":true,"score":76,
+            "problems":[{"type":"character_error","message":"角色不在原文"}]})
+        .to_string();
+        connection
+            .execute(
+                "UPDATE chapter_summaries SET validation_result=?1,validation_status='passed'",
+                [&unsafe_validation],
+            )
+            .map_err(|error| error.to_string())?;
+        let before = connection.total_changes();
+        let shared = search_lexical(&connection, &lexical_request("铜钥匙", &[], 0.0))?;
+        assert!(!shared
+            .hits
+            .iter()
+            .any(|hit| hit.source_type == "chapter_summary"));
+        assert_eq!(connection.total_changes(), before);
+        let result = retrieve(
+            &mut connection,
+            retrieval_input("blocked-summary-read", "铜钥匙", boundary_filters(), None),
+        )
+        .map_err(|error| error.to_string())?;
+        assert!(!result
+            .items
+            .iter()
+            .any(|item| item.source_type == "chapter_summary"));
+        assert!(result
+            .items
+            .iter()
+            .any(|item| item.source_type != "chapter_summary"));
+        let still_active: i64 = connection.query_row("SELECT COUNT(*) FROM memory_documents WHERE source_type='chapter_summary' AND status='active'", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        assert!(still_active > 0);
+    }
+    Ok(())
 }
 
 #[test]
@@ -225,7 +269,9 @@ fn empty_query_stays_structured_and_is_not_a_lexical_miss() -> Result<(), String
     )
     .map_err(|error| error.to_string())?;
     assert_eq!(empty.retrieval_mode, "structured");
-    assert!(item_ids(&empty).iter().any(|id| id == "chunk-important-irrelevant"));
+    assert!(item_ids(&empty)
+        .iter()
+        .any(|id| id == "chunk-important-irrelevant"));
     assert!(search_lexical(&connection, &lexical_request("   ", &[], 0.0)).is_err());
 
     let missing_filter = retrieve(
@@ -415,7 +461,15 @@ fn scoped_lexical_search_keeps_a_past_hit_beyond_the_candidate_window() -> Resul
             0,
         )?;
     }
-    insert_crowd_chunk(&connection, "past-hit", "active", "过去铜印在前章", 0.05, 0, 0)?;
+    insert_crowd_chunk(
+        &connection,
+        "past-hit",
+        "active",
+        "过去铜印在前章",
+        0.05,
+        0,
+        0,
+    )?;
     let request = LexicalSearchRequest {
         query: "过去铜印",
         candidate_limit: 50,
@@ -434,12 +488,7 @@ fn scoped_lexical_search_keeps_a_past_hit_beyond_the_candidate_window() -> Resul
     );
     let found = retrieve(
         &mut connection,
-        retrieval_input(
-            "crowd-past",
-            "过去铜印",
-            boundary_filters(),
-            None,
-        ),
+        retrieval_input("crowd-past", "过去铜印", boundary_filters(), None),
     )
     .map_err(|error| error.to_string())?;
     assert_eq!(item_ids(&found), vec!["past-hit".to_string()]);

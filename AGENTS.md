@@ -26,6 +26,7 @@
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 所有任务                       | 本文件、[文档索引](docs/README.md)、目标文件及相邻测试                                                                                                          |
 | 产品/交互                      | [产品设计](docs/product-design.md)（第 21 节起）、[UI 标准](docs/ui-reference.md)（第 18 节起）                                                                 |
+| UI 实现/组件/可访问性          | [UI 开发框架](docs/ui-development-framework.md) → [前端指令](.github/instructions/frontend.instructions.md) → 相邻组件测试                                      |
 | 对话工作台、DSH、Agent Runtime | [对话工作台架构](docs/architecture/conversational-creative-workbench.md)、[运行时说明](docs/agent-runtime.md)                                                   |
 | 模块调整/状态管理              | [项目架构](docs/project-architecture.md)、[模块边界](docs/module-boundaries.md)                                                                                 |
 | SQLite、保存/采用、备份/恢复   | [数据模型](docs/data-model.md)、[数据库入口](docs/technical/database.md)、[Safe Apply](docs/architecture/safe-apply.md)                                         |
@@ -53,7 +54,7 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 
 | 层级      | 既有技术/职责                                                  |
 | --------- | -------------------------------------------------------------- |
-| 桌面壳    | Tauri 1.x + Rust                                               |
+| 桌面壳    | Tauri 2（Rust crate 2.12.5；CLI/API 2.12.4）+ Rust             |
 | 前端      | React 18 + TypeScript 5 + Vite 5                               |
 | 路由/状态 | React Router 7（HashRouter）+ Zustand                          |
 | 持久化    | 桌面 SQLite；浏览器开发由 Service 提供 LocalStorage 回退       |
@@ -62,13 +63,26 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 
 具体依赖以清单与锁文件为准。未经明确讨论不得更换技术栈、引入依赖、升级 DSH 载体或完整 Fork/嵌入 Harness Web UI。
 
+当前桌面壳为 Tauri 2.12.5，`@tauri-apps/api` 与 CLI 均为 2.12.4；使用 fs / shell / dialog / notification / updater 官方插件，能力由 `src-tauri/capabilities/` 最小授权，更新仍由 `src-tauri/src/commands/app_update.rs` 自有 IPC 控制 stable / beta 通道与安装前版本复验。Rust MSRV 为 1.90，构建工具链固定 1.95.0；详见 [桌面构建](docs/technical/desktop-build.md) 与 [桌面 E2E](docs/technical/desktop-e2e.md)。
+
 ### 当前产品边界
 
 - 默认 `/` 是**创作工作台**：小说项目/任务树 + 独立任务对话；模型选择靠近输入区，工具调用、错误与产物卡片在对话内显示，不展示隐藏推理。
 - **写作工作台**用于章节人工审阅、显式编辑、保存、采用及章节准备/总结，不恢复旧生成类 AI 面板为主流程。
 - **当前插件**只读展示 Runtime Registry 实际加载的功能、模型与其他插件，不扩展成管理、市场或独立工具执行面板。
-- 生产写章分两条路径：桌面端 + 真实 API 模型默认经 Writing SubAgent 走 DSH candidate-only 回合（v3.7.0 起，契约与验收见 `docs/architecture/writing-subagent-contract.md`）；mock / 本地模型与浏览器模式仍由确定性 Writer 编排。Canonical 只读链路、实验 Harness 与 live Provider 验收是不同边界。当前准入和证据查阅对话工作台架构第 13～14 节，不凭目录存在或 Mock 通过宣称 R4 VERIFIED。
+- 桌面 AI 创作入口现收敛到原生 `unified-agent-runtime`（本批集成验证中）：API、Mock 与本地模型共用任务生命周期，Writing SubAgent 是受控 candidate-only 子任务；确定性 Writer 的编译、校验等能力继续复用，其旧顶层编排仅限浏览器开发兼容。正式写入由原生服务复验人工决定或明确的任务级预授权，不由模型直接执行。当前契约见 [运行时说明](docs/agent-runtime.md) 与 [Writing SubAgent 契约](docs/architecture/writing-subagent-contract.md)。Canonical 只读链路、离线/回环、真实桌面与 R4 live 验收分别记录，不凭目录存在或 Mock 通过宣称 R4 VERIFIED。
 - 保持 Windows 桌面写作体验、既有主题和样式 Token、轻量边框、克制阴影、2K 可用性与正文舒适阅读；不做移动优先、无限宽表单、大面积渐变或表格后台风格。
+
+### UI 开发框架入口
+
+UI 实现与验证以 [`docs/ui-development-framework.md`](docs/ui-development-framework.md) 为细化规范：
+
+- 先复用语义 Token 和 `src/components/common/` primitive，再编排页面和 Feature；
+- 组件 API 必须明确状态、可访问名称、键盘行为、焦点返回和异步反馈；
+- 页面不得直接调用 AI、SQLite、文件或 IPC，Store 不承载副作用；
+- 测试优先断言用户行为和语义查询，`data-testid` 只用于稳定的桌面/E2E 边界；
+- 新 UI 变更必须同时说明状态矩阵、主题/窗口范围、键盘与 IME 行为以及验证命令；
+- 本框架不授权引入新的 UI 库、Storybook、CSS-in-JS 或路由迁移；此类变更需单独评估。
 
 ## 4. 修改范围与安全底线
 
@@ -151,10 +165,10 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
    ```powershell
    Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
    npm run dsh:assets
-   npx tauri build --bundles none
+   npx tauri build --no-bundle
    ```
 
-   产物路径必须是仓库内 `src-tauri/target/release/AI Novel Studio.exe`（`productName`），不能只留下 `ai-novel-studio.exe`，也不能写到沙箱或其他 `CARGO_TARGET_DIR`。`tauri build --bundles none` 会跑前端 `beforeBuildCommand` 并跳过安装包；不要用 `tauri:build` / `tauri:build:release` 代替（那些会打 MSI/NSIS/updater，且可能要签名私钥）。EXE 被占用（用户正在运行）时停止覆盖，报告路径并请用户先退出。纯文档且确定不改变可执行行为时，在汇报中写明未重建及原因；其余任务不得跳过。
+   产物路径必须是仓库内 `src-tauri/target/release/AI Novel Studio.exe`（`productName`），不能只留下 `ai-novel-studio.exe`，也不能写到沙箱或其他 `CARGO_TARGET_DIR`。`tauri build --no-bundle` 会跑前端 `beforeBuildCommand` 并跳过安装包；不要用 `tauri:build` / `tauri:build:release` 代替（那些会打 MSI/NSIS/updater，且可能要签名私钥）。EXE 被占用（用户正在运行）时停止覆盖，报告路径并请用户先退出。纯文档且确定不改变可执行行为时，在汇报中写明未重建及原因；其余任务不得跳过。
 
 完成汇报至少包含：
 

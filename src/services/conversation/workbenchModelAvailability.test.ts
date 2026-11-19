@@ -74,7 +74,7 @@ test('targets the current settings model only while creating a task', () => {
   );
 });
 
-test('requires an exact provider and model match', () => {
+test('normalizes provider aliases but still requires an exact model match', () => {
   const plugins = [plugin({ id: 'model:deepseek-official:deepseek-chat', name: 'DeepSeek Chat' })];
 
   assert.equal(
@@ -84,13 +84,12 @@ test('requires an exact provider and model match', () => {
     }).pluginId,
     'model:deepseek-official:deepseek-chat',
   );
-  assert.throws(
-    () =>
-      assertWorkbenchModelAvailable(plugins, {
-        providerId: 'deepseek',
-        modelId: 'deepseek-chat',
-      }),
-    WorkbenchModelUnavailableError,
+  assert.equal(
+    assertWorkbenchModelAvailable(plugins, {
+      providerId: 'deepseek',
+      modelId: 'deepseek-chat',
+    }).pluginId,
+    'model:deepseek-official:deepseek-chat',
   );
   assert.throws(
     () =>
@@ -150,11 +149,11 @@ test('directory state does not block sending a configured model or silently repl
       refreshing: true,
     }),
     {
-      status: 'refreshing',
+      status: 'initializing',
       options: listAvailableWorkbenchModels(plugins),
       selectedOption: listAvailableWorkbenchModels(plugins)[0],
       canSend: true,
-      message: '正在刷新模型列表；仍可直接发送，调用失败会显示在对话中。',
+      message: '正在刷新模型列表',
     },
   );
 
@@ -165,6 +164,7 @@ test('directory state does not block sending a configured model or silently repl
     refreshError: 'catalog failed',
   });
   assert.equal(failed.canSend, true);
+  assert.equal(failed.status, 'error');
   assert.match(failed.message, /刷新失败/);
   assert.match(failed.message, /catalog failed/);
 
@@ -174,8 +174,9 @@ test('directory state does not block sending a configured model or silently repl
     refreshing: false,
   });
   assert.equal(missing.canSend, true);
+  assert.equal(missing.status, 'not_registered');
   assert.match(missing.message, /直接发送/);
-  assert.match(missing.message, /当前模型不在 Runtime 目录中/);
+  assert.match(missing.message, /尚未注册/);
 
   const lockedMissing = getWorkbenchModelAvailability({
     plugins,
@@ -235,7 +236,7 @@ test('directory state does not block sending a configured model or silently repl
     refreshing: false,
   });
   assert.equal(available.canSend, true);
-  assert.equal(available.status, 'available');
+  assert.equal(available.status, 'ready');
 });
 
 test('surfaces the sanitized runtime probe reason when the model directory is empty', () => {

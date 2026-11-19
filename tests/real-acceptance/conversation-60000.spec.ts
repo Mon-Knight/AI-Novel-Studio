@@ -530,9 +530,9 @@ const CHAPTER_OUTLINES = [
 ] as const;
 
 const TARGET_CHAPTER_WORDS = 4100;
-const SPARSE_BOOK_TARGET_WORDS = 60_000;
-const SPARSE_BOOK_MIN_WORDS = 54_000;
-const SPARSE_BOOK_MAX_WORDS = 66_000;
+const SPARSE_BOOK_TARGET_WORDS = 30_000;
+const SPARSE_BOOK_MIN_WORDS = 27_000;
+const SPARSE_BOOK_MAX_WORDS = 33_000;
 const APPLY_CURRENT_ASSET_COMMAND = '应用当前资产候选';
 const ADOPT_CURRENT_CHAPTER_COMMAND = '采用本章正文候选';
 const APPLY_CURRENT_SUMMARY_COMMAND = '应用本章总结候选';
@@ -1027,6 +1027,27 @@ async function configureRealModelThroughSettings(
       timeout: 30_000,
       timeoutMsg: 'Real API mode did not settle.',
     });
+  }
+  const editor = await browser.$('[data-testid="ai-api-model-editor"]');
+  if (!(await editor.isDisplayed())) {
+    await clickTestId('ai-saved-model-add');
+  }
+  const advancedSettings = await browser.$(
+    '[data-testid="ai-api-model-editor"] .api-source-advanced-toggle',
+  );
+  if (await advancedSettings.isExisting()) {
+    const advancedBody = await browser.$(
+      '[data-testid="ai-api-model-editor"] .api-source-advanced-body',
+    );
+    if ((await advancedBody.getAttribute('data-open')) !== 'true') {
+      await advancedSettings.click();
+    }
+  }
+  const modelParameters = await browser.$(
+    '[data-testid="ai-api-model-editor"] button[aria-label="展开模型参数"]',
+  );
+  if (await modelParameters.isExisting()) {
+    await modelParameters.click();
   }
   const provider = await waitForTestId('ai-api-model-provider');
   await provider.selectByAttribute('value', 'openai_compatible');

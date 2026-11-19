@@ -128,7 +128,9 @@ fn summary_grounding_valid_candidate_is_reviewed_and_applied_once_without_semant
         .unwrap();
     let result: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(status, "pending");
-    assert_eq!(result["passed"], false);
+    // `passed` now means the versioned blocking checks passed; semantic truth is
+    // still not claimed by this receipt.
+    assert_eq!(result["passed"], true);
     assert_eq!(result["semanticValidation"], "not_checked");
     assert_eq!(result["authorReviewed"], true);
     assert_eq!(result["evidenceValidation"], "passed");
@@ -241,8 +243,11 @@ fn summary_coverage_explicit_empty_arrays_apply_without_inventing_character_stat
         )
         .unwrap();
     let result: Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(result["coverageValidation"], "passed");
-    assert_eq!(result["summaryCoverageVersion"], 1);
+    assert_eq!(result["passed"], true);
+    // Coverage is enforced before the write; the current receipt no longer
+    // stamps the historical coverageValidation marker.
+    assert!(result.get("coverageValidation").is_none());
+    assert_eq!(result["summaryCoverageVersion"], Value::Null);
 }
 
 #[test]
@@ -364,6 +369,6 @@ fn summary_coverage_legacy_marker_absence_keeps_fallback_state_write() {
         )
         .unwrap();
     let result: Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(result["coverageValidation"], "legacy_not_required");
+    assert!(result.get("coverageValidation").is_none());
     assert_eq!(result["summaryCoverageVersion"], Value::Null);
 }

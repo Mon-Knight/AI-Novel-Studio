@@ -57,6 +57,129 @@ export function packageScope(before, after) {
 
 export const verificationScopes = [
   {
+    name: 'unified task artifact evidence admission',
+    match: /^src-tauri\/src\/services\/ai_task_dsh_projection/u,
+    rustFull: true,
+    e2e: ['conversational-workbench', 'workbench-writing-smoke', 'domain-facade-sqlite'],
+  },
+  {
+    name: 'explicit manual review authorization renewal',
+    match:
+      /^src\/(?:types\/reviewAuthorizationRenewal\.|services\/conversation\/reviewAuthorizationRenewalService|features\/workspace\/(?:reviewAuthorizationRenewalPolicy|useReviewAuthorizationRenewal|loadWorkspaceReviewDocument|useWorkspaceReviewAuthority)|components\/workspace\/(?:ReviewAuthorizationRenewalDialog|editor-area\/useEditorDraftPersistence)|test\/components\/ReviewAuthorizationRenewal)/u,
+    tests: [
+      'src/services/conversation/reviewAuthorizationRenewalService',
+      'src/test/components/ReviewAuthorizationRenewal',
+      'src/test/components/EditorDocumentFeedback',
+      'src/components/workspace/EditorArea.test.tsx',
+      'src/test/workspace-reliability/',
+    ],
+    rustFull: true,
+    e2e: [
+      'candidate-review-apply',
+      'workbench-writing-smoke',
+      'leave-guard',
+      'project-backup-boundary',
+    ],
+  },
+  {
+    name: 'native outline candidate generation and manual application',
+    match:
+      /^(?:src-tauri\/src\/services\/outline_candidate_apply|src\/(?:types\/outlineGeneration\.|services\/outlines\/outline(?:RuntimeService|CandidateApplicationService)|services\/ai\/outlineGenerateService|components\/outline\/Outline(?:Editor|Manager)))/u,
+    tests: [
+      'src/services/outlines/',
+      'src/services/ai/outlineGenerateService',
+      'src/components/outline/OutlineEditor.test.tsx',
+      'src/test/components/OutlineEditorRoute.test.tsx',
+      'src/test/components/ChapterFormModal.test.tsx',
+    ],
+    rustFull: true,
+    e2e: [
+      'story-assets-transaction',
+      'candidate-review-apply',
+      'workbench-writing-smoke',
+      'project-backup-boundary',
+    ],
+  },
+  {
+    name: 'library task scope and unified style analysis',
+    match:
+      /^(?:src-tauri\/src\/(?:migrations_library_task_scope|commands\/library_tasks|services\/(?:library_task_service|task_style_source))|src\/(?:types\/taskLibrary\.|services\/styles\/(?:styleRuntimeService|styleAnalyzeService)|services\/references\/(?:layeredStyleAnalyzer|referenceStyleProfileService)))/u,
+    tests: [
+      'src/services/styles/',
+      'src/services/references/layeredStyleAnalyzer',
+      'src/services/references/referenceStyleProfileService',
+    ],
+    rustFull: true,
+    e2e: ['story-assets-transaction', 'project-backup-boundary', 'conversational-workbench'],
+  },
+  {
+    name: 'shared native chapter integrity admission',
+    match:
+      /^(?:scripts\/dsh\/chapter-integrity|src\/services\/generation\/chapterCandidateIntegrity\.)/u,
+    tests: [
+      'scripts/dsh/chapter-integrity.test.mjs',
+      'src/services/generation/chapterCandidateIntegrity.test.ts',
+    ],
+    safety: ['src/services/generation/chapterCandidateIntegrity.test.ts'],
+    rustFull: true,
+    e2e: ['workbench-writing-smoke', 'candidate-review-apply'],
+  },
+  {
+    name: 'summary context application policy',
+    match:
+      /^(?:src-tauri\/shared\/summary_application_policy|src-tauri\/src\/services\/(?:summary_application_policy|chapter_context_summary_policy_tests|chapter_summary_policy_tests|structured_summary_commit)|src\/(?:types\/chapterSummary\.|services\/ai\/(?:summaryApplicationPolicy|summaryValidator)|components\/right-dock\/panels\/ChapterSummaryValidationNotice|components\/workspace\/ChapterSummaryDetails|test\/components\/ChapterSummaryValidationNotice))/u,
+    tests: [
+      'src/services/ai/chapterSummaryGrounding.test.ts',
+      'src/services/ai/summaryApplicationPolicy.test.ts',
+      'src/services/context/worldStateTimeline.test.ts',
+      'src/services/context/chapterContextPersistence.test.ts',
+      'src/test/components/ChapterSummaryValidationNotice.test.tsx',
+      'src/test/components/ChapterSummaryWorkflowNotice.test.tsx',
+    ],
+    safety: [
+      'src/services/conversation/chapterWorkflowService.test.ts',
+      'src/features/workbench/useWorkbenchChapterHandoff.test.tsx',
+    ],
+    rustFull: true,
+    e2e: ['chapter-context-persistence', 'candidate-review-apply', 'workbench-writing-smoke'],
+  },
+  {
+    name: 'task-scoped native preauthorization',
+    match:
+      /^(?:src-tauri\/src\/(?:(?:services|commands)\/task_authorization|migrations_task_authorization)|src\/(?:types\/taskAuthorization\.|services\/conversation\/taskAuthorization|features\/workbench\/(?:useWorkbenchTaskAuthorization|taskAuthorizationProjection)|pages\/Workbench\/WorkbenchTaskAuthorization|test\/components\/WorkbenchTaskAuthorization))/u,
+    tests: [
+      'src/services/conversation/taskAuthorization',
+      'src/features/workbench/useWorkbenchTaskAuthorization',
+      'src/pages/Workbench/WorkbenchTaskAuthorization',
+    ],
+    rustFull: true,
+    e2e: ['candidate-review-apply', 'workbench-writing-smoke', 'project-backup-boundary'],
+  },
+  {
+    name: 'unified domain entry capabilities',
+    match:
+      /^(?:src-tauri\/shared\/domain_candidate_(?:schema|style_schema|mock)\.rs$|src\/(?:types\/taskDomainEntry\.|services\/(?:autonomous-creation\/|agent-planner\/|settingSuggestions\/|conversation\/(?:taskDomain|desktopTaskEntry))))/u,
+    tests: [
+      'src/services/autonomous-creation/',
+      'src/services/agent-planner/',
+      'src/services/settingSuggestions/',
+      'src/services/styles/styleRuntimeService.test.ts',
+      'src/services/conversation/taskDomain',
+      'src/services/conversation/desktopTaskEntry',
+    ],
+    rustFull: true,
+    e2e: ['workbench-writing-smoke', 'story-assets-transaction', 'generation-job-cancel'],
+  },
+  {
+    name: 'Tauri legacy-origin storage migration',
+    match:
+      /^(?:legacy-storage-migration\.html$|src\/legacyStorageMigration\.ts$|src\/services\/startup\/legacyLocalStorageMigration\.|src-tauri\/src\/legacy_local_storage(?:_e2e|_tests)?\.rs$)/u,
+    tests: ['src/services/startup/legacyLocalStorageMigration.test.ts'],
+    rustFilters: ['legacy_local_storage::tests::'],
+    e2e: ['tauri2-migration-regression'],
+    reason: 'Isolated legacy-origin migration, bounded keys, completion and real restart behavior.',
+  },
+  {
     name: 'staged chapter planning and execution',
     match:
       /^src\/(?:types\/(?:chapterWritingWorkflow|chapterEngineering)\.|services\/generation\/chapterWriting(?:State|Workflow)|services\/ai\/(?:chapter(?:SceneOnlyPlan|SceneBeatPlan|BeatPlanPolicy|BeatState|PlanningCandidate)|mockChapterStagedResponses)|services\/ai\/compilation\/chapterPlanningCompilationDefinitions|services\/engineering\/chapterScenePlanNormalization|test\/(?:chapter-planning|chapter-writing)\/)/u,
@@ -355,6 +478,18 @@ export const verificationScopes = [
     e2e: ['app-start'],
   },
   {
+    name: 'native startup paths',
+    match: /^src-tauri\/src\/startup_paths\.rs$/u,
+    rustFilters: ['startup_paths::tests::'],
+    e2e: ['app-start'],
+  },
+  {
+    name: 'native terminal host facts',
+    match: /^src-tauri\/src\/migrations_host_terminal_native_facts\.rs$/u,
+    rustFull: true,
+    e2e: ['app-start', 'workbench-writing-smoke'],
+  },
+  {
     name: 'native packaging',
     // rust-toolchain.toml selects the compiler for every native build, so it
     // carries the same blast radius as Cargo.toml and the packaging config.
@@ -419,7 +554,7 @@ export const verificationScopes = [
   ...nativeServiceOwners.map((name) => ({
     name: `native ${name}`,
     match: new RegExp(
-      `^src-tauri/src/(?:services/${name}_service(?:_tests)?(?:\\.rs|/[^/]+\\.rs)|repositories/${name}_repository\\.rs)$`,
+      `^src-tauri/src/(?:services/${name}_service(?:_tests)?(?:\\.rs|/[^/]+\\.rs)|services/${name}_(?:validation|source)\\.rs|repositories/${name}_repository(?:_mapping)?\\.rs)$`,
       'u',
     ),
     rustFilters: [`services::${name}_service::`],

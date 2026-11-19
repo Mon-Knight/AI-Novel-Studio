@@ -1,5 +1,6 @@
 import type { ChapterSummary } from '../../types/chapterSummary';
 import { formatDateTime } from '../../utils/date';
+import { evaluateSummaryApplicationPolicy } from '../../services/ai/summaryApplicationPolicy';
 
 /** Read-only context details remain available when generation moves into its source task. */
 export function ChapterSummaryDetails({ summary }: { summary: ChapterSummary }) {
@@ -16,6 +17,8 @@ export function ChapterSummaryDetails({ summary }: { summary: ChapterSummary }) 
     ['需记住的事实', summary.factsMustRemember],
   ];
   const validation = summary.validationResult;
+  const policy = evaluateSummaryApplicationPolicy(validation, summary.validationStatus);
+  const advisories = validation?.advisories ?? [];
   return (
     <div data-testid="chapter-summary-details">
       <div className="panel-section">
@@ -97,15 +100,34 @@ export function ChapterSummaryDetails({ summary }: { summary: ChapterSummary }) 
         <div className="panel-section">
           <h4 className="panel-section-title">审阅与校验</h4>
           <p>
-            {validation.authorReviewed
-              ? '作者已审阅，语义未自动核实'
-              : '自动校验结果仅供参考，事实仍需对照正式稿审阅'}
+            {validation.applicationProvenance?.mode === 'task_preauthorization'
+              ? '根据任务预授权应用，未代替作者审阅；语义未自动核实'
+              : validation.authorReviewed
+                ? '作者已审阅，语义未自动核实'
+                : '自动校验结果仅供参考，事实仍需对照正式稿审阅'}
           </p>
-          <ul>
-            {validation.problems.map((item, index) => (
-              <li key={index}>{item.message}</li>
-            ))}
-          </ul>
+          <p data-testid="chapter-summary-validation-state">
+            {policy.blocking ? '存在阻断性校验错误' : '无阻断性校验错误'}；
+            {policy.eligible ? '可用于后续上下文' : '不会自动启用为上下文'}。
+            {policy.humanReviewRequired && !policy.eligible ? '需要作者完成具体审阅。' : ''}
+          </p>
+          {validation.problems.length > 0 && (
+            <ul>
+              {validation.problems.map((item, index) => (
+                <li key={index}>{item.message}</li>
+              ))}
+            </ul>
+          )}
+          {advisories.length > 0 && (
+            <>
+              <p>审阅提示（非阻断）</p>
+              <ul data-testid="chapter-summary-details-advisories">
+                {advisories.map((advisory, index) => (
+                  <li key={`${advisory.code}:${advisory.path}:${index}`}>{advisory.message}</li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
       <p className="panel-section">创建于：{formatDateTime(summary.createdAt)}</p>

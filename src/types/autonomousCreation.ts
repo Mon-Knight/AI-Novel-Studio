@@ -1,4 +1,5 @@
 import type { ChapterSummarizeResult } from './chapterSummary';
+import type { TaskModelSnapshot } from './conversation';
 import type { ConsensusAction } from './multiAgent';
 
 export const AUTONOMOUS_PLAN_SCHEMA_VERSION = 1;
@@ -224,6 +225,8 @@ export type AutonomousChapterAnalysisStatus =
   'running' | 'pending_confirmation' | 'confirmed' | 'cancelled' | 'failed';
 
 export interface AutonomousChapterAnalysis {
+  runtimeConversationId?: string;
+  runtimeArtifactId?: string;
   status: AutonomousChapterAnalysisStatus;
   adoptedDraftId: string;
   result?: ChapterSummarizeResult;
@@ -234,6 +237,11 @@ export interface AutonomousChapterAnalysis {
 }
 
 export interface AutonomousChapterRun {
+  runtimeConversationId?: string;
+  runtimeModelSnapshot?: TaskModelSnapshot;
+  runtimeRound?: number;
+  runtimeReviewArtifactIds?: Record<string, string>;
+  runtimeSourceArtifactId?: string;
   runId: string;
   operationId: string;
   chapterId: string;
@@ -259,6 +267,13 @@ export interface AutonomousChapterRun {
 }
 
 export interface AutonomousStoryPlan {
+  runtimeSchedulerTasks?: Array<{
+    runId: string;
+    conversationId: string;
+    modelSnapshot: TaskModelSnapshot;
+  }>;
+  runtimeConversationId?: string;
+  runtimeModelSnapshot?: TaskModelSnapshot;
   schemaVersion: AutonomousPlanSchemaVersion;
   planId: string;
   operationId: string;

@@ -3,6 +3,56 @@ export interface DesktopViewport {
   height: number;
 }
 
+interface ProductionWindowDriver {
+  getWindowHandles(): Promise<string[]>;
+  switchToWindow(handle: string): Promise<unknown>;
+  getUrl(): Promise<string>;
+  execute(script: () => boolean): Promise<boolean>;
+  waitUntil(
+    predicate: () => Promise<boolean>,
+    options: { timeout: number; interval: number; timeoutMsg: string },
+  ): Promise<unknown>;
+}
+
+/** Fresh production profiles may briefly expose the hidden legacy HTTP migration window. */
+export async function selectProductionWorkbenchWindow(
+  driver: ProductionWindowDriver,
+): Promise<void> {
+  await driver.waitUntil(
+    async () => {
+      for (const handle of await driver.getWindowHandles()) {
+        try {
+          await driver.switchToWindow(handle);
+          if (new URL(await driver.getUrl()).origin !== 'https://tauri.localhost') continue;
+          if (
+            await driver.execute(
+              () =>
+                location.origin === 'https://tauri.localhost' &&
+                Boolean(
+                  document.querySelector('[data-testid="app-shell"]')?.getClientRects().length,
+                ),
+            )
+          )
+            return true;
+        } catch (error) {
+          // A probe can disappear after its handle was enumerated. Other driver errors are real.
+          if (
+            !/no such window|web view not found|target window already closed/iu.test(String(error))
+          ) {
+            throw error;
+          }
+        }
+      }
+      return false;
+    },
+    {
+      timeout: 90_000,
+      interval: 300,
+      timeoutMsg: 'Visible production workbench not found at the expected HTTPS origin',
+    },
+  );
+}
+
 interface ViewportDriver {
   execute(script: () => DesktopViewport): Promise<DesktopViewport>;
   maximizeWindow(): Promise<unknown>;

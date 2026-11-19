@@ -1,5 +1,7 @@
 use rusqlite::types::{ToSql, ToSqlOutput, Value};
 use rusqlite::{params_from_iter, Connection};
+#[path = "summary_application_policy.rs"]
+mod summary_application_policy;
 
 pub struct Scope<'a> {
     pub novel_id: &'a str,
@@ -69,9 +71,12 @@ pub fn scoped_chunks(
     text_query: Option<&str>,
     fts_phrase: Option<&str>,
 ) -> Result<Vec<ScopedChunk>, String> {
+    let summary_ids =
+        summary_application_policy::eligible_summary_ids_json(connection, scope.novel_id)
+            .map_err(|error| error.to_string())?;
     let (sql, binds) = match (text_query, fts_phrase) {
-        (None, Some(phrase)) => fts_query(scope, phrase, limit),
-        (Some(query), None) => substring_query(scope, query, limit),
+        (None, Some(phrase)) => fts_query(scope, phrase, limit, &summary_ids),
+        (Some(query), None) => substring_query(scope, query, limit, &summary_ids),
         _ => return Err("lexical scope requires exactly one matcher".to_string()),
     };
     let mut statement = connection
@@ -84,9 +89,14 @@ pub fn scoped_chunks(
         .map_err(|error| error.to_string())
 }
 
-fn fts_query(scope: &Scope<'_>, phrase: &str, limit: i64) -> (String, Vec<Bind>) {
+fn fts_query(
+    scope: &Scope<'_>,
+    phrase: &str,
+    limit: i64,
+    summary_ids: &str,
+) -> (String, Vec<Bind>) {
     let mut binds = vec![Bind::Text(phrase.to_string())];
-    let filters = push_scope(&mut binds, scope);
+    let filters = push_scope(&mut binds, scope, summary_ids);
     binds.push(Bind::Integer(limit));
     (
         format!(
@@ -106,9 +116,14 @@ fn fts_query(scope: &Scope<'_>, phrase: &str, limit: i64) -> (String, Vec<Bind>)
     )
 }
 
-fn substring_query(scope: &Scope<'_>, query: &str, limit: i64) -> (String, Vec<Bind>) {
+fn substring_query(
+    scope: &Scope<'_>,
+    query: &str,
+    limit: i64,
+    summary_ids: &str,
+) -> (String, Vec<Bind>) {
     let mut binds = Vec::new();
-    let filters = push_scope(&mut binds, scope);
+    let filters = push_scope(&mut binds, scope, summary_ids);
     binds.push(Bind::Text(query.to_string()));
     binds.push(Bind::Integer(limit));
     (
@@ -127,7 +142,7 @@ fn substring_query(scope: &Scope<'_>, query: &str, limit: i64) -> (String, Vec<B
     )
 }
 
-fn push_scope(binds: &mut Vec<Bind>, scope: &Scope<'_>) -> String {
+fn push_scope(binds: &mut Vec<Bind>, scope: &Scope<'_>, summary_ids: &str) -> String {
     let mut sql = String::from(
         "m.novel_id = ?
          AND d.status = 'active'
@@ -146,6 +161,8 @@ fn push_scope(binds: &mut Vec<Bind>, scope: &Scope<'_>) -> String {
     push_pair_i64(binds, scope.chapter_end);
     push_pair_f64(binds, scope.min_importance);
     push_temporal(binds, scope.temporal_chapter);
+    sql.push_str(" AND (d.source_type != 'chapter_summary' OR d.source_id IN (SELECT value FROM json_each(?)))");
+    binds.push(Bind::Text(summary_ids.to_string()));
     if !scope.source_types.is_empty() {
         sql.push_str(" AND d.source_type IN (");
         for (index, source) in scope.source_types.iter().enumerate() {

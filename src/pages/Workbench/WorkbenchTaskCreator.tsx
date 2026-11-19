@@ -86,9 +86,9 @@ export function WorkbenchTaskCreator({
   });
   const modelBlocksSubmit = !modelAvailability.canSend && !conversationalGoal && !modelLed;
   const modelDirectoryMessage =
-    modelAvailability.status === 'available' || !modelAvailability.message
-      ? modelAvailability.message
-      : `${modelAvailability.message} 本地能力问答仍可创建。`;
+    modelAvailability.status === 'unavailable' && modelAvailability.message
+      ? `${modelAvailability.message} 本地能力问答仍可创建。`
+      : modelAvailability.message;
 
   useModalAccessibility({
     overlayRef,

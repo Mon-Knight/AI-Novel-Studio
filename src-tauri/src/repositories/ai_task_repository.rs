@@ -8,7 +8,7 @@ use serde_json::Value;
 pub struct AiTaskRecord {
     pub task_id: String,
     pub task_type: String,
-    pub novel_id: String,
+    pub novel_id: Option<String>,
     pub chapter_id: Option<String>,
     pub draft_id: Option<String>,
     pub scope_type: String,
@@ -103,7 +103,7 @@ pub struct AiConstraintSnapshotRecord {
 pub struct NewTask<'a> {
     pub task_id: &'a str,
     pub task_type: &'a str,
-    pub novel_id: &'a str,
+    pub novel_id: Option<&'a str>,
     pub chapter_id: Option<&'a str>,
     pub draft_id: Option<&'a str>,
     pub scope_type: &'a str,

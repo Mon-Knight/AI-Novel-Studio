@@ -25,7 +25,7 @@ pub(super) fn validate_contract(input: &StartTaskTurnInput) -> Result<(), AppErr
         if !matching_kind
             || input.expected_artifact_type.as_deref() != Some(source.artifact_type.as_str())
             || source.conversation_id != input.conversation_id
-            || source.novel_id != input.novel_id
+            || input.novel_id.as_deref() != Some(source.novel_id.as_str())
             || source.chapter_id != input.chapter_id
         {
             return Err(invalid_source());
@@ -66,6 +66,23 @@ fn parse_source(value: &Value) -> Result<Option<ArtifactRevisionSource>, AppErro
     Ok(Some(source))
 }
 
+fn set_runtime_artifact_revision(
+    snapshot: &mut Value,
+    source: Option<&ArtifactRevisionSource>,
+) -> Result<(), AppError> {
+    // Overwrite, never trust a client-provided runtime.artifactRevision or original text.
+    let runtime = snapshot
+        .as_object_mut()
+        .ok_or_else(invalid_source)?
+        .entry("runtime")
+        .or_insert_with(|| json!({}));
+    runtime.as_object_mut().ok_or_else(invalid_source)?.insert(
+        "artifactRevision".to_string(),
+        json!({"version":1,"source":source}),
+    );
+    Ok(())
+}
+
 pub(super) fn freeze_turn_revision(
     connection: &Connection,
     input: &mut StartTaskTurnInput,
@@ -75,6 +92,17 @@ pub(super) fn freeze_turn_revision(
         "SELECT content FROM conversation_turns WHERE turn_id=?1 AND conversation_id=?2 AND role='user'",
         params![input.turn_id, input.conversation_id], |row| row.get(0),
     ).optional().map_err(AppError::database)?.ok_or_else(invalid_source)?;
+    if input.task_kind == "chapter_summary"
+        && input
+            .execution
+            .as_ref()
+            .is_some_and(|root| root.parent_run_id.is_some() && root.internal_revision.is_none())
+    {
+        input.goal = "总结本章".to_string();
+        input.revision_source = None;
+        input.verified_revision_source = None;
+        return set_runtime_artifact_revision(&mut input.model_snapshot, None);
+    }
     let (goal, turn_source) = decode_turn(&raw)?;
     let mut source = turn_source
         .clone()
@@ -133,7 +161,7 @@ pub(super) fn freeze_turn_revision(
             verify_source(
                 connection,
                 source,
-                &input.novel_id,
+                input.require_novel()?,
                 input.chapter_id.as_deref(),
             )
         })
@@ -141,22 +169,11 @@ pub(super) fn freeze_turn_revision(
     input.goal = goal;
     input.revision_source = source;
     input.verified_revision_source = verified;
-    let runtime = input
-        .model_snapshot
-        .as_object_mut()
-        .ok_or_else(invalid_source)?
-        .entry("runtime")
-        .or_insert_with(|| json!({}));
-    // Overwrite, never trust a client-provided runtime.artifactRevision or original text.
-    runtime.as_object_mut().ok_or_else(invalid_source)?.insert(
-        "artifactRevision".to_string(),
-        json!({"version":1,"source":input.revision_source}),
-    );
-    Ok(())
+    set_runtime_artifact_revision(&mut input.model_snapshot, input.revision_source.as_ref())
 }
 
 pub(super) fn material_prompt(input: &StartTaskTurnInput) -> String {
-    let Some(verified) = input.verified_revision_source.as_ref() else {
+    let Some(verified) = effective_verified(input) else {
         return String::new();
     };
     format!(
@@ -169,13 +186,13 @@ pub(super) fn revalidate_frozen(
     connection: &Connection,
     input: &StartTaskTurnInput,
 ) -> Result<(), AppError> {
-    match (&input.revision_source, &input.verified_revision_source) {
+    let original = match (&input.revision_source, &input.verified_revision_source) {
         (None, None) => Ok(()),
         (Some(source), Some(frozen)) if source == &frozen.source => {
             let current = verify_source(
                 connection,
                 source,
-                &input.novel_id,
+                input.require_novel()?,
                 input.chapter_id.as_deref(),
             )?;
             if current.content != frozen.content {
@@ -184,7 +201,24 @@ pub(super) fn revalidate_frozen(
             Ok(())
         }
         _ => Err(invalid_source()),
+    };
+    original?;
+    if let Some(internal) = input
+        .execution
+        .as_ref()
+        .and_then(|r| r.internal_revision.as_ref())
+    {
+        let live = verify_source(
+            connection,
+            &internal.source,
+            input.require_novel()?,
+            input.chapter_id.as_deref(),
+        )?;
+        if live.content != internal.content {
+            return Err(invalid_source());
+        }
     }
+    Ok(())
 }
 
 pub(super) fn freeze_snapshot_metadata(
@@ -192,8 +226,7 @@ pub(super) fn freeze_snapshot_metadata(
     payload: &mut Value,
     manifest: &mut Value,
 ) -> Result<(), AppError> {
-    let Some(VerifiedRevisionSource { source, .. }) = input.verified_revision_source.as_ref()
-    else {
+    let Some(VerifiedRevisionSource { source, .. }) = effective_verified(input) else {
         return if input.revision_source.is_none() {
             Ok(())
         } else {
@@ -211,4 +244,12 @@ pub(super) fn freeze_snapshot_metadata(
         .ok_or_else(invalid_source)?
         .insert("revisionSource".to_string(), json!(source));
     Ok(())
+}
+
+fn effective_verified(input: &StartTaskTurnInput) -> Option<&VerifiedRevisionSource> {
+    input
+        .execution
+        .as_ref()
+        .and_then(|r| r.internal_revision.as_ref())
+        .or(input.verified_revision_source.as_ref())
 }

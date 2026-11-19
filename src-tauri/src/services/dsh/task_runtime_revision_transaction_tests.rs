@@ -50,7 +50,7 @@ fn setting_revision_preserves_exact_source_and_rejects_wrong_type_scope_and_stal
         crate::services::artifact_service::revision_source::verify_source(
             &connection,
             &wrong_scope,
-            &input.novel_id,
+            input.novel_id.as_deref().expect("revision fixture novel"),
             None,
         )
         .is_err()
@@ -100,7 +100,10 @@ fn revision_transaction_rejects_unfrozen_mismatched_or_stale_sources_without_art
         create.target_hint_json = Some(
             json!({"runId":"transaction-revision","turnId":input.turn_id,
             "conversationId":input.conversation_id,"expectedRuleSetFingerprint":
-                crate::services::world_rule_governance::rule_set_snapshot(&connection, &input.novel_id).expect("rules").fingerprint}),
+                crate::services::world_rule_governance::rule_set_snapshot(
+                    &connection,
+                    input.novel_id.as_deref().expect("revision fixture novel"),
+                ).expect("rules").fingerprint}),
         );
         create.input_snapshot.input_type = "workbench_dsh_messages_v1".to_string();
         create.input_snapshot.payload_json = json!({"goal":"修订 A","conversationId":input.conversation_id,

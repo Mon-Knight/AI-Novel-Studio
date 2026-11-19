@@ -316,9 +316,23 @@ describe('round-2 desktop interaction contract', () => {
     const observation = await readWorkbenchReadGroups();
     const runIds = new Set(bundle.runs.map((run) => run.runId));
     const persistedToolEvents = bundle.toolEvents.filter((event) => runIds.has(event.runId));
+    const internalHostBookkeepingTools = new Set([
+      'dsh.execution_contract',
+      'dsh.tool_dispatch',
+      'dsh.request_usage',
+    ]);
+    const publicPersistedToolEvents = persistedToolEvents.filter((event) => {
+      const args = (event as { argumentsSummary?: { source?: unknown } }).argumentsSummary;
+      return !(
+        internalHostBookkeepingTools.has(event.toolName) &&
+        event.status === 'succeeded' &&
+        !event.error &&
+        args?.source === 'ans-host'
+      );
+    });
 
-    // Grouping may compact a finished read, never hide or duplicate a persisted tool fact.
-    expect(observation.toolEvents).toHaveLength(persistedToolEvents.length);
+    // Grouping may compact a finished read, never hide or duplicate a persisted public tool fact.
+    expect(observation.toolEvents).toHaveLength(publicPersistedToolEvents.length);
     expect(new Set(observation.presentationIds).size).toBe(observation.presentationIds.length);
     expect(observation.errorsInsideGroups).toBe(0);
     expect(observation.presentationIds).toContain('artifact:' + candidate.cardId);

@@ -10,7 +10,11 @@ import type {
 import type { StyleAnalyzeResult } from '../../types/style';
 import { throwIfAiRequestCancelled } from '../ai/aiCancellation';
 import { aiSettingsService } from '../ai/aiSettingsService';
-import { analyzeStyle } from '../styles/styleAnalyzeService';
+import { analyzeStyleBrowser } from '../styles/styleAnalyzeService';
+import { analyzeStyleSource } from '../styles/styleRuntimeService';
+import { isTauri } from '../database/db';
+import { captureTaskModelSnapshotFromSettings } from '../conversation/taskModelSnapshot';
+import type { TaskModelSnapshot } from '../../types/conversation';
 
 export const LAYERED_STYLE_ANALYZER_VERSION = 'layered_style_analyzer_v1' as const;
 export const LAYERED_STYLE_PROMPT_VERSION = 'style_analyze_layered_v1';
@@ -103,8 +107,15 @@ function createCandidate(
   desiredStart: number,
   sampleChars: number,
 ): CandidateWindow | undefined {
-  const startUtf16 = normalizeWindowStart(section.content.length, desiredStart, sampleChars);
-  const endUtf16 = Math.min(section.content.length, startUtf16 + sampleChars);
+  let startUtf16 = normalizeWindowStart(section.content.length, desiredStart, sampleChars);
+  const splitsSurrogate = (offset: number) => {
+    const before = section.content.charCodeAt(offset - 1);
+    const after = section.content.charCodeAt(offset);
+    return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+  };
+  if (splitsSurrogate(startUtf16)) startUtf16 += 1;
+  let endUtf16 = Math.min(section.content.length, startUtf16 + sampleChars);
+  if (splitsSurrogate(endUtf16)) endUtf16 -= 1;
   const content = section.content.slice(startUtf16, endUtf16).trim();
   if (unicodeLength(content) < MIN_SAMPLE_CHARS) return undefined;
   const leadingWhitespace = section.content.slice(startUtf16, endUtf16).search(/\S/u);
@@ -348,27 +359,70 @@ export async function analyzeLayeredReferenceStyle(
 ): Promise<LayeredStyleResult> {
   const requestOptions = input.options ?? {};
   throwIfAiRequestCancelled(requestOptions.signal);
-  const samples = await selectLayeredStyleSamples(input.sections);
-  const analyzeSample = dependencies.analyzeSample ?? analyzeStyle;
+  const samples = (await selectLayeredStyleSamples(input.sections)).map((sample, index) => ({
+    ...sample,
+    sampleId: `${sample.sampleId}-${index}`,
+  }));
   const layerResults: LayeredStyleResult['layerResults'] = [];
-  for (const sample of samples) {
-    throwIfAiRequestCancelled(requestOptions.signal);
-    const profile = await analyzeSample(sample.content, requestOptions);
-    throwIfAiRequestCancelled(requestOptions.signal);
-    layerResults.push({ sampleId: sample.sampleId, layers: sample.layers, profile });
+  let modelSnapshot: TaskModelSnapshot;
+  if (isTauri()) {
+    const sourceSamples = samples.map((sample) => ({
+      sampleId: sample.sampleId,
+      contentHash: sample.contentHash,
+      utf8ByteLength: new TextEncoder().encode(sample.content).length,
+      sectionId: sample.sectionId,
+      startUtf16: sample.startUtf16,
+      endUtf16: sample.endUtf16,
+      layers: sample.layers,
+    }));
+    const result = await analyzeStyleSource(
+      {
+        sourceId: input.importId,
+        contentHash: input.sourceHash,
+        utf8ByteLength: sourceSamples.reduce((sum, sample) => sum + sample.utf8ByteLength, 0),
+        samples: sourceSamples,
+        reference: {
+          novelId: input.work.novelId,
+          workId: input.work.id,
+          importId: input.importId,
+          sourceHash: input.sourceHash,
+        },
+      },
+      { signal: requestOptions.signal },
+    );
+    modelSnapshot = result.modelSnapshot;
+    for (const [index, sample] of samples.entries()) {
+      layerResults.push({
+        sampleId: sample.sampleId,
+        layers: sample.layers,
+        profile: result.profiles[index],
+      });
+    }
+  } else {
+    // Browser-only preview seam. It cannot select or substitute a desktop runtime.
+    const settings = aiSettingsService.getSettings();
+    modelSnapshot = captureTaskModelSnapshotFromSettings(settings);
+    const analyzeSample =
+      dependencies.analyzeSample ??
+      ((text, options) => analyzeStyleBrowser(text, options, settings));
+    for (const sample of samples) {
+      throwIfAiRequestCancelled(requestOptions.signal);
+      const profile = await analyzeSample(sample.content, requestOptions);
+      throwIfAiRequestCancelled(requestOptions.signal);
+      layerResults.push({ sampleId: sample.sampleId, layers: sample.layers, profile });
+    }
   }
   const merged = mergeLayeredStyleProfiles(
     layerResults.map((item) => item.profile),
     `${input.work.title} · 分层风格画像`,
   );
-  const settings = aiSettingsService.getSettings();
   return {
     analyzerVersion: LAYERED_STYLE_ANALYZER_VERSION,
     promptVersion: LAYERED_STYLE_PROMPT_VERSION,
     model: {
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      runtimeMode: modelSnapshot.runtimeMode,
+      provider: modelSnapshot.providerId,
+      modelName: modelSnapshot.modelId,
     },
     sourceWorkId: input.work.id,
     sourceImportId: input.importId,

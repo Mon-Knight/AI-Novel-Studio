@@ -7,6 +7,7 @@ import test from 'node:test';
 import { BUNDLE_LIMITS, BundleSizeError, inspectBundle } from './check-bundle-size.mjs';
 
 const ENTRY_FILE = 'assets/index-testhash.js';
+const LEGACY_ENTRY_FILE = 'assets/legacy-storage-migration-testhash.js';
 const VENDOR_FILES = {
   'vendor-react': 'assets/vendor-react-testhash.js',
   'vendor-router': 'assets/vendor-router-testhash.js',
@@ -27,8 +28,18 @@ async function createFixture(t) {
       name: 'index',
       src: 'index.html',
     },
+    'legacy-storage-migration.html': {
+      file: LEGACY_ENTRY_FILE,
+      isEntry: true,
+      name: 'legacy-storage-migration',
+      src: 'legacy-storage-migration.html',
+    },
   };
   await writeFile(path.join(distDirectory, ...ENTRY_FILE.split('/')), 'console.log("entry");\n');
+  await writeFile(
+    path.join(distDirectory, ...LEGACY_ENTRY_FILE.split('/')),
+    'console.log("legacy entry");\n',
+  );
 
   for (const [name, file] of Object.entries(VENDOR_FILES)) {
     manifest[`_${name}.js`] = { file, name };
@@ -46,12 +57,16 @@ async function createFixture(t) {
   return { distDirectory, manifest, writeManifest };
 }
 
-test('measures the single manifest entry and all emitted JavaScript', async (t) => {
+test('measures both manifest entries and all emitted JavaScript', async (t) => {
   const fixture = await createFixture(t);
   const result = await inspectBundle({ distDir: fixture.distDirectory });
 
   assert.equal(result.entry.file, ENTRY_FILE);
-  assert.equal(result.chunks.length, 5);
+  assert.deepEqual(
+    result.entries.map((entry) => entry.file),
+    [ENTRY_FILE, LEGACY_ENTRY_FILE],
+  );
+  assert.equal(result.chunks.length, 6);
   assert.deepEqual(result.vendorChunks, VENDOR_FILES);
   assert.ok(result.entry.bytes > 0);
   assert.ok(result.entry.gzipBytes > 0);
@@ -84,7 +99,18 @@ test('fails closed when manifest entry ownership is ambiguous', async (t) => {
 
   await assert.rejects(
     inspectBundle({ distDir: fixture.distDirectory }),
-    /Expected exactly one JavaScript entry.*found 2/,
+    /Expected 2 JavaScript entries.*found 3/,
+  );
+});
+
+test('fails closed when the legacy LocalStorage migration entry is missing', async (t) => {
+  const fixture = await createFixture(t);
+  delete fixture.manifest['legacy-storage-migration.html'];
+  await fixture.writeManifest();
+
+  await assert.rejects(
+    inspectBundle({ distDir: fixture.distDirectory }),
+    /Expected 2 JavaScript entries.*found 1/,
   );
 });
 
