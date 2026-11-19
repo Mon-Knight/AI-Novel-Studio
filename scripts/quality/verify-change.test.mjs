@@ -135,6 +135,43 @@ test('ordinary native services select only their validated module filters', () =
   assert.ok(commands(plan).some(({ id }) => id === 'rust-check'));
 });
 
+test('the transport diagnostic is compiled, never executed, with owned Rust regressions', () => {
+  const file = 'src-tauri/examples/transport_probe.rs';
+  const plan = createVerificationPlan([file], []);
+  assert.deepEqual(plan.rustExamples, ['transport_probe']);
+  assert.equal(plan.rustFull, false);
+  assert.equal(plan.rustFilters.length, 3);
+  assert.ok(plan.rustFilters.every((filter) => filter.startsWith('ai::tests::')));
+  const steps = commands(plan, 'native');
+  assert.deepEqual(steps.find(({ id }) => id === 'rust-check')?.args, [
+    'check',
+    '--locked',
+    '--bins',
+    '--example',
+    'transport_probe',
+    '--manifest-path',
+    'src-tauri/Cargo.toml',
+  ]);
+  assert.ok(steps.some(({ id }) => id === 'rust-selected'));
+  assert.deepEqual(
+    steps.filter(({ args }) => args.includes('transport_probe')).map(({ id }) => id),
+    ['rust-check'],
+  );
+  assert.deepEqual(commands(plan, 'desktop'), []);
+  assert.throws(() => createVerificationPlan(['src-tauri/examples/unmapped.rs'], []), /Unmapped/u);
+});
+
+test('a deleted example still selects its regressions without asking Cargo to build it', () => {
+  const plan = createVerificationPlan(['src-tauri/examples/transport_probe.rs'], [], {
+    existing: () => false,
+  });
+  assert.deepEqual(plan.rustExamples, []);
+  assert.ok(plan.rustFilters.length > 0);
+  const check = commands(plan, 'native').find(({ id }) => id === 'rust-check');
+  assert.ok(check);
+  assert.ok(!check.args.includes('--example'));
+});
+
 test('Rust compilation always prepares dist/ in the native lane before cargo runs', () => {
   const rustOnly = createVerificationPlan(
     ['src-tauri/src/services/memory_service.rs', 'src-tauri/src/repositories/memory_repository.rs'],
