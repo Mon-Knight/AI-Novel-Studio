@@ -58,6 +58,7 @@ export function createVerificationPlan(
     rustFull: full,
     rustCheck: full,
     rustSize: full,
+    rustExamples: [],
     rustFilters: [],
     desktopFull: full,
     faultInjection: full,
@@ -151,6 +152,7 @@ export function createVerificationPlan(
       if (!units.includes(test)) throw new Error(`Missing owned test: ${test}`);
     plan.tests.push(...selected);
     plan.e2e.push(...(rule.e2e ?? []));
+    if (existing(file)) plan.rustExamples.push(...(rule.rustExamples ?? []));
     plan.rustFilters.push(...(rule.rustFilters ?? []));
     for (const key of [
       'coverage',
@@ -173,7 +175,7 @@ export function createVerificationPlan(
         : (rule.reason ?? 'owned domain tests/journeys'),
     });
   }
-  for (const key of ['tests', 'e2e', 'rustFilters', 'lint', 'format'])
+  for (const key of ['tests', 'e2e', 'rustExamples', 'rustFilters', 'lint', 'format'])
     plan[key] = [...new Set(plan[key])].sort();
   // Full aggregators subsume targeted executions. Discovery gates still verify ownership.
   if (plan.coverage) plan.tests = [];
@@ -275,7 +277,18 @@ export function verificationCommands(
     add('dist-prepare', 'native', node(['scripts/quality/ensure-dist.mjs']), {
       note: 'ensures dist/ exists so tauri::generate_context! can compile (no-op when present)',
     });
-  if (compilesRust) add('rust-check', 'native', cargo(['check', '--locked']));
+  if (compilesRust)
+    add(
+      'rust-check',
+      'native',
+      cargo([
+        'check',
+        '--locked',
+        ...(plan.rustExamples.length
+          ? ['--bins', ...plan.rustExamples.flatMap((example) => ['--example', example])]
+          : []),
+      ]),
+    );
   if (plan.rustSize) add('rust-file-size', 'native', npmCommand('test:rust-file-size'));
   if (plan.rustFull) {
     add('gateway-clean', 'native', cargo(['clean', '-p', 'novel-domain-gateway']));

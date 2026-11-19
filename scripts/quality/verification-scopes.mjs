@@ -572,6 +572,17 @@ export const verificationScopes = [
     rustFilters: ['ai::tests::', 'services::ai_fact_security::'],
     e2e: ['generation-job-cancel'],
   },
+  {
+    name: 'native transport diagnostic example',
+    match: /^src-tauri\/examples\/transport_probe\.rs$/u,
+    rustExamples: ['transport_probe'],
+    rustFilters: [
+      'ai::tests::connection_refusal_has_a_stable_retryable_code',
+      'ai::tests::request_transport_interruption_has_a_stable_retryable_code',
+      'ai::tests::streaming_body_interruption_uses_the_same_stable_transport_code',
+    ],
+    reason: 'compile-only transport example and isolated loopback regressions',
+  },
   ...['session_credentials', 'errors', 'system_accent', 'crash_reports'].map((name) => ({
     name: `native ${name}`,
     match: new RegExp(`^src-tauri/src/${name}\\.rs$`, 'u'),
