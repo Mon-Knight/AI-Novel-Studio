@@ -256,9 +256,17 @@ test('production and development CSP differ, and a non-null CSP is not an XSS pr
       'wss:',
     ].sort(),
   );
-  assert.ok(production.get('img-src').includes('asset:'));
-  assert.ok(production.get('img-src').includes('https://asset.localhost'));
-  assert.ok(production.get('img-src').includes('blob:'));
+  assert.deepEqual(
+    [...production.get('img-src')].sort(),
+    [
+      "'self'",
+      'data:',
+      'blob:',
+      'asset:',
+      'http://asset.localhost',
+      'https://asset.localhost',
+    ].sort(),
+  );
   assert.equal(development.get('script-src').includes("'unsafe-inline'"), true);
   assert.equal(development.get('script-src').includes("'unsafe-eval'"), true);
   assert.ok(development.get('connect-src').includes('ws://localhost:1420'));

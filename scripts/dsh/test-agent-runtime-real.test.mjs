@@ -27,6 +27,7 @@ const BIN_HASH = 'a'.repeat(64);
 const GATEWAY_HASH = 'b'.repeat(64);
 const KEY = 'sk-test-key-not-real';
 const ENDPOINT = 'https://api.example.test/v1';
+const ENDPOINT_LITERAL = new RegExp(ENDPOINT.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u');
 const MODEL = 'frozen-model';
 const PROVIDER = 'deepseek-official';
 const SCRIPT = fileURLToPath(new URL('./test-agent-runtime-real.mjs', import.meta.url));
@@ -329,11 +330,12 @@ test('explicit env credential skips files and the cargo plan keeps the frozen id
     },
   });
   assert.equal(JSON.stringify(visible).includes(KEY), false);
-  assert.equal(JSON.stringify(visible).includes(ENDPOINT), false);
+  // Check for a literal disclosure anywhere in the output, not for URL trust.
+  assert.doesNotMatch(JSON.stringify(visible), ENDPOINT_LITERAL);
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /^PASS /);
   assert.equal(result.stdout.includes(KEY), false);
-  assert.equal(result.stdout.includes(ENDPOINT), false);
+  assert.doesNotMatch(result.stdout, ENDPOINT_LITERAL);
   assert.match(result.stdout, /upstreamRequests=4/);
   assert.match(result.stdout, new RegExp(`endpointHash=${sha256Hex(ENDPOINT)}`));
 });
