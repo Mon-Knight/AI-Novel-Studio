@@ -83,9 +83,9 @@ describe('real browser development mode', () => {
       preference: 'dark',
       effective: 'dark',
       colorScheme: 'dark',
-      surfaceToken: '#1a1a1a',
-      textToken: '#ececec',
-      cardBackground: 'rgb(35, 35, 35)',
+      surfaceToken: '#191813',
+      textToken: '#ece5d6',
+      cardBackground: 'rgb(35, 32, 25)',
     });
 
     const light = await themeSnapshot('light');
@@ -93,9 +93,9 @@ describe('real browser development mode', () => {
       preference: 'light',
       effective: 'light',
       colorScheme: 'light',
-      surfaceToken: '#f7f7f8',
-      textToken: '#18181b',
-      cardBackground: 'rgb(255, 255, 255)',
+      surfaceToken: '#f5f1e8',
+      textToken: '#1d1b17',
+      cardBackground: 'rgb(255, 253, 248)',
     });
   });
 });

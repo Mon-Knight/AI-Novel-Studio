@@ -776,7 +776,6 @@ describe('UI optimization browser acceptance', () => {
         firstCandidate: '[data-testid="workbench-artifact-candidate"]',
         firstName: '.workbench-artifact-candidate-title',
         firstSummary: '.workbench-artifact-candidate-summary',
-        modelReason: '[data-testid="workbench-fixed-model-reason"]',
         messages: '.workbench-message-region',
       },
       label: 'candidate first screen',
@@ -810,10 +809,6 @@ describe('UI optimization browser acceptance', () => {
     expect(boxes.messages.scrollWidth).toBeLessThanOrEqual(boxes.messages.clientWidth + 1);
     expect(boxes.candidates.right).toBeLessThanOrEqual(boxes.card.right + 1);
     expect(boxes.identity.right).toBeLessThanOrEqual(boxes.card.right + 1);
-    // The frozen-model reason stays a disclosure the author opens on demand.
-    expect(
-      await (await $('[data-testid="workbench-fixed-model-reason"]')).getAttribute('open'),
-    ).toBe(null);
     await takeRound2Screenshot('ui-candidate-first-screen-1440x900');
     recordRound2Metrics(round2SpecId, 'ui-candidate-first-screen', { boxes });
     await assertNoExecution();
