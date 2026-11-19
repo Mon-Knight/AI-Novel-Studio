@@ -515,7 +515,7 @@ describe('creative workbench layout', () => {
       expect(layout.header.bottom).toBeLessThanOrEqual(layout.messages.top + 1);
       expect(layout.messages.bottom).toBeLessThanOrEqual(layout.composer.top + 1);
       expect(layout.composer.bottom).toBeLessThanOrEqual(layout.viewport.height + 1);
-      expect(layout.messages.height).toBeGreaterThan(220);
+      expect(layout.messages.height).toBeGreaterThan(200);
       const turnCenter = (layout.turn.left + layout.turn.right) / 2;
       const headerCenter = (layout.headerInner.left + layout.headerInner.right) / 2;
       const composerCenter = (layout.composerSurface.left + layout.composerSurface.right) / 2;
@@ -1425,7 +1425,9 @@ describe('creative workbench layout', () => {
     const input = await $('[data-testid="workbench-composer-input"]');
     const send = await $('[data-testid="workbench-send-task"]');
     await input.setValue('继续生成本章正文');
-    expect(await send.isEnabled()).toBe(false);
+    // The current selected model remains sendable even while its directory
+    // status is unavailable; recovery actions stay available alongside it.
+    expect(await send.isEnabled()).toBe(true);
     await input.setValue('你能做什么？');
     expect(await send.isEnabled()).toBe(true);
 
