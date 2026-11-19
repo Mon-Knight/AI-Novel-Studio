@@ -259,6 +259,125 @@ fn planning_receipt_is_atomic_idempotent_and_cannot_refresh_external_conflicts()
     .unwrap();
 }
 #[test]
+fn later_reject_blocks_new_preauthorized_apply_but_preserves_receipt_replay() {
+    let (mut conn, mut spec) = fixture();
+    spec.actions = vec![ActionLimit {
+        action: Action::AdoptChapterText,
+        max_writes: 2,
+    }];
+    spec.max_writes = 2;
+    let grant = issue(&mut conn, spec.clone()).unwrap();
+    let (card, artifact) = publish(
+        &mut conn,
+        &spec,
+        "decision-guard",
+        "chapter_text",
+        "她推开门，看见雨后的街道。",
+        None,
+    );
+    let request = input(
+        &grant,
+        card.clone(),
+        artifact.clone(),
+        Action::AdoptChapterText,
+    );
+    let first = apply(&mut conn, request.clone()).unwrap();
+    let bundle = artifact_service::get_artifact_bundle(&conn, &artifact).unwrap();
+    conversations::record_artifact_decision(
+        &mut conn,
+        conversations::RecordArtifactDecisionInput {
+            decision_id: "decision-guard-reject".into(),
+            artifact_id: artifact.clone(),
+            artifact_hash: bundle.artifact.content_hash,
+            card_id: card.clone(),
+            conversation_id: spec.conversation_id.clone(),
+            decision: "reject".into(),
+            idempotency_key: "decision-guard-reject-op".into(),
+            actor: "user".into(),
+            target_type: "chapter".into(),
+            target_id: spec.chapter_ids[0].clone(),
+            base_revision: None,
+            apply_transaction_id: None,
+            conflict_code: None,
+            created_at: Utc::now().to_rfc3339(),
+        },
+    )
+    .unwrap();
+
+    assert!(apply(&mut conn, request.clone()).unwrap().replayed);
+    let mut fresh = request;
+    fresh.operation_id = "decision-guard-new-operation".into();
+    assert_eq!(
+        apply(&mut conn, fresh).unwrap_err().code,
+        "TASK_AUTHORIZATION_CANDIDATE_DECISION_INVALID"
+    );
+    assert_eq!(load(&conn, &grant.authorization_id).unwrap().used_writes, 1);
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM task_authorization_receipts WHERE authorization_id=?1",
+            [&grant.authorization_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        first.receipt_id,
+        receipts::list(&conn, &grant.authorization_id).unwrap()[0].receipt_id
+    );
+}
+
+#[test]
+fn request_revision_blocks_a_new_preauthorized_apply_before_quota() {
+    let (mut conn, mut spec) = fixture();
+    spec.actions = vec![ActionLimit {
+        action: Action::AdoptChapterText,
+        max_writes: 1,
+    }];
+    spec.max_writes = 1;
+    let grant = issue(&mut conn, spec.clone()).unwrap();
+    let (card, artifact) = publish(
+        &mut conn,
+        &spec,
+        "decision-guard-revision",
+        "chapter_text",
+        "她把信放回桌面。",
+        None,
+    );
+    let bundle = artifact_service::get_artifact_bundle(&conn, &artifact).unwrap();
+    conversations::record_artifact_decision(
+        &mut conn,
+        conversations::RecordArtifactDecisionInput {
+            decision_id: "decision-guard-request-revision".into(),
+            artifact_id: artifact.clone(),
+            artifact_hash: bundle.artifact.content_hash,
+            card_id: card.clone(),
+            conversation_id: spec.conversation_id.clone(),
+            decision: "request_revision".into(),
+            idempotency_key: "decision-guard-request-revision-op".into(),
+            actor: "user".into(),
+            target_type: "chapter".into(),
+            target_id: spec.chapter_ids[0].clone(),
+            base_revision: None,
+            apply_transaction_id: None,
+            conflict_code: None,
+            created_at: Utc::now().to_rfc3339(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        apply(
+            &mut conn,
+            input(&grant, card, artifact, Action::AdoptChapterText),
+        )
+        .unwrap_err()
+        .code,
+        "TASK_AUTHORIZATION_CANDIDATE_DECISION_INVALID"
+    );
+    assert_eq!(load(&conn, &grant.authorization_id).unwrap().used_writes, 0);
+}
+
+#[test]
 fn preauthorized_large_body_adoption_has_no_fabricated_review_and_replay_survives_revoke() {
     let (mut conn, spec) = fixture();
     let grant = issue(&mut conn, spec.clone()).unwrap();
