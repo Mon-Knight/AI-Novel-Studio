@@ -206,6 +206,24 @@ pub(super) fn apply(conn: &mut Connection, input: ApplyInput) -> Result<Receipt,
         return Ok(receipt);
     }
     let grant = load(&tx, &input.authorization_id)?;
+    // Check the grant's conversation, not the authorization id. The latter is not
+    // an artifact-decision scope key and must never be used as a substitute.
+    let latest: Option<String> = tx
+        .query_row(
+            "SELECT decision FROM artifact_decisions
+             WHERE card_id=?1 AND conversation_id=?2 AND artifact_id=?3
+             ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            params![&input.card_id, &grant.conversation_id, &input.artifact_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    if matches!(latest.as_deref(), Some("reject" | "request_revision")) {
+        return Err(error(
+            "TASK_AUTHORIZATION_CANDIDATE_DECISION_INVALID",
+            "候选已被作者拒绝或要求修订，不能通过任务授权正式应用",
+        ));
+    }
     let (bundle, model) = candidate_root(&tx, &grant, &input)?;
     let base = validate_active(&tx, &grant, &model)?;
     receipts::ensure_quota(&tx, &grant, &input.action)?;

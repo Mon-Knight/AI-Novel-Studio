@@ -264,7 +264,15 @@ pub fn record_artifact_decision(
     let mut connection = get_connection()
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
-    service::record_artifact_decision(&mut connection, input)
+    let stop_pending = matches!(input.decision.as_str(), "reject" | "request_revision");
+    let decision = service::record_artifact_decision(&mut connection, input)?;
+    drop(connection);
+    if stop_pending {
+        crate::services::dsh::task_runtime::cancel_pending_after_decision(
+            &decision.conversation_id,
+        );
+    }
+    Ok(decision)
 }
 
 #[tauri::command]

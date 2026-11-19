@@ -74,6 +74,11 @@ mod summary_scope;
 #[path = "task_runtime_word_target.rs"]
 mod word_target;
 pub use coordinator::start_with_observer;
+/// Drop a waiting candidate after an explicit author reject/request-revision decision.
+/// This does not revoke unrelated task authorization or alter committed receipts.
+pub fn cancel_pending_after_decision(conversation_id: &str) -> bool {
+    followup::cancel_pending(conversation_id)
+}
 #[path = "task_runtime_admission.rs"]
 mod admission;
 #[path = "task_runtime_domain_entry.rs"]
