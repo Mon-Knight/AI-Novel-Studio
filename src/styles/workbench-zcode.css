@@ -54,13 +54,6 @@
   flex-direction: column;
 }
 
-.workbench-side-plugin-actions {
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: flex-end;
-  padding: 6px 10px 0;
-}
-
 .workbench-side-launcher-actions {
   display: flex;
   flex: 0 0 auto;
@@ -864,7 +857,7 @@
   outline-offset: -2px;
 }
 
-.workbench-plugin-header > div {
+.workbench-plugin-header > div:not(.workbench-side-launcher-actions) {
   flex: 1;
   min-width: 0;
 }

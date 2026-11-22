@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 const manifestPath = fileURLToPath(
   new URL('../../contracts/agent/canonical-tool-manifest.v1.json', import.meta.url),
 );
-const taskServerTemplatePath = fileURLToPath(
-  new URL('./ans-task-server-template.mjs', import.meta.url),
+const nativeLoopPath = fileURLToPath(
+  new URL('../../src-tauri/src/services/dsh/native_agent_loop.rs', import.meta.url),
 );
 
 const EXPECTED_TOOL_IDS = Object.freeze([
@@ -141,12 +141,12 @@ test('shared manifest and existing DSH template do not auto-connect legacy alias
   }
   assert.equal(serializedManifest.includes('mcp__novel__'), false);
 
-  const taskServerTemplate = readFileSync(taskServerTemplatePath, 'utf8');
+  const nativeLoopSource = readFileSync(nativeLoopPath, 'utf8');
   for (const canonicalId of EXPECTED_TOOL_IDS) {
     assert.match(
-      taskServerTemplate,
-      new RegExp(`['\"]${escapeRegex(canonicalId)}['\"]`, 'u'),
-      `DSH template must not register catalog-only canonical Tool ${canonicalId}`,
+      nativeLoopSource,
+      new RegExp(`['"]${escapeRegex(canonicalId)}['"]`, 'u'),
+      `native runtime dispatcher must map canonical Tool ${canonicalId}`,
     );
   }
 });

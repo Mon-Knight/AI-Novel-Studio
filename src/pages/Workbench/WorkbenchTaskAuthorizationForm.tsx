@@ -29,7 +29,6 @@ const BUDGET_FIELDS: Array<{
   { key: 'maxToolCalls', label: '最多工具调用数', min: 1, max: 50000, step: 1 },
   { key: 'maxRevisions', label: '最多修订次数', min: 0, max: 200, step: 1 },
   { key: 'maxTokens', label: '最多 Token 总量', min: 1, max: 10000000, step: 1 },
-  { key: 'maxCostUsd', label: '最高费用（美元）', min: 0.01, max: 10000, step: 0.01 },
 ];
 const CREATION_FIELDS: Array<{
   key: keyof TaskAuthorizationCreationScope;
@@ -75,7 +74,7 @@ export function WorkbenchTaskAuthorizationForm({
   const [minutes, setMinutes] = useState(30);
   const [wallMinutes, setWallMinutes] = useState(10);
   const [budget, setBudget] = useState<TaskAuthorizationBudget>({
-    maxRequests: 8,
+    maxRequests: 16,
     maxToolCalls: 24,
     maxRevisions: 2,
     maxTokens: 32000,

@@ -22,6 +22,7 @@ once_cell = "1.19"
 time = { version = "0.3", features = ["formatting", "macros"] }
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+novel-domain-gateway = { path = "gateway" }
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"

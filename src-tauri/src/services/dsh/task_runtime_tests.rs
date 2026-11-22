@@ -3191,6 +3191,14 @@ fn normalize_tool_name_keeps_canonical_novel_read() {
         "novel.read_context"
     );
     assert_eq!(
+        normalize_tool_name("novel_read_context"),
+        "novel.read_context"
+    );
+    assert_eq!(
+        normalize_tool_name("chapter_read_outline"),
+        "chapter.read_outline"
+    );
+    assert_eq!(
         normalize_tool_name("mcp__novel__novel_read_context_1e2b3adf9a19"),
         "novel.read_context"
     );

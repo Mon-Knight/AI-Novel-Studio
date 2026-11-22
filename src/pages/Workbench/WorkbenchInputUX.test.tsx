@@ -478,6 +478,40 @@ describe('composer transient controls', () => {
     expect(screen.getByRole('option', { name: 'Mock' })).toBeTruthy();
   });
 
+  it('labels an unconfigured historical API model as disabled while keeping configured models selectable', () => {
+    saveAiSettings({
+      runtimeMode: 'api',
+      provider: 'openai_compatible',
+      baseUrl: 'https://configured.invalid/v1',
+      apiKey: '',
+      modelName: 'Configured-B',
+      mockMode: false,
+    });
+    render(
+      <WorkbenchModelSelect
+        id="historical-unconfigured"
+        plugins={[]}
+        selectedModel={{
+          ...model,
+          providerId: 'openai_compatible',
+          modelId: 'gemini-3.7-flash-high',
+          runtimeMode: 'api',
+        }}
+        refreshing={false}
+        refreshError=""
+      />,
+    );
+    const missingOption = screen.getByRole('option', {
+      name: 'gemini-3.7-flash-high（未在设置中配置）',
+    }) as HTMLOptionElement;
+    expect(missingOption.disabled).toBe(true);
+    const configuredOption = screen.getByRole('option', {
+      name: 'Configured-B',
+    }) as HTMLOptionElement;
+    expect(configuredOption.disabled).toBe(false);
+    localStorage.clear();
+  });
+
   it.each([
     { selectedConversationRunning: true },
     { selectedConversationPreparing: true },

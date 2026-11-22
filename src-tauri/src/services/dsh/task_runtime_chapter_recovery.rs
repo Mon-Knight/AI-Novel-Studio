@@ -65,6 +65,10 @@ impl ChapterLengthRecovery {
         self.repair_number = length_repairs;
     }
 
+    pub(super) fn is_repairing(&self) -> bool {
+        self.repair_number > 0
+    }
+
     pub(super) fn restore_history(
         &mut self,
         connection: &rusqlite::Connection,

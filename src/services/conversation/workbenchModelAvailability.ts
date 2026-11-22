@@ -201,7 +201,7 @@ export function getWorkbenchModelAvailability({
       options,
       selectedOption,
       canSend,
-      message: `模型列表刷新失败：${refreshError}。请重试 Runtime 初始化，或打开模型设置检查 Endpoint 与凭据。`,
+      message: `模型列表刷新失败：${refreshError}。请点击重试，或打开模型设置检查接口地址与 API 密钥。`,
     };
   }
   if (credentialAvailable === false) {
@@ -215,7 +215,7 @@ export function getWorkbenchModelAvailability({
   }
   if (!selectedOption) {
     // A row that exists in the Runtime projection but did not load is a real
-    // failure, not a missing registration. Keep the two states distinct.
+    // failure; an unprobed configured model is directly usable in the native loop.
     const selectedDirectoryRow = plugins.find((plugin) => {
       if (plugin.source === 'provider-settings') return false;
       const selection = modelSelectionFromPlugin(plugin);
@@ -229,7 +229,7 @@ export function getWorkbenchModelAvailability({
         status: 'unavailable',
         options,
         canSend,
-        message: `Runtime 报告当前模型不可用：${selectedDirectoryRow.description}。请检查 Endpoint 与凭据后重试初始化。`,
+        message: `当前模型暂不可用：${selectedDirectoryRow.description}。请检查接口地址与 API 密钥后重试。`,
       };
     }
     if (runtimeFailure) {
@@ -237,16 +237,10 @@ export function getWorkbenchModelAvailability({
         status: 'error',
         options,
         canSend,
-        message: `Runtime 初始化失败：${runtimeFailure}。请重试初始化，或检查模型设置。`,
+        message: `本地运行时状态异常：${runtimeFailure}。请点击重试或检查模型设置。`,
       };
     }
-    return {
-      status: 'not_registered',
-      options,
-      canSend,
-      message:
-        '当前模型尚未注册到 Runtime；可重试初始化，仍可直接发送，后端会按冻结模型建立精确 Worker。',
-    };
+    return { status: 'ready', options, canSend, message: '' };
   }
   return { status: 'ready', options, selectedOption, canSend, message: '' };
 }

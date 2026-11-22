@@ -299,17 +299,12 @@ Add-CheckResult "reusable desktop suite input propagation" ($desktopSuiteExpress
 
 $desktopQualityJob = Get-WorkflowJobBlock ([string]$desktopWorkflow) "quality"
 $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob) @(
-    "repository: deepseek-ai/deepseek-harness",
-    "ref: 47f943859bef60e4160492346772ded9b24f765a",
-    "path: .dsh-checkout",
-    "pnpm --dir .dsh-checkout run build:lib:host",
-    '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build -- --no-bundle --ci"
 )
-Add-CheckResult "desktop DSH and gateway precede Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, serial Rust tests and the production Tauri build"
+Add-CheckResult "desktop gateway precedes Rust tests" $desktopQualityHasRuntimeOrder "clean gateway rebuild precedes serial Rust tests and the production Tauri build"
 
 $releaseWorkflow = Get-OptionalText ".github/workflows/release.yml"
 $windowsReleaseJob = Get-WorkflowJobBlock ([string]$releaseWorkflow) "windows-release"
@@ -322,16 +317,11 @@ $releaseRequiresDesktopGate =
 Add-CheckResult "release waits for full desktop gate" $releaseRequiresDesktopGate "signed release depends on full reusable desktop E2E and bundle budgets"
 
 $windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob) @(
-    "repository: deepseek-ai/deepseek-harness",
-    "ref: 47f943859bef60e4160492346772ded9b24f765a",
-    "path: .dsh-checkout",
-    "pnpm --dir .dsh-checkout run build:lib:host",
-    '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
     "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway",
     "npm run tauri:build:release -- --config"
 )
-Add-CheckResult "release DSH and gateway precede signed packaging" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before a clean gateway rebuild, signed installer creation; dynamic tests are inherited from desktop-gate"
+Add-CheckResult "release gateway precedes signed packaging" $windowsReleaseHasRuntimeOrder "clean gateway rebuild precedes signed installer creation; dynamic tests are inherited from desktop-gate"
 
 $releaseReusesExactEvidence =
     ([string]$windowsReleaseJob).Contains("VERIFIED_SHA:" ) -and

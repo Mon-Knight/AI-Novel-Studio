@@ -1,14 +1,5 @@
-//! Dynamic tests for the persistent ANS bridge over the pinned DSH carrier.
-//!
-//! Carrier discovery accepts an explicit `DSH_RUNTIME_ROOT`/`DSH_CHECKOUT`,
-//! the fixed development checkout, or the staged self-contained payload. Real
-//! carrier scenarios never use the official create-only SDK server: they
-//! render `ans-task-server-template.mjs`, load the production Cordis graph,
-//! and exercise public `agents.create/resume` through the ANS protocol.
-//!
-//! A carrier-independent controlled child test always runs as well. It proves
-//! supervisor timeout, crash, and two-child isolation without silently
-//! skipping those failure paths when a developer machine lacks the carrier.
+//! Dynamic integration tests for the pure-Rust native task runtime, Canonical read
+//! tools, session continuation/resumption, cancellation, and R4 cloud read guardrails.
 
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
@@ -26,26 +17,11 @@ static START_PATH_LOCK: Mutex<()> = Mutex::new(());
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-use super::config::{task_cordis_yml, task_server_script};
-use super::launcher::{DshLaunchConfig, DshRuntimeLauncher, NodeDshRuntime};
-use super::supervisor::{RuntimeHandle, SessionSnapshot, SupervisorError};
 use super::task_runtime::{
     self, StartTaskTurnInput, TaskRequestPolicyInput, DSH_PROTOCOL, DSH_SOURCE_COMMIT,
 };
 use crate::services::conversation_service::{self, AppendTurnInput, CreateConversationInput};
 
-const PROVIDER: &str = "deepseek-official";
-const DEFAULT_MODEL: &str = "deepseek-chat";
-const SESSION_TIMEOUT: Duration = Duration::from_secs(90);
-const ALLOWED_TOOLS: &str =
-    "novel.read_context,chapter.read_outline,get_character_states,search_memory,generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
-const EXPECTED_PUBLIC_TOOLS: [&str; 5] = [
-    "mcp__novel__chapter_read_outline_68634582eb55",
-    "mcp__novel__generate_chapter",
-    "mcp__novel__get_character_states",
-    "mcp__novel__novel_read_context_1e2b3adf9a19",
-    "mcp__novel__search_memory",
-];
 const INTEGRATION_NOVEL_ID: &str = "integration-novel";
 const INTEGRATION_CHAPTER_ID: &str = "integration-chapter";
 
@@ -102,7 +78,7 @@ struct StartPathEnvironment {
 }
 
 impl StartPathEnvironment {
-    fn new(root: &Path, scratch: &ScratchDir) -> Self {
+    fn new(scratch: &ScratchDir) -> Self {
         let gateway_database = scratch.path().join("gateway.sqlite");
         let mut connection =
             Connection::open(&gateway_database).expect("create start-path gateway database");
@@ -111,9 +87,7 @@ impl StartPathEnvironment {
 
         Self {
             _guards: vec![
-                EnvironmentGuard::set("DSH_RUNTIME_ROOT", root),
                 EnvironmentGuard::set("ANS_TASK_WORKER_ROOT", scratch.path()),
-                EnvironmentGuard::set("DSH_GATEWAY_BIN", gateway_bin()),
                 EnvironmentGuard::set("DSH_E2E_GATEWAY_DB_PATH", gateway_database),
             ],
         }
@@ -250,964 +224,12 @@ fn http_get_json(port: u16, path: &str) -> Value {
     serde_json::from_slice(&response[split + 4..]).expect("parse mock upstream JSON")
 }
 
-fn carrier_root() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let candidates = [
-        std::env::var_os("DSH_RUNTIME_ROOT").map(PathBuf::from),
-        std::env::var_os("DSH_CHECKOUT").map(PathBuf::from),
-        Some(PathBuf::from(r"F:\dsh-v320-clean")),
-        Some(manifest.join(".payload-staging/dsh-runtime")),
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .find(|root| {
-            root.join("packages/examples/jsonrpc-demo/lib/bin.js")
-                .is_file()
-                && root
-                    .join("packages/sdk/protocol/lib/index.js")
-                    .is_file()
-                && root.join("packages/core/agent/lib/index.js").is_file()
-                && root
-                    .join("packages/session/session-persistence-jsonl/lib/index.js")
-                    .is_file()
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "pinned DSH carrier unavailable: set DSH_RUNTIME_ROOT/DSH_CHECKOUT, provide F:\\dsh-v320-clean, or build src-tauri/.payload-staging/dsh-runtime; controlled_protocol_child_timeout_crash_and_isolation_never_skips still provides the non-skipping protocol fallback"
-            )
-        })
-}
-
-fn gateway_bin() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let executable = if cfg!(windows) {
-        "novel-domain-gateway.exe"
-    } else {
-        "novel-domain-gateway"
-    };
-    let candidates = [
-        std::env::var_os("CARGO_BIN_EXE_novel-domain-gateway").map(PathBuf::from),
-        Some(manifest.join("target/debug").join(executable)),
-        Some(manifest.join("target/release").join(executable)),
-        Some(
-            manifest
-                .join(".payload-staging/dsh-runtime/gateway")
-                .join(executable),
-        ),
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| {
-            panic!(
-                "novel-domain-gateway missing; run `cargo build --locked -p novel-domain-gateway` before the real carrier tests"
-            )
-        })
-}
-
-struct RuntimeFixture {
-    config: DshLaunchConfig,
-}
-
-impl RuntimeFixture {
-    fn new(root: &Path, dir: &Path, gateway: &Path, upstream: &MockWorkbench) -> Self {
-        let database = dir.join("novel.sqlite");
-        let mut connection = Connection::open(&database).expect("create integration database");
-        crate::db::create_tables(&mut connection).expect("migrate integration database");
-        connection
-            .execute_batch(
-                "INSERT OR IGNORE INTO novels (id, title, created_at, updated_at)
-                 VALUES ('integration-novel', 'DSH integration novel', '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z');
-                 INSERT OR IGNORE INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
-                 VALUES ('integration-chapter', 'integration-novel', 'DSH integration chapter', 1, 'not_started', 0, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z');",
-            )
-            .expect("seed authoritative DSH task scope");
-        drop(connection);
-
-        let server_path = dir.join("ans-task-server.mjs");
-        fs::write(
-            &server_path,
-            task_server_script(
-                root.to_string_lossy().as_ref(),
-                DSH_SOURCE_COMMIT,
-                DSH_PROTOCOL,
-            ),
-        )
-        .expect("write rendered ANS task server");
-        let cordis_config = dir.join("cordis.yml");
-        fs::write(
-            &cordis_config,
-            task_cordis_yml(
-                root.to_string_lossy().as_ref(),
-                gateway.to_string_lossy().as_ref(),
-                database.to_string_lossy().as_ref(),
-                &server_path,
-            ),
-        )
-        .expect("write persistent task Cordis composition");
-        let config = DshLaunchConfig {
-            runtime_bin: root.join("packages/examples/jsonrpc-demo/lib/bin.js"),
-            cordis_config,
-            session_root: dir.join("sessions"),
-            home: dir.join("home"),
-            api_key: "mock-key-never-persisted".to_string(),
-            base_url: upstream.upstream_base_url.clone(),
-            system_prompt: "你是 ANS 固定载体动态测试 Agent。只按用户要求回复，不展示隐藏推理。"
-                .to_string(),
-            cwd: dir.to_path_buf(),
-            allowed_tools: Some(ALLOWED_TOOLS.to_string()),
-            task_novel_id: Some(INTEGRATION_NOVEL_ID.to_string()),
-            task_chapter_id: Some(INTEGRATION_CHAPTER_ID.to_string()),
-            candidate_policy: None,
-            task_budget_url: None,
-        };
-        Self { config }
-    }
-
-    fn spawn(&self) -> RuntimeHandle {
-        let child = NodeDshRuntime
-            .launch(&self.config)
-            .expect("launch pinned DSH carrier");
-        RuntimeHandle::new(child).expect("wrap pinned DSH carrier")
-    }
-}
-
-fn initialize(runtime: &RuntimeHandle, config: &DshLaunchConfig, model: &str) -> Value {
-    let result = runtime
-        .request(
-            "initialize",
-            Some(json!({
-                "cwd": config.cwd.to_string_lossy().replace('\\', "/"),
-                "provider": PROVIDER,
-                "model": model,
-                "maxTokens": 512,
-                "sourceCommit": DSH_SOURCE_COMMIT,
-                "protocol": DSH_PROTOCOL
-            })),
-            Duration::from_secs(30),
-        )
-        .unwrap_or_else(|error| {
-            panic!(
-                "initialize persistent carrier: {error}; stderr: {}",
-                runtime.stderr_tail()
-            )
-        });
-    assert_eq!(
-        result.pointer("/serverInfo/name").and_then(Value::as_str),
-        Some("ai-novel-studio-dsh-task-runtime")
-    );
-    assert_eq!(
-        result
-            .pointer("/serverInfo/sourceCommit")
-            .and_then(Value::as_str),
-        Some(DSH_SOURCE_COMMIT)
-    );
-    assert_eq!(
-        result
-            .pointer("/serverInfo/protocol")
-            .and_then(Value::as_str),
-        Some(DSH_PROTOCOL)
-    );
-    result
-}
-
-fn health(runtime: &RuntimeHandle) -> Value {
-    runtime
-        .request("runtime/health", None, Duration::from_secs(30))
-        .unwrap_or_else(|error| {
-            panic!(
-                "persistent carrier health: {error}; stderr: {}",
-                runtime.stderr_tail()
-            )
-        })
-}
-
-fn prompt(runtime: &RuntimeHandle, session_id: &str, text: &str, model: &str) -> (Value, u64) {
-    let before = runtime
-        .snapshot(session_id)
-        .map(|snapshot| snapshot.events)
-        .unwrap_or(0);
-    let receipt = runtime
-        .request(
-            "session/prompt",
-            Some(json!({
-                "sessionId": session_id,
-                "contentBlocks": [{"type":"text", "text":text}],
-                "route": {
-                    "provider": PROVIDER,
-                    "model": model,
-                    "maxTokens": 512
-                }
-            })),
-            Duration::from_secs(30),
-        )
-        .unwrap_or_else(|error| {
-            panic!(
-                "queue persistent prompt: {error}; stderr: {}",
-                runtime.stderr_tail()
-            )
-        });
-    assert!(receipt.get("messageId").and_then(Value::as_str).is_some());
-    assert_eq!(
-        receipt.get("sessionId").and_then(Value::as_str),
-        Some(session_id)
-    );
-    assert_eq!(
-        receipt.get("agentId").and_then(Value::as_str),
-        Some(session_id)
-    );
-    (receipt, before)
-}
-
-fn wait_for_status(runtime: &RuntimeHandle, session_id: &str, status: &str, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if runtime.status_of(session_id).as_deref() == Some(status) {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "session {session_id} never reached {status}; snapshot={:?}; stderr={}",
-            runtime.snapshot(session_id),
-            runtime.stderr_tail()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn wait_for_turn(
-    runtime: &RuntimeHandle,
-    session_id: &str,
-    before_events: u64,
-    timeout: Duration,
-) -> SessionSnapshot {
-    wait_for_settled_turn(runtime, session_id, before_events, timeout, true)
-}
-
-fn wait_for_cancelled_turn(
-    runtime: &RuntimeHandle,
-    session_id: &str,
-    before_events: u64,
-    timeout: Duration,
-) -> SessionSnapshot {
-    wait_for_settled_turn(runtime, session_id, before_events, timeout, false)
-}
-
-fn wait_for_settled_turn(
-    runtime: &RuntimeHandle,
-    session_id: &str,
-    before_events: u64,
-    timeout: Duration,
-    require_turn_end: bool,
-) -> SessionSnapshot {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(snapshot) = runtime.snapshot(session_id) {
-            let new_kinds = snapshot
-                .event_kinds
-                .get((before_events as usize)..)
-                .unwrap_or(&[]);
-            let has_new_end =
-                snapshot.events > before_events && new_kinds.iter().any(|kind| kind == "turn/end");
-            let cancelled_idle = snapshot.events > before_events
-                && snapshot.status.as_deref() == Some("idle")
-                && new_kinds.iter().any(|kind| {
-                    kind == "turn/start" || kind == "step/end" || kind == "agent/inbox/spliced"
-                });
-            if snapshot.status.as_deref() == Some("idle")
-                && (has_new_end || (!require_turn_end && cancelled_idle))
-            {
-                return snapshot;
-            }
-        }
-        assert!(
-            Instant::now() < deadline,
-            "session {session_id} turn did not settle; snapshot={:?}; stderr={}",
-            runtime.snapshot(session_id),
-            runtime.stderr_tail()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn cancel_session(runtime: &RuntimeHandle, session_id: &str) -> Value {
-    runtime
-        .request(
-            "session/cancel",
-            Some(json!({"sessionId":session_id})),
-            Duration::from_secs(10),
-        )
-        .unwrap_or_else(|error| {
-            panic!(
-                "cancel persistent session: {error}; stderr: {}",
-                runtime.stderr_tail()
-            )
-        })
-}
-
-fn shutdown(runtime: &RuntimeHandle) {
-    let code = runtime
-        .shutdown_and_wait(Duration::from_secs(30))
-        .unwrap_or_else(|error| {
-            panic!(
-                "persistent carrier shutdown: {error}; stderr: {}",
-                runtime.stderr_tail()
-            )
-        });
-    assert_eq!(code, 0, "runtime stderr: {}", runtime.stderr_tail());
-}
-
 fn request_rows(snapshot: &Value) -> &[Value] {
     snapshot
         .get("requests")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .expect("mock upstream request rows")
-}
-
-#[test]
-fn node_runtime_meets_version_requirement() {
-    let version = NodeDshRuntime::check_node().expect("node version check");
-    assert!(
-        version.starts_with('v'),
-        "unexpected Node version: {version}"
-    );
-}
-
-#[test]
-fn persistent_carrier_gateway_inherits_authoritative_task_scope() {
-    let root = carrier_root();
-    let gateway = gateway_bin();
-    let scratch = ScratchDir::new("task-scope");
-    let upstream = MockWorkbench::start("normal", 0);
-    let fixture = RuntimeFixture::new(&root, scratch.path(), &gateway, &upstream);
-    let runtime = fixture.spawn();
-
-    initialize(&runtime, &fixture.config, DEFAULT_MODEL);
-    let (_, before) = prompt(
-        &runtime,
-        "task-scope-session",
-        "请读取上下文并生成本章候选正文。",
-        DEFAULT_MODEL,
-    );
-    let snapshot = wait_for_turn(&runtime, "task-scope-session", before, SESSION_TIMEOUT);
-
-    assert_eq!(snapshot.tool_calls.len(), EXPECTED_PUBLIC_TOOLS.len());
-    for expected in EXPECTED_PUBLIC_TOOLS {
-        assert!(
-            snapshot.tool_calls.iter().any(|tool| tool == expected),
-            "missing scoped gateway call {expected}: {:?}",
-            snapshot.tool_calls
-        );
-    }
-    assert_eq!(snapshot.tool_results.len(), EXPECTED_PUBLIC_TOOLS.len());
-    let tool_results = snapshot
-        .tool_results
-        .iter()
-        .map(|(_, text)| text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(tool_results.contains("\"artifactType\":\"chapter_text\""));
-    assert!(tool_results.contains("\"candidateOnly\":true"));
-    assert!(!tool_results.contains("TASK_SCOPE"));
-    assert!(!tool_results.contains("scope mismatch"));
-    assert!(snapshot.last_assistant_text.contains("尚未写入正式正文"));
-
-    let requests = upstream.wait_for(
-        "scoped context, generation, and final model calls",
-        Duration::from_secs(10),
-        |value| value.get("requestCount").and_then(Value::as_u64) == Some(3),
-    );
-    let rows = request_rows(&requests);
-    assert_eq!(
-        rows[1].get("toolResultCount").and_then(Value::as_u64),
-        Some(4)
-    );
-    assert_eq!(
-        rows[2].get("toolResultCount").and_then(Value::as_u64),
-        Some(5)
-    );
-    shutdown(&runtime);
-}
-
-#[test]
-fn persistent_carrier_same_process_followup_model_switch_and_allowlist() {
-    let root = carrier_root();
-    let gateway = gateway_bin();
-    let scratch = ScratchDir::new("followup");
-    let upstream = MockWorkbench::start("text-only", 0);
-    let fixture = RuntimeFixture::new(&root, scratch.path(), &gateway, &upstream);
-    let runtime = fixture.spawn();
-
-    let first_initialize = initialize(&runtime, &fixture.config, DEFAULT_MODEL);
-    assert_eq!(
-        first_initialize
-            .get("reinitialized")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    let runtime_health = health(&runtime);
-    assert_eq!(
-        runtime_health.get("ready").and_then(Value::as_bool),
-        Some(true),
-        "runtime health: {runtime_health}"
-    );
-    assert_eq!(
-        runtime_health.get("protocol").and_then(Value::as_str),
-        Some(DSH_PROTOCOL)
-    );
-    let composition = runtime_health
-        .get("composition")
-        .and_then(Value::as_array)
-        .expect("health composition");
-    assert_eq!(composition.len(), 7);
-    assert!(composition
-        .iter()
-        .all(|entry| entry.get("status").and_then(Value::as_str) == Some("loaded")));
-
-    let tools = runtime_health
-        .pointer("/tools/global")
-        .and_then(Value::as_array)
-        .expect("global tool directory")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    for expected in EXPECTED_PUBLIC_TOOLS {
-        assert!(
-            tools.iter().any(|tool| *tool == expected),
-            "missing public tool {expected}: {tools:?}"
-        );
-    }
-    for tool in &tools {
-        let lowered = tool.to_ascii_lowercase();
-        assert!(
-            tool.starts_with("mcp__novel__"),
-            "unexpected MCP namespace: {tool}"
-        );
-        assert!(
-            ![
-                "bash",
-                "jobs",
-                "read_file",
-                "write_file",
-                "shell",
-                "git",
-                "sql"
-            ]
-            .iter()
-            .any(|forbidden| lowered.contains(forbidden)),
-            "forbidden model-facing capability: {tool}"
-        );
-    }
-
-    let first_prompt = "FOLLOWUP_PRIVATE_FIRST_7f5a";
-    let (first_receipt, before_first) =
-        prompt(&runtime, "persistent-session", first_prompt, "model-alpha");
-    assert_eq!(
-        first_receipt.get("lifecycle").and_then(Value::as_str),
-        Some("created")
-    );
-    let first = wait_for_turn(
-        &runtime,
-        "persistent-session",
-        before_first,
-        SESSION_TIMEOUT,
-    );
-    assert!(!first.last_assistant_text.is_empty());
-
-    let second_initialize = initialize(&runtime, &fixture.config, "model-beta");
-    assert_eq!(
-        second_initialize
-            .get("reinitialized")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    let (second_receipt, before_second) = prompt(
-        &runtime,
-        "persistent-session",
-        "FOLLOWUP_PRIVATE_SECOND_91ca",
-        "model-beta",
-    );
-    assert_eq!(
-        second_receipt.get("lifecycle").and_then(Value::as_str),
-        Some("continued")
-    );
-    wait_for_turn(
-        &runtime,
-        "persistent-session",
-        before_second,
-        SESSION_TIMEOUT,
-    );
-    assert_eq!(
-        health(&runtime).get("liveSessions").and_then(Value::as_u64),
-        Some(1)
-    );
-
-    let requests = upstream.wait_for(
-        "two follow-up model calls",
-        Duration::from_secs(10),
-        |value| value.get("requestCount").and_then(Value::as_u64) == Some(2),
-    );
-    let rows = request_rows(&requests);
-    assert_eq!(
-        rows.iter()
-            .map(|row| row.get("model").and_then(Value::as_str).unwrap_or(""))
-            .collect::<Vec<_>>(),
-        ["model-alpha", "model-beta"]
-    );
-    assert_eq!(
-        rows[1].pointer("/roles/user").and_then(Value::as_u64),
-        Some(2),
-        "second request must replay the first user turn"
-    );
-    for row in rows {
-        let advertised = row
-            .get("advertisedToolNames")
-            .and_then(Value::as_array)
-            .expect("advertised tool names")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        for expected in EXPECTED_PUBLIC_TOOLS {
-            assert!(
-                advertised.iter().any(|tool| *tool == expected),
-                "missing advertised tool {expected}: {advertised:?}"
-            );
-        }
-    }
-    let safe_snapshot = requests.to_string();
-    assert!(!safe_snapshot.contains(first_prompt));
-    assert!(!safe_snapshot.contains("mock-key-never-persisted"));
-    shutdown(&runtime);
-}
-
-#[test]
-fn persistent_carrier_restart_resumes_interrupted_session() {
-    let root = carrier_root();
-    let gateway = gateway_bin();
-    let scratch = ScratchDir::new("restart");
-    let interrupted_upstream = MockWorkbench::start("delay", 75);
-    let first_fixture = RuntimeFixture::new(&root, scratch.path(), &gateway, &interrupted_upstream);
-    let first = first_fixture.spawn();
-    initialize(&first, &first_fixture.config, "model-before-crash");
-    let (receipt, before_durable) = prompt(
-        &first,
-        "restart-session",
-        "RESTART_PRIVATE_DURABLE_TURN_148d",
-        "model-before-crash",
-    );
-    assert_eq!(
-        receipt.get("lifecycle").and_then(Value::as_str),
-        Some("created")
-    );
-    wait_for_turn(&first, "restart-session", before_durable, SESSION_TIMEOUT);
-    let (interrupted_receipt, _) = prompt(
-        &first,
-        "restart-session",
-        "RESTART_PRIVATE_INTERRUPTED_TURN_0cb2",
-        "model-before-crash",
-    );
-    assert_eq!(
-        interrupted_receipt.get("lifecycle").and_then(Value::as_str),
-        Some("continued")
-    );
-    wait_for_status(
-        &first,
-        "restart-session",
-        "running",
-        Duration::from_secs(10),
-    );
-    interrupted_upstream.wait_for("in-flight request", Duration::from_secs(10), |value| {
-        value.get("activeRequests").and_then(Value::as_u64) == Some(1)
-            && value
-                .get("requestCount")
-                .and_then(Value::as_u64)
-                .is_some_and(|count| count >= 4)
-    });
-    first.kill();
-    interrupted_upstream.wait_for("crashed client closure", Duration::from_secs(10), |value| {
-        value
-            .get("requests")
-            .and_then(Value::as_array)
-            .is_some_and(|requests| {
-                requests.iter().any(|request| {
-                    request.get("outcome").and_then(Value::as_str) == Some("client_closed")
-                })
-            })
-    });
-
-    let resumed_upstream = MockWorkbench::start("text-only", 0);
-    let resumed_fixture = RuntimeFixture::new(&root, scratch.path(), &gateway, &resumed_upstream);
-    let resumed = resumed_fixture.spawn();
-    initialize(&resumed, &resumed_fixture.config, "model-after-restart");
-    let (resumed_receipt, before) = prompt(
-        &resumed,
-        "restart-session",
-        "RESTART_PRIVATE_AFTER_CRASH_90c1",
-        "model-after-restart",
-    );
-    assert_eq!(
-        resumed_receipt.get("lifecycle").and_then(Value::as_str),
-        Some("resumed")
-    );
-    let snapshot = wait_for_turn(&resumed, "restart-session", before, SESSION_TIMEOUT);
-    assert!(!snapshot.last_assistant_text.is_empty());
-    let requests =
-        resumed_upstream.wait_for("resumed model call", Duration::from_secs(10), |value| {
-            value.get("requestCount").and_then(Value::as_u64) == Some(1)
-        });
-    assert_eq!(
-        requests
-            .pointer("/requests/0/roles/user")
-            .and_then(Value::as_u64),
-        Some(2),
-        "resumed request must reconstruct the completed durable user turn before accepting the new one; the crash-orphaned tail is repaired"
-    );
-    assert_eq!(
-        requests
-            .pointer("/requests/0/model")
-            .and_then(Value::as_str),
-        Some("model-after-restart")
-    );
-    shutdown(&resumed);
-}
-
-#[test]
-fn persistent_carrier_cancel_and_timeout_are_session_scoped() {
-    let root = carrier_root();
-    let gateway = gateway_bin();
-    let scratch = ScratchDir::new("cancel");
-    let upstream = MockWorkbench::start("delay", 400);
-    let fixture = RuntimeFixture::new(&root, scratch.path(), &gateway, &upstream);
-    let runtime = fixture.spawn();
-    initialize(&runtime, &fixture.config, DEFAULT_MODEL);
-
-    let (_, before_cancelled) = prompt(
-        &runtime,
-        "cancelled-session",
-        "CANCEL_PRIVATE_8aa1",
-        DEFAULT_MODEL,
-    );
-    let (_, before_survivor) = prompt(
-        &runtime,
-        "survivor-session",
-        "SURVIVOR_PRIVATE_52e3",
-        DEFAULT_MODEL,
-    );
-    wait_for_status(
-        &runtime,
-        "cancelled-session",
-        "running",
-        Duration::from_secs(10),
-    );
-    wait_for_status(
-        &runtime,
-        "survivor-session",
-        "running",
-        Duration::from_secs(10),
-    );
-    let overlap = upstream.wait_for(
-        "two sessions in one child to overlap",
-        Duration::from_secs(10),
-        |value| {
-            value
-                .get("peakActiveRequests")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                >= 2
-        },
-    );
-    assert!(
-        overlap
-            .get("peakActiveRequests")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            >= 2
-    );
-    let cancelled = cancel_session(&runtime, "cancelled-session");
-    assert_eq!(
-        cancelled.get("cancelled").and_then(Value::as_bool),
-        Some(true)
-    );
-    let cancelled_snapshot = wait_for_cancelled_turn(
-        &runtime,
-        "cancelled-session",
-        before_cancelled,
-        SESSION_TIMEOUT,
-    );
-    assert!(cancelled_snapshot.last_assistant_text.is_empty());
-    let survivor = wait_for_turn(
-        &runtime,
-        "survivor-session",
-        before_survivor,
-        SESSION_TIMEOUT,
-    );
-    assert!(
-        !survivor.last_assistant_text.is_empty(),
-        "cancelling one Agent must not stop the sibling Agent"
-    );
-    assert_eq!(
-        health(&runtime).get("ready").and_then(Value::as_bool),
-        Some(true)
-    );
-
-    let (_, before_timeout) = prompt(
-        &runtime,
-        "timeout-session",
-        "TIMEOUT_PRIVATE_f77e",
-        DEFAULT_MODEL,
-    );
-    wait_for_status(
-        &runtime,
-        "timeout-session",
-        "running",
-        Duration::from_secs(10),
-    );
-    let timeout = runtime
-        .wait_idle_checked("timeout-session", Duration::from_millis(25))
-        .expect_err("bounded idle wait must time out while upstream is delayed");
-    assert!(timeout.to_string().contains("timeout"));
-    assert_eq!(
-        cancel_session(&runtime, "timeout-session")
-            .get("cancelled")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    wait_for_cancelled_turn(&runtime, "timeout-session", before_timeout, SESSION_TIMEOUT);
-    shutdown(&runtime);
-}
-
-#[test]
-fn persistent_carrier_two_children_run_concurrently_and_isolate_failure() {
-    let root = carrier_root();
-    let gateway = gateway_bin();
-    let scratch_a = ScratchDir::new("parallel-a");
-    let scratch_b = ScratchDir::new("parallel-b");
-    let upstream = MockWorkbench::start("delay", 150);
-    let fixture_a = RuntimeFixture::new(&root, scratch_a.path(), &gateway, &upstream);
-    let fixture_b = RuntimeFixture::new(&root, scratch_b.path(), &gateway, &upstream);
-    let runtime_a = fixture_a.spawn();
-    let runtime_b = fixture_b.spawn();
-    initialize(&runtime_a, &fixture_a.config, "parallel-model-a");
-    initialize(&runtime_b, &fixture_b.config, "parallel-model-b");
-
-    let (_, before_a) = prompt(
-        &runtime_a,
-        "parallel-session-a",
-        "PARALLEL_PRIVATE_A_c233",
-        "parallel-model-a",
-    );
-    let (_, before_b) = prompt(
-        &runtime_b,
-        "parallel-session-b",
-        "PARALLEL_PRIVATE_B_a7c4",
-        "parallel-model-b",
-    );
-    let overlap = upstream.wait_for(
-        "two real child requests to overlap",
-        Duration::from_secs(15),
-        |value| {
-            value
-                .get("peakActiveRequests")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                >= 2
-        },
-    );
-    assert!(
-        overlap
-            .get("peakActiveRequests")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            >= 2
-    );
-
-    runtime_a.kill();
-    let survivor = wait_for_turn(&runtime_b, "parallel-session-b", before_b, SESSION_TIMEOUT);
-    assert!(!survivor.last_assistant_text.is_empty());
-    assert_eq!(
-        health(&runtime_b).get("ready").and_then(Value::as_bool),
-        Some(true)
-    );
-    assert!(
-        runtime_a
-            .request("runtime/health", None, Duration::from_secs(5))
-            .is_err(),
-        "killed child must fail independently"
-    );
-    assert!(runtime_a
-        .snapshot("parallel-session-a")
-        .is_some_and(|snapshot| snapshot.events >= before_a));
-    shutdown(&runtime_b);
-}
-
-fn spawn_controlled_protocol_child(dir: &Path, worker: &str) -> RuntimeHandle {
-    let script = dir.join(format!("controlled-{worker}.mjs"));
-    fs::write(
-        &script,
-        r#"import fs from 'node:fs';
-import process from 'node:process';
-import readline from 'node:readline';
-const worker = process.argv[2];
-const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-lines.on('line', line => {
-  const frame = JSON.parse(line);
-  if (frame.method === 'timeout') return;
-  if (frame.method === 'crash') {
-    fs.writeSync(2, 'CONTROLLED_CRASH_STDERR\n');
-    process.exit(23);
-  }
-  if (frame.method === 'crash-secret') {
-    const secret = ['agt', '_', 'fixture', '_', 'only', '_', '0000000000000000'].join('');
-    fs.writeSync(2, `Authorization: Bearer ${secret} ${'s'.repeat(400)} SECRET_STDERR_TAIL\n`);
-    process.exit(24);
-  }
-  if (frame.method === 'crash-long') {
-    fs.writeSync(2, `LONG_STDERR_HEAD_${'诊断'.repeat(1500)}_LONG_STDERR_TAIL\n`);
-    process.exit(25);
-  }
-  const respond = () => {
-    const result = frame.method.endsWith('health') ? { worker, ready: true, method: frame.method } : {};
-    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: frame.id, result }) + '\n');
-  };
-  if (frame.method === 'delayed-health') {
-    setTimeout(respond, 60);
-    return;
-  }
-  respond();
-  if (frame.method === 'shutdown') setImmediate(() => process.exit(0));
-});
-"#,
-    )
-    .expect("write controlled protocol child");
-    let child = Command::new("node")
-        .arg(script)
-        .arg(worker)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn controlled protocol child");
-    RuntimeHandle::new(child).expect("wrap controlled protocol child")
-}
-
-#[test]
-fn controlled_protocol_child_timeout_crash_and_isolation_never_skips() {
-    let scratch = ScratchDir::new("controlled-protocol");
-    let first = spawn_controlled_protocol_child(scratch.path(), "first");
-    let second = spawn_controlled_protocol_child(scratch.path(), "second");
-    assert_eq!(
-        first
-            .request("health", None, Duration::from_secs(5))
-            .expect("first child health")["worker"],
-        "first"
-    );
-    assert_eq!(
-        second
-            .request("health", None, Duration::from_secs(5))
-            .expect("second child health")["worker"],
-        "second"
-    );
-    let timeout = first
-        .request("timeout", None, Duration::from_millis(40))
-        .expect_err("controlled request must time out");
-    assert!(timeout.to_string().contains("timeout waiting for timeout"));
-    let crash = first
-        .request("crash", None, Duration::from_secs(5))
-        .expect_err("controlled child crash must disconnect");
-    assert!(crash.is_frame_channel_disconnected());
-    let crash_diagnostic = task_runtime::safe_supervisor_error(&first, "DSH 回合失败", &crash);
-    assert!(crash_diagnostic.starts_with(task_runtime::DSH_WORKER_FRAME_CHANNEL_DISCONNECTED));
-    assert!(crash_diagnostic.contains("childExitStatus=exit-code:23"));
-    assert!(crash_diagnostic.contains("stderrTail=CONTROLLED_CRASH_STDERR"));
-    assert!(crash_diagnostic.chars().count() <= 512);
-
-    let unavailable_diagnostic = task_runtime::safe_supervisor_error(
-        &second,
-        "DSH 回合失败",
-        &SupervisorError("frame channel disconnected".to_string()),
-    );
-    assert_eq!(
-        unavailable_diagnostic,
-        task_runtime::DSH_WORKER_FRAME_CHANNEL_DISCONNECTED
-    );
-    assert_eq!(
-        second
-            .request("health", None, Duration::from_secs(5))
-            .expect("second child survives first crash")["ready"],
-        true
-    );
-    shutdown(&second);
-}
-
-#[test]
-fn disconnected_worker_diagnostics_redact_secrets_and_bound_stderr_tail() {
-    let scratch = ScratchDir::new("controlled-disconnect-diagnostics");
-
-    let secret_worker = spawn_controlled_protocol_child(scratch.path(), "secret");
-    let secret_error = secret_worker
-        .request("crash-secret", None, Duration::from_secs(5))
-        .expect_err("secret worker must disconnect");
-    let secret_diagnostic =
-        task_runtime::safe_supervisor_error(&secret_worker, "DSH 回合失败", &secret_error);
-    let fixture_secret = ["agt", "_", "fixture", "_", "only", "_", "0000000000000000"].concat();
-    assert!(secret_diagnostic.starts_with(task_runtime::DSH_WORKER_FRAME_CHANNEL_DISCONNECTED));
-    assert!(secret_diagnostic.contains("childExitStatus=exit-code:24"));
-    assert!(secret_diagnostic.contains("敏感详情未写入运行记录"));
-    assert!(!secret_diagnostic.contains(&fixture_secret));
-    assert!(!secret_diagnostic.contains("Authorization"));
-    assert!(!secret_diagnostic.contains("Bearer"));
-    assert!(secret_diagnostic.chars().count() <= 512);
-
-    let long_worker = spawn_controlled_protocol_child(scratch.path(), "long");
-    let long_error = long_worker
-        .request("crash-long", None, Duration::from_secs(5))
-        .expect_err("long stderr worker must disconnect");
-    let long_diagnostic =
-        task_runtime::safe_supervisor_error(&long_worker, "DSH 回合失败", &long_error);
-    assert!(long_diagnostic.starts_with(task_runtime::DSH_WORKER_FRAME_CHANNEL_DISCONNECTED));
-    assert!(long_diagnostic.contains("childExitStatus=exit-code:25"));
-    assert!(long_diagnostic.contains("LONG_STDERR_TAIL"));
-    assert!(!long_diagnostic.contains("LONG_STDERR_HEAD"));
-    assert!(long_diagnostic.chars().count() <= 512);
-    let bounded_tail = long_diagnostic
-        .split_once("stderrTail=")
-        .expect("stderr tail diagnostic field")
-        .1
-        .trim_end_matches(']');
-    assert!(bounded_tail.chars().count() <= 240);
-}
-
-#[test]
-fn concurrent_requests_on_one_runtime_keep_response_ownership() {
-    let scratch = ScratchDir::new("controlled-concurrent-requests");
-    let runtime = Arc::new(spawn_controlled_protocol_child(scratch.path(), "shared"));
-    let delayed_runtime = runtime.clone();
-    let delayed = std::thread::spawn(move || {
-        delayed_runtime.request("delayed-health", None, Duration::from_secs(2))
-    });
-    std::thread::sleep(Duration::from_millis(15));
-    let fast_runtime = runtime.clone();
-    let fast = std::thread::spawn(move || {
-        fast_runtime.request("fast-health", None, Duration::from_secs(2))
-    });
-
-    assert_eq!(
-        delayed
-            .join()
-            .expect("join delayed request")
-            .expect("delayed response")["method"],
-        "delayed-health"
-    );
-    assert_eq!(
-        fast.join()
-            .expect("join fast request")
-            .expect("fast response")["method"],
-        "fast-health"
-    );
-    runtime.kill();
 }
 
 fn default_request_policy() -> TaskRequestPolicyInput {
@@ -1504,9 +526,8 @@ fn creative_dialogue_start_path_initializes_its_narrow_registry_without_an_attes
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("creative-start");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("text-only", 0);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("creative-start");
     let input: StartTaskTurnInput = serde_json::from_value(json!({
@@ -1541,9 +562,8 @@ fn start_path_missing_exact_credential_is_a_persisted_dialogue_failure() {
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("direct-credential-fail");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("direct-credential-fail");
     let error = try_start_turn(
         &conversation_id,
@@ -1580,9 +600,8 @@ fn start_path_records_actual_model_failure_without_a_capability_probe() {
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("direct-model-fail");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("tool-error", 0);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("direct-model-fail");
     let error = try_start_turn(
@@ -1633,9 +652,8 @@ fn start_path_cancellation_aborts_actual_request_and_persists_cancelled_run() {
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("attestation-cancel");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("delayed-text", 20_000);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("attestation-cancel");
     let start_handle = std::thread::spawn({
@@ -1705,9 +723,8 @@ fn start_path_followup_reuses_session_and_resumes_after_child_exit() {
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("start-followup");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("text-only", 0);
     let (conversation_id, novel_id, first_turn_id) = seed_task_turn("followup-start");
 
@@ -1791,9 +808,8 @@ fn start_path_model_switch_uses_exact_directory_and_preserves_session_history() 
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("start-model-switch");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("text-only", 0);
     let (conversation_id, novel_id, first_turn_id) = seed_task_turn("model-switch-start");
     let first = start_turn(
@@ -1890,9 +906,8 @@ fn start_path_two_conversations_cancel_one_without_stopping_the_other() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let started_at = Instant::now();
-    let root = carrier_root();
     let scratch = ScratchDir::new("start-parallel");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let upstream = MockWorkbench::start("delayed-text", 2500);
     let (first_id, first_novel, first_turn) = seed_task_turn("parallel-a");
     let (second_id, second_novel, second_turn) = seed_task_turn("parallel-b");
@@ -2001,9 +1016,8 @@ fn canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts() {
     let _guard = START_PATH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = carrier_root();
     let scratch = ScratchDir::new("canonical-read-turn");
-    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let _environment = StartPathEnvironment::new(&scratch);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("canonical-read");
     let chapter_id = format!("chapter-canonical-read-{}", uuid::Uuid::new_v4());
     seed_chapter(&novel_id, &chapter_id);
@@ -2263,90 +1277,13 @@ fn r4_evidence_path() -> PathBuf {
     path
 }
 
-fn r4_runtime_root() -> PathBuf {
-    let Some(root) = std::env::var_os("DSH_RUNTIME_ROOT")
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-    else {
-        panic!("ANS_R4_RUNTIME_UNAVAILABLE");
-    };
-    let ready = [
-        "packages/examples/jsonrpc-demo/lib/bin.js",
-        "packages/sdk/protocol/lib/index.js",
-        "packages/core/agent/lib/index.js",
-        "packages/session/session-persistence-jsonl/lib/index.js",
-    ]
-    .iter()
-    .all(|marker| root.join(marker).is_file());
-    if !ready {
-        panic!("ANS_R4_RUNTIME_UNAVAILABLE");
-    }
-    root
-}
-
-fn r4_gateway() -> PathBuf {
-    std::env::var_os("ANS_R4_GATEWAY_BIN")
-        .map(PathBuf::from)
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| panic!("ANS_R4_GATEWAY_UNAVAILABLE"))
-}
-
-fn r4_file_sha256(path: &Path) -> String {
-    let bytes = std::fs::read(path).unwrap_or_else(|_| panic!("ANS_R4_CARRIER_UNVERIFIED"));
-    crate::repositories::large_text_repository::sha256_bytes(&bytes)
-}
-
-fn r4_verify_carrier(root: &Path, explicit_gateway: &Path) {
-    let matrix_path = root.join("VERSION_MATRIX.json");
-    let raw = std::fs::read_to_string(&matrix_path)
-        .unwrap_or_else(|_| panic!("ANS_R4_CARRIER_UNVERIFIED"));
-    if raw.len() > 1_048_576 {
-        panic!("ANS_R4_CARRIER_UNVERIFIED");
-    }
-    let matrix: serde_json::Value =
-        serde_json::from_str(&raw).unwrap_or_else(|_| panic!("ANS_R4_CARRIER_UNVERIFIED"));
-    let commit = matrix
-        .get("sourceCommit")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if commit != R4_PINNED_COMMIT || commit != DSH_SOURCE_COMMIT {
+fn r4_verify_carrier() {
+    let descriptor = task_runtime::describe_runtime();
+    if descriptor.source_commit != R4_PINNED_COMMIT || descriptor.source_commit != DSH_SOURCE_COMMIT {
         panic!("ANS_R4_CARRIER_PIN_MISMATCH");
     }
-    let recorded = matrix
-        .get("runtimeBinSha256")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if recorded.len() != 64
-        || !recorded
-            .chars()
-            .all(|character| character.is_ascii_hexdigit())
-    {
-        panic!("ANS_R4_CARRIER_BIN_MISMATCH");
-    }
-    let recorded_gateway = matrix
-        .get("gatewaySha256")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if recorded_gateway.len() != 64
-        || !recorded_gateway
-            .chars()
-            .all(|character| character.is_ascii_hexdigit())
-    {
-        panic!("ANS_R4_GATEWAY_MISMATCH");
-    }
-    let actual_bin = r4_file_sha256(&root.join("packages/examples/jsonrpc-demo/lib/bin.js"));
-    if !actual_bin.eq_ignore_ascii_case(recorded) {
-        panic!("ANS_R4_CARRIER_BIN_MISMATCH");
-    }
-    let carrier_gateway = root.join("gateway").join("novel-domain-gateway.exe");
-    if !carrier_gateway.is_file() {
-        panic!("ANS_R4_GATEWAY_MISMATCH");
-    }
-    let carrier_gateway_hash = r4_file_sha256(&carrier_gateway);
-    if !carrier_gateway_hash.eq_ignore_ascii_case(recorded_gateway)
-        || !carrier_gateway_hash.eq_ignore_ascii_case(&r4_file_sha256(explicit_gateway))
-    {
-        panic!("ANS_R4_GATEWAY_MISMATCH");
+    if descriptor.status != "available" {
+        panic!("ANS_R4_RUNTIME_UNAVAILABLE");
     }
 }
 
@@ -2498,7 +1435,7 @@ struct R4CloudEnvironment {
 }
 
 impl R4CloudEnvironment {
-    fn new(root: &Path, scratch: &ScratchDir, gateway: &Path, endpoint: &str, model: &str) -> Self {
+    fn new(scratch: &ScratchDir, endpoint: &str, model: &str) -> Self {
         let gateway_database = scratch.path().join("gateway.sqlite");
         let mut connection = Connection::open(&gateway_database)
             .unwrap_or_else(|_| panic!("ANS_R4_GATEWAY_DB_FAILED"));
@@ -2511,9 +1448,7 @@ impl R4CloudEnvironment {
         std::fs::create_dir_all(&roaming).unwrap_or_else(|_| panic!("ANS_R4_ISOLATION_FAILED"));
         Self {
             _guards: vec![
-                EnvironmentGuard::set("DSH_RUNTIME_ROOT", root),
                 EnvironmentGuard::set("ANS_TASK_WORKER_ROOT", scratch.path()),
-                EnvironmentGuard::set("DSH_GATEWAY_BIN", gateway),
                 EnvironmentGuard::set("DSH_E2E_GATEWAY_DB_PATH", &gateway_database),
                 EnvironmentGuard::set("LOCALAPPDATA", &local_app),
                 EnvironmentGuard::set("APPDATA", &roaming),
@@ -2592,9 +1527,7 @@ fn canonical_read_turn_cloud_profile() {
     let model = r4_model();
     let endpoint = r4_endpoint();
     let evidence_path = r4_evidence_path();
-    let root = r4_runtime_root();
-    let gateway = r4_gateway();
-    r4_verify_carrier(&root, &gateway);
+    r4_verify_carrier();
     let api_key = r4_api_key();
     let max_requests = r4_bounded("ANS_R4_MAX_REQUESTS", R4_MAX_REQUESTS, R4_MAX_REQUESTS);
     let timeout_seconds = r4_bounded("ANS_R4_TIMEOUT_SECONDS", 10, 20);
@@ -2606,7 +1539,7 @@ fn canonical_read_turn_cloud_profile() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let scratch = ScratchDir::new("r4-cloud-read");
-    let _environment = R4CloudEnvironment::new(&root, &scratch, &gateway, &endpoint, &model);
+    let _environment = R4CloudEnvironment::new(&scratch, &endpoint, &model);
     let database_path = crate::db::get_database_path();
     let rendered = database_path.to_string_lossy().to_ascii_lowercase();
     if !database_path.starts_with(scratch.path()) || rendered.contains("com.ainovelstudio.app") {
@@ -2946,4 +1879,111 @@ fn canonical_read_turn_cloud_profile() {
             names.join(",")
         );
     }
+}
+
+#[test]
+fn native_upstream_budget_rejects_seventh_send_redirect_and_identity_drift() {
+    let _guard = START_PATH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let scratch = ScratchDir::new("native-budget-boundary");
+    let budget_file = scratch.path().join("sends.txt");
+    let steal_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind steal target listener");
+    let steal_port = steal_listener.local_addr().unwrap().port();
+    let stolen = Arc::new(AtomicBool::new(false));
+    let stolen_flag = Arc::clone(&stolen);
+    std::thread::spawn(move || {
+        steal_listener.set_nonblocking(true).ok();
+        for _ in 0..40 {
+            if let Ok((mut stream, _)) = steal_listener.accept() {
+                stolen_flag.store(true, Ordering::SeqCst);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    });
+
+    let redirect_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind redirect upstream");
+    let redirect_port = redirect_listener.local_addr().unwrap().port();
+    let hits = Arc::new(Mutex::new(0u64));
+    let hits_counter = Arc::clone(&hits);
+    std::thread::spawn(move || {
+        for index in 0..6 {
+            let Ok((mut stream, _)) = redirect_listener.accept() else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            *hits_counter.lock().unwrap() += 1;
+            if index == 0 {
+                let header = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{steal_port}/stolen\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(header.as_bytes());
+            } else {
+                let body = r#"{"choices":[{"message":{"content":"ok"}}]}"#;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+            }
+        }
+    });
+
+    let frozen = format!("http://127.0.0.1:{redirect_port}/v1");
+    let _g1 = EnvironmentGuard::set("PROXY_UPSTREAM_REQUEST_BUDGET", "6");
+    let _g2 = EnvironmentGuard::set("PROXY_UPSTREAM_BUDGET_FILE", &budget_file);
+    let _g3 = EnvironmentGuard::set("PROXY_FROZEN_UPSTREAM", &frozen);
+    let _g4 = EnvironmentGuard::set("PROXY_FROZEN_MODEL", "frozen-model");
+
+    let cancel = AtomicBool::new(false);
+    let seq = Mutex::new(0u64);
+    let call_step = |model: &str| {
+        let mut guard = seq.lock().unwrap();
+        super::native_agent_transport::complete_chat_step(
+            &super::native_agent_transport::NativeChatStepRequest {
+                base_url: frozen.clone(),
+                api_key: "sk-test-key-never-logged".to_string(),
+                model: model.to_string(),
+                messages: vec![json!({"role": "user", "content": "ping"})],
+                tools: Vec::new(),
+                max_tokens: 64,
+                temperature: None,
+                top_p: None,
+                reasoning_effort: None,
+                request_timeout: Duration::from_secs(5),
+            },
+            None,
+            &mut guard,
+            &cancel,
+            Instant::now() + Duration::from_secs(10),
+        )
+    };
+
+    let redirected = call_step("frozen-model").expect_err("302 redirect must fail closed");
+    assert!(redirected.contains("HTTP 302"), "{redirected}");
+    assert!(!stolen.load(Ordering::SeqCst), "must never follow redirect");
+
+    for _ in 0..5 {
+        let ok = call_step("frozen-model").expect("within 6-send cap");
+        assert_eq!(ok.content, "ok");
+    }
+    assert_eq!(*hits.lock().unwrap(), 6);
+    assert_eq!(fs::read_to_string(&budget_file).unwrap().trim(), "6");
+
+    let wrong_model = call_step("other-model").expect_err("model drift must fail closed");
+    assert!(
+        wrong_model.contains("UPSTREAM_MODEL_MISMATCH"),
+        "{wrong_model}"
+    );
+    let seventh = call_step("frozen-model").expect_err("seventh request must fail closed");
+    assert!(
+        seventh.contains("UPSTREAM_BUDGET_EXCEEDED"),
+        "{seventh}"
+    );
+    assert_eq!(*hits.lock().unwrap(), 6);
 }

@@ -133,7 +133,7 @@ test(
     assert.match(trace, /npm run test:coverage/u);
     assert.match(trace, /cargo test --locked --workspace -- --test-threads=1/u);
     assert.match(trace, /npm run test:e2e\r?\n/u);
-    assert.match(trace, /npm run dsh:assets\r?\ntarget=\r?\n/u);
+    assert.doesNotMatch(trace, /dsh:assets/u);
     assert.match(trace, /npx tauri build --no-bundle\r?\ntarget=\r?\n/u);
     assert.match(trace, /npm run test:e2e:writing-faults -- --skip-build --app /u);
     const buildIndex = trace.indexOf('npx tauri build --no-bundle');

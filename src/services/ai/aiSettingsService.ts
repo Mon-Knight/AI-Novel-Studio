@@ -5,7 +5,7 @@ import type { AiGenerateOptions, AiSettings } from '../../types/ai';
 import { requireLoopbackAiBaseUrl, validateRealAiConfig } from './realAiClient';
 import { executeAiTask } from './aiExecutionPipeline';
 import { isAiRequestCancelled } from './aiCancellation';
-import { aiRequestPolicyService } from './aiRequestPolicyService';
+import { AiRequestPolicyError, aiRequestPolicyService } from './aiRequestPolicyService';
 import {
   getAiSettings,
   maskAiApiKey,
@@ -53,7 +53,24 @@ export const aiSettingsService = {
     if (normalized.localChapterModel?.enabled) {
       requireLoopbackAiBaseUrl(normalized.localChapterModel.baseUrl);
     }
-    await aiRequestPolicyService.configureGlobalPolicy(normalized);
+    try {
+      await aiRequestPolicyService.configureGlobalPolicy(normalized);
+    } catch (error) {
+      if (
+        error instanceof AiRequestPolicyError &&
+        error.code === 'AI_REQUEST_POLICY_CONFIG_CONFLICT'
+      ) {
+        await syncSessionModelCredentialsToNative(normalized);
+        saveAiSettings(normalized);
+      }
+      throw error;
+    }
+    await syncSessionModelCredentialsToNative(normalized);
+    saveAiSettings(normalized);
+  },
+
+  async saveConnectionTestResult(settings: AiSettings): Promise<void> {
+    const normalized = normalizeAiSettings(settings);
     await syncSessionModelCredentialsToNative(normalized);
     saveAiSettings(normalized);
   },

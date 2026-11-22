@@ -302,7 +302,7 @@
 
 .workbench-task-menu {
   position: fixed;
-  z-index: 70;
+  z-index: var(--z-modal);
   display: grid;
   width: 148px;
   padding: 4px;
@@ -420,7 +420,7 @@
 
 .workbench-task-creator-backdrop {
   position: absolute;
-  z-index: 40;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   padding: 28px;

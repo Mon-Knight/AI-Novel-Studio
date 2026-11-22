@@ -147,17 +147,14 @@ if ($NoBundle) {
     } else {
         # Scope this environment change to the verifier process; never redirect the deliverable.
         [Environment]::SetEnvironmentVariable("CARGO_TARGET_DIR", $null, "Process")
-        Invoke-VerificationStep -Name "npm run dsh:assets" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "dsh:assets")
+        $npx = Resolve-Executable -Candidates @("npx.cmd", "npx")
+        Invoke-VerificationStep -Name "local release EXE (no installer)" -WorkingDirectory $ProjectRoot -Executable $npx -Arguments @("tauri", "build", "--no-bundle")
         if ($script:Results[-1].Status -eq "PASS") {
-            $npx = Resolve-Executable -Candidates @("npx.cmd", "npx")
-            Invoke-VerificationStep -Name "local release EXE (no installer)" -WorkingDirectory $ProjectRoot -Executable $npx -Arguments @("tauri", "build", "--no-bundle")
-            if ($script:Results[-1].Status -eq "PASS") {
-                if (Test-Path -LiteralPath $releaseExecutable -PathType Leaf) {
-                    $localExeReady = $true
-                } else {
-                    Write-Host "[verify_project] Expected productName executable is missing: $releaseExecutable" -ForegroundColor Red
-                    Add-VerificationResult -Step "local executable location" -Status "FAIL"
-                }
+            if (Test-Path -LiteralPath $releaseExecutable -PathType Leaf) {
+                $localExeReady = $true
+            } else {
+                Write-Host "[verify_project] Expected productName executable is missing: $releaseExecutable" -ForegroundColor Red
+                Add-VerificationResult -Step "local executable location" -Status "FAIL"
             }
         }
     }

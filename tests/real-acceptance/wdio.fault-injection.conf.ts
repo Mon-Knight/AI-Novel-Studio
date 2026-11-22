@@ -27,7 +27,7 @@ export const config = createProductionCarrierConfig({
   defaultDriverPort: 4480,
   artifactFolder: 'fault-injection',
   specTimeoutMs: 40 * 60_000,
-  isolatedProfile: { dshRuntimeRootEnv: FAULT_INJECTION_ENV.dshRuntimeRoot },
+  isolatedProfile: true,
   driverPidEnv: FAULT_INJECTION_ENV.driverPid,
 });
 

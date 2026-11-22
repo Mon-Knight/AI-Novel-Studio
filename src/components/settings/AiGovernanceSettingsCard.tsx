@@ -43,9 +43,7 @@ function AiGovernanceSettingsCard({
               maxRequestsPerMinute: value.policy.maxRequestsPerMinute,
               maxConcurrentAiRequests: value.policy.maxConcurrentRequests,
               dailyTokenBudget: value.policy.dailyTokenBudget,
-              dailyCostBudgetUsd: value.policy.dailyCostBudgetUsd,
-              inputPricePerMillionTokens: value.policy.inputPricePerMillionTokens,
-              outputPricePerMillionTokens: value.policy.outputPricePerMillionTokens,
+              dailyCostBudgetUsd: undefined,
               budgetWarningPercent: value.policy.warningPercent,
             });
           }
@@ -59,9 +57,6 @@ function AiGovernanceSettingsCard({
       active = false;
     };
   }, [refreshVersion]);
-  const pricingReady =
-    settings.inputPricePerMillionTokens !== undefined &&
-    settings.outputPricePerMillionTokens !== undefined;
 
   return (
     <section className="detail-card settings-card" aria-labelledby="ai-governance-title">
@@ -106,21 +101,6 @@ function AiGovernanceSettingsCard({
           />
         </label>
         <label className="settings-field">
-          <span>每日成本硬预算（USD）</span>
-          <input
-            className="form-input"
-            type="number"
-            min={0.000001}
-            step={0.01}
-            value={settings.dailyCostBudgetUsd ?? ''}
-            placeholder={pricingReady ? '留空表示不限制' : '请先配置输入/输出单价'}
-            disabled={!pricingReady}
-            onChange={(event) =>
-              onChange({ dailyCostBudgetUsd: optionalPositive(event.target.value) })
-            }
-          />
-        </label>
-        <label className="settings-field">
           <span>预算提醒阈值（%）</span>
           <input
             className="form-input"
@@ -147,16 +127,9 @@ function AiGovernanceSettingsCard({
               {snapshot.tokenBudget ? ` / ${snapshot.tokenBudget.toLocaleString()}` : ''}
             </span>
             <span>
-              估算成本 ${snapshot.costUsedUsd.toFixed(6)} USD
-              {snapshot.costBudgetUsd ? ` / ${snapshot.costBudgetUsd.toFixed(2)} USD` : ''}
-            </span>
-            <span>
               最近一分钟 {snapshot.requestsLastMinute} 次 · 正在运行 {snapshot.activeRequests} 次
               {snapshot.usageMissingCount
                 ? ` · ${snapshot.usageMissingCount} 次缺少 Provider 用量`
-                : ''}
-              {snapshot.unpricedRequestCount
-                ? ` · ${snapshot.unpricedRequestCount} 次成本未定价`
                 : ''}
             </span>
           </>

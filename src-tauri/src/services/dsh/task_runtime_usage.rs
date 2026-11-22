@@ -171,13 +171,13 @@ pub fn usage_for_root(
          COALESCE(SUM(COALESCE(accounted_output_tokens,estimated_output_tokens)),0),
          COALESCE(SUM(COALESCE(accounted_cost_units,estimated_cost_units)),0),
          COALESCE(SUM(CASE
-           WHEN status='settled' AND accounted_cost_status='complete' AND EXISTS(
+           WHEN status='settled' AND accounted_cost_status IN ('complete','unpriced') AND EXISTS(
              SELECT 1 FROM tool_call_events e
              WHERE e.event_id=ai_request_reservations.reservation_id||'-root-usage'
                AND e.tool_name='dsh.request_usage' AND e.status='succeeded'
                AND json_extract(e.arguments_summary_json,'$.usageKnown')=1
            ) THEN 0
-           WHEN status='failed' AND accounted_cost_status='complete' THEN 0
+           WHEN status='failed' AND accounted_cost_status IN ('complete','unpriced') THEN 0
            ELSE 1
          END),0)
          FROM ai_request_reservations WHERE owner_id=?1",[owner],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
@@ -273,20 +273,21 @@ pub(crate) fn before_dispatch(
     {
         return Err("DSH_ROOT_TOKEN_BUDGET_EXHAUSTED".into());
     }
-    let (Some(ip), Some(op)) = (input_price, output_price) else {
-        return Err("DSH_ROOT_PRICING_REQUIRED: 执行成本未知，不能开始下一请求".into());
-    };
-    if !ip.is_finite() || !op.is_finite() || ip < 0.0 || op < 0.0 {
+    if let (Some(ip), Some(op)) = (input_price, output_price) {
+        if !ip.is_finite() || !op.is_finite() || ip < 0.0 || op < 0.0 {
+            return Err("DSH_ROOT_PRICING_INVALID".into());
+        }
+        let cost = (ip * estimated_input as f64 + op * estimated_output as f64) / 1_000_000.0;
+        if !cost.is_finite()
+            || usage.cost_usd + cost
+                > budget.map_or(input.max_cost_usd, |b| {
+                    b.max_cost_usd.min(input.max_cost_usd)
+                })
+        {
+            return Err("DSH_ROOT_COST_BUDGET_EXHAUSTED".into());
+        }
+    } else if input_price.is_some() != output_price.is_some() {
         return Err("DSH_ROOT_PRICING_INVALID".into());
-    }
-    let cost = (ip * estimated_input as f64 + op * estimated_output as f64) / 1_000_000.0;
-    if !cost.is_finite()
-        || usage.cost_usd + cost
-            > budget.map_or(input.max_cost_usd, |b| {
-                b.max_cost_usd.min(input.max_cost_usd)
-            })
-    {
-        return Err("DSH_ROOT_COST_BUDGET_EXHAUSTED".into());
     }
     Ok(())
 }

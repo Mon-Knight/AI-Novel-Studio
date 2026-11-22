@@ -108,6 +108,7 @@ export function WorkbenchAssetScopePanel({
   onRefresh,
   onOpen,
   onCollapse,
+  embedded = false,
   id = 'workbench-asset-scope-panel',
 }: {
   summary: WorkbenchAssetScopeSummary | null;
@@ -116,6 +117,8 @@ export function WorkbenchAssetScopePanel({
   onRefresh: () => void;
   onOpen: (path: string) => void;
   onCollapse?: () => void;
+  /** Omit duplicate panel heading when hosted inside the side panel view header. */
+  embedded?: boolean;
   /** The side panel hosts a second instance and must not reuse the composer's id. */
   id?: string;
 }) {
@@ -136,7 +139,7 @@ export function WorkbenchAssetScopePanel({
       <div className="workbench-asset-scope-sticky">
         <header className="workbench-asset-scope-header">
           <div className="workbench-asset-scope-heading">
-            <strong>创作上下文</strong>
+            {!embedded && <strong>创作上下文</strong>}
             <span className="workbench-asset-scope-counts" aria-live="polite">
               {summary
                 ? `可用 ${availableCount} 项 · 待准备 ${pendingCount} 项`

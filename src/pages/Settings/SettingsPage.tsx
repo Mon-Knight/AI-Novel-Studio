@@ -2,6 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { Bot, Database, Palette, Search, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
+import {
+  aiRequestPolicyService,
+  AiRequestPolicyError,
+  type AiRequestPolicySnapshot,
+} from '../../services/ai/aiRequestPolicyService';
+import { appLogger } from '../../services/observability/appLogger';
 import { getCredentialStorageCopy } from '../../services/ai/credentialStorageCopy';
 import type { AiSettings } from '../../types/ai';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -40,6 +46,17 @@ function isSettingsTab(value: string | null): value is SettingsTabKey {
   return SETTINGS_TABS.includes(value as SettingsTabKey);
 }
 
+function mergePolicySnapshot(current: AiSettings, policy: AiRequestPolicySnapshot): AiSettings {
+  return {
+    ...current,
+    maxRequestsPerMinute: policy.maxRequestsPerMinute,
+    maxConcurrentAiRequests: policy.maxConcurrentRequests,
+    dailyTokenBudget: policy.dailyTokenBudget,
+    dailyCostBudgetUsd: undefined,
+    budgetWarningPercent: policy.warningPercent,
+  };
+}
+
 function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
@@ -54,21 +71,53 @@ function SettingsPage() {
     null,
   );
   const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
-  const [runtimeSync, setRuntimeSync] = useState<{
-    status: 'idle' | 'syncing' | 'ready' | 'not_registered' | 'error';
-    message?: string;
-  }>({ status: 'idle' });
   const connectionAbortRef = useRef<AbortController | null>(null);
   const localHealthAbortRef = useRef<AbortController | null>(null);
-  const runtimeSyncSequenceRef = useRef(0);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  const applyPolicySnapshot = (policy: AiRequestPolicySnapshot) => {
+    setSettings((current) => mergePolicySnapshot(current, policy));
+  };
 
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
     let disposed = false;
+    void aiRequestPolicyService
+      .snapshotCurrent(settingsRef.current)
+      .then((snapshot) => {
+        if (!disposed && snapshot.policy) {
+          const syncedPolicy = snapshot.policy;
+          setSettings((current) => mergePolicySnapshot(current, syncedPolicy));
+        }
+      })
+      .catch((error: unknown) => {
+        appLogger.warn('[SettingsPage] initial global policy snapshot failed', error);
+      });
     void aiSettingsService
       .restoreSessionCredentials()
       .then(() => {
-        if (!disposed) setSettings(aiSettingsService.getSettings());
+        if (disposed) return;
+        const restored = aiSettingsService.getSettings();
+        setSettings((current) => ({
+          ...current,
+          apiKey: restored.apiKey || current.apiKey,
+          localChapterModel: current.localChapterModel
+            ? {
+                ...current.localChapterModel,
+                apiKey: restored.localChapterModel?.apiKey || current.localChapterModel.apiKey,
+              }
+            : restored.localChapterModel,
+          gateway: current.gateway
+            ? { ...current.gateway, apiKey: restored.gateway?.apiKey || current.gateway.apiKey }
+            : restored.gateway,
+          remoteWriter: current.remoteWriter
+            ? {
+                ...current.remoteWriter,
+                apiKey: restored.remoteWriter?.apiKey || current.remoteWriter.apiKey,
+              }
+            : restored.remoteWriter,
+        }));
       })
       .catch(() => {
         if (!disposed) setMessage(getCredentialStorageCopy().restoreFailed);
@@ -124,39 +173,38 @@ function SettingsPage() {
     }
   };
 
-  const runRuntimeSync = async (source: AiSettings) => {
-    const sequence = runtimeSyncSequenceRef.current + 1;
-    runtimeSyncSequenceRef.current = sequence;
-    setRuntimeSync({ status: 'syncing' });
-    const result = await aiSettingsService.syncRuntimeModel(source);
-    if (runtimeSyncSequenceRef.current !== sequence) return;
-    if (result.status === 'ready') {
-      setRuntimeSync({ status: 'ready' });
-      return;
-    }
-    if (result.status === 'skipped') {
-      setRuntimeSync({ status: 'idle' });
-      return;
-    }
-    setRuntimeSync({
-      status: result.status === 'error' ? 'error' : 'not_registered',
-      message: result.message,
-    });
-  };
-
   const handleSave = async (nextSettings?: AiSettings) => {
     const source = nextSettings ?? settings;
-    const final = { ...source, mockMode: source.runtimeMode === 'mock' };
+    const final = {
+      ...source,
+      mockMode: source.runtimeMode === 'mock',
+      dailyCostBudgetUsd: undefined,
+    };
     try {
       await aiSettingsService.saveSettings(final);
       setSettings(aiSettingsService.getSettings());
       setPolicySnapshotVersion((version) => version + 1);
       setMessage(getCredentialStorageCopy().saved);
-      // Registration is a separate bounded step; the save itself never blocks
-      // on Worker startup, and the result stays visible until the next change.
-      void runRuntimeSync(final);
     } catch (error) {
-      setMessage(`AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
+      const conflict =
+        error instanceof AiRequestPolicyError && error.code === 'AI_REQUEST_POLICY_CONFIG_CONFLICT';
+      if (conflict) {
+        const latest = await aiRequestPolicyService
+          .snapshotCurrent(final, true)
+          .catch(() => undefined);
+        if (latest?.policy) {
+          applyPolicySnapshot(latest.policy);
+          await aiSettingsService
+            .saveConnectionTestResult(mergePolicySnapshot(final, latest.policy))
+            .catch((persistError: unknown) =>
+              appLogger.warn('[SettingsPage] persist synced policy snapshot failed', persistError),
+            );
+        }
+        setPolicySnapshotVersion((version) => version + 1);
+        setMessage('全局策略已与数据库最新版本同步，模型配置已保存，请确认策略后再次点击保存。');
+      } else {
+        setMessage(`AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
+      }
     }
     setTimeout(() => setMessage(''), 2500);
   };
@@ -190,7 +238,11 @@ function SettingsPage() {
         lastTestOk: result.ok,
         lastTestMessage: result.message,
       };
-      await aiSettingsService.saveSettings(updated);
+      await aiSettingsService
+        .saveConnectionTestResult(updated)
+        .catch((persistError: unknown) =>
+          appLogger.warn('[SettingsPage] persist connection test result failed', persistError),
+        );
       setSettings(updated);
       setPolicySnapshotVersion((version) => version + 1);
       setMessage(result.ok ? `连接成功！（${latency}ms）` : `连接失败：${result.message}`);
@@ -288,32 +340,6 @@ function SettingsPage() {
                 onStopTest={() => connectionAbortRef.current?.abort()}
                 handleSave={handleSave}
               />
-              {runtimeSync.status !== 'idle' && (
-                <div
-                  className="settings-result is-info"
-                  data-testid="ai-runtime-sync-status"
-                  data-status={runtimeSync.status}
-                  role="status"
-                >
-                  <span>
-                    {runtimeSync.status === 'syncing'
-                      ? '正在将当前模型同步到 DeepSeek Runtime…'
-                      : runtimeSync.status === 'ready'
-                        ? 'DeepSeek Runtime 已注册当前模型。'
-                        : `DeepSeek Runtime 初始化未完成：${runtimeSync.message ?? '请重试。'}`}
-                  </span>
-                  {(runtimeSync.status === 'error' || runtimeSync.status === 'not_registered') && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      data-testid="ai-runtime-sync-retry"
-                      onClick={() => void runRuntimeSync(settings)}
-                    >
-                      重试 Runtime 初始化
-                    </button>
-                  )}
-                </div>
-              )}
               <LocalChapterModelSettingsCard
                 settings={settings}
                 onChange={update}
@@ -331,7 +357,7 @@ function SettingsPage() {
             <div data-testid="settings-tab-pane-governance">
               <PageHeader
                 title="AI 网关与流控治理"
-                description="配置调用预算阈值、请求速率并发限制、章节候选字数验收区间与安全审计规则。"
+                description="配置请求速率并发限制、每日 Token 预算、章节候选字数验收区间与安全审计规则。"
                 icon={ShieldCheck}
               />
               <AiGovernanceSettingsCard

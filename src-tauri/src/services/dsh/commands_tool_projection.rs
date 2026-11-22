@@ -1,12 +1,19 @@
 //! Public capability names projected from the actual loaded task registry.
 pub(super) fn canonical_workbench_tool(value: &str) -> Option<&'static str> {
     match value {
-        "domain.submit_candidate" | "mcp__novel__domain.submit_candidate" => {
-            Some("domain.submit_candidate")
-        }
+        "domain.submit_candidate"
+        | "domain_submit_candidate"
+        | "mcp__novel__domain.submit_candidate"
+        | "mcp__novel__domain_submit_candidate" => Some("domain.submit_candidate"),
         "submit_chapter_stage" | "mcp__novel__submit_chapter_stage" => Some("submit_chapter_stage"),
-        "novel.read_context" | "mcp__novel__novel.read_context" => Some("novel.read_context"),
-        "chapter.read_outline" | "mcp__novel__chapter.read_outline" => Some("chapter.read_outline"),
+        "novel.read_context"
+        | "novel_read_context"
+        | "mcp__novel__novel.read_context"
+        | "mcp__novel__novel_read_context" => Some("novel.read_context"),
+        "chapter.read_outline"
+        | "chapter_read_outline"
+        | "mcp__novel__chapter.read_outline"
+        | "mcp__novel__chapter_read_outline" => Some("chapter.read_outline"),
         "get_character_states" | "mcp__novel__get_character_states" => Some("get_character_states"),
         "search_memory" | "mcp__novel__search_memory" => Some("search_memory"),
         "generate_chapter" | "mcp__novel__generate_chapter" => Some("generate_chapter"),

@@ -110,7 +110,7 @@ struct TaskScope {
     chapter_id: Option<String>,
 }
 
-struct TaskSecurityContext {
+pub(crate) struct TaskSecurityContext {
     allowed_tools: Option<HashSet<String>>,
     scope: Option<TaskScope>,
     candidate_policy: Option<CandidatePolicy>,
@@ -533,6 +533,36 @@ fn list_tools_for_allowlist(allowed_tools: Result<Option<HashSet<String>>, Strin
     }
 }
 
+pub(crate) fn list_tools_for_allowlist_csv(allowed_csv: Option<&str>) -> Vec<Value> {
+    let parsed = match allowed_csv {
+        Some(csv) => resolve_allowed_tools(Ok(csv.to_string())),
+        None => Ok(None),
+    };
+    list_tools_for_allowlist(parsed)
+}
+
+pub(crate) fn build_in_process_security_context(
+    allowed_csv: Option<&str>,
+    novel_id: Option<&str>,
+    chapter_id: Option<&str>,
+    candidate_policy: Option<&str>,
+) -> Result<TaskSecurityContext, String> {
+    let allowed_tools = match allowed_csv {
+        Some(csv) => resolve_allowed_tools(Ok(csv.to_string()))?,
+        None => None,
+    };
+    let scope = resolve_task_scope(allowed_tools.is_some(), novel_id, chapter_id)?;
+    let candidate_policy = match candidate_policy {
+        Some(policy) => resolve_candidate_policy(Ok(policy.to_string()))?,
+        None => None,
+    };
+    Ok(TaskSecurityContext {
+        allowed_tools,
+        scope,
+        candidate_policy,
+    })
+}
+
 /// Dispatches one `tools/call`.
 pub fn call_tool(connection: &Connection, name: &str, arguments: &Value) -> Result<Value, String> {
     call_tool_with_security_context(
@@ -549,8 +579,24 @@ fn call_tool_with_security_context(
     arguments: &Value,
     security_context: Result<TaskSecurityContext, String>,
 ) -> Result<Value, String> {
+    call_tool_with_security_and_budget(
+        connection,
+        name,
+        arguments,
+        security_context,
+        &crate::task_budget::authorize,
+    )
+}
+
+pub(crate) fn call_tool_with_security_and_budget(
+    connection: &Connection,
+    name: &str,
+    arguments: &Value,
+    security_context: Result<TaskSecurityContext, String>,
+    authorize_budget: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<Value, String> {
     let security_context = security_context?;
-    crate::task_budget::authorize(name)?;
+    authorize_budget(name)?;
     if crate::secret_guard::contains_secret_value(arguments) {
         return Err("suspicious credential-like input rejected".to_string());
     }

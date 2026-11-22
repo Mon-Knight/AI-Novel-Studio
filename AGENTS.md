@@ -52,14 +52,14 @@ AI Novel Studio 是 **Windows 桌面端 AI 长篇小说创作工程系统**，�
 用户控制方向 → AI 分工生成 → 章节逐步采用 → 上下文持续沉淀
 ```
 
-| 层级      | 既有技术/职责                                                  |
-| --------- | -------------------------------------------------------------- |
-| 桌面壳    | Tauri 2（Rust crate 2.12.5；CLI/API 2.12.4）+ Rust             |
-| 前端      | React 18 + TypeScript 5 + Vite 5                               |
-| 路由/状态 | React Router 7（HashRouter）+ Zustand                          |
-| 持久化    | 桌面 SQLite；浏览器开发由 Service 提供 LocalStorage 回退       |
-| AI/运行时 | 统一服务层、受治理的 Provider 请求、固定版本 DSH Headless 载体 |
-| 提示词    | 独立 Markdown 模板与既有模板注册/编译服务                      |
+| 层级      | 既有技术/职责                                                        |
+| --------- | -------------------------------------------------------------------- |
+| 桌面壳    | Tauri 2（Rust crate 2.12.5；CLI/API 2.12.4）+ Rust                   |
+| 前端      | React 18 + TypeScript 5 + Vite 5                                     |
+| 路由/状态 | React Router 7（HashRouter）+ Zustand                                |
+| 持久化    | 桌面 SQLite；浏览器开发由 Service 提供 LocalStorage 回退             |
+| AI/运行时 | 统一服务层、受治理的 Provider 请求、纯 Rust 进程内原生 Agent Runtime |
+| 提示词    | 独立 Markdown 模板与既有模板注册/编译服务                            |
 
 具体依赖以清单与锁文件为准。未经明确讨论不得更换技术栈、引入依赖、升级 DSH 载体或完整 Fork/嵌入 Harness Web UI。
 
@@ -164,7 +164,6 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
    ```powershell
    Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
-   npm run dsh:assets
    npx tauri build --no-bundle
    ```
 

@@ -37,15 +37,15 @@ const RETRYABLE_PROVIDER_FAILURE_CODES = new Set([
 const MODEL_TOOL_FAILURE_REASONS: Record<string, string> = {
   NO_TOOL_CALL: '模型没有返回原生工具调用',
   INVALID_TOOL_CALL: '模型返回的工具名称、参数或结束状态不符合验证要求',
-  PROVIDER_NOT_LOADED: '当前 Runtime 未加载该模型的 Provider',
+  PROVIDER_NOT_LOADED: '当前模型服务提供方未就绪',
   PROVIDER_ERROR: '模型服务在验证请求中返回错误',
   PROBE_ABORTED: '验证请求已中止',
   PROBE_TIMEOUT: '验证请求超时',
-  PROBE_INTERNAL_ERROR: 'Runtime 无法完成验证请求',
-  PROBE_TRANSPORT_FAILED: '验证请求与 Runtime 的通信失败',
-  INVALID_ATTESTATION_EVIDENCE: 'Runtime 返回的验证证据格式无效',
+  PROBE_INTERNAL_ERROR: '本地无法完成验证请求',
+  PROBE_TRANSPORT_FAILED: '验证请求通信失败',
+  INVALID_ATTESTATION_EVIDENCE: '返回的验证证据格式无效',
   ATTESTATION_IDENTITY_MISMATCH: '验证证据与本回合固定模型不一致',
-  INVALID_POSITIVE_EVIDENCE: 'Runtime 返回的成功证据不完整或已失效',
+  INVALID_POSITIVE_EVIDENCE: '返回的成功证据不完整或已失效',
 };
 
 export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
@@ -193,7 +193,7 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
     return {
       layer: 'model',
       code: code || 'MODEL_TOOL_CALLING_NOT_VERIFIED',
-      message: '所选模型未通过当前 Runtime 的工具调用能力验证。' + detail,
+      message: '所选模型未通过工具调用能力验证。' + detail,
       hint: '可重试验证，或在模型设置中选择支持原生工具调用的模型后再发送。',
     };
   }
@@ -230,7 +230,7 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       layer: 'service',
       code: code || 'WORKBENCH_SERVICE_FAILED',
       message: message.trim() || '生成服务调用失败。',
-      hint: '检查设置中心的模型、API Key 与桌面 DSH 运行时，然后重试。',
+      hint: '请检查设置中心的模型地址、模型名称与 API 密钥，然后重试。',
     };
   }
   return {

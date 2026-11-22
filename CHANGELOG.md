@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+- **去 DSH 化：切换为纯 Rust 进程内原生 Agent 执行引擎（2026-11-22，非版本任务）**：
+  - 将 `novel-domain-gateway` 作为 Rust 库直接内联进 `src-tauri` 主程序，新增纯 Rust 原生传输、SSE/JSON 工具流拼装与多步工具调用循环（`native_agent_transport.rs`、`native_agent_sse.rs`、`native_agent_loop.rs`、`native_agent_evidence.rs`），`dsh_start_task_turn`、`dsh_prepare_chapter`、`dsh_describe_runtime` 与 `dsh_list_current_plugins` 全部在 Rust 进程内直接执行，保留原有 IPC 接口、SQLite 事实表、Canonical 4 只读工具、Writing SubAgent 分阶段写章、任务预授权与 Safe Apply 事务边界。
+  - 彻底移除外置 465 MB `dsh-runtime.zip`、首次启动 1.4 GB 解包流程（`unpack-payload.mjs`）、本地 Node 代理子进程（`model-proxy.mjs`）、`cordis.yml` / `ans-task-server-template.mjs` 及 stdio MCP 子进程监管（`launcher.rs` / `supervisor.rs` / `governed_proxy.rs`），并在数据库启动恢复后异步自动清理数据目录遗留的 `dsh-runtime`、`dsh-task-workers` 与临时解包锁；移除治理页「每日成本硬预算（USD）」模块与后端 `DSH_ROOT_PRICING_REQUIRED` 强制计价门禁，移除工作台「当前模型尚未注册到 Runtime」假警报、设置页「同步到 DeepSeek Runtime」残留状态条及旧 DSH 报错文案；补齐下划线工具名投影映射并将任务预授权表单默认请求上限对齐至单章全链路所需的 16 次；同步精简 `tauri.conf.json`、`build.rs`、桌面 E2E / 故障注入运行器与 CI 构建工作流。
+
+- **设置页策略冲突、模型列表/插件长转圈及创作上下文浮层遮挡修复（2026-11-22，非版本任务）**：
+  - 修复在未打开「网关与治理」页签时于「AI 模型服务」页签点击「测试当前模型」或「保存设置」报错 `连接失败：AI 请求全局策略已被其他进程更新，请刷新后重试。`：设置页加载时即同步 SQLite 全局策略版本与配置字段，`reserve_ai_request` 首次自举 `revision=1` 时同步记录观测基线，测试连接结果持久化与全局策略写库解耦，且在发生策略版本冲突时先保留已编辑的模型卡片并自动重新对齐数据库最新策略版本。
+  - 修复桌面端首次或升级后解包 DSH 运行时在 `%LOCALAPPDATA%` 残留 0 字节 `.dsh-runtime.lock` 时阻塞 10 分钟导致工作台长期显示「正在刷新模型列表」和「正在读取 Runtime Registry」：解包锁记录进程 PID 与时间戳并自动清理僵尸锁和孤立临时目录，新增校验 `JUNCTIONS.json` 后的 Gateway 增量快速更新路径，Windows 子进程静默启动，打开插件面板复用合规探测门禁。
+  - 修复工作台右下角模型选择器继续展示已在设置中移除的模型：当设置配置存在时，`listSelectableWorkbenchModels` 按已保存的模型配置与当前模式过滤运行时目录条目；对于历史会话遗留且设置中已不存在的 API 模型，保留只读展示并标注`（未在设置中配置）`且禁止新选。
+  - 修复工作台右侧边栏样式与层叠遮挡：将「当前插件」的固定按钮收纳进标题栏内与关闭按钮并排对齐；「创作上下文」嵌入右侧边栏时不重复渲染标题，并将 `.workbench-asset-scope-sticky` 改为自然文档流滚动作用于全局避免悬浮卡片半截遮挡资产详情；同时通过 `MutationObserver` 动态追踪任务头高度保证侧边栏不遮挡任务头，并将任务菜单与新建任务弹窗层级提升至侧边栏之上。
+
+- **v3.7.0 全套桌面自动测试连续收尾通过（2026-11-22，非版本任务）**：修复 `tests/e2e/workbench-task-directory.spec.ts` 在导入完成提示窗悬停停表时的显式确认关闭逻辑，并在 `scripts/e2e/run-writing-fault-injection.mjs` 中新增动态可用端口选择以避开 Windows 保留端口冲突；在本地提交 `26256ea` 上完成一次不中断的 **29/29 桌面功能 E2E（47 用例，`686.66s`）** 与 **8/8 生产 EXE 写作故障注入（`130.45s`）** 全量通过验收（R4 云端 live 与文学效果仍独立保持未验证，详见[实施记录](reports/unified-agent-2026-11-11/implementation.md#10-2026-11-22-全套桌面自动测试一次性收尾验收)）。
+
 - **开发完成汇报规范优化（2026-11-22，非版本任务）**：在根 `AGENTS.md` 第 7.7 节、`docs/agent-workflow.md`、`.github/instructions/agent-behavior.instructions.md` 与 `.cursor/rules/completion-report.mdc` 同步规定完成汇报采用“先白话结论与直观效果、后精简技术留档”的通俗表达，避免堆砌底层术语与冗长命令参数。
 
 - **测试与验证流水线提速（2026-11-22，非版本任务）**：在不放宽任何覆盖率阈值、安全门禁、Rust 串行验收或真实桌面 E2E 边界的前提下，完成测试与构建执行优化（应用版本保持 `3.7.0`）：

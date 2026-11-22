@@ -22,11 +22,6 @@ export const E2E_BUILD_INPUT_PATHS = [
   'rust-toolchain.toml',
 ] as const;
 
-const CARRIER_RESOURCE_PATHS = [
-  'src-tauri/bin/unpack-payload.mjs',
-  'src-tauri/bin/dsh-runtime.zip',
-] as const;
-
 const TEST_ONLY_PATH =
   /(?:\.(?:test|spec)\.(?:[cm]?js|ts|tsx)|(?:^|\/)(?:tests|[^/]+_tests)\.rs)$/u;
 
@@ -97,14 +92,6 @@ export function computeE2eBuildInputFingerprint(
         hash.update(`file:${relativePath}:${sha256File(fullPath)}\n`);
       } else {
         hash.update(`absent:${relativePath}\n`);
-      }
-    }
-    for (const carrierPath of CARRIER_RESOURCE_PATHS) {
-      const fullPath = path.join(workspaceRoot, carrierPath);
-      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-        hash.update(`carrier:${carrierPath}:${sha256File(fullPath)}\n`);
-      } else {
-        hash.update(`carrier-absent:${carrierPath}\n`);
       }
     }
     return hash.digest('hex');

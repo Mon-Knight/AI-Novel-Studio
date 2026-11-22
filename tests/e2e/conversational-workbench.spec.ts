@@ -104,13 +104,15 @@ describe('conversational creative workbench', () => {
       pluginStatuses.every((status) => ['loaded', 'failed', 'unavailable'].includes(status)),
     ).toBe(true);
     // v3.7.0 的 ZCode 侧边面板把插件页作为标签视图打开，除“关闭当前插件”外还保留
-    // “返回标签列表”的导航键；这里锁定面板内只允许这两个控制项，不得出现插件生命周期管理控件。
+    // “返回标签列表”和“固定侧栏”面板壳控件；这里锁定面板内只允许这三个壳控件，不得出现插件生命周期管理控件。
     const pluginButtons = await pluginPanel.$$('button');
     const pluginButtonLabels: string[] = [];
     for (const button of pluginButtons) {
       pluginButtonLabels.push((await button.getAttribute('aria-label')) ?? '');
     }
-    expect([...pluginButtonLabels].sort()).toEqual(['关闭当前插件', '返回标签列表'].sort());
+    expect([...pluginButtonLabels].sort()).toEqual(
+      ['关闭当前插件', '固定参考面板', '返回标签列表'].sort(),
+    );
     expect(await pluginPanel.$('[data-testid="workbench-plugin-close"]').isExisting()).toBe(true);
     expect(await pluginPanel.$('[data-testid="workbench-side-back"]').isExisting()).toBe(true);
     const pluginText = await pluginPanel.getText();

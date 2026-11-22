@@ -1,50 +1,8 @@
-//! Novel Domain Gateway — AI Novel Studio v3.1.0 (workspace member crate).
-//!
-//! An MCP stdio server (protocol 2024-11-05, JSON-RPC 2.0 line frames) that the
-//! DSH runtime spawns via `@deepseek-ai/dsh-mcp-client` (`serverName: novel`).
-//! It opens the novel SQLite READ-ONLY and serves scoped read tools plus a
-//! candidate-only validation sink. The sink returns model-authored candidate
-//! text for the ANS ResultArtifact pipeline; it never writes chapters or any
-//! other business fact. The gateway never runs migrations, recovery, or writes;
-//! stdout carries only protocol frames and diagnostics go to stderr.
-//! Credential-like inputs and outputs are rejected (mirrors ai_fact_security;
-//! see secret_guard.rs).
-//!
-//! Deviation note: the task book planned a package [[bin]]; a workspace member
-//! crate is used instead so the app's bin crate stays untouched. The binary
-//! lands at src-tauri/target/debug/novel-domain-gateway.exe.
-//!
-//! Usage:
-//!   novel-domain-gateway --db <novel.sqlite>           # MCP stdio loop
-//!   novel-domain-gateway --db <novel.sqlite> --smoke   # one-shot self check
+//! Novel Domain Gateway — MCP stdio CLI entry over `novel_domain_gateway` library.
 
-mod secret_guard;
-#[cfg(test)]
-mod sql_column_contract;
-mod stage_submission;
-mod tool_allowlist;
-mod tools;
-mod task_budget;
-mod domain_candidate;
-#[path="../../shared/summary_application_policy.rs"]
-mod summary_context_policy;
-
-use rusqlite::{Connection, OpenFlags};
+use novel_domain_gateway::{handle_mcp_method, open_readonly, tools, SERVER_VERSION};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-
-const PROTOCOL_VERSION: &str = "2024-11-05";
-const SERVER_NAME: &str = "novel-domain-gateway";
-const SERVER_VERSION: &str = "0.1.0";
-const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
-
-fn open_readonly(path: &str) -> Result<Connection, String> {
-    Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|error| format!("open read-only failed: {}", error))
-}
 
 fn main() {
     let mut db_path: Option<String> = None;
@@ -95,17 +53,17 @@ fn main() {
         }
         let request: Value = match serde_json::from_str(trimmed) {
             Ok(value) => value,
-            Err(_) => continue, // malformed frames are ignored per JSON-RPC
+            Err(_) => continue,
         };
         let id = match request.get("id") {
             Some(id) if !id.is_null() => id.clone(),
-            _ => continue, // notification (e.g. notifications/initialized)
+            _ => continue,
         };
         let method = match request.get("method").and_then(Value::as_str) {
             Some(method) => method,
             None => continue,
         };
-        let frame = match handle_method(method, request.get("params"), &connection) {
+        let frame = match handle_mcp_method(method, request.get("params"), &connection) {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err(message) => {
                 json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}})
@@ -121,61 +79,10 @@ fn main() {
     eprintln!("stdin closed, exiting");
 }
 
-fn handle_method(
-    method: &str,
-    params: Option<&Value>,
-    connection: &Connection,
-) -> Result<Value, String> {
-    match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {"tools": {"listChanged": false}},
-            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
-        })),
-        "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tools::tool_list()})),
-        "tools/call" => {
-            let params = params.ok_or_else(|| "missing params".to_string())?;
-            let name = params
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "missing tool name".to_string())?;
-            let arguments = params
-                .get("arguments")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
-            let result = match tools::call_tool(connection, name, &arguments) {
-                Ok(payload) => {
-                    if secret_guard::contains_secret_value(&payload) {
-                        return Err(
-                            "tool output contains credential-like content; rejected".to_string()
-                        );
-                    }
-                    let text =
-                        serde_json::to_string(&payload).map_err(|error| error.to_string())?;
-                    if text.len() > MAX_OUTPUT_BYTES {
-                        return Err("tool output exceeds 2 MiB cap".to_string());
-                    }
-                    json!({
-                        "content": [{"type": "text", "text": text}],
-                        "structuredContent": payload,
-                        "isError": false
-                    })
-                }
-                Err(message) => json!({
-                    "content": [{"type": "text", "text": json!({"error": message}).to_string()}],
-                    "isError": true
-                }),
-            };
-            Ok(result)
-        }
-        other => Err(format!("method not found: {}", other)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     fn fixture_connection() -> Connection {
         let connection = Connection::open_in_memory().expect("open fixture database");
@@ -203,7 +110,7 @@ mod tests {
                 "candidateText": "雨过天青。\n城门缓缓打开。"
             }
         });
-        let result = handle_method("tools/call", Some(&params), &connection)
+        let result = handle_mcp_method("tools/call", Some(&params), &connection)
             .expect("tool call should succeed");
 
         assert_eq!(result["isError"], false);
@@ -231,7 +138,7 @@ mod tests {
                 "candidateText": "候选正文"
             }
         });
-        let result = handle_method("tools/call", Some(&params), &connection)
+        let result = handle_mcp_method("tools/call", Some(&params), &connection)
             .expect("domain rejection is returned as an MCP tool result");
 
         assert_eq!(result["isError"], true);
