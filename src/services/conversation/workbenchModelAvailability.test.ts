@@ -174,9 +174,8 @@ test('directory state does not block sending a configured model or silently repl
     refreshing: false,
   });
   assert.equal(missing.canSend, true);
-  assert.equal(missing.status, 'not_registered');
-  assert.match(missing.message, /直接发送/);
-  assert.match(missing.message, /尚未注册/);
+  assert.equal(missing.status, 'ready');
+  assert.equal(missing.message, '');
 
   const lockedMissing = getWorkbenchModelAvailability({
     plugins,
@@ -185,7 +184,8 @@ test('directory state does not block sending a configured model or silently repl
     selectionLocked: true,
   });
   assert.equal(lockedMissing.canSend, true);
-  assert.match(lockedMissing.message, /直接发送/);
+  assert.equal(lockedMissing.status, 'ready');
+  assert.equal(lockedMissing.message, '');
 
   const localFallback = getWorkbenchModelAvailability({
     plugins: [
@@ -228,7 +228,8 @@ test('directory state does not block sending a configured model or silently repl
   });
   assert.equal(fixedTaskModel.canSend, true);
   assert.equal(fixedTaskModel.fallbackOption, undefined);
-  assert.match(fixedTaskModel.message, /直接发送/);
+  assert.equal(fixedTaskModel.status, 'ready');
+  assert.equal(fixedTaskModel.message, '');
 
   const available = getWorkbenchModelAvailability({
     plugins,

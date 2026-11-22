@@ -1,4 +1,4 @@
-import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useWorkbenchFocus } from '../../../components/layout/workbenchFocus';
 import { useWorkbenchOverlayInset } from './useWorkbenchOverlayInset';
 import type { WorkbenchSidePanelState, WorkbenchSidePanelView } from './useWorkbenchSidePanel';
@@ -19,18 +19,26 @@ function focusWorkbenchComposerInput() {
 export function useWorkbenchPageChrome({
   sidePanel,
   selectedConversationId,
+  taskCreatorOpen = false,
   setDraft,
   setStartupDraft,
 }: {
-  sidePanel: Pick<WorkbenchSidePanelState, 'view' | 'open' | 'toggle'>;
+  sidePanel: Pick<WorkbenchSidePanelState, 'view' | 'presentation' | 'open' | 'toggle' | 'close'>;
   selectedConversationId: string;
+  taskCreatorOpen?: boolean;
   setDraft: Dispatch<SetStateAction<string>>;
   setStartupDraft: Dispatch<SetStateAction<string>>;
 }) {
   const pageRef = useRef<HTMLDivElement>(null);
   useWorkbenchOverlayInset(pageRef, selectedConversationId || 'startup');
   const { focusMode, toggleFocusMode, exitFocusMode } = useWorkbenchFocus();
-  const { view, open, toggle } = sidePanel;
+  const { view, presentation, open, toggle, close } = sidePanel;
+
+  useEffect(() => {
+    if (taskCreatorOpen && view && presentation === 'transient') {
+      close();
+    }
+  }, [close, presentation, taskCreatorOpen, view]);
 
   const openReference = useCallback(
     (next: WorkbenchSidePanelView) => {

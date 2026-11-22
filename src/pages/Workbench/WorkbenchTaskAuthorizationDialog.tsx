@@ -147,8 +147,8 @@ export function WorkbenchTaskAuthorizationDialog({
             <p>
               有效期至：{grant.expiresAt}；预算：{grant.spec.budget.maxRequests} 次模型请求 /{' '}
               {grant.spec.budget.maxToolCalls} 次工具调用 / {grant.spec.budget.maxRevisions} 次修订
-              / {grant.spec.budget.maxTokens} Token / ${grant.spec.budget.maxCostUsd} /{' '}
-              {grant.spec.budget.maxWallClockMs / 60000} 分钟。
+              / {grant.spec.budget.maxTokens} Token / {grant.spec.budget.maxWallClockMs / 60000}{' '}
+              分钟。
             </p>
             {grant.revokedAt && (
               <p>

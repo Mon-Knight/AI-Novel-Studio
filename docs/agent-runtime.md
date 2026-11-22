@@ -261,7 +261,7 @@ Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少�
 
 ```text
 桌面 AI 入口 → TaskConversation / ConversationTurn + 冻结模型
-→ 原生协调器 → 阶段 allowlist + 受控子任务 + 固定 DSH
+→ 原生协调器 → 阶段 allowlist + 受控子任务 + 纯 Rust 进程内 Agent 循环 / 内联 Gateway
 → AiTask / Attempt / Snapshot / ResultArtifact + 校验
 → 等待人工决定，或原生任务预授权复验
 → SQLite 原子应用、采用与上下文更新 + 回执

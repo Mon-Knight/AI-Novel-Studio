@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkbenchOverlayInset } from './useWorkbenchOverlayInset';
 
@@ -57,5 +57,37 @@ describe('useWorkbenchOverlayInset', () => {
       observers[0]?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
     });
     expect(setProperty).not.toHaveBeenCalled();
+  });
+
+  it('updates --workbench-panel-top when workbench-task-header mounts after initial render', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.getAttribute('data-testid') === 'workbench-task-header') {
+        return { top: 40, bottom: 96, left: 0, right: 1200, width: 1200, height: 56 } as DOMRect;
+      }
+      if (this.getAttribute('data-testid') === 'page') {
+        return { top: 40, bottom: 800, left: 0, right: 1200, width: 1200, height: 760 } as DOMRect;
+      }
+      return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 } as DOMRect;
+    });
+    function DelayedHeaderHarness({ showHeader }: { showHeader: boolean }) {
+      const ref = useRef<HTMLDivElement>(null);
+      useWorkbenchOverlayInset(ref, 'startup');
+      return (
+        <div ref={ref} data-testid="page">
+          {showHeader && <header data-testid="workbench-task-header">head</header>}
+        </div>
+      );
+    }
+    const view = render(<DelayedHeaderHarness showHeader={false} />);
+    const page = screen.getByTestId('page');
+    expect(page.style.getPropertyValue('--workbench-panel-top')).toBe('0px');
+    await act(async () => {
+      view.rerender(<DelayedHeaderHarness showHeader={true} />);
+    });
+    await waitFor(() => {
+      expect(page.style.getPropertyValue('--workbench-panel-top')).toBe('56px');
+    });
   });
 });

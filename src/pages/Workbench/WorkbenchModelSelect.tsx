@@ -73,7 +73,13 @@ export function WorkbenchModelSelect({
         disabled={disabled}
         onChange={(event) => onChange?.(event.target.value)}
       >
-        {selectedMissing && <option value={selectedValue}>{selectedModel.modelId}</option>}
+        {selectedMissing && (
+          <option value={selectedValue} disabled={selectedModel.providerId !== 'mock'}>
+            {selectedModel.providerId === 'mock'
+              ? selectedModel.modelId
+              : `${selectedModel.modelId}（未在设置中配置）`}
+          </option>
+        )}
         {choices.map((option) => (
           <option key={option.pluginId} value={option.key}>
             {option.name}

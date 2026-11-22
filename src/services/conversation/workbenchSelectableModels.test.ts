@@ -144,3 +144,25 @@ test('static rendering without browser storage retains runtime choices without r
   assert.equal(typeof localStorage, 'undefined');
   assert.equal(listSelectableWorkbenchModels([loaded])[0].key, 'openai_compatible:A');
 });
+
+test('excludes unconfigured dsh-runtime-health models when settings are known', () => {
+  const unconfiguredGemini: CurrentPluginProjection = {
+    ...loaded,
+    id: 'model:openai_compatible:gemini-3.7-flash-high',
+    name: 'gemini-3.7-flash-high',
+  };
+  const choices = listSelectableWorkbenchModels([loaded, unconfiguredGemini], settings);
+  assert.deepEqual(
+    choices.map((choice) => choice.key),
+    ['openai_compatible:A', 'deepseek-official:B'],
+  );
+  assert.deepEqual(
+    listSelectableWorkbenchModels([unconfiguredGemini], {
+      ...settings,
+      baseUrl: '',
+      modelName: '',
+      savedApiModels: [],
+    }),
+    [],
+  );
+});

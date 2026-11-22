@@ -426,7 +426,20 @@ function fileSha256(deps, file) {
 
 export function inspectCarrier(env, deps = createDefaultDeps()) {
   const root = String(env.DSH_RUNTIME_ROOT ?? '').trim();
-  if (!root || !deps.isDirectory(root)) return { ok: false, reason: 'runtime_root_missing' };
+  if (!root) {
+    const tauriManifest = path.join(deps.repoRoot, 'src-tauri', 'Cargo.toml');
+    const gatewayManifest = path.join(deps.repoRoot, 'src-tauri', 'gateway', 'Cargo.toml');
+    if (!deps.isFile(tauriManifest) || !deps.isFile(gatewayManifest)) {
+      return { ok: false, reason: 'runtime_root_missing' };
+    }
+    return {
+      ok: true,
+      runtimeRoot: 'builtin://ans-native-runtime',
+      gatewayBin: 'builtin://novel-domain-gateway',
+      sourceCommit: PINNED_SOURCE_COMMIT,
+    };
+  }
+  if (!deps.isDirectory(root)) return { ok: false, reason: 'runtime_root_missing' };
   for (const marker of RUNTIME_MARKERS) {
     if (!deps.isFile(path.join(root, marker))) {
       return { ok: false, reason: 'runtime_root_incomplete' };

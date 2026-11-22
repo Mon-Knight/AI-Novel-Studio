@@ -405,6 +405,7 @@ describe('Writing SubAgent fault-injection acceptance (E-4b)', () => {
         temperature: 0.7,
         maxTokens: 8000,
         timeoutSeconds: 120,
+        maxRequestsPerMinute: 120,
       },
     );
     await setWritingSubAgentFlag(true);

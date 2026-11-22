@@ -299,11 +299,16 @@
 }
 
 .workbench-asset-scope-sticky {
-  position: sticky;
-  z-index: 2;
-  top: 0;
+  position: static;
   padding: 10px 12px 8px;
   border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+}
+
+.workbench-composer-extras .workbench-asset-scope-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--color-bg-secondary);
 }
 
@@ -499,7 +504,8 @@
 }
 
 .workbench-side-view-body .workbench-asset-scope-sticky {
-  background: var(--color-bg-sidebar);
+  padding: 0 0 10px;
+  background: transparent;
 }
 
 .workbench-side-view-body .workbench-asset-scope-details {

@@ -1,5 +1,9 @@
-//! One isolated governed carrier stage; the root coordinator owns all transitions.
+//! One isolated governed native stage; the root coordinator owns all transitions.
+use crate::services::dsh::commands::gateway_database_path;
+use crate::services::dsh::native_agent_loop::{run_native_turn, NativeTurnParams};
+use crate::services::dsh::native_agent_transport::NativePolicySpec;
 use super::*;
+use std::time::Instant;
 
 pub(in super::super) fn execute(
     input: StartTaskTurnInput,
@@ -16,7 +20,16 @@ pub(in super::super) fn execute(
     chapter_recovery: &mut ChapterLengthRecovery,
 ) -> Result<TaskRuntimeResult, String> {
     let turn_error = Arc::new(Mutex::new(None));
-    let runtime = process.runtime.clone();
+    let allowed_tools = turn_allowed_tools(&input).to_string();
+    let staged_input = input
+        .execution
+        .as_ref()
+        .and_then(|r| r.staged.as_ref())
+        .map(|_| {
+            let mut cloned = input.clone();
+            cloned.api_key.clear();
+            Arc::new(cloned)
+        });
     *projection
         .lock()
         .map_err(|_| "DSH 事件投影锁失败".to_string())? = Some(ProjectionTarget {
@@ -24,21 +37,11 @@ pub(in super::super) fn execute(
         run_id: run_id.clone(),
         turn_error: turn_error.clone(),
         notifier: notifier.clone(),
-        request_identity: process._policy_guard.request_identity_reader(),
-        allowed_tools: turn_allowed_tools(&input).to_string(),
-        staged_input: input
-            .execution
-            .as_ref()
-            .and_then(|r| r.staged.as_ref())
-            .map(|_| {
-                let mut cloned = input.clone();
-                cloned.api_key.clear();
-                Arc::new(cloned)
-            }),
+        request_identity: process.request_identity.clone(),
+        allowed_tools: allowed_tools.clone(),
+        staged_input: staged_input.clone(),
     });
-    ensure_runtime_initialized_with_timeout(&input, &runtime, |cap| {
-        chapter_recovery.timeout(cap, &cancel)
-    })?;
+
     let route = selected_model_route(&input)?;
     let max_tokens = if is_chapter_writing_turn(&input) {
         super::chapter_gate::capped_output_tokens(&input)
@@ -49,7 +52,16 @@ pub(in super::super) fn execute(
             .and_then(Value::as_u64)
             .unwrap_or(8000)
     };
-    let before = runtime.snapshot(&session_id).unwrap_or_default();
+    let temperature = input
+        .model_snapshot
+        .pointer("/options/temperature")
+        .and_then(Value::as_f64);
+    let top_p = input
+        .model_snapshot
+        .pointer("/options/topP")
+        .and_then(Value::as_f64);
+    let reasoning_effort = Some(workbench_reasoning_effort(&input).to_string());
+
     let mut turn_prompt =
         chapter_recovery.prompt(&input, protocol_recovery_retry, previous_terminal_runs);
     if input.task_kind == "creative_dialogue" {
@@ -66,59 +78,101 @@ pub(in super::super) fn execute(
             ));
         }
     }
-    let prompt_result = runtime
-        .request(
-            "session/prompt",
-            Some(json!({
-                "sessionId":session_id,
-                "contentBlocks":[{"type":"text","text":turn_prompt}],
-                "route":{
-                    "provider":route.harness_provider,
-                    "model":route.model,
-                    "maxTokens":max_tokens,
-                    "reasoningEffort":workbench_reasoning_effort(&input)
-                }
-            })),
-            chapter_recovery.timeout(Duration::from_secs(30), &cancel)?,
-        )
-        .map_err(|error| safe_supervisor_error(&runtime, "session/prompt 失败", &error))?;
-    if prompt_result.get("sessionId").and_then(Value::as_str) != Some(session_id.as_str())
-        || prompt_result.get("agentId").and_then(Value::as_str) != Some(session_id.as_str())
-    {
-        return Err("DSH 持久 Session/Agent 身份响应不匹配".to_string());
-    }
-    let session_lifecycle = prompt_result
-        .get("lifecycle")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    if let Some(lifecycle) = session_lifecycle.as_deref() {
-        if !matches!(lifecycle, "created" | "continued" | "resumed") {
-            return Err(format!("DSH Session 生命周期无效: {}", lifecycle));
+
+    let upstream_base = process
+        .mock_base_url()
+        .unwrap_or_else(|| route.base_url.clone());
+    let pricing = input.model_snapshot.get("pricing");
+    let owner_hash = large_text_repository::sha256(&input.conversation_id);
+    let transport_instance_id = uuid::Uuid::new_v4().simple().to_string();
+    let policy_spec = NativePolicySpec {
+        owner_id: input
+            .execution
+            .as_ref()
+            .map(|e| e.owner_id.clone())
+            .unwrap_or_else(|| format!("dsh-workbench:{}", &owner_hash[..32])),
+        request_prefix: format!("dsh:{}:{}", &owner_hash[..32], transport_instance_id),
+        max_requests_per_minute: input.request_policy.max_requests_per_minute,
+        max_concurrent_requests: input.request_policy.max_concurrent_requests,
+        daily_token_budget: input.request_policy.daily_token_budget,
+        daily_cost_budget_usd: None,
+        input_price_per_million_tokens: pricing
+            .and_then(|value| value.get("inputPricePerMillionTokens"))
+            .and_then(Value::as_f64),
+        output_price_per_million_tokens: pricing
+            .and_then(|value| value.get("outputPricePerMillionTokens"))
+            .and_then(Value::as_f64),
+        warning_percent: input.request_policy.warning_percent,
+        ttl_ms: (input.request_policy.timeout_seconds.max(1) * 1_000 + 60_000)
+            .clamp(60_000, 2 * 60 * 60_000),
+        root: input.execution.clone(),
+    };
+
+    let budget_window = chapter_recovery.timeout(Duration::from_secs(480), &cancel)?;
+    let deadline = Instant::now() + budget_window;
+    let request_timeout = Duration::from_secs(
+        u64::try_from(input.request_policy.timeout_seconds.max(1)).unwrap_or(120),
+    );
+    let candidate_policy = candidate_validation_policy(&input);
+    let db_path = gateway_database_path();
+    let reset_history = protocol_recovery_retry > 0 || chapter_recovery.is_repairing();
+    let conversation_id_for_events = input.conversation_id.clone();
+    let request_identity_reader = process.request_identity.clone();
+
+    let turn_outcome = run_native_turn(
+        NativeTurnParams {
+            session_id: &session_id,
+            worker_instance_id: &process.instance_id,
+            reset_history,
+            system_prompt: workbench_system_prompt(&input),
+            user_prompt: &turn_prompt,
+            base_url: &upstream_base,
+            api_key: &process.upstream_key,
+            model: &route.model,
+            max_tokens,
+            temperature,
+            top_p,
+            reasoning_effort,
+            request_timeout,
+            allowed_tools_csv: Some(allowed_tools.as_str()),
+            novel_id: input.novel_id.as_deref(),
+            chapter_id: input.chapter_id.as_deref(),
+            candidate_policy: candidate_policy.as_deref(),
+            db_path: &db_path,
+            policy: Some(&policy_spec),
+            root: input.execution.as_ref(),
+            latest_request_identity: Some(&request_identity_reader),
+            cancel: &cancel,
+            deadline,
+        },
+        |notification| {
+            project_session_event(
+                notification,
+                &session_id,
+                &conversation_id_for_events,
+                &run_id,
+                &turn_error,
+                notifier.as_ref(),
+                &request_identity_reader,
+                &allowed_tools,
+                staged_input.as_deref(),
+            )
+        },
+    )
+    .map_err(|error| {
+        if chapter_recovery.remaining_at(Instant::now()).is_zero() {
+            CHAPTER_WALL_BUDGET_EXHAUSTED.to_string()
+        } else {
+            safe_runtime_error(&error)
         }
-    }
-    runtime
-        .wait_idle_checked_with_cancel(
-            &session_id,
-            chapter_recovery.timeout(Duration::from_secs(480), &cancel)?,
-            Some(&cancel),
-        )
-        .map_err(|error| {
-            if chapter_recovery.remaining_at(Instant::now()).is_zero() {
-                runtime.kill();
-                CHAPTER_WALL_BUDGET_EXHAUSTED.to_string()
-            } else {
-                safe_supervisor_error(&runtime, "DSH 回合失败", &error)
-            }
-        })?;
-    let snapshot = runtime.snapshot(&session_id).unwrap_or_default();
+    })?;
+
     if let Some(error) = turn_error.lock().ok().and_then(|error| error.clone()) {
-        let diagnostics = process._proxy_guard.safe_diagnostics();
-        return Err(match diagnostics {
-            Some(diagnostics) => format!("DSH 回合以错误结束: {} | {}", error, diagnostics),
-            None => format!("DSH 回合以错误结束: {}", error),
-        });
+        return Err(format!("DSH 回合以错误结束: {}", error));
     }
-    let assistant_text = snapshot.last_assistant_text.clone();
+
+    let assistant_text = turn_outcome.last_assistant_text;
+    let session_lifecycle = Some(turn_outcome.lifecycle);
     let mut connection = crate::db::get_connection()
         .lock()
         .map_err(|_| "数据库锁失败".to_string())?;
@@ -160,10 +214,8 @@ pub(in super::super) fn execute(
                     &input,
                     &run_id,
                     generated,
-                    snapshot.prompt_tokens.saturating_sub(before.prompt_tokens),
-                    snapshot
-                        .completion_tokens
-                        .saturating_sub(before.completion_tokens),
+                    turn_outcome.prompt_tokens,
+                    turn_outcome.completion_tokens,
                 )
             })
             .transpose()

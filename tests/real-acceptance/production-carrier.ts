@@ -41,12 +41,9 @@ export interface ProductionCarrierOptions {
   specTimeoutMs: number;
   /**
    * Isolated profile: everything the desktop app persists is redirected below
-   * `<artifactRoot>/profile`. The DSH runtime payload is reused read-only from
-   * `dshRuntimeRootEnv` (or the operator's unpacked payload) to avoid a 1.4 GB unpack.
+   * `<artifactRoot>/profile`.
    */
-  isolatedProfile?: {
-    dshRuntimeRootEnv: string;
-  };
+  isolatedProfile?: boolean;
   /** Env var that receives the tauri-driver pid so specs can locate the app process tree. */
   driverPidEnv?: string;
 }
@@ -143,12 +140,6 @@ export function createProductionCarrierConfig(options: ProductionCarrierOptions)
         fs.mkdirSync(webviewDataDir, { recursive: true });
         env.LOCALAPPDATA = isolatedLocalAppData;
         env.APPDATA = isolatedAppData;
-        const runtimeRoot =
-          process.env[options.isolatedProfile.dshRuntimeRootEnv]?.trim() ||
-          path.join(localAppData, 'AI Novel Studio', 'dsh-runtime');
-        if (fs.existsSync(runtimeRoot)) {
-          env.DSH_RUNTIME_ROOT = runtimeRoot;
-        }
       }
 
       const driverArgs = ['--port', String(driverPort), '--native-port', String(driverPort + 1000)];

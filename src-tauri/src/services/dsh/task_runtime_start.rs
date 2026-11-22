@@ -267,10 +267,8 @@ pub(super) fn start_stage(
             .remaining_at(std::time::Instant::now())
             .is_zero()
         {
-            if let Ok(holder) = process.lock() {
-                if let Some(worker_process) = holder.as_ref() {
-                    worker_process.runtime.kill();
-                }
+            if let Ok(mut holder) = process.lock() {
+                holder.take();
             }
         }
         let error = runtime_error_for_persistence(&raw_error);
@@ -283,21 +281,10 @@ pub(super) fn start_stage(
                     .map(|worker| worker.cancel.load(Ordering::SeqCst))
             })
             .unwrap_or(false);
-        let process_healthy = process
-            .lock()
-            .ok()
-            .and_then(|holder| holder.as_ref().cloned())
-            .is_some_and(|process| {
-                chapter_recovery
-                    .timeout(Duration::from_secs(3), &cancel)
-                    .ok()
-                    .is_some_and(|timeout| {
-                        process
-                            .runtime
-                            .request("runtime/health", None, timeout)
-                            .is_ok()
-                    })
-            });
+        let process_healthy = !cancelled
+            && !chapter_recovery
+                .remaining_at(std::time::Instant::now())
+                .is_zero();
         let recovery_candidate = !cancelled
             && process_healthy
             && is_automatic_protocol_recovery_candidate(&input, &raw_error);
@@ -386,9 +373,7 @@ pub(super) fn start_stage(
         }
         if !process_healthy {
             if let Ok(mut holder) = process.lock() {
-                if let Some(dead) = holder.take() {
-                    dead.runtime.kill();
-                }
+                holder.take();
             }
         }
         if next_chapter_length_repair {

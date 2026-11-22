@@ -22,18 +22,22 @@ export function useWorkbenchOverlayInset(
     const page = pageRef.current;
     if (!page || typeof ResizeObserver === 'undefined') return;
     let frame = 0;
+    let scheduled = false;
     let last = '';
     const observed = new Set<Element>();
     const apply = () => {
       frame = 0;
+      scheduled = false;
       const next = overlayTopPx(page);
       if (next === last) return;
       last = next;
       page.style.setProperty('--workbench-panel-top', next);
     };
     const schedule = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(apply);
+      if (scheduled) return;
+      scheduled = true;
+      const id = requestAnimationFrame(apply);
+      if (scheduled) frame = id;
     };
     const observer = new ResizeObserver(schedule);
     const watch = (node: Element | null) => {
@@ -43,10 +47,19 @@ export function useWorkbenchOverlayInset(
     };
     watch(page);
     watch(page.querySelector('[data-testid="workbench-task-header"]'));
+    let mutationObserver: MutationObserver | undefined;
+    if (typeof MutationObserver !== 'undefined') {
+      mutationObserver = new MutationObserver(() => {
+        watch(page.querySelector('[data-testid="workbench-task-header"]'));
+        schedule();
+      });
+      mutationObserver.observe(page, { childList: true, subtree: true });
+    }
     window.addEventListener('resize', schedule);
     schedule();
     return () => {
-      if (frame) cancelAnimationFrame(frame);
+      if (scheduled) cancelAnimationFrame(frame);
+      mutationObserver?.disconnect();
       observer.disconnect();
       window.removeEventListener('resize', schedule);
     };

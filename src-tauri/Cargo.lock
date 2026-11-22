@@ -22,6 +22,7 @@ name = "ai-novel-studio"
 version = "3.7.0"
 dependencies = [
  "chrono",
+ "novel-domain-gateway",
  "once_cell",
  "reqwest 0.12.28",
  "rusqlite",

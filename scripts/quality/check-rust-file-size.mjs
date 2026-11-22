@@ -38,7 +38,6 @@ export const LEGACY_RUST_BASELINE = Object.freeze({
   'src-tauri/src/services/multi_agent_service.rs': 956,
   'src-tauri/src/services/chapter_context_bundle_service.rs': 879,
   'src-tauri/src/services/ai_task_record_service.rs': 809,
-  'src-tauri/src/services/dsh/supervisor.rs': 797,
   'src-tauri/src/commands/local_assets.rs': 745,
   'src-tauri/src/repositories/ai_task_repository.rs': 697,
   'src-tauri/src/services/chapter_service.rs': 697,

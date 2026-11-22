@@ -124,20 +124,7 @@ try {
   }
   if ([string]::IsNullOrWhiteSpace($ApiKey)) { throw 'ApiKey is empty' }
 
-  if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
-    $RuntimeRoot = Join-Path $tauriRoot '.payload-staging\dsh-runtime'
-  }
-  if ([string]::IsNullOrWhiteSpace($GatewayBin)) {
-    $GatewayBin = Join-Path $tauriRoot 'target\debug\novel-domain-gateway.exe'
-  }
-  $RuntimeRoot = Resolve-RequiredDirectory $RuntimeRoot 'RuntimeRoot'
-  $GatewayBin = Resolve-RequiredFile $GatewayBin 'GatewayBin'
-  if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'packages\examples\jsonrpc-demo\lib\bin.js') -PathType Leaf)) {
-    throw 'RuntimeRoot is not a complete DSH payload'
-  }
   $env:DSH_E2E_API_KEY = $ApiKey
-  $env:DSH_RUNTIME_ROOT = $RuntimeRoot
-  $env:DSH_GATEWAY_BIN = $GatewayBin
   $env:DSH_E2E_MODEL = $Model
   if ($null -ne $BaseUrl) { $env:DSH_E2E_BASE_URL = $BaseUrl }
   else { Remove-Item Env:DSH_E2E_BASE_URL -ErrorAction SilentlyContinue }

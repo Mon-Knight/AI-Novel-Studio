@@ -30,25 +30,25 @@ npm run build
 # Rust 编译检查
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 
-# 本地安装包：先准备固定 DeepSeek assets，再打 MSI 与 NSIS
+# 本地安装包：打 MSI 与 NSIS
 npm run tauri:build
 ```
 
-`npm run tauri:build` 实际执行 `npm run dsh:assets && tauri build --bundles msi,nsis`。它包含前端 `beforeBuildCommand`，不需要提前重复 `npm run build`；普通本地构建不会读取或生成更新签名私钥。
+`npm run tauri:build` 实际执行 `tauri build --bundles msi,nsis`（不再打包外置 `dsh-runtime.zip` 或解压脚本）。它包含前端 `beforeBuildCommand`，不需要提前重复 `npm run build`；普通本地构建不会读取或生成更新签名私钥。
 
-日常任务刷新用户打开的 EXE 时，按根 [AGENTS.md](../../AGENTS.md) 第 7.6 节：清除 `CARGO_TARGET_DIR` 后执行 `npm run dsh:assets` 与 `npx tauri build --no-bundle`，产物为 `src-tauri/target/release/AI Novel Studio.exe`（`productName`）。不要把该步骤当成 `npm run tauri:build` 发布打包；构建不等于获准发布。
+日常任务刷新用户打开的 EXE 时，按根 [AGENTS.md](../../AGENTS.md) 第 7.6 节：清除 `CARGO_TARGET_DIR` 后执行 `npx tauri build --no-bundle`，产物为 `src-tauri/target/release/AI Novel Studio.exe`（`productName`）。不要把该步骤当成 `npm run tauri:build` 发布打包；构建不等于获准发布。
 
-默认产物位于 `src-tauri/target/release/`；若设置了 `CARGO_TARGET_DIR`，以实际输出为准。完整发布门禁与载体/Gateway 准备顺序见 [测试策略](testing.md)。
+默认产物位于 `src-tauri/target/release/`；若设置了 `CARGO_TARGET_DIR`，以实际输出为准。完整发布门禁与验证顺序见 [测试策略](testing.md)。
 
-### 2.1 当前统一 Runtime 本地交付（2026-11-11）
+### 2.1 当前统一 Runtime 本地交付（2026-11-22 同步）
 
-本批统一内核与任务级预授权仍处于 **INTEGRATION / NOT YET FULLY VERIFIED**。完整本地验收可使用：
+本批统一内核与任务级预授权已切换为纯 Rust 进程内原生 Agent 循环 + 内联 `novel-domain-gateway` 库，彻底移除外置 465 MB `dsh-runtime.zip`、首次启动解压及 Node 子进程代理链路。完整本地验收可使用：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1 -NoBundle
 ```
 
-`-NoBundle` 只将最后生产构建改为准备当前 DSH assets 并执行 `tauri build --no-bundle`，不生成 MSI/NSIS，不发布。默认发布矩阵及脏工作树检查保持原行为，不为本地交付清理、覆盖或提交用户已有修改；本批脚本改动尚须实际验证。
+`-NoBundle` 只将最后生产构建改为执行 `tauri build --no-bundle`，不生成 MSI/NSIS，不发布。默认发布矩阵及脏工作树检查保持原行为，不为本地交付清理、覆盖或提交用户已有修改。
 
 交付路径固定为仓库的 [AI Novel Studio.exe](../../src-tauri/target/release/AI%20Novel%20Studio.exe)，构建前清除进程级 `CARGO_TARGET_DIR`；不可用其他输出目录或小写 crate 可执行文件代替。目标 EXE 被占用时拒绝覆盖并等待用户退出。固定 DSH commit 和 `ans_task_session_v2` 未升级，但必须重建/绑定当前 Gateway，不能用过往载荷或过去桌面测试证明本批产物正确。实际结果、未验证项及 EXE 对应代码见[实施记录](../../reports/unified-agent-2026-11-11/implementation.md)；下方 2026-10-29 的 Tauri 迁移结果仍只证明当时批次。
 

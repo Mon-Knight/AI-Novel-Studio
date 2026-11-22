@@ -204,9 +204,6 @@ export function WorkbenchSidePanel({
     >
       {view === 'plugins' ? (
         <div className="workbench-side-plugin-frame">
-          <div className="workbench-side-plugin-actions">
-            <PanelPinButton presentation={presentation} onToggle={onTogglePresentation} />
-          </div>
           <PanelErrorBoundary panelTitle="当前插件">
             <PluginPanel
               plugins={plugins}
@@ -214,6 +211,9 @@ export function WorkbenchSidePanel({
               error={pluginsError}
               onClose={onClose}
               onBack={onBack}
+              headerAction={
+                <PanelPinButton presentation={presentation} onToggle={onTogglePresentation} />
+              }
             />
           </PanelErrorBoundary>
         </div>
@@ -292,6 +292,7 @@ export function WorkbenchSidePanel({
               {view === 'context' ? (
                 <WorkbenchAssetScopePanel
                   id="workbench-side-asset-scope"
+                  embedded
                   summary={assetScope}
                   loading={assetScopeLoading}
                   error={assetScopeError}

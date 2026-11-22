@@ -9,6 +9,7 @@ import {
   shouldProbeConfiguredWorkbenchModel,
   workbenchModelProbeKey,
 } from '../../services/conversation/workbenchModelAvailability';
+import { hydrateTaskModelSnapshotRuntime } from '../../services/conversation/taskModelSnapshot';
 import { useWorkbenchTaskModelSelection } from '../../features/workbench/useWorkbenchTaskModelSelection';
 import { useWorkbenchChapterHandoff } from '../../features/workbench/useWorkbenchChapterHandoff';
 import { useWorkbenchTaskCreator } from './hooks/useWorkbenchTaskCreator';
@@ -154,6 +155,7 @@ export function WorkbenchPage() {
   const chrome = useWorkbenchPageChrome({
     sidePanel,
     selectedConversationId,
+    taskCreatorOpen,
     setDraft,
     setStartupDraft,
   });
@@ -224,15 +226,16 @@ export function WorkbenchPage() {
     onCreated: () => setStartupDraft(''),
   });
   const openTaskCreator = taskCreator.open;
-  const pluginProbeModel = resolveWorkbenchModelDirectoryTarget(
-    taskCreatorOpen,
-    selectedModel,
-    taskCreator.model,
+  const pluginProbeModel = hydrateTaskModelSnapshotRuntime(
+    resolveWorkbenchModelDirectoryTarget(taskCreatorOpen, selectedModel, taskCreator.model),
   );
   const pluginProbeModelKey = workbenchModelProbeKey(pluginProbeModel);
   const lastPluginProbeModelKeyRef = useRef('');
+  const previousShowPluginsRef = useRef(false);
   useEffect(() => {
-    if (lastPluginProbeModelKeyRef.current === pluginProbeModelKey) return;
+    const openedPlugins = showPlugins && !previousShowPluginsRef.current;
+    previousShowPluginsRef.current = showPlugins;
+    if (!openedPlugins && lastPluginProbeModelKeyRef.current === pluginProbeModelKey) return;
     lastPluginProbeModelKeyRef.current = pluginProbeModelKey;
     // Register the saved API route with the isolated Runtime probe on entry and
     // on model switches; Mock never probes and health stays descriptive.
@@ -240,11 +243,7 @@ export function WorkbenchPage() {
     void refreshPlugins(undefined, shouldProbe, shouldProbe ? pluginProbeModel : undefined).catch(
       () => undefined,
     );
-  }, [pluginProbeModel, pluginProbeModelKey, refreshPlugins]);
-  useEffect(() => {
-    if (!showPlugins) return;
-    void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);
-  }, [pluginProbeModel, refreshPlugins, showPlugins]);
+  }, [pluginProbeModel, pluginProbeModelKey, refreshPlugins, showPlugins]);
   const listedSelectedConversation = conversations.find(
     (conversation) => conversation.conversationId === selectedConversationId,
   );

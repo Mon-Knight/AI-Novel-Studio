@@ -27,6 +27,12 @@ const { MemoryRouter } = (await vite.ssrLoadModule(
 const pageModule = (await vite.ssrLoadModule(
   '/src/pages/Settings/SettingsPage.tsx',
 )) as typeof import('./SettingsPage');
+const { aiSettingsService } = (await vite.ssrLoadModule(
+  '/src/services/ai/aiClient.ts',
+)) as typeof import('../../services/ai/aiClient');
+const { aiRequestPolicyService } = (await vite.ssrLoadModule(
+  '/src/services/ai/aiRequestPolicyService.ts',
+)) as typeof import('../../services/ai/aiRequestPolicyService');
 const SettingsPage = pageModule.default;
 
 const { act, cleanup, fireEvent, render, screen, waitFor, within } =
@@ -41,7 +47,11 @@ function readStoredSettings(): Record<string, unknown> {
   >;
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  delete (dom.window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  aiRequestPolicyService.clearForTests();
+});
 after(async () => {
   await vite.close();
   dom.window.close();
@@ -661,4 +671,145 @@ test('SettingsPage persists chapter word-range percents from the governance card
   };
   assert.equal(stored.hardMinimumPercent, 70);
   assert.equal(stored.hardMaximumPercent, 120);
+});
+
+test('SettingsPage hydrates desktop policy before Tab 2 test/save and keeps model edits on conflict', async () => {
+  localStorage.setItem(
+    AI_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      runtimeMode: 'api',
+      provider: 'openai_compatible',
+      baseUrl: 'https://source-a.invalid/v1',
+      modelName: 'model-a',
+      mockMode: false,
+      maxRequestsPerMinute: 60,
+      maxConcurrentAiRequests: 2,
+      activeSavedApiModelId: 'model-a',
+      savedApiModels: [
+        {
+          id: 'model-a',
+          label: 'Model A',
+          provider: 'openai_compatible',
+          baseUrl: 'https://source-a.invalid/v1',
+          modelName: 'model-a',
+        },
+        {
+          id: 'model-b',
+          label: 'Model B',
+          provider: 'openai_compatible',
+          baseUrl: 'https://source-b.invalid/v1',
+          modelName: 'model-b',
+        },
+      ],
+    }),
+  );
+
+  let policySnapshotCalls = 0;
+  const configureCalls: Array<Record<string, unknown>> = [];
+  let rejectNextConfigureConflict = false;
+  (dom.window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'get_ai_request_policy_snapshot') {
+        policySnapshotCalls += 1;
+        return {
+          policy: {
+            revision: policySnapshotCalls === 1 ? 3 : 4,
+            policyHash: 'policy-hash',
+            maxRequestsPerMinute: 45,
+            maxConcurrentRequests: 3,
+            warningPercent: 75,
+          },
+          day: '2026-11-22',
+          requestsLastMinute: 0,
+          activeRequests: 0,
+          tokenUsed: 0,
+          reservedTokens: 0,
+          costUsedUsd: 0,
+          reservedCostUsd: 0,
+          usageMissingCount: 0,
+          warningPercent: 75,
+          warning: false,
+        };
+      }
+      if (command === 'configure_ai_request_policy') {
+        configureCalls.push((args?.input as Record<string, unknown>) ?? {});
+        if (rejectNextConfigureConflict) {
+          rejectNextConfigureConflict = false;
+          throw {
+            code: 'AI_REQUEST_POLICY_CONFIG_CONFLICT',
+            message: 'AI 请求全局策略已被其他进程更新，请刷新后重试。',
+            retryable: true,
+          };
+        }
+        return {
+          revision: 4,
+          policyHash: 'policy-hash-4',
+          maxRequestsPerMinute: 45,
+          maxConcurrentRequests: 3,
+          warningPercent: 75,
+        };
+      }
+      if (command === 'resolve_session_model_credential') return 'session-key';
+      if (command === 'set_session_model_credential') return null;
+      if (command === 'dsh_list_current_plugins') return [];
+      return null;
+    },
+  };
+
+  const originalTestConnection = aiSettingsService.testConnection;
+  aiSettingsService.testConnection = async () => ({ ok: true, message: '连接成功：OK' });
+  try {
+    await act(async () => {
+      render(
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>,
+      );
+    });
+    await waitFor(() => assert.equal(policySnapshotCalls >= 1, true));
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+    });
+    await waitFor(() => assert.ok(screen.getByTestId('ai-provider-settings-card')));
+
+    // Connection test on Tab 2 must succeed without invoking configure_ai_request_policy.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '测试当前模型' }));
+    });
+    await waitFor(() => {
+      assert.match(screen.getByTestId('ai-provider-settings-card').textContent ?? '', /连接成功/u);
+    });
+    assert.equal(configureCalls.length, 0);
+
+    // Deleting a card on Tab 2 (without ever opening Tab 3) passes observed revision 3.
+    const cards = screen.getAllByTestId('ai-saved-model-card');
+    const cardB = cards.find((card) => card.getAttribute('data-model-id') === 'model-b');
+    assert.ok(cardB);
+    await act(async () => {
+      fireEvent.click(within(cardB).getByRole('button', { name: '删除' }));
+    });
+    await waitFor(() => assert.equal(configureCalls.length, 1));
+    assert.equal(configureCalls[0].expectedRevision, 3);
+    assert.equal(configureCalls[0].maxRequestsPerMinute, 45);
+    assert.equal((readStoredSettings().savedApiModels as unknown[]).length, 1);
+
+    // Even if another process bumps policy revision concurrently, model deletion/save still persists
+    // and rebinds the latest revision so clicking Save again succeeds cleanly.
+    rejectNextConfigureConflict = true;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    });
+    await waitFor(() => {
+      assert.equal(policySnapshotCalls >= 2, true);
+      assert.equal((readStoredSettings().savedApiModels as unknown[]).length, 1);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    });
+    await waitFor(() => assert.equal(configureCalls.length, 3));
+    assert.equal(configureCalls[2].expectedRevision, 4);
+  } finally {
+    aiSettingsService.testConnection = originalTestConnection;
+  }
 });

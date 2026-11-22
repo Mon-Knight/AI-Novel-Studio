@@ -1,9 +1,9 @@
+import { randomInt } from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { npmCommand } from '../quality/verification-process.mjs';
-import { verifyExtractedCarrierGateway } from '../dsh/carrier-freshness.mjs';
 
 // This runner never selects the real-profile spec or forwards cloud credentials.
 // Its only model is the loopback upstream owned by the isolated fault-injection spec.
@@ -48,7 +48,6 @@ export function writingFaultPlan({
   const steps = skipBuild
     ? []
     : [
-        { id: 'assets', ...npmCommand('dsh:assets'), env: environment },
         {
           id: 'production-carrier-build',
           executable: process.execPath,
@@ -68,21 +67,6 @@ export function writingFaultPlan({
       ...environment,
       AI_NOVEL_STUDIO_FAULT_INJECTION: '1',
       AI_NOVEL_STUDIO_FAULT_INJECTION_APP: appPath,
-      AI_NOVEL_STUDIO_FAULT_INJECTION_DSH_RUNTIME_ROOT: path.join(
-        root,
-        'src-tauri',
-        '.payload-verify',
-        'dsh-runtime',
-      ),
-      // The production test binary lives in .e2e-tools and does not sit beside the
-      // verified Gateway. Isolated profiles also hide the operator's unpacked copy.
-      DSH_GATEWAY_BIN: path.join(
-        root,
-        'src-tauri',
-        'target',
-        'release',
-        'novel-domain-gateway.exe',
-      ),
       ...(env.AI_NOVEL_STUDIO_FAULT_INJECTION_DRIVER_PORT
         ? {
             AI_NOVEL_STUDIO_FAULT_INJECTION_DRIVER_PORT:
@@ -128,30 +112,60 @@ async function runStep(step, root) {
   });
 }
 
-export function verifyWritingFaultCarrier(root) {
-  return verifyExtractedCarrierGateway({
-    extractedRoot: path.join(root, 'src-tauri', '.payload-verify'),
-    currentGateway: path.join(root, 'src-tauri', 'target', 'release', 'novel-domain-gateway.exe'),
-    pinnedCommit: '47f943859bef60e4160492346772ded9b24f765a',
+function canBindPort(port, host, allowUnavailableAddress) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', (error) => {
+      resolve(
+        allowUnavailableAddress && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error?.code ?? ''),
+      );
+    });
+    server.listen({ port, host, exclusive: true }, () => {
+      server.close((error) => resolve(!error));
+    });
   });
+}
+
+async function isPortAvailable(port) {
+  if (!(await canBindPort(port, '127.0.0.1', false))) return false;
+  return canBindPort(port, '::1', true);
+}
+
+/** Pick a free driver/native port pair outside Windows Hyper-V excluded ranges. */
+export async function findAvailableFaultDriverPort() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const base = randomInt(20_000, 40_000);
+    if ((await isPortAvailable(base)) && (await isPortAvailable(base + 1000))) {
+      return base;
+    }
+  }
+  throw new Error('Unable to reserve an available local driver/native port pair.');
 }
 
 export async function executeWritingFaultPlan(
   plan,
   run = runStep,
   exists = fs.existsSync,
-  verifyCarrier = verifyWritingFaultCarrier,
+  selectDriverPort = findAvailableFaultDriverPort,
 ) {
   for (const step of plan.steps) {
+    let resolvedStep = step;
     if (step.id === 'isolated-writing-faults') {
       if (!exists(plan.appPath))
         throw new Error('The freshly built production fault-injection executable is missing.');
-      verifyCarrier(plan.root);
+      if (!step.env.AI_NOVEL_STUDIO_FAULT_INJECTION_DRIVER_PORT) {
+        const driverPort = await selectDriverPort();
+        resolvedStep = {
+          ...step,
+          env: { ...step.env, AI_NOVEL_STUDIO_FAULT_INJECTION_DRIVER_PORT: String(driverPort) },
+        };
+      }
     }
-    console.log(`[writing-faults] ${step.id}`);
-    const code = await run(step, plan.root);
+    console.log(`[writing-faults] ${resolvedStep.id}`);
+    const code = await run(resolvedStep, plan.root);
     if (code !== 0)
-      throw new Error(`Writing fault verification failed at ${step.id} (exit ${code}).`);
+      throw new Error(`Writing fault verification failed at ${resolvedStep.id} (exit ${code}).`);
   }
 }
 

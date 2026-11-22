@@ -316,6 +316,10 @@ describe('side panel dismissal and navigation', () => {
     const pluginTrigger = screen.getByTestId('workbench-current-plugins');
     fireEvent.click(pluginTrigger);
     expect(screen.getByTestId('workbench-side-panel').getAttribute('data-view')).toBe('plugins');
+    const pluginHeader = document.querySelector('.workbench-plugin-header');
+    expect(pluginHeader?.contains(screen.getByTestId('workbench-side-pin'))).toBe(true);
+    expect(pluginHeader?.contains(screen.getByTestId('workbench-plugin-close'))).toBe(true);
+    expect(document.querySelector('.workbench-side-plugin-actions')).toBeNull();
     fireEvent.click(screen.getByTestId('workbench-side-back'));
     expect(screen.getByTestId('workbench-side-panel').getAttribute('data-view')).toBe('launcher');
     fireEvent.click(pluginTrigger);
@@ -428,5 +432,36 @@ describe('side panel dismissal and navigation', () => {
     fireEvent.click(screen.getByTestId('workbench-toggle-focus'));
     expect(screen.getByTestId('workbench-side-panel').hidden).toBe(false);
     expect(document.activeElement).toBe(input);
+  });
+
+  it('keeps the side-panel context view free of a duplicate title or floating sticky summary', () => {
+    const refinementCss = readFileSync(resolve('src/styles/workbench-refinement.css'), 'utf8');
+    expect(refinementCss).not.toMatch(
+      /\.workbench-asset-scope-sticky\s*\{[^}]*position:\s*sticky/u,
+    );
+
+    render(
+      <MemoryRouter>
+        <WorkbenchSidePanel
+          view="context"
+          novelId="novel-1"
+          scopeKey="conv-1"
+          bundle={bundle}
+          plugins={[]}
+          pluginsLoading={false}
+          pluginsError=""
+          assetScope={null}
+          assetScopeLoading={false}
+          assetScopeError=""
+          onRefreshAssetScope={vi.fn()}
+          onOpenAssetScopePath={vi.fn()}
+          onOpen={vi.fn()}
+          onBack={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('heading', { name: '创作上下文' })).not.toBeNull();
+    expect(document.querySelector('.workbench-asset-scope-heading strong')).toBeNull();
   });
 });

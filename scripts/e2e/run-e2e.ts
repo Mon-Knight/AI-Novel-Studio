@@ -15,7 +15,6 @@ import {
 } from './e2e-build-stamp.ts';
 import { assertUnelevatedWindowsHost } from './host-integrity.ts';
 import { legacyPanelSpecs, selectDesktopSpecs } from './spec-selection.ts';
-import { desktopCarrierEnvironment, prepareDesktopCarrier } from './e2e-carrier.mjs';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -98,8 +97,6 @@ if (process.env.AI_NOVEL_STUDIO_E2E !== undefined && process.env.AI_NOVEL_STUDIO
   throw new Error('AI_NOVEL_STUDIO_E2E must be 1 when supplied.');
 }
 fs.mkdirSync(artifactRoot, { recursive: true });
-const carrier = await prepareDesktopCarrier(workspaceRoot);
-console.log(`[E2E] DeepSeek carrier: ${diagnosticPath(carrier.runtimeRoot)}`);
 
 let activeWdioPid: number | undefined;
 let signalCleanupStarted = false;
@@ -139,7 +136,6 @@ for (const [index, spec] of specs.entries()) {
   const before = await snapshotProcesses();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    ...desktopCarrierEnvironment(carrier),
     AI_NOVEL_STUDIO_E2E: '1',
     AI_NOVEL_STUDIO_E2E_LEGACY_PANELS: legacyPanelSpecs.has(spec) ? '1' : '0',
     AI_NOVEL_STUDIO_E2E_RUN_ID: runId,

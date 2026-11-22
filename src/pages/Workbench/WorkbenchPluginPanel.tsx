@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import { ArrowLeft, CircleAlert, LoaderCircle, X } from 'lucide-react';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
 
@@ -24,12 +24,14 @@ export const PluginPanel = memo(function PluginPanel({
   error = '',
   onClose,
   onBack,
+  headerAction,
 }: {
   plugins: CurrentPluginProjection[];
   loading?: boolean;
   error?: string;
   onClose: () => void;
   onBack?: () => void;
+  headerAction?: ReactNode;
 }) {
   const grouped = useMemo(
     () => ({
@@ -63,14 +65,17 @@ export const PluginPanel = memo(function PluginPanel({
           <div className="workbench-eyebrow">Runtime Registry</div>
           <h2>当前插件</h2>
         </div>
-        <button
-          className="workbench-icon-button"
-          data-testid="workbench-plugin-close"
-          onClick={onClose}
-          aria-label="关闭当前插件"
-        >
-          <X aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
+        <div className="workbench-side-launcher-actions">
+          {headerAction}
+          <button
+            className="workbench-icon-button"
+            data-testid="workbench-plugin-close"
+            onClick={onClose}
+            aria-label="关闭当前插件"
+          >
+            <X aria-hidden="true" size={17} strokeWidth={1.8} />
+          </button>
+        </div>
       </div>
       {loading && (
         <div

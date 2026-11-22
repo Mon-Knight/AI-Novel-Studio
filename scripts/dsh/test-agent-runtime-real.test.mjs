@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
-import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -31,7 +30,12 @@ const ENDPOINT_LITERAL = new RegExp(ENDPOINT.replace(/[.*+?^${}()|[\]\\]/gu, '\\
 const MODEL = 'frozen-model';
 const PROVIDER = 'deepseek-official';
 const SCRIPT = fileURLToPath(new URL('./test-agent-runtime-real.mjs', import.meta.url));
-const PROXY = fileURLToPath(new URL('./model-proxy.mjs', import.meta.url));
+const NATIVE_EVIDENCE = fileURLToPath(
+  new URL('../../src-tauri/src/services/dsh/native_agent_evidence.rs', import.meta.url),
+);
+const NATIVE_TRANSPORT = fileURLToPath(
+  new URL('../../src-tauri/src/services/dsh/native_agent_transport.rs', import.meta.url),
+);
 const RUST_TESTS = fileURLToPath(
   new URL('../../src-tauri/src/services/dsh/tests.rs', import.meta.url),
 );
@@ -605,9 +609,10 @@ test('loopback keeps the historical cargo filter and strips secrets', async () =
   assert.equal(calls[0].env.OPENAI_API_KEY, undefined);
 });
 
-test('the rust source locks the ignored full-path test and the proxy send boundary', () => {
+test('the rust source locks the ignored full-path test and the native send boundary', () => {
   const rust = fs.readFileSync(RUST_TESTS, 'utf8');
-  const proxy = fs.readFileSync(PROXY, 'utf8');
+  const evidence = fs.readFileSync(NATIVE_EVIDENCE, 'utf8');
+  const transport = fs.readFileSync(NATIVE_TRANSPORT, 'utf8');
   assert.match(
     rust,
     /#\[ignore = "R4 cloud canonical read; explicit ANS_R4_CLOUD_PROFILE=1 only"\]/,
@@ -629,11 +634,11 @@ test('the rust source locks the ignored full-path test and the proxy send bounda
   const exactBody = rust.slice(exactStart, exactEnd);
   assert.equal(exactBody.includes('ends_with'), false);
   assert.equal(exactBody.includes('contains'), false);
-  assert.match(rust, /r4_verify_carrier\(&root, &gateway\);\s*let api_key = r4_api_key\(\);/);
+  assert.match(rust, /r4_verify_carrier\(\);\s*let api_key = r4_api_key\(\);/);
   assert.match(rust, /source_commit: R4_PINNED_COMMIT\.to_string\(\)/);
-  assert.match(proxy, /function claimUpstreamSend/);
-  assert.match(proxy, /redirect: 'error'/);
-  assert.match(proxy, /raw !== '6'/);
+  assert.match(evidence, /pub\(super\) fn enforce_upstream_budget_if_configured/);
+  assert.match(evidence, /raw != "6"/);
+  assert.match(transport, /RedirectPolicy::none\(\)/);
 });
 
 test('cli subprocesses do not execute cloud or read saved credentials by default', async () => {
@@ -698,175 +703,3 @@ function runNode(script, env) {
     });
   });
 }
-
-const FETCH_FORBIDDEN_PORTS = new Set([
-  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
-  103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
-  512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993,
-  995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
-  6669, 6697, 10080,
-]);
-
-function listen(server) {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
-      if (FETCH_FORBIDDEN_PORTS.has(port)) {
-        server.close(() => resolve(listen(server)));
-        return;
-      }
-      resolve(port);
-    });
-  });
-}
-
-function close(server) {
-  return new Promise((resolve) => {
-    if (!server.listening) {
-      resolve();
-      return;
-    }
-    server.close(() => resolve());
-    server.closeAllConnections?.();
-  });
-}
-
-async function startProxy({ upstream, budgetFile, frozenUpstream, model = MODEL, budget = '6' }) {
-  const child = spawn(process.execPath, [PROXY], {
-    env: {
-      PATH: process.env.PATH,
-      SystemRoot: process.env.SystemRoot,
-      PROXY_PORT: '0',
-      PROXY_UPSTREAM: frozenUpstream,
-      PROXY_UPSTREAM_KEY: KEY,
-      PROXY_MODEL: model,
-      PROXY_UPSTREAM_REQUEST_BUDGET: budget,
-      PROXY_UPSTREAM_BUDGET_FILE: budgetFile,
-      PROXY_FROZEN_UPSTREAM: frozenUpstream,
-      PROXY_FROZEN_MODEL: model,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  let output = '';
-  child.stdout.on('data', (chunk) => {
-    output += chunk.toString('utf8');
-  });
-  child.stderr.on('data', (chunk) => {
-    output += chunk.toString('utf8');
-  });
-  const deadline = Date.now() + 5_000;
-  let match;
-  while (Date.now() < deadline) {
-    match = output.match(/\[model-proxy\] listening on 127\.0\.0\.1:(\d+)/);
-    if (match || child.exitCode !== null) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return {
-    child,
-    output: () => output,
-    url: match ? `http://127.0.0.1:${match[1]}` : '',
-    async stop() {
-      if (child.exitCode === null) child.kill();
-      await new Promise((resolve) => child.once('exit', resolve));
-      await close(upstream);
-    },
-  };
-}
-
-async function post(url, model = MODEL) {
-  const response = await fetch(`${url}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      messages: [{ role: 'user', content: 'ping' }],
-    }),
-  });
-  const body = await response.json();
-  return { status: response.status, body };
-}
-
-test(
-  'proxy send boundary rejects the seventh request, redirects, and a changed model',
-  { timeout: 20_000 },
-  async () => {
-    const hits = [];
-    const redirected = [];
-    const upstream = http.createServer((request, response) => {
-      hits.push(new URL(request.url, 'http://127.0.0.1').pathname);
-      request.resume();
-      if (hits.length === 1) {
-        response.writeHead(302, { location: 'http://127.0.0.1:9/stolen' });
-        response.end();
-        return;
-      }
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
-    });
-    const steal = http.createServer((request, response) => {
-      redirected.push(request.url);
-      request.resume();
-      response.end('stolen');
-    });
-    const upstreamPort = await listen(upstream);
-    await listen(steal);
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ans-r4-budget-'));
-    const budgetFile = path.join(directory, 'sends.txt');
-    const frozen = `http://127.0.0.1:${upstreamPort}/v1`;
-    const proxy = await startProxy({ upstream, budgetFile, frozenUpstream: frozen });
-    try {
-      assert.ok(proxy.url, proxy.output());
-      const first = await post(proxy.url);
-      assert.notEqual(first.status, 200);
-      assert.equal(redirected.length, 0);
-      assert.equal(hits.length, 1);
-      for (let index = 0; index < 5; index += 1) {
-        const response = await post(proxy.url);
-        assert.equal(response.status, 200);
-      }
-      assert.equal(hits.length, 6);
-      assert.equal(fs.readFileSync(budgetFile, 'utf8').trim(), '6');
-      const blocked = await post(proxy.url);
-      assert.equal(blocked.status, 429);
-      assert.equal(blocked.body.error.code, 'UPSTREAM_BUDGET_EXCEEDED');
-      assert.equal(hits.length, 6);
-      const wrongModel = await post(proxy.url, 'other-model');
-      assert.equal(wrongModel.status, 409);
-      assert.equal(hits.length, 6);
-      assert.equal(proxy.output().includes(KEY), false);
-    } finally {
-      await proxy.stop();
-      await close(steal);
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-
-    const restartHits = [];
-    const restartUpstream = http.createServer((request, response) => {
-      restartHits.push(1);
-      request.resume();
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end('{}');
-    });
-    const restartPort = await listen(restartUpstream);
-    const restartDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ans-r4-budget-'));
-    const restartFile = path.join(restartDir, 'sends.txt');
-    fs.writeFileSync(restartFile, '6');
-    const restarted = await startProxy({
-      upstream: restartUpstream,
-      budgetFile: restartFile,
-      frozenUpstream: `http://127.0.0.1:${restartPort}/v1`,
-    });
-    try {
-      const refused = await post(restarted.url);
-      assert.equal(refused.status, 429);
-      assert.equal(restartHits.length, 0);
-      assert.equal(fs.readFileSync(restartFile, 'utf8').trim(), '6');
-    } finally {
-      await restarted.stop();
-      fs.rmSync(restartDir, { recursive: true, force: true });
-    }
-  },
-);

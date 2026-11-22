@@ -343,19 +343,49 @@ fn native_root_pauses_provider_authority_while_waiting_without_losing_candidate_
     );
 }
 #[test]
-fn native_root_unknown_pricing_stops_before_any_provider_reservation() {
+fn native_root_unpriced_requests_succeed_and_remain_usage_known() {
     let (mut connection, mut input) = fixture();
     run(&mut connection, &mut input, "root-run");
     let root = input.execution.clone().unwrap();
-    assert!(usage::before_dispatch(&connection, &root, 1, 1, None, None)
-        .unwrap_err()
-        .starts_with("DSH_ROOT_PRICING_REQUIRED"));
-    assert_eq!(
-        usage::usage_for_root(&connection, &input.conversation_id, &input.turn_id)
-            .unwrap()
-            .requests,
-        0
-    );
+    assert!(usage::before_dispatch(&connection, &root, 128, 256, None, None).is_ok());
+    let grant = requests::reserve_request(
+        &mut connection,
+        requests::ReserveAiRequestInput {
+            owner_id: root.owner_id.clone(),
+            provider_request_id: "native-unified-unpriced-1".into(),
+            max_requests_per_minute: 60,
+            max_concurrent_requests: 2,
+            daily_token_budget: None,
+            daily_cost_budget_usd: None,
+            estimated_input_tokens: 128,
+            estimated_output_tokens: 256,
+            input_price_per_million_tokens: None,
+            output_price_per_million_tokens: None,
+            warning_percent: 80,
+            ttl_ms: 60_000,
+        },
+    )
+    .unwrap();
+    requests::settle_request(
+        &mut connection,
+        requests::SettleAiRequestInput {
+            reservation_id: grant.reservation_id.clone(),
+            owner_id: grant.owner_id,
+            lease_token: grant.lease_token,
+            outcome: "succeeded".into(),
+            token_input: Some(100),
+            token_output: Some(200),
+        },
+    )
+    .unwrap();
+    usage::record_request_usage(&mut connection, &root, &grant.reservation_id, true).unwrap();
+    let settled =
+        usage::usage_for_root(&connection, &input.conversation_id, &input.turn_id).unwrap();
+    assert!(settled.usage_known);
+    assert_eq!(settled.requests, 1);
+    assert_eq!(settled.token_input, 100);
+    assert_eq!(settled.token_output, 200);
+    assert!(usage::before_dispatch(&connection, &root, 128, 256, None, None).is_ok());
 }
 #[test]
 fn native_root_startup_recovery_settles_active_reservation_conservatively_for_retry() {

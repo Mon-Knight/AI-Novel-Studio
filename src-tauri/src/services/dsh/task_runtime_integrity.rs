@@ -20,6 +20,27 @@ impl Drop for ModuleDirectory {
     }
 }
 
+#[cfg(windows)]
+fn configure_background_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_background_process(_command: &mut Command) {}
+
+fn node_compatible_path(path: &std::path::Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let rendered = path.to_string_lossy();
+        if let Some(stripped) = rendered.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 pub(in super::super) fn inspect(
     root: Option<&execution::RootExecution>,
     pending: &chapter_gate::PendingChapterCandidate,
@@ -42,7 +63,7 @@ pub(in super::super) fn inspect(
         ("check.mjs","import { inspectChapterCandidateIntegrity } from './chapter-integrity.mjs';\nlet raw='';for await(const chunk of process.stdin){raw+=chunk;if(raw.length>8388608)process.exit(2);}const value=JSON.parse(raw);process.stdout.write(JSON.stringify(inspectChapterCandidateIntegrity(value)));"),
     ] { std::fs::write(directory.0.join(name),content).map_err(|_|"DSH_CHAPTER_INTEGRITY_MODULE_WRITE_FAILED".to_string())?; }
     let mut command = Command::new("node");
-    super::super::super::launcher::configure_background_process(&mut command);
+    configure_background_process(&mut command);
     let mut child = command
         .arg(node_compatible_path(&directory.0.join("check.mjs")))
         .current_dir(node_compatible_path(&directory.0))

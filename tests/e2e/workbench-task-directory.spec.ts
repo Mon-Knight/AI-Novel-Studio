@@ -61,10 +61,25 @@ async function restoreDirectoryFixture(sourceNovelId: string, sourceTaskId: stri
   await confirm.waitForEnabled();
   await confirm.click();
   await waitForTestId('project-import-result');
-  // Restore commits before its progress overlay and import dialog finish. Let the
-  // normal success flow return to the workbench before clicking the project tree.
+  // Restore commits before its progress overlay and import dialog finish. The
+  // success loading modal pauses auto-close while hovered (hover-to-read), so
+  // acknowledge it if it remains visible after the import dialog closes.
   await waitForTestIdMissing('project-import-dialog');
-  await waitForTestIdMissing('loading-modal-dismiss');
+  await browser.waitUntil(
+    async () => {
+      const dismissButton = await browser.$('[data-testid="loading-modal-dismiss"]');
+      if (!(await dismissButton.isExisting().catch(() => false))) return true;
+      if (!(await dismissButton.isDisplayed().catch(() => false))) return true;
+      try {
+        await browser.execute((element) => (element as HTMLElement).click(), dismissButton);
+      } catch {
+        // Auto-closed between check and click.
+      }
+      return !(await dismissButton.isExisting().catch(() => true));
+    },
+    { timeout: 30000, timeoutMsg: 'loading-modal-dismiss remained visible' },
+  );
+  await browser.$('.modal-overlay').waitForExist({ reverse: true, timeout: 30000 });
   await waitForTestId('creative-workbench');
   const added = (await bridgeCall<Array<{ id: string }>>('get_all_novels')).filter(
     (novel) => !before.some((old) => old.id === novel.id),

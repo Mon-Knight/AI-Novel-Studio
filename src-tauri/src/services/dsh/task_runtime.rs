@@ -6,13 +6,9 @@
 //! owning worker.  The browser fallback lives in TypeScript; the desktop path
 //! fails explicitly when the pinned carrier is unavailable.
 
-use super::commands::{normalize_model_base_url, spawn_governed_proxy, ProxyGuard};
-use super::config::{runtime_root, task_cordis_yml, task_server_script};
-use super::governed_proxy::{
-    GovernedProxyPolicy, GovernedProxyPolicyGuard, GovernedRequestIdentityReader,
-};
-use super::launcher::{node_compatible_path, DshLaunchConfig, DshRuntimeLauncher, NodeDshRuntime};
-use super::supervisor::{RuntimeHandle, SessionEventObserver, SupervisorError};
+use super::commands::normalize_model_base_url;
+use super::config::WORKBENCH_COMPOSITION;
+use super::native_agent_transport::GovernedRequestIdentityReader;
 use crate::errors::AppError;
 use crate::repositories::{draft_repository, large_text_repository};
 use crate::services::ai_task_service::{ClaimAiTaskAttemptInput, CreateAiTaskInput};
@@ -27,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -121,9 +117,6 @@ pub const DSH_PROTOCOL: &str = "ans_task_session_v2";
 pub const DSH_TASK_PROJECTION_EVENT: &str = "ans://task-runtime-projection";
 const MODEL_TOOL_ATTESTATION_PROTOCOL: &str = "ans_model_tool_attestation_v1";
 const MODEL_TOOL_ATTESTATION_TTL_MS: i64 = 10 * 60 * 1_000;
-pub(super) const DSH_WORKER_FRAME_CHANNEL_DISCONNECTED: &str =
-    "DSH_WORKER_FRAME_CHANNEL_DISCONNECTED";
-const MAX_DSH_WORKER_STDERR_TAIL_CHARS: usize = 240;
 const DEEPSEEK_HARNESS_PROVIDER: &str = "deepseek-official";
 const OPENAI_COMPATIBLE_PROVIDER: &str = "openai_compatible";
 pub(super) const ALLOWED_TOOLS: &str =
@@ -1030,13 +1023,19 @@ struct ActiveWorker {
 }
 
 struct WorkerProcess {
-    runtime: Arc<RuntimeHandle>,
+    instance_id: String,
     identity_hash: String,
     model_route: SelectedModelRoute,
+    upstream_key: String,
     credential_hash: String,
-    _proxy_guard: ProxyGuard,
-    _policy_guard: GovernedProxyPolicyGuard,
-    _mock_guard: Option<mock_response::MockResponseGuard>,
+    request_identity: GovernedRequestIdentityReader,
+    mock_guard: Option<mock_response::MockResponseGuard>,
+}
+
+impl WorkerProcess {
+    fn mock_base_url(&self) -> Option<String> {
+        self.mock_guard.as_ref().map(|guard| guard.base_url())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1131,120 +1130,16 @@ pub(super) fn safe_runtime_error(error: &str) -> String {
     safe
 }
 
-fn bounded_stderr_tail(value: &str) -> String {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let character_count = normalized.chars().count();
-    if character_count <= MAX_DSH_WORKER_STDERR_TAIL_CHARS {
-        return normalized;
-    }
-    let retained = MAX_DSH_WORKER_STDERR_TAIL_CHARS.saturating_sub(1);
-    format!(
-        "…{}",
-        normalized
-            .chars()
-            .skip(character_count - retained)
-            .collect::<String>()
-    )
-}
-
-fn safe_runtime_stderr_tail(stderr: &str) -> String {
-    let trimmed = stderr.trim();
-    if trimmed.is_empty() {
-        return "<empty>".to_string();
-    }
-    if crate::services::ai_fact_security::contains_secret_text(trimmed) {
-        return safe_runtime_error(trimmed);
-    }
-    safe_runtime_error(&bounded_stderr_tail(trimmed))
-}
-
-pub(super) fn safe_supervisor_error(
-    runtime: &RuntimeHandle,
-    context: &str,
-    error: &SupervisorError,
-) -> String {
-    if !error.is_frame_channel_disconnected() {
-        return safe_runtime_error(&format!("{}: {}", context, error));
-    }
-    let Some(exit_code) = runtime.diagnostic_child_exit_code() else {
-        return DSH_WORKER_FRAME_CHANNEL_DISCONNECTED.to_string();
-    };
-    let stderr_tail = safe_runtime_stderr_tail(&runtime.diagnostic_stderr_tail());
-    safe_runtime_error(&format!(
-        "{} [childExitStatus=exit-code:{}; stderrTail={}]",
-        DSH_WORKER_FRAME_CHANNEL_DISCONNECTED, exit_code, stderr_tail
-    ))
-}
-
 pub fn describe_runtime() -> RuntimeDescriptor {
-    let root = runtime_root();
-    if root.is_none() {
-        return RuntimeDescriptor {
-            source_commit: DSH_SOURCE_COMMIT.to_string(),
-            protocol: DSH_PROTOCOL.to_string(),
-            status: "unavailable".to_string(),
-            runtime_root: None,
-            node_version: None,
-            bundle: "scripts/dsh/build-runtime-payload.mjs".to_string(),
-            isolation: "one-persistent-worker-per-task".to_string(),
-            error: Some("未找到固定 DSH 运行时载体".to_string()),
-        };
-    }
-    let root_value = root.clone().unwrap_or_default();
-    match NodeDshRuntime::check_node() {
-        Ok(node_version) => {
-            let matrix = Path::new(&root_value).join("VERSION_MATRIX.json");
-            let matrix_commit = std::fs::read_to_string(matrix)
-                .ok()
-                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-                .and_then(|value| {
-                    value
-                        .get("sourceCommit")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                });
-            let checkout_usable = Path::new(&root_value)
-                .join("packages/examples/jsonrpc-demo/lib/bin.js")
-                .is_file()
-                && Path::new(&root_value)
-                    .join("packages/sdk/protocol/lib/index.js")
-                    .is_file()
-                && Path::new(&root_value)
-                    .join("packages/core/agent/lib/index.js")
-                    .is_file();
-            let (status, error) = match matrix_commit.as_deref() {
-                Some(DSH_SOURCE_COMMIT) => ("available", None),
-                Some(_) => (
-                    "failed",
-                    Some("载体 VERSION_MATRIX.sourceCommit 与固定基线不符".to_string()),
-                ),
-                None if checkout_usable => ("available", None),
-                None => (
-                    "failed",
-                    Some("固定载体缺少 VERSION_MATRIX.json，且 checkout 布局不完整".to_string()),
-                ),
-            };
-            RuntimeDescriptor {
-                source_commit: DSH_SOURCE_COMMIT.to_string(),
-                protocol: DSH_PROTOCOL.to_string(),
-                status: status.to_string(),
-                runtime_root: Some(root_value),
-                node_version: Some(node_version),
-                bundle: "scripts/dsh/build-runtime-payload.mjs".to_string(),
-                isolation: "one-persistent-worker-per-task".to_string(),
-                error,
-            }
-        }
-        Err(error) => RuntimeDescriptor {
-            source_commit: DSH_SOURCE_COMMIT.to_string(),
-            protocol: DSH_PROTOCOL.to_string(),
-            status: "failed".to_string(),
-            runtime_root: Some(root_value),
-            node_version: None,
-            bundle: "scripts/dsh/build-runtime-payload.mjs".to_string(),
-            isolation: "one-persistent-worker-per-task".to_string(),
-            error: Some(error),
-        },
+    RuntimeDescriptor {
+        source_commit: DSH_SOURCE_COMMIT.to_string(),
+        protocol: DSH_PROTOCOL.to_string(),
+        status: "available".to_string(),
+        runtime_root: Some("builtin://ans-native-runtime".to_string()),
+        node_version: Some("native-rust".to_string()),
+        bundle: "ans-native-in-process".to_string(),
+        isolation: "in-process-scoped-task".to_string(),
+        error: None,
     }
 }
 
@@ -1413,12 +1308,14 @@ fn normalize_tool_name(name: &str) -> String {
     }
     if name == "get_metadata"
         || name == "novel.read_context"
+        || name == "novel_read_context"
         || name.starts_with("novel_read_context_")
     {
         return "novel.read_context".to_string();
     }
     if name == "get_chapter_context"
         || name == "chapter.read_outline"
+        || name == "chapter_read_outline"
         || name.starts_with("chapter_read_outline_")
     {
         return "chapter.read_outline".to_string();
@@ -3181,20 +3078,6 @@ fn create_artifact_projection(
     Ok(card.artifact_id)
 }
 
-fn worker_root() -> PathBuf {
-    let root = std::env::var("ANS_TASK_WORKER_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| crate::db::get_data_dir().join("dsh-task-workers"));
-    node_compatible_path(&root)
-}
-
-fn worker_directory(conversation_id: &str) -> PathBuf {
-    let digest = large_text_repository::sha256(conversation_id);
-    worker_root().join(&digest[..32])
-}
-
 fn is_loopback_model_base_url(base_url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(base_url.trim()) else {
         return false;
@@ -3218,7 +3101,7 @@ fn provider_transport(input: &StartTaskTurnInput) -> Result<ProviderTransport, S
             "local-no-key-required".to_string()
         } else {
             return Err(
-                "DSH 任务需要 Provider API Key；远程模型不得使用空凭据，也不会静默降级到前端流水线"
+                "当前远程模型缺少 API Key；远程模型不得使用空凭据，也不会静默降级到前端流水线"
                     .to_string(),
             );
         }
@@ -3417,254 +3300,59 @@ fn workbench_reasoning_effort(input: &StartTaskTurnInput) -> &str {
 
 fn spawn_worker_process(
     input: &StartTaskTurnInput,
-    descriptor: &RuntimeDescriptor,
-    worker_id: &str,
     identity_hash: String,
     model_route: &SelectedModelRoute,
     upstream_key: &str,
-    projection: Arc<Mutex<Option<ProjectionTarget>>>,
 ) -> Result<Arc<WorkerProcess>, String> {
-    let root = descriptor
-        .runtime_root
-        .clone()
-        .ok_or_else(|| "DSH runtime root missing".to_string())?;
-    let runtime_bin = NodeDshRuntime::runtime_bin(&root)?;
-    let gateway_bin = super::commands::resolve_gateway_bin()?;
-    let work = worker_directory(&input.conversation_id);
-    std::fs::create_dir_all(&work).map_err(|error| error.to_string())?;
-    let db_path = node_compatible_path(&super::commands::gateway_database_path())
-        .to_string_lossy()
-        .to_string();
-    let server_path = work.join("ans-task-server.mjs");
-    std::fs::write(
-        &server_path,
-        task_server_script(&root, DSH_SOURCE_COMMIT, DSH_PROTOCOL),
-    )
-    .map_err(|error| error.to_string())?;
-    let cordis_path = work.join("cordis.yml");
-    std::fs::write(
-        &cordis_path,
-        task_cordis_yml(&root, &gateway_bin, &db_path, &server_path),
-    )
-    .map_err(|error| error.to_string())?;
-
-    let pricing = input.model_snapshot.get("pricing");
-    let owner_hash = large_text_repository::sha256(&input.conversation_id);
-    let transport_instance_id = uuid::Uuid::new_v4().simple().to_string();
-    let policy_guard = super::governed_proxy::start_policy_server_with_root(
-        GovernedProxyPolicy {
-            owner_id: input
-                .execution
-                .as_ref()
-                .map(|e| e.owner_id.clone())
-                .unwrap_or_else(|| format!("dsh-workbench:{}", &owner_hash[..32])),
-            max_requests_per_minute: input.request_policy.max_requests_per_minute,
-            max_concurrent_requests: input.request_policy.max_concurrent_requests,
-            daily_token_budget: input.request_policy.daily_token_budget,
-            daily_cost_budget_usd: input.request_policy.daily_cost_budget_usd,
-            input_price_per_million_tokens: pricing
-                .and_then(|value| value.get("inputPricePerMillionTokens"))
-                .and_then(Value::as_f64)
-                .or_else(|| is_loopback_model_base_url(&model_route.base_url).then_some(0.0)),
-            output_price_per_million_tokens: pricing
-                .and_then(|value| value.get("outputPricePerMillionTokens"))
-                .and_then(Value::as_f64)
-                .or_else(|| is_loopback_model_base_url(&model_route.base_url).then_some(0.0)),
-            warning_percent: input.request_policy.warning_percent,
-            ttl_ms: (input.request_policy.timeout_seconds.max(1) * 1_000 + 60_000)
-                .clamp(60_000, 2 * 60 * 60_000),
-        },
-        input.execution.clone(),
-    )?;
     let mock_guard = if model_route.logical_provider == "mock" {
         Some(mock_response::start(input)?)
     } else {
         None
     };
-    let upstream_base = mock_guard
-        .as_ref()
-        .map(|g| g.base_url())
-        .unwrap_or_else(|| model_route.base_url.clone());
-    let (proxy_guard, base_url) = spawn_governed_proxy(
-        &work,
-        upstream_key,
-        &upstream_base,
-        &model_route.model,
-        &policy_guard.url(),
-        &format!("dsh:{}:{}", &owner_hash[..32], transport_instance_id),
-        input.request_policy.timeout_seconds.max(1) * 1_000,
-    )?;
-    let config = DshLaunchConfig {
-        runtime_bin: PathBuf::from(runtime_bin),
-        cordis_config: cordis_path,
-        session_root: work.join("sessions"),
-        home: work.join("home"),
-        api_key: "local-proxy".to_string(),
-        base_url,
-        system_prompt: workbench_system_prompt(input).to_string(),
-        cwd: work,
-        allowed_tools: Some(turn_allowed_tools(input).to_string()),
-        task_novel_id: input.novel_id.clone(),
-        task_chapter_id: input.chapter_id.clone(),
-        candidate_policy: candidate_validation_policy(input),
-        task_budget_url: input.execution.as_ref().map(|_| policy_guard.url()),
-    };
-    let child = NodeDshRuntime
-        .launch(&config)
-        .map_err(|error| format!("DSH Worker {} 启动失败: {}", worker_id, error))?;
-    let observer: SessionEventObserver = {
-        let conversation_id = input.conversation_id.clone();
-        Arc::new(move |notification| {
-            let target = projection
-                .lock()
-                .map_err(|_| "DSH 事件投影锁失败".to_string())?
-                .clone();
-            let Some(target) = target else {
-                return Ok(());
-            };
-            project_session_event(
-                notification,
-                &target.session_id,
-                &conversation_id,
-                &target.run_id,
-                &target.turn_error,
-                target.notifier.as_ref(),
-                &target.request_identity,
-                &target.allowed_tools,
-                target.staged_input.as_deref(),
-            )
-        })
-    };
-    let runtime = Arc::new(
-        RuntimeHandle::new_with_observer(child, Some(observer))
-            .map_err(|error| error.to_string())?,
-    );
     Ok(Arc::new(WorkerProcess {
-        runtime,
+        instance_id: uuid::Uuid::new_v4().to_string(),
         identity_hash,
         model_route: model_route.clone(),
+        upstream_key: upstream_key.to_string(),
         credential_hash: large_text_repository::sha256(upstream_key),
-        _proxy_guard: proxy_guard,
-        _policy_guard: policy_guard,
-        _mock_guard: mock_guard,
+        request_identity: Arc::new(Mutex::new(None)),
+        mock_guard,
     }))
 }
 
 fn ensure_worker_process(
     input: &StartTaskTurnInput,
-    worker_id: &str,
+    _worker_id: &str,
     process_holder: &Arc<Mutex<Option<Arc<WorkerProcess>>>>,
-    projection: Arc<Mutex<Option<ProjectionTarget>>>,
+    _projection: Arc<Mutex<Option<ProjectionTarget>>>,
 ) -> Result<Arc<WorkerProcess>, String> {
     let transport = provider_transport(input)?;
     let descriptor = describe_runtime();
     if !carrier_files_ready(&descriptor.status) {
         return Err(descriptor
             .error
-            .unwrap_or_else(|| "DSH 运行时不可用".to_string()));
+            .unwrap_or_else(|| "原生运行时不可用".to_string()));
     }
     let mut holder = process_holder
         .lock()
         .map_err(|_| "Worker 进程锁失败".to_string())?;
     if let Some(existing) = holder.as_ref() {
-        let healthy = existing.identity_hash == transport.identity_hash
-            && existing
-                .runtime
-                .request("runtime/health", None, Duration::from_secs(3))
-                .ok()
-                .and_then(|health| health.get("sourceCommit").cloned())
-                .and_then(|value| value.as_str().map(str::to_string))
-                .as_deref()
-                == Some(DSH_SOURCE_COMMIT);
-        if healthy {
-            if let Some(mock) = &existing._mock_guard {
+        if existing.identity_hash == transport.identity_hash {
+            if let Some(mock) = &existing.mock_guard {
                 mock.set_input(input)?;
             }
             return Ok(existing.clone());
         }
-        if let Some(previous) = holder.take() {
-            let _ = previous.runtime.shutdown_and_wait(Duration::from_secs(10));
-        }
+        holder.take();
     }
     let process = spawn_worker_process(
         input,
-        &descriptor,
-        worker_id,
         transport.identity_hash,
         &transport.route,
         &transport.upstream_key,
-        projection,
     )?;
     *holder = Some(process.clone());
     Ok(process)
-}
-
-fn ensure_runtime_initialized(
-    input: &StartTaskTurnInput,
-    runtime: &RuntimeHandle,
-) -> Result<(), String> {
-    ensure_runtime_initialized_with_timeout(input, runtime, Ok)
-}
-
-fn ensure_runtime_initialized_with_timeout(
-    input: &StartTaskTurnInput,
-    runtime: &RuntimeHandle,
-    timeout: impl Fn(Duration) -> Result<Duration, String>,
-) -> Result<(), String> {
-    let route = selected_model_route(input)?;
-    let max_tokens = input
-        .model_snapshot
-        .pointer("/options/maxTokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(8000);
-    let current_health =
-        match runtime.request("runtime/health", None, timeout(Duration::from_secs(5))?) {
-            Ok(health) => Some(health),
-            Err(error) if error.is_frame_channel_disconnected() => {
-                return Err(safe_supervisor_error(
-                    runtime,
-                    "runtime/health 失败",
-                    &error,
-                ));
-            }
-            Err(_) => None,
-        };
-    let already_ready = current_health.as_ref().is_some_and(|health| {
-        health.get("ready").and_then(Value::as_bool) == Some(true)
-            && health.get("sourceCommit").and_then(Value::as_str) == Some(DSH_SOURCE_COMMIT)
-            && health.pointer("/route/provider").and_then(Value::as_str)
-                == Some(route.harness_provider.as_str())
-            && health.pointer("/route/model").and_then(Value::as_str) == Some(route.model.as_str())
-    });
-    if already_ready {
-        return Ok(());
-    }
-    runtime
-        .request(
-            "initialize",
-            Some(json!({
-                "cwd":worker_directory(&input.conversation_id).to_string_lossy().replace('\\',"/"),
-                "provider":route.harness_provider,
-                "model":route.model,
-                "maxTokens":max_tokens,
-                "sourceCommit":DSH_SOURCE_COMMIT,
-                "protocol":DSH_PROTOCOL
-            })),
-            timeout(Duration::from_secs(30))?,
-        )
-        .map_err(|error| safe_supervisor_error(runtime, "initialize 失败", &error))?;
-    let health = runtime
-        .request("runtime/health", None, timeout(Duration::from_secs(30))?)
-        .map_err(|error| safe_supervisor_error(runtime, "runtime/health 失败", &error))?;
-    if health.get("ready").and_then(Value::as_bool) != Some(true)
-        || health.get("sourceCommit").and_then(Value::as_str) != Some(DSH_SOURCE_COMMIT)
-        || health.pointer("/route/provider").and_then(Value::as_str)
-            != Some(route.harness_provider.as_str())
-        || health.pointer("/route/model").and_then(Value::as_str) != Some(route.model.as_str())
-    {
-        return Err("DSH Runtime 初始化、固定载体或精确模型路由健康校验失败".to_string());
-    }
-    Ok(())
 }
 
 pub(super) fn validate_model_tool_attestation(
@@ -3817,9 +3505,7 @@ pub fn cancel(conversation_id: &str) -> Result<TaskRuntimeStatus, String> {
     drop(workers);
     if initializing {
         if let Ok(mut holder) = process.lock() {
-            if let Some(process) = holder.take() {
-                process.runtime.kill();
-            }
+            holder.take();
         }
         return Ok(TaskRuntimeStatus {
             conversation_id: conversation_id.to_string(),
@@ -3936,10 +3622,7 @@ pub fn debug_kill_worker(conversation_id: &str) {
     if let Ok(mut workers) = active().lock() {
         if let Some(worker) = workers.get_mut(conversation_id) {
             if let Ok(mut holder) = worker.process.lock() {
-                if let Some(process) = holder.take() {
-                    let _ = process.runtime.shutdown_and_wait(Duration::from_secs(10));
-                    process.runtime.kill();
-                }
+                holder.take();
             }
             worker.status = "idle".to_string();
         }
@@ -4024,14 +3707,58 @@ fn project_runtime_health_identity(mut health: Value, route: &SelectedModelRoute
     health
 }
 
+pub(crate) fn native_catalog_only_health() -> Value {
+    let composition: Vec<Value> = WORKBENCH_COMPOSITION
+        .iter()
+        .map(|spec| json!({ "id": spec.id, "status": "loaded" }))
+        .collect();
+    let tools: Vec<Value> = ALLOWED_TOOLS
+        .split(',')
+        .map(|tool| Value::String(tool.to_string()))
+        .collect();
+    json!({
+        "initialized": true,
+        "ready": true,
+        "sourceCommit": DSH_SOURCE_COMMIT,
+        "protocol": DSH_PROTOCOL,
+        "composition": composition,
+        "providers": [],
+        "models": [],
+        "modelToolAttestations": [],
+        "tools": { "global": tools },
+    })
+}
+
+fn build_native_route_health(route: &SelectedModelRoute) -> Value {
+    let mut health = native_catalog_only_health();
+    health["route"] = json!({
+        "provider": route.harness_provider,
+        "model": route.model,
+    });
+    health["providers"] = json!([{
+        "id": route.harness_provider,
+        "name": if route.harness_provider == DEEPSEEK_HARNESS_PROVIDER {
+            "DeepSeek"
+        } else {
+            "OpenAI-compatible"
+        },
+        "status": "loaded",
+        "models": [{
+            "provider": route.harness_provider,
+            "id": route.model,
+            "name": route.model,
+        }],
+    }]);
+    health["models"] = json!([{
+        "provider": route.harness_provider,
+        "id": route.model,
+        "name": route.model,
+    }]);
+    health
+}
+
 fn read_process_health(process: &WorkerProcess) -> Result<Value, String> {
-    let health = process
-        .runtime
-        .request("runtime/health", None, Duration::from_secs(5))
-        .map_err(|_| "DSH runtime/health 查询失败".to_string())?;
-    if !health.is_object() {
-        return Err("DSH runtime/health 响应无效".to_string());
-    }
+    let health = build_native_route_health(&process.model_route);
     validate_runtime_health_identity(&health, &process.model_route)?;
     Ok(project_runtime_health_identity(
         health,
@@ -4135,25 +3862,15 @@ fn ensure_plugin_probe_health(
                 return Ok(Some(health));
             }
         }
-        let stale = plugin_probe()
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
-        if let Some(stale) = stale {
-            // A probe never owns user work, so replace an unhealthy or
-            // differently routed carrier immediately.
-            stale.runtime.kill();
+        if let Ok(mut guard) = plugin_probe().lock() {
+            guard.take();
         }
     }
-    let dummy_projection = Arc::new(Mutex::new(None));
     let process = match spawn_worker_process(
         &input,
-        &descriptor,
-        "worker-plugin-probe",
         transport.identity_hash,
         &transport.route,
         &transport.upstream_key,
-        dummy_projection,
     ) {
         Ok(process) => process,
         Err(error) => {
@@ -4163,17 +3880,9 @@ fn ensure_plugin_probe_health(
             return Ok(None);
         }
     };
-    if let Err(error) = ensure_runtime_initialized(&input, &process.runtime) {
-        process.runtime.kill();
-        if model_snapshot.is_some() {
-            return Err(safe_runtime_error(&error));
-        }
-        return Ok(None);
-    }
     let health = match read_process_health(&process) {
         Ok(health) => health,
         Err(error) => {
-            process.runtime.kill();
             if model_snapshot.is_some() {
                 return Err(safe_runtime_error(&error));
             }

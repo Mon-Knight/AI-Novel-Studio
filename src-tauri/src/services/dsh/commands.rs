@@ -6,28 +6,20 @@
 //! validator (enum coercion included); adapter-owned metrics are injected before
 //! returning. The runtime tree dies with the handle (Job Object).
 
-use std::io::{BufRead, BufReader};
 #[cfg(test)]
 use std::net::IpAddr;
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{async_runtime, Emitter};
 
-use super::config::{cordis_yml, runtime_root, RuntimeCompositionSpec, WORKBENCH_COMPOSITION};
-use super::launcher::{
-    configure_background_process, node_compatible_path, DshLaunchConfig, DshRuntimeLauncher,
-    NodeDshRuntime,
-};
+use super::config::{RuntimeCompositionSpec, WORKBENCH_COMPOSITION};
 use super::ledger::{record_run, summary, PreparationRunRecord, PreparationSummary};
 use super::models::{ChapterPreparationInput, ChapterPreparationProposal};
 use super::proposal_validator::{self, ValidationReport};
-use super::supervisor::{RuntimeHandle, SessionSnapshot};
 use super::task_runtime::{
     self, RuntimeDescriptor, StartTaskTurnInput, TaskProjectionObserver, TaskRuntimeResult,
     TaskRuntimeStatus, DSH_TASK_PROJECTION_EVENT,
@@ -140,14 +132,6 @@ fn safe_catalog_text(value: Option<&str>, fallback: &str) -> String {
 #[path = "commands_tool_projection.rs"]
 mod tool_projection;
 use tool_projection::canonical_workbench_tool;
-
-fn component_files_available(root: Option<&Path>, spec: &RuntimeCompositionSpec) -> bool {
-    root.is_some_and(|root| {
-        spec.required_paths
-            .iter()
-            .all(|relative| root.join(relative).is_file())
-    })
-}
 
 fn health_is_compatible(health: &Value, runtime: &RuntimeDescriptor) -> bool {
     health.get("sourceCommit").and_then(Value::as_str) == Some(runtime.source_commit.as_str())
@@ -430,14 +414,7 @@ fn build_current_plugin_projection(
     runtime: &RuntimeDescriptor,
     health: Option<&Value>,
 ) -> Vec<CurrentPluginProjection> {
-    let root = runtime.runtime_root.as_deref().map(Path::new);
-    let gateway_available = resolve_gateway_bin().is_ok();
-    build_current_plugin_projection_with(
-        runtime,
-        health,
-        |spec| component_files_available(root, spec),
-        gateway_available,
-    )
+    build_current_plugin_projection_with(runtime, health, |_| true, true)
 }
 
 fn list_current_plugins_projection(
@@ -454,7 +431,11 @@ fn list_current_plugins_projection(
         model_snapshot.as_ref(),
         api_key.as_deref(),
     ) {
-        Ok(health) => Ok(build_current_plugin_projection(&runtime, health.as_ref())),
+        Ok(Some(health)) => Ok(build_current_plugin_projection(&runtime, Some(&health))),
+        Ok(None) => {
+            let catalog_health = task_runtime::native_catalog_only_health();
+            Ok(build_current_plugin_projection(&runtime, Some(&catalog_health)))
+        }
         Err(error) => Err(task_runtime::safe_runtime_error(&error)),
     }
 }
@@ -474,13 +455,8 @@ pub async fn dsh_list_current_plugins(
 
 /// The persona the runtime is booted with (asset: prompts/dsh_chapter_preparation.md).
 const PERSONA: &str = include_str!("../../../../prompts/dsh_chapter_preparation.md");
-/// The local model-gateway proxy script (asset: scripts/dsh/model-proxy.mjs),
-/// embedded so the command can write it to the runtime work dir at launch.
-const PROXY_SCRIPT: &str = include_str!("../../../../scripts/dsh/model-proxy.mjs");
 const MAX_REPAIR_TURNS: usize = 3;
-const SETTLE: Duration = Duration::from_millis(3000);
 const TURN_TIMEOUT: Duration = Duration::from_secs(480);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TOKENS: u64 = 8192;
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 
@@ -571,337 +547,37 @@ pub fn get_dsh_preparation_summary(
     summary(&connection, &novel_id, &chapter_id)
 }
 
-/// Owns the local model-gateway proxy process; killed on drop.
-pub(crate) struct ProxyGuard {
-    child: Mutex<Option<Child>>,
-    log: Arc<Mutex<String>>,
-    #[cfg(windows)]
-    job: Mutex<Option<super::supervisor::JobObject>>,
-}
-
-impl ProxyGuard {
-    fn log_tail(&self) -> String {
-        let buffer = self.log.lock().unwrap();
-        if buffer.len() > 4000 {
-            buffer[buffer.len() - 4000..].to_string()
-        } else {
-            buffer.clone()
-        }
-    }
-
-    pub(crate) fn last_policy_error_code(&self) -> Option<String> {
-        self.log
-            .lock()
-            .ok()?
-            .lines()
-            .rev()
-            .find_map(|line| line.strip_prefix("[model-proxy] policyReject code="))
-            .filter(|code| {
-                !code.is_empty()
-                    && code.len() <= 96
-                    && code.bytes().all(|byte| {
-                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
-                    })
-            })
-            .map(str::to_string)
-    }
-
-    pub(crate) fn safe_diagnostics(&self) -> Option<String> {
-        let buffer = self.log.lock().ok()?;
-        let lines = buffer
-            .lines()
-            .filter(|line| {
-                line.starts_with("[model-proxy] request ")
-                    || line.starts_with("[model-proxy] responseStats ")
-                    || line.starts_with("[model-proxy] done ")
-            })
-            .rev()
-            .take(9)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join(" | ");
-        (!lines.is_empty()).then_some(lines.chars().take(3600).collect())
-    }
-}
-
-impl Drop for ProxyGuard {
-    fn drop(&mut self) {
-        #[cfg(windows)]
-        if let Ok(mut job) = self.job.lock() {
-            job.take();
-        }
-        if let Some(mut child) = self.child.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-/// Spawns the local proxy on a free port with the upstream key; returns the
-/// guard plus the base URL. The downstream (DSH) side gets a dummy key: the
-/// upstream credential lives only in the proxy process.
-pub(crate) fn spawn_proxy(
-    work: &Path,
-    upstream_key: &str,
-    model: &str,
-) -> Result<(ProxyGuard, String), String> {
-    let upstream = std::env::var("DSH_PROXY_UPSTREAM")
-        .unwrap_or_else(|_| "https://api.deepseek.com".to_string());
-    spawn_proxy_with_policy(work, upstream_key, &upstream, model, None, None, None)
-}
-
-pub(crate) fn spawn_governed_proxy(
-    work: &Path,
-    upstream_key: &str,
-    upstream: &str,
-    model: &str,
-    policy_url: &str,
-    request_prefix: &str,
-    request_timeout_ms: i64,
-) -> Result<(ProxyGuard, String), String> {
-    spawn_proxy_with_policy(
-        work,
-        upstream_key,
-        upstream,
-        model,
-        Some(policy_url),
-        Some(request_prefix),
-        Some(request_timeout_ms),
-    )
-}
-
-fn spawn_proxy_with_policy(
-    work: &Path,
-    upstream_key: &str,
-    upstream: &str,
-    model: &str,
-    policy_url: Option<&str>,
-    request_prefix: Option<&str>,
-    request_timeout_ms: Option<i64>,
-) -> Result<(ProxyGuard, String), String> {
-    let port = {
-        let listener =
-            TcpListener::bind("127.0.0.1:0").map_err(|error| format!("端口分配失败: {}", error))?;
-        listener
-            .local_addr()
-            .map(|address| address.port())
-            .map_err(|error| error.to_string())?
-    };
-    let script_path = work.join("model-proxy.mjs");
-    std::fs::write(&script_path, PROXY_SCRIPT)
-        .map_err(|error| format!("代理脚本写入失败: {}", error))?;
-
-    let mut command = Command::new("node");
-    configure_background_process(&mut command);
-    command
-        .arg(node_compatible_path(&script_path))
-        .env("PROXY_PORT", port.to_string())
-        .env("PROXY_UPSTREAM", upstream)
-        .env("PROXY_UPSTREAM_KEY", upstream_key)
-        .env("PROXY_MODEL", model)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(policy_url) = policy_url {
-        command.env("PROXY_POLICY_URL", policy_url);
-    }
-    if let Some(request_prefix) = request_prefix {
-        command.env("PROXY_REQUEST_PREFIX", request_prefix);
-    }
-    if let Some(request_timeout_ms) = request_timeout_ms {
-        command.env(
-            "PROXY_REQUEST_TIMEOUT_MS",
-            request_timeout_ms.clamp(1_000, 30 * 60_000).to_string(),
-        );
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("代理启动失败: {}", error))?;
-    #[cfg(windows)]
-    let job = match super::supervisor::JobObject::create_and_assign(child.id()) {
-        Ok(job) => Mutex::new(Some(job)),
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("代理进程树隔离失败: {}", error));
-        }
-    };
-
-    let log = Arc::new(Mutex::new(String::new()));
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "代理 stdout 未接管".to_string())?;
-    {
-        let log = log.clone();
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let mut buffer = log.lock().unwrap();
-                        buffer.push_str(&line);
-                        if buffer.len() > 1_000_000 {
-                            *buffer = buffer[buffer.len() - 600_000..].to_string();
-                        }
-                    }
-                }
-            }
-        });
-    }
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "代理 stderr 未接管".to_string())?;
-    {
-        let log = log.clone();
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(stderr);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let mut buffer = log.lock().unwrap();
-                        buffer.push_str(&line);
-                        if buffer.len() > 1_000_000 {
-                            *buffer = buffer[buffer.len() - 600_000..].to_string();
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Health: wait until the server accepts connections.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "代理未在 10 秒内就绪；日志: {}",
-                log.lock().unwrap()
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    let base_url = format!("http://127.0.0.1:{}", port);
-    Ok((
-        ProxyGuard {
-            child: Mutex::new(Some(child)),
-            log,
-            #[cfg(windows)]
-            job,
-        },
-        base_url,
-    ))
-}
-
 fn prepare(
     input: ChapterPreparationInput,
     options: DshPrepareOptions,
 ) -> Result<ChapterPreparationProposal, String> {
     if options.api_key.trim().is_empty() {
-        return Err("apiKey 不能为空（从设置中的 DeepSeek Provider 读取）".to_string());
+        return Err("apiKey 不能为空（从设置中的 Provider 读取）".to_string());
     }
     verify_baseline_freshness(&input)?;
-    let _node_version = NodeDshRuntime::check_node()?;
-    let root = runtime_root().ok_or_else(|| {
-        "未找到 DSH 运行时载体：请设置 DSH_RUNTIME_ROOT / DSH_CHECKOUT，或在应用目录放置 dsh-runtime/ 载荷（用 scripts/dsh/build-runtime-payload.mjs 构建）".to_string()
-    })?;
-    let runtime_bin = NodeDshRuntime::runtime_bin(&root)?;
-    let gateway_bin = resolve_gateway_bin()?;
-    let db_path = node_compatible_path(&gateway_database_path())
-        .to_string_lossy()
-        .to_string();
-
-    let work = std::env::temp_dir().join(format!("dsh-v310-{}", std::process::id()));
-    std::fs::create_dir_all(&work).map_err(|error| format!("工作目录创建失败: {}", error))?;
-    let cordis_path = work.join("cordis.yml");
-    std::fs::write(&cordis_path, cordis_yml(&root, &gateway_bin, &db_path))
-        .map_err(|error| format!("cordis 渲染失败: {}", error))?;
-
     let model = options
         .model
         .or_else(|| std::env::var("DSH_MODEL").ok())
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    // Keep every upstream behind the process-local compatibility proxy. Besides
-    // isolating the credential from the carrier, this normalizes conservative
-    // OpenAI-compatible SSE variants before they reach the pinned DSH adapter.
-    let (proxy_guard, base_url) = match options.base_url {
-        Some(url) => {
-            let upstream = normalize_model_base_url(&url)?;
-            let (guard, proxy_url) = spawn_proxy_with_policy(
-                &work,
-                &options.api_key,
-                &upstream,
-                &model,
-                None,
-                None,
-                None,
-            )?;
-            (Some(guard), proxy_url)
-        }
-        None => {
-            let (guard, proxy_url) = spawn_proxy(&work, &options.api_key, &model)?;
-            (Some(guard), proxy_url)
-        }
-    };
-    let downstream_key = "local-proxy".to_string();
-
-    let config = DshLaunchConfig {
-        runtime_bin: PathBuf::from(runtime_bin),
-        cordis_config: cordis_path,
-        session_root: work.join("sessions"),
-        home: work.join("home"),
-        api_key: downstream_key,
-        base_url,
-        system_prompt: PERSONA.to_string(),
-        cwd: work.clone(),
-        allowed_tools: None,
-        task_novel_id: Some(input.novel_id.clone()),
-        task_chapter_id: Some(input.chapter_id.clone()),
-        candidate_policy: None,
-        task_budget_url: None,
+    let base_url = match options.base_url {
+        Some(url) if !url.trim().is_empty() => normalize_model_base_url(&url)?,
+        _ => std::env::var("DSH_PROXY_UPSTREAM")
+            .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
     };
 
     let run_id = uuid::Uuid::new_v4().to_string();
-    let child = NodeDshRuntime
-        .launch(&config)
-        .map_err(|error| format!("DSH 运行时启动失败: {}", error))?;
-    let runtime = RuntimeHandle::new(child).map_err(|error| error.to_string())?;
-
     let run_started = Instant::now();
-    let result = run_preparation(&runtime, &config, &input, &model);
-    let failed_session = format!("prepare-{}-{}", input.novel_id, input.chapter_id);
-    let failed_snapshot = runtime.snapshot(&failed_session).unwrap_or_default();
+    let mut failed_prompt_tokens = 0i64;
+    let mut failed_completion_tokens = 0i64;
+    let result = run_preparation_native(
+        &input,
+        &base_url,
+        &options.api_key,
+        &model,
+        &mut failed_prompt_tokens,
+        &mut failed_completion_tokens,
+    );
     let failed_duration_ms = run_started.elapsed().as_millis() as i64;
-    let _ = runtime.shutdown_and_wait(SHUTDOWN_TIMEOUT);
-    drop(runtime);
-    if let Some(guard) = proxy_guard {
-        let tail = guard.log_tail();
-        crate::errors::log_workspace_event(crate::errors::WorkspaceLogEvent {
-            level: "info",
-            event: "dsh_model_proxy_accounting",
-            trace_id: None,
-            operation_id: None,
-            novel_id: Some(input.novel_id.as_str()),
-            chapter_id: Some(input.chapter_id.as_str()),
-            draft_id: None,
-            error_code: None,
-            metadata: Some(serde_json::json!({ "logTail": tail })),
-        });
-    }
 
     let ledger_record = match &result {
         Ok(proposal) => PreparationRunRecord {
@@ -926,8 +602,8 @@ fn prepare(
             chapter_id: input.chapter_id.clone(),
             planner: "dsh_spike_v0".to_string(),
             status: "failed".to_string(),
-            prompt_tokens: failed_snapshot.prompt_tokens as i64,
-            completion_tokens: failed_snapshot.completion_tokens as i64,
+            prompt_tokens: failed_prompt_tokens,
+            completion_tokens: failed_completion_tokens,
             duration_ms: failed_duration_ms,
             planner_coerced: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -958,60 +634,76 @@ fn verify_baseline_freshness(input: &ChapterPreparationInput) -> Result<(), Stri
     super::baseline_freshness::verify_fresh(input, &canonical)
 }
 
-fn run_preparation(
-    runtime: &RuntimeHandle,
-    config: &DshLaunchConfig,
+fn run_preparation_native(
     input: &ChapterPreparationInput,
+    base_url: &str,
+    api_key: &str,
     model: &str,
+    total_prompt_tokens: &mut i64,
+    total_completion_tokens: &mut i64,
 ) -> Result<ChapterPreparationProposal, String> {
-    let cwd = config.cwd.to_string_lossy().replace('\\', "/");
-    runtime
-        .request(
-            "initialize",
-            Some(json!({
-                "cwd": cwd,
-                "provider": "deepseek-official",
-                "model": model,
-                "maxTokens": MAX_TOKENS
-            })),
-            Duration::from_secs(30),
-        )
-        .map_err(|error| format!("initialize 失败: {}", error))?;
-    // P2 finding: MCP tool sync has no readiness notification; settle first.
-    std::thread::sleep(SETTLE);
+    use super::native_agent_loop::{run_native_turn, NativeTurnParams};
+    use std::sync::atomic::AtomicBool;
 
-    let session_id = format!("prepare-{}-{}", input.novel_id, input.chapter_id);
+    let session_id = format!(
+        "prepare-{}-{}-{}",
+        input.novel_id,
+        input.chapter_id,
+        uuid::Uuid::new_v4()
+    );
     let started = Instant::now();
-    verify_baseline_freshness(input)?;
-    runtime
-        .request(
-            "session/prompt",
-            Some(json!({
-                "sessionId": session_id,
-                "contentBlocks": [{"type": "text", "text": planning_prompt(input)}]
-            })),
-            Duration::from_secs(30),
-        )
-        .map_err(|error| format!("session/prompt 失败: {}", error))?;
+    let deadline = started + TURN_TIMEOUT;
+    let cancel = AtomicBool::new(false);
+    let db_path = gateway_database_path();
+    let allowed = "get_metadata,get_chapter_context,get_character_states,search_memory";
 
+    verify_baseline_freshness(input)?;
+    let mut current_prompt = planning_prompt(input);
+    let mut repair_turns = 0usize;
+    let mut total_tool_calls = 0i64;
     let parsed_value: Option<Value>;
     let coercion;
-    let mut repair_turns = 0usize;
-    let mut last_errors: Vec<String>;
 
     loop {
-        if !runtime.wait_idle(&session_id, TURN_TIMEOUT) {
-            return Err(format!(
-                "DSH 回合未在 {} 秒内完成；stderr: {}",
-                TURN_TIMEOUT.as_secs(),
-                runtime.stderr_tail()
-            ));
-        }
-        let snapshot = runtime
-            .snapshot(&session_id)
-            .ok_or_else(|| "会话快照缺失".to_string())?;
-        ensure_model_turn_succeeded(&snapshot)?;
-        match extract_proposal_json(&snapshot) {
+        let outcome = run_native_turn(
+            NativeTurnParams {
+                session_id: &session_id,
+                worker_instance_id: &session_id,
+                reset_history: repair_turns == 0,
+                system_prompt: PERSONA,
+                user_prompt: &current_prompt,
+                base_url,
+                api_key,
+                model,
+                max_tokens: MAX_TOKENS,
+                temperature: None,
+                top_p: None,
+                reasoning_effort: None,
+                request_timeout: Duration::from_secs(120),
+                allowed_tools_csv: Some(allowed),
+                novel_id: Some(input.novel_id.as_str()),
+                chapter_id: Some(input.chapter_id.as_str()),
+                candidate_policy: None,
+                db_path: &db_path,
+                policy: None,
+                root: None,
+                latest_request_identity: None,
+                cancel: &cancel,
+                deadline,
+            },
+            |_| Ok(()),
+        )?;
+        *total_prompt_tokens =
+            total_prompt_tokens.saturating_add(outcome.prompt_tokens as i64);
+        *total_completion_tokens =
+            total_completion_tokens.saturating_add(outcome.completion_tokens as i64);
+        total_tool_calls = total_tool_calls.saturating_add(outcome.tool_call_count as i64);
+
+        let last_errors = match extract_proposal_json_candidates(
+            &outcome.last_assistant_text,
+            &outcome.last_assistant_reasoning,
+            &outcome.assistant_text,
+        ) {
             Some(mut value) => {
                 let report: ValidationReport = proposal_validator::validate(input, &mut value);
                 if report.valid {
@@ -1019,46 +711,35 @@ fn run_preparation(
                     coercion = report.coerced;
                     break;
                 }
-                last_errors = report.errors;
                 if repair_turns >= MAX_REPAIR_TURNS {
                     return Err(format!(
                         "提案校验在 {} 次修复回合后仍失败: {}",
                         repair_turns,
-                        last_errors.join(" | ")
+                        report.errors.join(" | ")
                     ));
                 }
+                report.errors
             }
             None => {
-                last_errors = vec!["模型输出不含 JSON 对象".to_string()];
                 if repair_turns >= MAX_REPAIR_TURNS {
                     return Err("模型输出不含 JSON 对象且修复回合已耗尽".to_string());
                 }
+                vec!["模型输出不含 JSON 对象".to_string()]
             }
-        }
+        };
         verify_baseline_freshness(input)?;
-        runtime
-            .request(
-                "session/prompt",
-                Some(json!({
-                    "sessionId": session_id,
-                    "contentBlocks": [{"type": "text", "text": build_repair_prompt(&last_errors)}]
-                })),
-                Duration::from_secs(30),
-            )
-            .map_err(|error| format!("修复回合请求失败: {}", error))?;
+        current_prompt = build_repair_prompt(&last_errors);
         repair_turns += 1;
     }
 
     let mut value = parsed_value.expect("valid proposal value");
     let duration_ms = started.elapsed().as_millis() as i64;
-    let snapshot = runtime.snapshot(&session_id).unwrap_or_default();
-    // Adapter-owned runtime metrics replace whatever the model produced.
     value["metrics"] = json!({
         "planner": value["planner"],
         "durationMs": duration_ms,
-        "promptTokens": snapshot.prompt_tokens as i64,
-        "completionTokens": snapshot.completion_tokens as i64,
-        "toolCallCount": snapshot.tool_calls.len() as i64,
+        "promptTokens": *total_prompt_tokens,
+        "completionTokens": *total_completion_tokens,
+        "toolCallCount": total_tool_calls,
         "processRestarts": 0,
     });
     if let Some(coercion) = coercion {
@@ -1069,13 +750,6 @@ fn run_preparation(
     }
     serde_json::from_value::<ChapterPreparationProposal>(value)
         .map_err(|error| format!("提案类型化失败: {}", error))
-}
-
-fn ensure_model_turn_succeeded(snapshot: &SessionSnapshot) -> Result<(), String> {
-    match snapshot.last_turn_error_code.as_deref() {
-        Some(code) => Err(format!("DSH 模型回合失败: {}", code)),
-        None => Ok(()),
-    }
 }
 
 fn planning_prompt(input: &ChapterPreparationInput) -> String {
@@ -1114,14 +788,6 @@ fn build_repair_prompt(errors: &[String]) -> String {
             .to_string(),
     );
     lines.join("\n")
-}
-
-fn extract_proposal_json(snapshot: &SessionSnapshot) -> Option<Value> {
-    extract_proposal_json_candidates(
-        &snapshot.last_assistant_text,
-        &snapshot.last_assistant_reasoning,
-        &snapshot.assistant_text,
-    )
 }
 
 fn extract_proposal_json_candidates(
@@ -1236,19 +902,7 @@ mod response_json_tests {
         assert!(build_repair_prompt(&["模型输出不含 JSON 对象".to_string()])
             .contains("工具调用完成后必须继续输出完整 JSON"));
     }
-
-    #[test]
-    fn model_turn_failure_is_reported_before_json_repair() {
-        let mut snapshot = SessionSnapshot::default();
-        snapshot.last_turn_error_code = Some("STREAM_CLOSED".to_string());
-        assert_eq!(
-            ensure_model_turn_succeeded(&snapshot).expect_err("turn must fail"),
-            "DSH 模型回合失败: STREAM_CLOSED"
-        );
-    }
 }
-
-pub(crate) use super::config::resolve_gateway_bin;
 
 #[cfg(test)]
 mod current_plugin_projection_tests {
@@ -1665,11 +1319,9 @@ mod e2e_tests {
     }
 
     #[test]
-    #[ignore = "real api + full dsh stack; run explicitly with DSH_RUNTIME_ROOT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN (optional DSH_E2E_BASE_URL/DSH_E2E_MODEL)"]
+    #[ignore = "real api + native runtime stack; run explicitly with DSH_E2E_API_KEY (optional DSH_E2E_BASE_URL/DSH_E2E_MODEL)"]
     fn e2e_prepare_via_local_proxy() {
         let api_key = std::env::var("DSH_E2E_API_KEY").expect("set DSH_E2E_API_KEY");
-        let gateway_bin = std::env::var("DSH_GATEWAY_BIN").expect("set DSH_GATEWAY_BIN");
-        std::env::set_var("DSH_GATEWAY_BIN", gateway_bin);
         let novel_id = std::env::var("DSH_E2E_NOVEL_ID")
             .unwrap_or_else(|_| "fed8183e-f40f-4b68-8291-fe0f1a4c82b2".to_string());
         let chapter_id = std::env::var("DSH_E2E_CHAPTER_ID")

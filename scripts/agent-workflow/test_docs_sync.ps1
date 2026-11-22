@@ -149,12 +149,6 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Build installers and signed updater archives" "Checkout pinned DSH runtime source"
-    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
-    Assert-CheckResult "release packaging before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
-    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
-
-    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
     $releaseWithoutGatewayClean = $releaseWorkflow.Replace($GatewayCleanCommand, "gateway clean command removed")
     if ($releaseWithoutGatewayClean -ceq $releaseWorkflow) {
         throw "Unable to remove the release gateway clean command fixture."
@@ -184,15 +178,6 @@ try {
     Assert-CheckResult "release without matching commit evidence" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
-    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
-    $releaseWithoutDshExport = $releaseWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
-    if ($releaseWithoutDshExport -ceq $releaseWorkflow) {
-        throw "Unable to remove the release DSH_CHECKOUT export fixture."
-    }
-    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWithoutDshExport -Encoding UTF8
-    Assert-CheckResult "release without DSH runtime export" $false (Invoke-DocsSyncCheck $FixtureRoot)
-    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
-
     $desktopWorkflowPath = Join-Path $FixtureRoot ".github/workflows/windows-desktop-e2e.yml"
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
     $desktopWorkflow = $desktopWorkflow -replace 'workflow_call:', 'workflow_call_removed:'
@@ -207,12 +192,6 @@ try {
     }
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflowWithCallerEventGate -Encoding UTF8
     Assert-CheckResult "desktop workflow with caller-event-gated suite input" $false (Invoke-DocsSyncCheck $FixtureRoot)
-    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
-
-    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
-    $desktopWorkflow = Move-WorkflowStepBefore $desktopWorkflow "Run Rust tests" "Checkout pinned DSH runtime source"
-    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
-    Assert-CheckResult "desktop tests before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
@@ -243,15 +222,6 @@ try {
     $desktopParallelRust = $desktopWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopParallelRust -Encoding UTF8
     Assert-CheckResult "desktop Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
-    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
-
-    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
-    $desktopWithoutDshExport = $desktopWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
-    if ($desktopWithoutDshExport -ceq $desktopWorkflow) {
-        throw "Unable to remove the desktop DSH_CHECKOUT export fixture."
-    }
-    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWithoutDshExport -Encoding UTF8
-    Assert-CheckResult "desktop workflow without DSH runtime export" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $verificationScriptPath = Join-Path $FixtureRoot "scripts/agent-workflow/verify_project.ps1"

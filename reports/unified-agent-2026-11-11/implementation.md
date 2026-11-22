@@ -155,3 +155,17 @@ S7 原实现已生成候选，故障规格却把继续等待作者决定的 `wai
 **交付前 Git 复核。** 当前有 277 个已跟踪修改与 271 个未跟踪文件，暂存区为空，无未合并条目，HEAD 仍为 `ce4452f`；不提交、推送、打 tag 或发布。后续若获准提交，应区分 Tauri 迁移、统一运行时及 SQLite、前端工作台、测试与文档，逐组核对；不要把 87 个未跟踪报告文件里的历史 Git 索引/引用备份、原始工作树补丁、截图和覆盖率快照整体暂存。生产 EXE、测试载体和本次运行日志均在 Git 忽略目录。
 
 这不是干净工作树上的正式发布验收；不因已有未提交修改而重置或提交。仓库中历史的 R4、截图、原始日志和 EXE 证明各自保留原日期与适用范围。
+
+## 10. 2026-11-22 全套桌面自动测试一次性收尾验收
+
+- **基准提交**：分支 `feat/tauri-2-migration` 本地提交 `26256ea`（应用版本保持 `v3.7.0`，包含 bundled SQLite `3.54.1` 身份对齐、测试流水线提速及桌面 E2E/Carrier 双指纹复用）。
+- **初测发现与测试脚本/运行器修复**：
+  1. 首次连续执行 `npm run test:e2e` 耗时 `908.94s`，其中 `28/29` 通过，`workbench-task-directory.spec.ts` 在恢复 100 条目录夹具后等待 `loading-modal-dismiss` 消失超时（`LoadingModal` 按“悬停阅读暂停自动关闭”设计，WebDriver 点击确认按钮后指针停留在居中弹窗区域导致 `1200ms` 自动关闭计时持续暂停）。比照同仓 `candidate-review-apply.spec.ts` 与 `workbench-writing-smoke.spec.ts` 改为显式确认关闭该提示窗（仅修改测试规格 `tests/e2e/workbench-task-directory.spec.ts`），单跑复用 `23.46s` 通过（`1 passing (8.8s)`）。
+  2. 执行 `npm run test:e2e:writing-faults -- --skip-build --app "src-tauri\target\release\AI Novel Studio.exe"` 时，`tauri-driver` 绑定默认固定端口 `4480` 触发 Windows Hyper-V/WinNAT 保留端口权限错误（`os error 10013`）。现已在 `scripts/e2e/run-writing-fault-injection.mjs` 中比照 `run-e2e.ts` 新增动态非排除端口探测（未显式传 `AI_NOVEL_STUDIO_FAULT_INJECTION_DRIVER_PORT` 时自动选择成对可用的 `port` 与 `port + 1000`），并补齐单元测试（`9/9` 通过）。
+- **连续全量桌面 E2E 实测终态**：
+  - `npm run test:e2e`（单次不中断连续运行，命中 DSH Carrier 复用 `52a4486a0267` 与 E2E 应用构建复用 `0e0b2d4b2acf`）：**29/29 个桌面规格、47 个用例一次全部通过**，`failures = 0`、`cleanupError = null`、`dataDirectoryRetained = false`，总耗时 **`686.66s`（约 11 分 27 秒）**；完整日志留存于 `test-results/closeout-2026-11-22/desktop-full-29.log`（忽略目录）。
+- **生产 EXE 写作故障注入实测终态**：
+  - 直接指向仓内最新生产包 `src-tauri/target/release/AI Novel Studio.exe`（v3.7.0，2026-11-22 18:33:32，38,354,944 字节，SHA-256 `DD3FE9D6447A6EE10A5F93E0C4C3EA40BA6EEBF66E4CDAA423B46D05C3597680`）执行 `npm run test:e2e:writing-faults -- --skip-build --app "src-tauri\target\release\AI Novel Studio.exe"`：**S1 / S2 / S3a / S3b / S5 / S6 / S7 / S4 全部 8/8 通过**，耗时 **`130.45s`（2 分 10 秒）**；日志位于 `test-results/closeout-2026-11-22/writing-faults-8.log`，结构化证据位于 `test-results/fault-injection/2026-11-22T11-35-03-015Z/writing-subagent-fault-injection.json`。
+- **生产前端产物复核与当前边界**：
+  - `npm run build && npm run test:bundle-size` 恢复并核验干净生产 `dist/`（113 个 JS 分块全部符合预算）。
+  - R4 真实云端模型只读验收与文学效果评价仍保持 `NOT_VERIFIED`（本次未使用真实云端凭据，未打 MSI/NSIS 安装包、未签名、未推送或打 tag）。

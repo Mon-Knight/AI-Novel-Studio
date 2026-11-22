@@ -196,6 +196,43 @@ describe('aiRequestPolicyService', () => {
     );
   });
 
+  it('captures revision 1 after beginRequest bootstraps an absent policy and supports explicit rebinding', async () => {
+    tauriRuntime.enabled = true;
+    tauriRuntime.invoke
+      .mockResolvedValueOnce({ day: '2026-07-28' })
+      .mockResolvedValueOnce({
+        reservationId: 'reservation-bootstrap',
+        ownerId: 'webview-owner-1',
+        providerRequestId: 'provider-bootstrap',
+        leaseToken: 'lease-bootstrap',
+        expiresAtMs: Date.now() + 120_000,
+        policyRevision: 1,
+        estimatedInputTokens: 10,
+        estimatedOutputTokens: 100,
+        estimatedTokens: 110,
+      })
+      .mockResolvedValueOnce({ revision: 2, policyHash: 'policy-2' })
+      .mockResolvedValueOnce({ policy: { revision: 5, policyHash: 'policy-5' }, day: '2026-07-28' })
+      .mockResolvedValueOnce({ revision: 6, policyHash: 'policy-6' });
+
+    await aiRequestPolicyService.snapshotCurrent(settings());
+    await aiRequestPolicyService.beginRequest(settings(), request, 'provider-bootstrap');
+    await aiRequestPolicyService.configureGlobalPolicy(settings({ maxRequestsPerMinute: 5 }));
+    await aiRequestPolicyService.snapshotCurrent(settings(), true);
+    await aiRequestPolicyService.configureGlobalPolicy(settings({ maxRequestsPerMinute: 6 }));
+
+    expect(tauriRuntime.invoke).toHaveBeenNthCalledWith(
+      3,
+      'configure_ai_request_policy',
+      expect.objectContaining({ input: expect.objectContaining({ expectedRevision: 1 }) }),
+    );
+    expect(tauriRuntime.invoke).toHaveBeenNthCalledWith(
+      5,
+      'configure_ai_request_policy',
+      expect.objectContaining({ input: expect.objectContaining({ expectedRevision: 5 }) }),
+    );
+  });
+
   it('enforces concurrent and rolling-minute limits before another provider call', () => {
     const config = settings();
     const first = aiRequestPolicyService.begin(config, request);

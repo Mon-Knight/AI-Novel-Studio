@@ -184,22 +184,20 @@ function normalizeLedger(value: unknown, now: number): RequestLedger {
     if (reservation.estimatedCostUsd === undefined) newlyExpiredUnpricedCount += 1;
     else expiredCostUsd += reservation.estimatedCostUsd;
   }
+  const count = (value: unknown): number => (sameDay ? finiteNonNegative(value) : 0);
   return {
     schemaVersion: 1,
     day: dayKey(now),
     requestStartedAt: Array.isArray(source.requestStartedAt)
       ? source.requestStartedAt.filter((item) => typeof item === 'number' && item > now - MINUTE_MS)
       : [],
-    tokenInput: (sameDay ? finiteNonNegative(source.tokenInput) : 0) + expiredInputTokens,
-    tokenOutput: (sameDay ? finiteNonNegative(source.tokenOutput) : 0) + expiredOutputTokens,
-    costUsd: (sameDay ? finiteNonNegative(source.costUsd) : 0) + expiredCostUsd,
-    usageMissingCount:
-      (sameDay ? finiteNonNegative(source.usageMissingCount) : 0) + newlyExpiredCount,
-    unpricedRequestCount:
-      (sameDay ? finiteNonNegative(source.unpricedRequestCount) : 0) + newlyExpiredUnpricedCount,
-    failedRequestCount: sameDay ? finiteNonNegative(source.failedRequestCount) : 0,
-    expiredRequestCount:
-      (sameDay ? finiteNonNegative(source.expiredRequestCount) : 0) + newlyExpiredCount,
+    tokenInput: count(source.tokenInput) + expiredInputTokens,
+    tokenOutput: count(source.tokenOutput) + expiredOutputTokens,
+    costUsd: count(source.costUsd) + expiredCostUsd,
+    usageMissingCount: count(source.usageMissingCount) + newlyExpiredCount,
+    unpricedRequestCount: count(source.unpricedRequestCount) + newlyExpiredUnpricedCount,
+    failedRequestCount: count(source.failedRequestCount),
+    expiredRequestCount: count(source.expiredRequestCount) + newlyExpiredCount,
     reservations,
   };
 }
@@ -316,10 +314,7 @@ let desktopOwnerId: string | undefined;
 let observedDesktopPolicyRevision: number | undefined;
 let desktopPolicyObservationCaptured = false;
 
-function getDesktopOwnerId(): string {
-  desktopOwnerId ??= `webview-${uuid()}`;
-  return desktopOwnerId;
-}
+const getDesktopOwnerId = (): string => (desktopOwnerId ??= `webview-${uuid()}`);
 
 function pricingPair(settings: AiSettings): {
   inputPricePerMillionTokens?: number;
@@ -387,6 +382,9 @@ export const aiRequestPolicyService = {
           ttlMs,
         },
       });
+      if (desktopPolicyObservationCaptured && observedDesktopPolicyRevision === undefined) {
+        if (grant.policyRevision === 1) observedDesktopPolicyRevision = 1;
+      }
       return {
         id: grant.reservationId,
         estimatedTokens: grant.estimatedTokens,
@@ -404,7 +402,6 @@ export const aiRequestPolicyService = {
       throwPolicyInvokeError(error);
     }
   },
-
   async settleRequest(
     lease: AiRequestPolicyLease,
     settings: AiSettings,
@@ -435,12 +432,14 @@ export const aiRequestPolicyService = {
       throwPolicyInvokeError(error);
     }
   },
-
-  async snapshotCurrent(settings: AiSettings): Promise<AiRequestBudgetSnapshot> {
+  async snapshotCurrent(
+    settings: AiSettings,
+    rebindObservation = false,
+  ): Promise<AiRequestBudgetSnapshot> {
     if (!isTauriRuntime()) return this.snapshot(settings);
     try {
       const snapshot = await tauriInvoke<AiRequestBudgetSnapshot>('get_ai_request_policy_snapshot');
-      if (!desktopPolicyObservationCaptured) {
+      if (!desktopPolicyObservationCaptured || rebindObservation) {
         observedDesktopPolicyRevision = snapshot.policy?.revision;
         desktopPolicyObservationCaptured = true;
       }
@@ -449,7 +448,6 @@ export const aiRequestPolicyService = {
       throwPolicyInvokeError(error);
     }
   },
-
   async configureGlobalPolicy(settings: AiSettings): Promise<AiRequestPolicySnapshot | undefined> {
     requirePricingForCostBudget(settings);
     if (!isTauriRuntime()) return undefined;

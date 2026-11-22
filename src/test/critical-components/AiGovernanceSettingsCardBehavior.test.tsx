@@ -74,9 +74,7 @@ describe('AiGovernanceSettingsCard policy baseline', () => {
       maxRequestsPerMinute: 20,
       maxConcurrentAiRequests: 3,
       dailyTokenBudget: 100_000,
-      dailyCostBudgetUsd: 5,
-      inputPricePerMillionTokens: 1.25,
-      outputPricePerMillionTokens: 2.5,
+      dailyCostBudgetUsd: undefined,
       budgetWarningPercent: 75,
     });
 
