@@ -63,9 +63,22 @@ export const verificationScopes = [
     e2e: ['conversational-workbench', 'workbench-writing-smoke', 'domain-facade-sqlite'],
   },
   {
+    name: 'explicit manual review authorization renewal UI',
+    match:
+      /^src\/(?:features\/workspace\/(?:reviewAuthorizationRenewalPolicy|useReviewAuthorizationRenewal|loadWorkspaceReviewDocument|useWorkspaceReviewAuthority)|components\/workspace\/(?:ReviewAuthorizationRenewalDialog|editor-area\/useEditorDraftPersistence)|test\/components\/ReviewAuthorizationRenewal)/u,
+    tests: [
+      'src/services/conversation/reviewAuthorizationRenewalService',
+      'src/test/components/ReviewAuthorizationRenewal',
+      'src/test/components/EditorDocumentFeedback',
+      'src/components/workspace/EditorArea.test.tsx',
+      'src/test/workspace-reliability/',
+    ],
+    e2e: ['candidate-review-apply', 'leave-guard'],
+  },
+  {
     name: 'explicit manual review authorization renewal',
     match:
-      /^src\/(?:types\/reviewAuthorizationRenewal\.|services\/conversation\/reviewAuthorizationRenewalService|features\/workspace\/(?:reviewAuthorizationRenewalPolicy|useReviewAuthorizationRenewal|loadWorkspaceReviewDocument|useWorkspaceReviewAuthority)|components\/workspace\/(?:ReviewAuthorizationRenewalDialog|editor-area\/useEditorDraftPersistence)|test\/components\/ReviewAuthorizationRenewal)/u,
+      /^src\/(?:types\/reviewAuthorizationRenewal\.|services\/conversation\/reviewAuthorizationRenewalService)/u,
     tests: [
       'src/services/conversation/reviewAuthorizationRenewalService',
       'src/test/components/ReviewAuthorizationRenewal',
@@ -82,9 +95,20 @@ export const verificationScopes = [
     ],
   },
   {
+    name: 'outline candidate editor UI',
+    match: /^src\/components\/outline\/Outline(?:Editor|Manager)/u,
+    tests: [
+      'src/services/outlines/',
+      'src/components/outline/OutlineEditor.test.tsx',
+      'src/test/components/OutlineEditorRoute.test.tsx',
+      'src/test/components/ChapterFormModal.test.tsx',
+    ],
+    e2e: ['story-assets-transaction', 'candidate-review-apply'],
+  },
+  {
     name: 'native outline candidate generation and manual application',
     match:
-      /^(?:src-tauri\/src\/services\/outline_candidate_apply|src\/(?:types\/outlineGeneration\.|services\/outlines\/outline(?:RuntimeService|CandidateApplicationService)|services\/ai\/outlineGenerateService|components\/outline\/Outline(?:Editor|Manager)))/u,
+      /^(?:src-tauri\/src\/services\/outline_candidate_apply|src\/(?:types\/outlineGeneration\.|services\/outlines\/outline(?:RuntimeService|CandidateApplicationService)|services\/ai\/outlineGenerateService))/u,
     tests: [
       'src/services/outlines/',
       'src/services/ai/outlineGenerateService',
@@ -125,9 +149,27 @@ export const verificationScopes = [
     e2e: ['workbench-writing-smoke', 'candidate-review-apply'],
   },
   {
+    name: 'summary context validation UI',
+    match:
+      /^src\/(?:components\/right-dock\/panels\/ChapterSummaryValidationNotice|components\/workspace\/ChapterSummaryDetails|test\/components\/ChapterSummaryValidationNotice)/u,
+    tests: [
+      'src/services/ai/chapterSummaryGrounding.test.ts',
+      'src/services/ai/summaryApplicationPolicy.test.ts',
+      'src/services/context/worldStateTimeline.test.ts',
+      'src/services/context/chapterContextPersistence.test.ts',
+      'src/test/components/ChapterSummaryValidationNotice.test.tsx',
+      'src/test/components/ChapterSummaryWorkflowNotice.test.tsx',
+    ],
+    safety: [
+      'src/services/conversation/chapterWorkflowService.test.ts',
+      'src/features/workbench/useWorkbenchChapterHandoff.test.tsx',
+    ],
+    e2e: ['chapter-context-persistence', 'workbench-writing-smoke'],
+  },
+  {
     name: 'summary context application policy',
     match:
-      /^(?:src-tauri\/shared\/summary_application_policy|src-tauri\/src\/services\/(?:summary_application_policy|chapter_context_summary_policy_tests|chapter_summary_policy_tests|structured_summary_commit)|src\/(?:types\/chapterSummary\.|services\/ai\/(?:summaryApplicationPolicy|summaryValidator)|components\/right-dock\/panels\/ChapterSummaryValidationNotice|components\/workspace\/ChapterSummaryDetails|test\/components\/ChapterSummaryValidationNotice))/u,
+      /^(?:src-tauri\/shared\/summary_application_policy|src-tauri\/src\/services\/(?:summary_application_policy|chapter_context_summary_policy_tests|chapter_summary_policy_tests|structured_summary_commit)|src\/(?:types\/chapterSummary\.|services\/ai\/(?:summaryApplicationPolicy|summaryValidator)))/u,
     tests: [
       'src/services/ai/chapterSummaryGrounding.test.ts',
       'src/services/ai/summaryApplicationPolicy.test.ts',
@@ -144,9 +186,20 @@ export const verificationScopes = [
     e2e: ['chapter-context-persistence', 'candidate-review-apply', 'workbench-writing-smoke'],
   },
   {
+    name: 'task-scoped preauthorization UI',
+    match:
+      /^src\/(?:features\/workbench\/(?:useWorkbenchTaskAuthorization|taskAuthorizationProjection)|pages\/Workbench\/WorkbenchTaskAuthorization|test\/components\/WorkbenchTaskAuthorization)/u,
+    tests: [
+      'src/services/conversation/taskAuthorization',
+      'src/features/workbench/useWorkbenchTaskAuthorization',
+      'src/pages/Workbench/WorkbenchTaskAuthorization',
+    ],
+    e2e: ['workbench-task-authorization'],
+  },
+  {
     name: 'task-scoped native preauthorization',
     match:
-      /^(?:src-tauri\/src\/(?:(?:services|commands)\/task_authorization|migrations_task_authorization)|src\/(?:types\/taskAuthorization\.|services\/conversation\/taskAuthorization|features\/workbench\/(?:useWorkbenchTaskAuthorization|taskAuthorizationProjection)|pages\/Workbench\/WorkbenchTaskAuthorization|test\/components\/WorkbenchTaskAuthorization))/u,
+      /^(?:src-tauri\/src\/(?:(?:services|commands)\/task_authorization|migrations_task_authorization)|src\/(?:types\/taskAuthorization\.|services\/conversation\/taskAuthorization))/u,
     tests: [
       'src/services/conversation/taskAuthorization',
       'src/features/workbench/useWorkbenchTaskAuthorization',
@@ -156,9 +209,21 @@ export const verificationScopes = [
     e2e: ['candidate-review-apply', 'workbench-writing-smoke', 'project-backup-boundary'],
   },
   {
+    name: 'frontend domain entry workflows',
+    match: /^src\/services\/(?:autonomous-creation|agent-planner|settingSuggestions)\//u,
+    tests: [
+      'src/services/autonomous-creation/',
+      'src/services/agent-planner/',
+      'src/services/settingSuggestions/',
+      'src/services/conversation/taskDomain',
+      'src/services/conversation/desktopTaskEntry',
+    ],
+    e2e: ['workbench-writing-smoke', 'story-assets-transaction'],
+  },
+  {
     name: 'unified domain entry capabilities',
     match:
-      /^(?:src-tauri\/shared\/domain_candidate_(?:schema|style_schema|mock)\.rs$|src\/(?:types\/taskDomainEntry\.|services\/(?:autonomous-creation\/|agent-planner\/|settingSuggestions\/|conversation\/(?:taskDomain|desktopTaskEntry))))/u,
+      /^(?:src-tauri\/shared\/domain_candidate_(?:schema|style_schema|mock)\.rs$|src\/(?:types\/taskDomainEntry\.|services\/conversation\/(?:taskDomain|desktopTaskEntry)))/u,
     tests: [
       'src/services/autonomous-creation/',
       'src/services/agent-planner/',
@@ -503,7 +568,7 @@ export const verificationScopes = [
   {
     name: 'SQLite and native shared state',
     match:
-      /^src-tauri\/src\/(?:migrations|db(?:\.|\/)|main\.|lib\.|runtime\.|e2e|(?:services|repositories|domain)\/mod\.|services\/(?:content_transaction|structured_artifact_apply))/u,
+      /^src-tauri\/src\/(?:migrations|db(?:\.|\/)|main\.|lib\.|runtime(?:\.|_tests\.rs$)|e2e|(?:services|repositories|domain)\/mod\.|services\/(?:content_transaction|structured_artifact_apply))/u,
     rustFull: true,
     e2e: [
       'workbench-writing-smoke',
@@ -620,9 +685,15 @@ export const verificationScopes = [
     e2e: ['story-assets-transaction', 'interaction-world-rules-repair'],
   },
   {
+    name: 'setting suggestions feature UI',
+    match: /^src\/features\/settingSuggestions\//u,
+    tests: ['src/services/settingSuggestions/', 'src/pages/SettingSuggestions/'],
+    e2e: ['story-assets-transaction'],
+  },
+  {
     name: 'world rule schema and persistence',
     match:
-      /^src\/(?:services\/worldRules\/|services\/database\/settingRepository(?:\.|\/)|types\/(?:worldRules|setting)\.|features\/settingSuggestions\/)/u,
+      /^src\/(?:services\/worldRules\/|services\/database\/settingRepository(?:\.|\/)|types\/(?:worldRules|setting)\.)/u,
     tests: [
       'src/services/worldRules/',
       'src/services/settingSuggestions/',

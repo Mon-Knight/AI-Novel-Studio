@@ -7,6 +7,12 @@ import { execFile, spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { redactLogText, sanitizeArtifactDirectory } from './artifact-sanitizer.ts';
+import {
+  E2E_BUILD_STAMP_FILENAME,
+  canReuseE2eBuild,
+  computeE2eBuildInputFingerprint,
+  writeE2eBuildStamp,
+} from './e2e-build-stamp.ts';
 import { assertUnelevatedWindowsHost } from './host-integrity.ts';
 import { legacyPanelSpecs, selectDesktopSpecs } from './spec-selection.ts';
 import { desktopCarrierEnvironment, prepareDesktopCarrier } from './e2e-carrier.mjs';
@@ -493,6 +499,18 @@ async function ensureE2eApplication(dataRoot: string): Promise<string> {
     return stageApplication(resolvedAppPath, dataRoot);
   }
 
+  const stampPath = path.join(releaseDirectory, E2E_BUILD_STAMP_FILENAME);
+  const inputFingerprint = !explicitAppPath ? computeE2eBuildInputFingerprint(workspaceRoot) : null;
+  if (process.env.AI_NOVEL_STUDIO_E2E_FORCE_BUILD !== '1' && !explicitAppPath && inputFingerprint) {
+    const candidateApp = resolveBuiltApplication();
+    if (canReuseE2eBuild({ stampPath, appPath: candidateApp, inputFingerprint })) {
+      console.log(
+        `[E2E] reusing up-to-date E2E application build (${inputFingerprint.slice(0, 12)})`,
+      );
+      return stageApplication(candidateApp, dataRoot);
+    }
+  }
+
   console.log('[E2E] building the Tauri test application with the E2E frontend flag...');
   fs.mkdirSync(e2eCargoTargetDirectory, { recursive: true });
   const tauriCli = path.join(workspaceRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
@@ -517,6 +535,9 @@ async function ensureE2eApplication(dataRoot: string): Promise<string> {
   if (exitCode !== 0) throw new Error(`Tauri E2E build failed with exit code ${exitCode}`);
   const resolvedAppPath = explicitAppPath ?? resolveBuiltApplication();
   assertApplication(resolvedAppPath, 'Tauri E2E build completed');
+  if (!explicitAppPath && inputFingerprint) {
+    writeE2eBuildStamp({ stampPath, appPath: resolvedAppPath, inputFingerprint });
+  }
   return stageApplication(resolvedAppPath, dataRoot);
 }
 

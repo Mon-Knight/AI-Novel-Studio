@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
 import type { InvokeArgs } from '@tauri-apps/api/core';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type {
   AiGenerateRequest,
   AiPricingSnapshot,
@@ -43,13 +43,10 @@ Object.defineProperty(globalThis, 'window', { value: globalThis, configurable: t
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
 const originalFetch = globalThis.fetch;
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
+const vite = await createTestViteServer({
   define: {
     'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
   },
-  server: { middlewareMode: true, hmr: false, watch: null },
 });
 
 const realModule = (await vite.ssrLoadModule(

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { AiSettings, AiTaskType } from '../../types/ai';
 
 class MemoryStorage implements Storage {
@@ -37,13 +37,10 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
+const vite = await createTestViteServer({
   define: {
     'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
   },
-  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const { createAiClient, MockAiClient } = (await vite.ssrLoadModule(
   '/src/services/ai/aiClient.ts',

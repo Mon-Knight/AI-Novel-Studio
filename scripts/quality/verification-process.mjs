@@ -38,7 +38,7 @@ export function testCommand(root, { runner, files }) {
           : [
               path.join(root, 'node_modules/tsx/dist/cli.mjs'),
               '--test',
-              '--test-concurrency=1',
+              '--test-concurrency=4',
               ...files,
             ];
   return { executable: process.execPath, args };

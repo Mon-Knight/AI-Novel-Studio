@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { ChapterGenerationContext } from '../../types/ai';
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 
 after(async () => {
   await vite.close();

@@ -3,7 +3,7 @@ import { after, afterEach, beforeEach, test } from 'node:test';
 // @ts-expect-error jsdom has no bundled declarations; this import is test-only.
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { Novel } from '../../types/novel';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -35,11 +35,7 @@ Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollIntoView', {
   },
 });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const { MemoryRouter, Route, Routes } = (await vite.ssrLoadModule(
   '/src/test/routerExports.ts',
 )) as typeof import('react-router-dom');

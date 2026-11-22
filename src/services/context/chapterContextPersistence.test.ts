@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { Character } from '../../types/character';
 import type { Chapter } from '../../types/chapter';
 import type { SaveChapterContextBundleInput } from './chapterContextPersistenceService';
@@ -70,11 +70,7 @@ const storage = new FailingMemoryStorage();
 Object.defineProperty(globalThis, 'window', { value: globalThis, configurable: true });
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const summaryModule = (await vite.ssrLoadModule(
   '/src/services/context/chapterSummaryService.ts',
 )) as typeof import('./chapterSummaryService');

@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
+#[cfg(test)]
+mod schema_template_tests;
 mod startup_recovery;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
@@ -171,7 +173,17 @@ pub(crate) fn init_test_database() {
     });
 }
 
+#[cfg(not(test))]
 pub(crate) fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
+    create_tables_uncached(conn)
+}
+
+#[cfg(test)]
+pub(crate) fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
+    schema_template_tests::create_tables_cached(conn)
+}
+
+pub(crate) fn create_tables_uncached(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
     let total_started_at = Instant::now();
     let mut phase_started_at = total_started_at;
     create_base_tables(conn)?;

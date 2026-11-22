@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { QualityCheckResult } from '../../types/qualityCheck';
 
 class MemoryStorage implements Storage {
@@ -35,11 +35,7 @@ const storage = new MemoryStorage();
 Object.defineProperty(globalThis, 'window', { value: {}, configurable: true });
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const qualityModule = await vite.ssrLoadModule('/src/services/quality/qualityCheckService.ts');
 const qualityCheckService =
   qualityModule.qualityCheckService as typeof import('./qualityCheckService').qualityCheckService;
