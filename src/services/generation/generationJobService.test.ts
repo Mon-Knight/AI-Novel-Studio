@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { AiTask, AiTaskDetail } from '../../types/ai-task';
 import type { ChapterGenerationSnapshot } from '../../types/generationContext';
 import type { GenerationJob, GenerationStepResult } from '../../types/generationJob';
@@ -39,11 +39,7 @@ const storage = new MemoryStorage();
 Object.defineProperty(globalThis, 'window', { value: {}, configurable: true });
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const generationModule = await vite.ssrLoadModule(
   '/src/services/generation/generationJobService.ts',
 );

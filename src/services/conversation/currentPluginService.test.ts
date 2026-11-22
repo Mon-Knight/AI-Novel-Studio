@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { AiSettings } from '../../types/ai';
 import type { ToolDescriptorV1, ToolRegistryManifestV1 } from '../../types/toolRegistry';
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
@@ -144,13 +144,10 @@ test('non-E2E builds ignore the deterministic model storage opt-in', async () =>
 
 test('E2E build exposes deterministic Mock only after the exact storage opt-in', async () => {
   storage.clear();
-  const vite = await createServer({
-    appType: 'custom',
+  const vite = await createTestViteServer({
     define: {
       'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
     },
-    optimizeDeps: { noDiscovery: true },
-    server: { middlewareMode: true, hmr: false, watch: null },
   });
   try {
     const e2eModule = (await vite.ssrLoadModule(

@@ -1,5 +1,7 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
+import { coverageConfigDefaults, defineConfig } from 'vitest/config';
+
+delete process.env.NODE_V8_COVERAGE;
 
 export const criticalComponentFiles = [
   'src/components/right-dock/panels/CheckPanel.tsx',
@@ -22,6 +24,21 @@ export const criticalComponentFiles = [
   'src/pages/AutonomousPlanning/AutonomousSchedulerControls.tsx',
 ] as const;
 
+export const criticalCoverageExclude = [
+  ...coverageConfigDefaults.exclude,
+  '.e2e-tools/**',
+  'src-tauri/**',
+  'dist-release/**',
+  'release_output*/**',
+  'test-results/**',
+  'reports/**',
+  'scripts/**',
+  'docs/**',
+  'prompts/**',
+  'contracts/**',
+  'public/**',
+] as const;
+
 export default defineConfig({
   plugins: [react()],
   test: {
@@ -42,6 +59,7 @@ export default defineConfig({
       enabled: true,
       provider: 'v8',
       include: [...criticalComponentFiles],
+      exclude: [...criticalCoverageExclude],
       reportsDirectory: 'coverage/critical-components',
       reporter: ['text', 'json', 'json-summary'],
       thresholds: {

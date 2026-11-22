@@ -133,9 +133,12 @@ test(
     assert.match(trace, /npm run test:coverage/u);
     assert.match(trace, /cargo test --locked --workspace -- --test-threads=1/u);
     assert.match(trace, /npm run test:e2e\r?\n/u);
-    assert.match(trace, /npm run test:e2e:writing-faults/u);
     assert.match(trace, /npm run dsh:assets\r?\ntarget=\r?\n/u);
     assert.match(trace, /npx tauri build --no-bundle\r?\ntarget=\r?\n/u);
+    assert.match(trace, /npm run test:e2e:writing-faults -- --skip-build --app /u);
+    const buildIndex = trace.indexOf('npx tauri build --no-bundle');
+    const faultIndex = trace.indexOf('npm run test:e2e:writing-faults -- --skip-build --app ');
+    assert.ok(buildIndex > 0 && faultIndex > buildIndex);
     assert.doesNotMatch(trace, /npm run tauri:build|--bundles/u);
   },
 );
@@ -145,7 +148,8 @@ test(
   { skip: !windows },
   () => {
     const trace = runFixture([]);
+    assert.match(trace, /npm run test:e2e:writing-faults\r?\n/u);
     assert.match(trace, /npm run tauri:build\r?\n/u);
-    assert.doesNotMatch(trace, /npx tauri build --no-bundle/u);
+    assert.doesNotMatch(trace, /npx tauri build --no-bundle|--skip-build/u);
   },
 );

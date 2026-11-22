@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { AutonomousStoryPlan } from '../../types/autonomousCreation';
 
 const KEYS = {
@@ -52,11 +52,7 @@ const storage = new FailingMemoryStorage();
 Object.defineProperty(globalThis, 'window', { value: {}, configurable: true });
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const persistenceModule = (await vite.ssrLoadModule(
   '/src/services/autonomous-creation/autonomousPersistence.ts',
 )) as typeof import('./autonomousPersistence');

@@ -37,7 +37,11 @@ test('the standard fault gate can only select isolated loopback, never a live pr
   );
   assert.ok(plan.steps[1].args.includes('--no-bundle'));
   assert.ok(!plan.steps[1].args.includes('--features'));
-  assert.equal(plan.steps[1].env.CARGO_TARGET_DIR, path.join(root, '.e2e-tools', 'target'));
+  assert.equal(
+    plan.steps[1].env.CARGO_TARGET_DIR,
+    path.join(root, '.e2e-tools', 'target-production'),
+  );
+  assert.notEqual(plan.steps[1].env.CARGO_TARGET_DIR, path.join(root, '.e2e-tools', 'target'));
   const carrier = plan.steps[2];
   assert.ok(carrier.args.includes('tests/real-acceptance/wdio.fault-injection.conf.ts'));
   assert.equal(carrier.env.AI_NOVEL_STUDIO_FAULT_INJECTION, '1');

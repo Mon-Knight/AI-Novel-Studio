@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+- **开发完成汇报规范优化（2026-11-22，非版本任务）**：在根 `AGENTS.md` 第 7.7 节、`docs/agent-workflow.md`、`.github/instructions/agent-behavior.instructions.md` 与 `.cursor/rules/completion-report.mdc` 同步规定完成汇报采用“先白话结论与直观效果、后精简技术留档”的通俗表达，避免堆砌底层术语与冗长命令参数。
+
+- **测试与验证流水线提速（2026-11-22，非版本任务）**：在不放宽任何覆盖率阈值、安全门禁、Rust 串行验收或真实桌面 E2E 边界的前提下，完成测试与构建执行优化（应用版本保持 `3.7.0`）：
+  - **Node/Vite SSR 与测试运行器**：新增 `src/test/viteTestServer.ts`（`configFile: false`、`optimizeDeps.noDiscovery: true`、镜像 `e2eBridge` 别名）替换 22 个前端 SSR 测试内手工 `createServer()` 重复触发 `index.html` 预优化的问题；`tsx --test` 调整为 `--test-concurrency=4` 并合并 `test:ai-panels`；将原分散在 `test:discovered` 的 53 个 Vitest 文件并入 `test:vitest` 单次执行；新增 `scripts/quality/run-coverage.mjs` 在 `test:all` 首轮 `test:vitest` 中同步采集关键组件 V8 覆盖率（`ANS_COLLECT_CRITICAL_COVERAGE=1`），并在 `vitest.critical-components.config.ts` / `vitest.config.ts` 中排除非 `src/` 目录全盘扫描与清除继承 `NODE_V8_COVERAGE` 重复采样，取消重复运行 `test:coverage:components`；三组覆盖率门禁保持通过。
+  - **Rust 定向批跑、SQLite 模板缓存与基线收口**：`scripts/quality/run-cargo-tests.mjs` 将多 filter/exact 筛选合并为命令行预算内分批 `--exact` 执行并校验实测 `passed` 总数；`src-tauri/src/db/schema_template_tests.rs` 在 `#[cfg(test)]` 下为空内存库缓存并复放一次性的完整 Schema/Seed 模板，非空/迁移路径仍直通 `create_tables_uncached`。同时收口 `158cd93` 遗留的 2 项既有基线失步：将 `src-tauri/src/runtime.rs` 内置单元测试拆入 `src-tauri/src/runtime_tests.rs` 恢复 `test:rust-file-size` 通过（维持 `1186` 冻结上限不变），并同步 `tests/e2e/helpers.ts`、`README.md` 与 `docs/data-model.md` 中的 bundled SQLite `3.54.1` 身份常量。
+  - **变更归属与桌面 E2E 双重指纹复用**：`scripts/quality/verification-scopes.mjs` 将 6 项前端 UI/工作流与原生 `rustFull: true` 边界拆分（保留 `src-tauri/`、`contracts/` 与跨端契约的完整 Rust 门禁，并将 `src-tauri/src/runtime_tests.rs` 纳入原生共享状态范围）；`run-writing-fault-injection.mjs` 改用独立 `.e2e-tools/target-production` 目录；`verify_project.ps1 -NoBundle` 先建仓内本地生产 EXE 再通过 `--skip-build --app` 复用于写作故障注入；`scripts/e2e/e2e-build-stamp.ts` 在输入与二进制指纹完全一致时跳过重复 `tauri build --features e2e`（忽略测试文件及 `*_tests.rs`）；`scripts/e2e/e2e-carrier.mjs` 新增 `.e2e-tools/.ans-e2e-carrier-stamp.json` 指纹复用，先增量编译 `novel-domain-gateway` 并校验 ZIP/Gateway/`bin.js`/`unpack-payload.mjs` 哈希与全量 Junction 后跳过重复解包（`DSH_CHECKOUT` 或 `AI_NOVEL_STUDIO_FORCE_DSH_ASSETS=1` 可强制重装）。
+
 - **PR 验证归属（2026-11-19，未发布）**：登记 Rust 传输诊断示例的验证归属。门禁编译示例并选择已有传输回归，不运行诊断示例或发起外部模型请求。
 - **桌面安全验证（2026-11-19，未发布）**：安全契约测试精确比较 CSP 指令值，并按字面检查隔离输出是否泄露端点；产品运行时的 CSP、凭据及请求行为保持不变。
 - **依赖安全收口（2026-11-19，未发布）**：将主程序与只读 Gateway 的 bundled SQLite 绑定更新到 rusqlite 0.41.1/libsqlite3-sys 0.39.1，并更新 QUIC 锁定补丁版本；保留现有 features、迁移和 DSH 载体。同步适配 SQLite 列名迭代器，并让诊断回归读取当前 bundled SQLite 身份而不硬编码实现版本。

@@ -139,7 +139,7 @@ AI Novel Studio 是 Windows 原生桌面软件，早期版本应优先采用本�
 
 ### 2.5.1 当前桌面 SQLite 运行时基线
 
-桌面端主数据库继续使用单个 `Mutex<Connection>`，不引入连接池或第二个生产写连接。主应用与只读 Gateway 统一锁定 `rusqlite 0.39.0 / libsqlite3-sys 0.37.0`，由 `bundled` feature 静态链接 SQLite `3.51.3`。生产连接固定为：
+桌面端主数据库继续使用单个 `Mutex<Connection>`，不引入连接池或第二个生产写连接。主应用与只读 Gateway 统一锁定 `rusqlite 0.41.1 / libsqlite3-sys 0.39.1`，由 `bundled` feature 静态链接 SQLite `3.54.1`。生产连接固定为：
 
 ```text
 journal_mode = WAL

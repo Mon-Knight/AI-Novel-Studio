@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { AiSettings } from '../../types/ai';
 
 class MemoryStorage implements Storage {
@@ -292,14 +292,11 @@ test('real-provider E2E opt-in uses sanitized settings while ordinary E2E stays 
     ['1', 'api'],
   ] as const) {
     storage.clear();
-    const vite = await createServer({
-      appType: 'custom',
-      optimizeDeps: { noDiscovery: true },
+    const vite = await createTestViteServer({
       define: {
         'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
         'import.meta.env.VITE_AI_NOVEL_STUDIO_REAL_E2E': JSON.stringify(realEnabled),
       },
-      server: { middlewareMode: true, hmr: false, watch: null },
     });
     try {
       const isolated = (await vite.ssrLoadModule(

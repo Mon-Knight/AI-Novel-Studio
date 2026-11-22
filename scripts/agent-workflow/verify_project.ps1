@@ -135,12 +135,12 @@ Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $Project
 
 # The complete desktop suite is a release gate, not a substitute for Node or Rust tests.
 Invoke-VerificationStep -Name "npm run test:e2e" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e")
-Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults")
 if ($NoBundle) {
     $releaseExecutable = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "src-tauri\target\release\AI Novel Studio.exe"))
     $occupied = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
         try { $_.Path -and [string]::Equals($_.Path, $releaseExecutable, [System.StringComparison]::OrdinalIgnoreCase) } catch { $false }
     })
+    $localExeReady = $false
     if ($occupied.Count -gt 0) {
         Write-Host "[verify_project] Local EXE is in use; refusing to overwrite: $releaseExecutable" -ForegroundColor Red
         Add-VerificationResult -Step "local executable build (in use)" -Status "FAIL"
@@ -151,13 +151,23 @@ if ($NoBundle) {
         if ($script:Results[-1].Status -eq "PASS") {
             $npx = Resolve-Executable -Candidates @("npx.cmd", "npx")
             Invoke-VerificationStep -Name "local release EXE (no installer)" -WorkingDirectory $ProjectRoot -Executable $npx -Arguments @("tauri", "build", "--no-bundle")
-            if ($script:Results[-1].Status -eq "PASS" -and -not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
-                Write-Host "[verify_project] Expected productName executable is missing: $releaseExecutable" -ForegroundColor Red
-                Add-VerificationResult -Step "local executable location" -Status "FAIL"
+            if ($script:Results[-1].Status -eq "PASS") {
+                if (Test-Path -LiteralPath $releaseExecutable -PathType Leaf) {
+                    $localExeReady = $true
+                } else {
+                    Write-Host "[verify_project] Expected productName executable is missing: $releaseExecutable" -ForegroundColor Red
+                    Add-VerificationResult -Step "local executable location" -Status "FAIL"
+                }
             }
         }
     }
+    if ($localExeReady) {
+        Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults", "--", "--skip-build", "--app", $releaseExecutable)
+    } else {
+        Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults")
+    }
 } else {
+    Invoke-VerificationStep -Name "npm run test:e2e:writing-faults" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e:writing-faults")
     Invoke-VerificationStep -Name "npm run tauri:build" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "tauri:build")
 }
 

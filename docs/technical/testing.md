@@ -110,7 +110,7 @@ npm run test:migrations
 - `large-text-integrity`：前端 fail-closed / operation 重试 / 采用竞态 disposition 与 Rust DB04～DB11；Rust 集成回归分别执行采用先提交和保存先提交两个顺序，并核对最终草稿、章节指针与 operation 状态。
 - `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
 
-`components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再把列出的完整 Rust 测试名交给 `scripts/quality/run-cargo-tests.mjs --exact` 精确执行：先 `--list` 校验每个名称唯一存在，再逐个以 `--locked`、`--exact`、`--test-threads=1` 运行，不再运行全部 Rust 测试。Cargo 测试发现为 0、名称歧义、仅 ignored 或任一用例失败均不得被当作通过。
+`components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再把列出的完整 Rust 测试名交给 `scripts/quality/run-cargo-tests.mjs --exact` 精确执行：先 `--list` 校验每个名称唯一存在，再按命令行长度上限分批传入 `--locked`、`--exact` 与 `--test-threads=1`（同时校验实测 `passed` 总数与选中数严格相等），不再为多条筛选词逐条拉起独立 Cargo 进程，也不再运行全部 Rust 测试。Cargo 测试发现为 0、名称歧义、仅 ignored 或任一用例失败均不得被当作通过。
 
 #### 统一前端入口与覆盖率门禁
 
@@ -125,8 +125,14 @@ npm run build
 npm run test:bundle-size
 ```
 
-- `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与显式服务测试，以及性能基准；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
-- `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。全量与核心集合覆盖率在 `test:all` 首次执行时由 C8 采集，`test:coverage:core` 只读取同一份 `coverage/tmp` 生成核心集合报告；关键组件门禁 `test:coverage:components` 随后用 `vitest.critical-components.config.ts` 单独执行 22 个关键组件文件并由 `scripts/check-critical-component-coverage.mjs` 检查每组 ≥ 60%。`test:vitest` 本身不启用 Vitest 覆盖率提供者——它会接管子进程的 `NODE_V8_COVERAGE`，导致 C8 丢失 Vitest 用例对全量与核心集合的贡献（Linux CI 上核心集合曾因此从 87% 跌到 78%）。
+- `test:all` 顺序运行样式预算、`test:ownership`、Node/tsx 动态测试（`--test-concurrency=4`，SSR 单测通过 `src/test/viteTestServer.ts` 复用 `configFile: false` 与 `optimizeDeps.noDiscovery: true` 跳过 `index.html` 重复预构建）、三个合并执行的隔离 AI 面板组、`test:vitest`（统一收录 `src/test/**`、核心组件及原自动发现 Vitest 套件）、性能基准、`test:workbench` 与 `test:discovered`（`test:discovered` 为 Vitest 子批强制设置 `ANS_SKIP_CRITICAL_COMPONENT_COVERAGE=1` 避免覆盖主报告）；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
+- `test:coverage` 通过 `scripts/quality/run-coverage.mjs` 先清理过期的 `coverage/tmp` 与 `coverage/critical-components`，再由 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。全量与核心集合覆盖率在 `test:all` 首次执行时由 C8 采集，同时向合并后的 `test:vitest` 注入 `ANS_COLLECT_CRITICAL_COVERAGE=1` 在同一次运行中生成 `coverage/critical-components/coverage-summary.json`（只对 `vitest.critical-components.config.ts` 列出的关键组件文件插桩，并通过 `criticalCoverageExclude` 排除 `src-tauri/**`、`test-results/**`、`reports/**` 等非前端目录的全盘扫描，同时在 Vitest 配置加载时清除继承的 `NODE_V8_COVERAGE` 避免 worker 重复转储未映射 V8 JSON）；随后 `test:coverage:core` 只读取同一份 `coverage/tmp` 生成核心集合报告，`scripts/check-critical-component-coverage.mjs` 直接校验关键组件每组 ≥ 60% 门禁，不再二次重跑 Vitest。独立调试关键组件覆盖率仍可运行 `npm run test:coverage:components`。
+- 桌面 E2E、故障注入与本地 Rust 测试执行隔离加速：
+  - `scripts/e2e/run-writing-fault-injection.mjs` 使用独立的 `.e2e-tools/target-production` 目录编译无 E2E 探针载体，避免与 `run-e2e.ts` 的 `.e2e-tools/target`（`--features e2e`）互清 Cargo 特征缓存；`verify_project.ps1 -NoBundle` 先构建仓库本地生产 EXE，再直接以 `--skip-build --app` 复用该产物执行写作故障注入。
+  - `scripts/e2e/e2e-carrier.mjs` 在无 `DSH_CHECKOUT` 与 `AI_NOVEL_STUDIO_FORCE_DSH_ASSETS=1` 覆盖时，会先增量编译发布版 `novel-domain-gateway` 并按 `.e2e-tools/.ans-e2e-carrier-stamp.json` 复核 `dsh-runtime.zip`、Gateway、`bin.js`、`unpack-payload.mjs` 哈希及全量 Junction 完整性；命中一致指纹时复用已验 `src-tauri/.payload-verify/dsh-runtime` 跳过重复解包，否则失败关闭回退 `npm run dsh:assets`。
+  - `scripts/e2e/run-e2e.ts` 通过 `scripts/e2e/e2e-build-stamp.ts` 为输入指纹（`HEAD` + 生产源码/资源/配置/Carrier 载荷哈希，忽略纯 `*.test.*`/`*.spec.*` 及 `tests.rs`/`*_tests.rs` 测试文件变更）与已构建二进制建立 `.ans-e2e-build-stamp.json` 校验；输入和二进制字节完全未变时跳过重复 `tauri build`，仍完整执行独立沙箱启动与清理门禁（设置 `AI_NOVEL_STUDIO_E2E_FORCE_BUILD=1` 可强制重编）。
+  - `scripts/quality/verification-scopes.mjs` 将纯前端组件/交互文件从 `rustFull: true` 中拆出，继续保留前端行为测试与对应真实桌面 E2E 回归；`src-tauri/`、`contracts/` 及跨语言契约/仓储类型仍保持 `rustFull: true`。
+  - `src-tauri/src/db.rs` 在 `#[cfg(test)]` 下通过 `src-tauri/src/db/schema_template_tests.rs` 对空库复放一次性的内存 Schema/Seed 模板（保留完整 DDL、触发器、视图、FTS5 虚拟表、`schema_migrations` 与初始数据及 `PRAGMA foreign_keys` 状态），非空库或迁移升级测试仍直通 `create_tables_uncached`；完整 Rust 验收继续保持 `--locked --workspace -- --test-threads=1`。
 - `test:component-size` 扫描全部生产 `.tsx` 与 `.ts`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。`.tsx` 是硬上限；`.ts` 因存量模块早于本门禁，由 `LEGACY_TS_BASELINE` 冻结各自当前行数作为非回退预算——存量模块只能缩小不能增长，降到 500 行及以下时必须删除其豁免条目，新增 `.ts` 一律按 500 行硬上限。门禁自身行为由 `scripts/quality/check-component-size.test.mjs` 覆盖。
 - `test:rust-file-size` 扫描全部生产 Rust 源（`src-tauri/src/**/*.rs`，排除 `tests.rs` / `*_tests.rs` 测试模块与 test/fixture/target 路径），要求每个文件不超过 500 行：新增 `.rs` 一律按硬上限失败关闭；存量超限模块由 `LEGACY_RUST_BASELINE` 冻结各自当前行数作为非回退预算，只能缩小不能增长，降到 500 行及以下时必须删除其豁免条目，已提交条目 ≤ 上限本身即判失败。门禁自身行为由 `scripts/quality/check-rust-file-size.test.mjs` 覆盖。
 - `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。

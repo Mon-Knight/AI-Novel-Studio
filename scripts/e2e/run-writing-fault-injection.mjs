@@ -41,8 +41,9 @@ export function writingFaultPlan({
     throw new Error('--skip-build requires an explicitly freshly built --app.');
   if (app && !skipBuild) throw new Error('--app requires explicit --skip-build reuse.');
   const environment = writingFaultEnvironment(env);
-  // Reuse the desktop test dependency cache, never overwrite the user's release executable.
-  const target = path.join(root, '.e2e-tools', 'target');
+  // Use a dedicated Cargo target directory for the non-e2e production carrier
+  // so it never collides with `.e2e-tools/target` (`--features e2e`) or the user's release EXE.
+  const target = path.join(root, '.e2e-tools', 'target-production');
   const appPath = path.resolve(root, app || path.join(target, 'release', 'AI Novel Studio.exe'));
   const steps = skipBuild
     ? []

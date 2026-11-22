@@ -1,8 +1,8 @@
 import { browser, expect } from '@wdio/globals';
 
-export const EXPECTED_SQLITE_VERSION = '3.51.3';
+export const EXPECTED_SQLITE_VERSION = '3.54.1';
 export const EXPECTED_SQLITE_SOURCE_ID =
-  '2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618';
+  '2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76';
 
 export interface Diagnostics {
   enabled?: boolean;

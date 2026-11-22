@@ -24,6 +24,20 @@ export function selectRustTests(output, { exact = [], filters = [] }) {
   return [...selected].sort();
 }
 
+export function rustExecutionBatches(names, maxCharacters = 12_000) {
+  const batches = [];
+  let current = [];
+  for (const name of names) {
+    if (current.length && [...current, name].join(' ').length > maxCharacters) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(name);
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
 export function runCargoTests(
   { exact = [], filters = [], listOnly = false, root = process.cwd() },
   run = spawnSync,
@@ -36,7 +50,7 @@ export function runCargoTests(
     '-p',
     'ai-novel-studio',
   ];
-  const invoke = (args, capture = false) => {
+  const invoke = (args, capture = false, expectedPassed = null) => {
     const result = run('cargo', args, {
       cwd: root,
       encoding: 'utf8',
@@ -52,6 +66,14 @@ export function runCargoTests(
       );
     if (!capture && !/test result:.*? [1-9]\d* passed;/u.test(result.stdout ?? ''))
       throw new Error('Rust execution reported zero passed tests; discovery alone is not a pass.');
+    if (!capture && expectedPassed !== null) {
+      let actualPassed = 0;
+      for (const match of (result.stdout ?? '').matchAll(/test result: ok\. (\d+) passed;/gu)) {
+        actualPassed += Number(match[1]);
+      }
+      if (actualPassed !== expectedPassed)
+        throw new Error(`Rust batch expected ${expectedPassed} passed tests, got ${actualPassed}.`);
+    }
     return result.stdout ?? '';
   };
   const selected = selectRustTests(invoke([...common, '--', '--list'], true), { exact, filters });
@@ -60,12 +82,16 @@ export function runCargoTests(
   );
   if (!listOnly) {
     // A single substring can execute its validated set in one Cargo invocation.
-    // Mixed/overlapping selections use unique exact names so no case executes twice.
+    // Mixed/overlapping selections use batched exact names so no case executes twice.
     if (filters.length === 1 && !exact.length)
       invoke([...common, filters[0], '--', '--nocapture', '--test-threads=1']);
     else
-      for (const name of selected)
-        invoke([...common, name, '--', '--exact', '--nocapture', '--test-threads=1']);
+      for (const batch of rustExecutionBatches(selected))
+        invoke(
+          [...common, '--', '--exact', ...batch, '--nocapture', '--test-threads=1'],
+          false,
+          batch.length,
+        );
   }
   return selected;
 }

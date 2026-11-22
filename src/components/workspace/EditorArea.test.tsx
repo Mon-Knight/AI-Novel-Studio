@@ -2,14 +2,10 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { ChapterDraft } from '../../types/ai';
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const editorModule = await vite.ssrLoadModule('/src/components/workspace/EditorArea.tsx');
 const resolveEditorDraftContent =
   editorModule.resolveEditorDraftContent as typeof import('./EditorArea').resolveEditorDraftContent;

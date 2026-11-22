@@ -3,7 +3,7 @@ import { after, afterEach, test } from 'node:test';
 // @ts-expect-error jsdom has no bundled declarations; this import is test-only.
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../../test/viteTestServer';
 import type { ChapterDraft } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
 import type { QualityCheckResult } from '../../../types/qualityCheck';
@@ -21,13 +21,10 @@ Object.defineProperties(globalThis, {
 });
 
 const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react');
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
+const vite = await createTestViteServer({
   define: {
     'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
   },
-  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const panelModule = (await vite.ssrLoadModule(
   '/src/components/right-dock/panels/CheckPanel.tsx',

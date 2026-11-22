@@ -247,3 +247,66 @@ test('real-use repairs select source, grounding, word-preview and export behavio
     previewTests,
   );
 });
+
+test('pure UI splits avoid rustFull while preserving frontend tests, desktop E2Es, and native contract gates', () => {
+  const uiCases = [
+    {
+      file: 'src/components/workspace/ReviewAuthorizationRenewalDialog.tsx',
+      test: 'src/test/components/ReviewAuthorizationRenewal.test.tsx',
+      e2e: 'candidate-review-apply',
+    },
+    {
+      file: 'src/components/outline/OutlineEditor.tsx',
+      test: 'src/components/outline/OutlineEditor.test.tsx',
+      e2e: 'story-assets-transaction',
+    },
+    {
+      file: 'src/components/workspace/ChapterSummaryDetails.tsx',
+      test: 'src/services/ai/chapterSummaryGrounding.test.ts',
+      e2e: 'chapter-context-persistence',
+    },
+    {
+      file: 'src/pages/Workbench/WorkbenchTaskAuthorization.tsx',
+      test: 'src/pages/Workbench/WorkbenchTaskAuthorization.test.tsx',
+      e2e: 'workbench-task-authorization',
+    },
+    {
+      file: 'src/services/autonomous-creation/autonomousStoryService.ts',
+      test: 'src/services/autonomous-creation/autonomousStoryService.test.ts',
+      e2e: 'workbench-writing-smoke',
+    },
+    {
+      file: 'src/features/settingSuggestions/useSettingSuggestions.ts',
+      test: 'src/services/settingSuggestions/settingSuggestionService.test.ts',
+      e2e: 'story-assets-transaction',
+    },
+  ];
+  const inventory = [
+    ...uiCases.map((entry) => entry.test),
+    'src/services/conversation/chapterWorkflowService.test.ts',
+    'src/features/workbench/useWorkbenchChapterHandoff.test.tsx',
+  ];
+  for (const entry of uiCases) {
+    const plan = createVerificationPlan([entry.file], inventory);
+    assert.equal(plan.rustFull, false, entry.file);
+    assert.ok(plan.tests.includes(entry.test), entry.file);
+    assert.ok(plan.e2e.includes(entry.e2e), entry.file);
+  }
+
+  for (const contractFile of [
+    'src/services/conversation/reviewAuthorizationRenewalService.ts',
+    'src-tauri/src/services/outline_candidate_apply.rs',
+    'src/services/ai/summaryValidator.ts',
+    'src/services/conversation/taskAuthorizationService.ts',
+    'src-tauri/shared/domain_candidate_schema.rs',
+    'src/types/worldRules.ts',
+  ]) {
+    const plan = createVerificationPlan([contractFile], inventory);
+    assert.equal(plan.rustFull, true, contractFile);
+  }
+});
+
+test('runtime_tests.rs maps to SQLite and native shared state without broad false positives', () => {
+  assert.equal(owner('src-tauri/src/runtime_tests.rs')?.name, 'SQLite and native shared state');
+  assert.equal(owner('src-tauri/src/unrecognized_migration_runtime.rs'), undefined);
+});

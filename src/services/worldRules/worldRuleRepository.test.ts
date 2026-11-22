@@ -3,7 +3,7 @@ import { after, beforeEach, test } from 'node:test';
 import { webcrypto } from 'node:crypto';
 // @ts-expect-error jsdom declarations are not bundled.
 import { JSDOM } from 'jsdom';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import {
   createWorldRuleDocument,
   proposeConfirmedWorldRule,
@@ -23,11 +23,7 @@ for (const [key, value] of Object.entries({
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { configurable: true, value });
 }
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const { settingRepository } = (await vite.ssrLoadModule(
   '/src/services/database/settingRepository.ts',
 )) as typeof import('../database/settingRepository');

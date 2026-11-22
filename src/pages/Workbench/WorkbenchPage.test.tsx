@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
 // @ts-expect-error jsdom has no bundled declarations; this import is test-only.
 import { JSDOM } from 'jsdom';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import type {
@@ -31,11 +31,7 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const { MemoryRouter, Route, Routes } = (await vite.ssrLoadModule(
   '/src/test/routerExports.ts',
 )) as typeof import('react-router-dom');

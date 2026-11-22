@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
-import { createServer } from 'vite';
+import { createTestViteServer } from '../../test/viteTestServer';
 import type { CreateOutputProfileInput, OutputProfile } from '../../types/output';
 
 const OUTPUT_KEY = 'ai_novel_studio_output_profiles';
@@ -40,11 +40,7 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
-const vite = await createServer({
-  appType: 'custom',
-  optimizeDeps: { noDiscovery: true },
-  server: { middlewareMode: true, hmr: false, watch: null },
-});
+const vite = await createTestViteServer();
 const outputProfileModule = (await vite.ssrLoadModule(
   '/src/services/styles/outputProfileService.ts',
 )) as typeof import('./outputProfileService');

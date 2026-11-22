@@ -203,6 +203,7 @@ async function execute(root, { runner, files }, stdio) {
   // Keep NODE_V8_COVERAGE intact so the existing c8 aggregator receives child coverage.
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
+  if (runner === 'vitest') environment.ANS_SKIP_CRITICAL_COMPONENT_COVERAGE = '1';
   const args =
     runner === 'vitest'
       ? [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', ...files]
@@ -213,7 +214,7 @@ async function execute(root, { runner, files }, stdio) {
           : [
               path.join(root, 'node_modules/tsx/dist/cli.mjs'),
               '--test',
-              '--test-concurrency=1',
+              '--test-concurrency=4',
               ...files,
             ];
   const status = await new Promise((resolve, reject) => {
