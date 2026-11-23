@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+- **工作台右侧面板布局比例修复、顶栏精简与小说上下文自动压缩（2026-11-23，非版本任务）**：
+  - 修复右侧「创作上下文」面板资产详情行被旧样式 `grid-template-columns: 64px minmax(0, 1fr) 22px` 反置列宽导致左侧标题/设定描述挤压换行、右侧大片留白的问题：统一改为左侧主内容自适应占满（`minmax(0, 1fr)`）、状态与管理跳转按钮靠右紧凑排列，并仅在存在跳转目标时预留右侧图标列；侧面板顶部基础设定与故事结构摘要恢复双列紧凑排布。
+  - 修复右侧「运行日志」面板出现横向滚动条与右侧状态/耗时被截断的问题：侧面板滚动区禁用横向溢出（`overflow-x: hidden`），运行卡片与工具事件列表补齐 `minmax(0, 1fr)` 与 `min-width: 0` 宽度约束，长模型名与工具名自动单行省略并保留悬停完整提示，同时修复无数值耗时的宿主控制事件渲染为 `null ms` 的显示缺陷。
+  - 精简创作工作台顶栏并改为系统自动压缩小说上下文：移除顶栏右上角重复的「等待处理」状态胶囊、手动「压缩小说上下文」按钮以及任务头下方的「本任务授权：人工确认」提示条；新增 `novelContextAutoCompressionService` 在章节正式采用、章节总结确认启用、分卷标记完成、分卷总结保存及预授权正式写入后自动分析上下文里程碑、基线版本与覆盖率，按预算阶梯校验通过后自动更新活动压缩记录并停用旧记录，无需人工手动触发。
+  - 统一顶栏工作区入口、精简项目侧栏并新增左下角用户中心式上拉菜单：窗口顶部标签栏统一放置「会话 / 项目 / 资源中心」三个入口并移除右侧重复齿轮按钮；「项目」路由左侧栏去掉「新建会话 / 搜索」及「会话 / 资源中心」重复项，仅保留纯项目相关导航（项目库与当前项目各子页面）；左下角 `AI Novel Studio` 身份栏改为可点击弹出的用户中心上拉框（支持实时切换浅色/深色/跟随系统主题，以及直达 AI 模型配置、数据与备份、常规与更新、诊断与关于），同时移除右下角重复跳转到项目库的图标按钮。
+
 - **去 DSH 化：切换为纯 Rust 进程内原生 Agent 执行引擎（2026-11-22，非版本任务）**：
   - 将 `novel-domain-gateway` 作为 Rust 库直接内联进 `src-tauri` 主程序，新增纯 Rust 原生传输、SSE/JSON 工具流拼装与多步工具调用循环（`native_agent_transport.rs`、`native_agent_sse.rs`、`native_agent_loop.rs`、`native_agent_evidence.rs`），`dsh_start_task_turn`、`dsh_prepare_chapter`、`dsh_describe_runtime` 与 `dsh_list_current_plugins` 全部在 Rust 进程内直接执行，保留原有 IPC 接口、SQLite 事实表、Canonical 4 只读工具、Writing SubAgent 分阶段写章、任务预授权与 Safe Apply 事务边界。
   - 彻底移除外置 465 MB `dsh-runtime.zip`、首次启动 1.4 GB 解包流程（`unpack-payload.mjs`）、本地 Node 代理子进程（`model-proxy.mjs`）、`cordis.yml` / `ans-task-server-template.mjs` 及 stdio MCP 子进程监管（`launcher.rs` / `supervisor.rs` / `governed_proxy.rs`），并在数据库启动恢复后异步自动清理数据目录遗留的 `dsh-runtime`、`dsh-task-workers` 与临时解包锁；移除治理页「每日成本硬预算（USD）」模块与后端 `DSH_ROOT_PRICING_REQUIRED` 强制计价门禁，移除工作台「当前模型尚未注册到 Runtime」假警报、设置页「同步到 DeepSeek Runtime」残留状态条及旧 DSH 报错文案；补齐下划线工具名投影映射并将任务预授权表单默认请求上限对齐至单章全链路所需的 16 次；同步精简 `tauri.conf.json`、`build.rs`、桌面 E2E / 故障注入运行器与 CI 构建工作流。

@@ -10,7 +10,6 @@ import type {
   TaskConversation,
   TaskConversationBundle,
 } from '../../types/conversation';
-import type { NovelContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
 import {
   queryLocalConversationDirectory,
   toConversationPage,
@@ -4484,56 +4483,15 @@ test('WorkbenchPage clears only the submitted task draft after a late successful
   );
 });
 
-test('WorkbenchPage isolates compression candidate, busy state, and late failure by task', async () => {
-  const secondConversation: TaskConversation = {
-    ...mockConversation,
-    conversationId: 'conv-002',
-    title: '整理世界设定',
-    createdAt: '2026-08-19T00:00:00.000Z',
-    updatedAt: '2026-08-19T00:00:00.000Z',
-  };
-  taskConversationService.list = async () => [mockConversation, secondConversation];
-  taskConversationService.get = async (conversationId) =>
-    conversationId === secondConversation.conversationId
-      ? {
-          ...mockBundle,
-          conversation: secondConversation,
-          turns: [],
-          runs: [],
-          toolEvents: [],
-        }
-      : mockBundle;
-
-  const candidate: NovelContextCompressionCandidate = {
-    providerId: 'ans.novel-context.extractive-v1',
-    version: '1.1.0',
-    config: { tokenBudget: 4000 },
-    novelId: mockNovel.id,
-    sourceRevision: 'rev-task-one',
-    compressedText: '第一任务的压缩候选',
-    coverage: {
-      characters: { required: ['主角'], present: [], missing: ['主角'] },
-      plot: { required: [], present: [], missing: [] },
-      foreshadow: { required: [], present: [], missing: [] },
-      timeline: { required: [], present: [], missing: [] },
-      world: { required: [], present: [], missing: [] },
-      rules: { required: [], present: [], missing: [] },
-      outlines: { required: [], present: [], missing: [] },
-      style: { required: [], present: [], missing: [] },
-      output: { required: [], present: [], missing: [] },
-      tokens: { budget: 4000, used: 12, withinBudget: true },
+test('WorkbenchPage removes manual compress header controls, hosts conversation status on stage bar, and refreshes asset scope after automatic compression', async () => {
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify([mockNovel]));
+  chapterRepository.getByNovelId = async () => [
+    {
+      ...mockChapter,
+      adoptedDraftId: 'draft-confirmed-1',
+      status: 'adopted',
     },
-    valid: false,
-  };
-  let proposalCount = 0;
-  let rejectSecondProposal: (error: Error) => void = () => undefined;
-  novelContextCompressionProvider.propose = async () => {
-    proposalCount += 1;
-    if (proposalCount === 1) return candidate;
-    return new Promise<NovelContextCompressionCandidate>((_resolve, reject) => {
-      rejectSecondProposal = reject;
-    });
-  };
+  ];
 
   render(
     <MemoryRouter>
@@ -4544,70 +4502,25 @@ test('WorkbenchPage isolates compression candidate, busy state, and late failure
   await waitFor(() => {
     assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-001');
   });
-  fireEvent.click(screen.getByTestId('workbench-compress-context'));
-  await waitFor(() => assert.ok(screen.getByTestId('workbench-compression-card')));
 
-  const secondTask = screen
-    .getAllByTestId('workbench-task')
-    .find((item) => item.dataset.conversationId === secondConversation.conversationId);
-  const firstTask = screen
-    .getAllByTestId('workbench-task')
-    .find((item) => item.dataset.conversationId === mockConversation.conversationId);
-  assert.ok(secondTask);
-  assert.ok(firstTask);
-  fireEvent.click(secondTask);
-  await waitFor(() => {
-    assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-002');
-  });
-  assert.equal(screen.queryByTestId('workbench-compression-card'), null);
-  assert.equal(
-    (screen.getByTestId('workbench-compress-context') as HTMLButtonElement).disabled,
-    false,
+  assert.equal(screen.queryByTestId('workbench-compress-context'), null);
+  assert.equal(screen.queryByTestId('workbench-task-authorization-manage'), null);
+  assert.equal(document.querySelector('.workbench-task-header-actions .workbench-run-badge'), null);
+  assert.equal(document.querySelector('.workbench-library-link'), null);
+  assert.ok(screen.getByTestId('sidebar-user-menu-trigger'));
+  const statusNode = screen.getByTestId('workbench-conversation-status');
+  assert.equal(statusNode.dataset.status, 'idle');
+
+  const { novelContextAutoCompressionService } = await vite.ssrLoadModule(
+    '/src/services/context/novelContextAutoCompressionService.ts',
   );
-
-  fireEvent.click(firstTask);
-  await waitFor(() => assert.ok(screen.getByTestId('workbench-compression-card')));
-  fireEvent.click(screen.getByTestId('workbench-compress-context'));
-  await waitFor(() => {
-    assert.equal(
-      (screen.getByTestId('workbench-compress-context') as HTMLButtonElement).disabled,
-      true,
-    );
-  });
-
-  fireEvent.click(secondTask);
-  await waitFor(() => {
-    assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-002');
-  });
-  assert.equal(screen.queryByTestId('workbench-compression-card'), null);
-  assert.equal(
-    (screen.getByTestId('workbench-compress-context') as HTMLButtonElement).disabled,
-    false,
-  );
-
   await act(async () => {
-    rejectSecondProposal(new Error('第一任务压缩迟到失败'));
-  });
-  fireEvent.click(firstTask);
-  await waitFor(() => {
-    assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-001');
-    assert.match(
-      screen.getByTestId('workbench-composer-error').textContent ?? '',
-      /第一任务压缩迟到失败/,
+    const compressed = await novelContextAutoCompressionService.triggerAfterConfirmation(
+      mockNovel.id,
+      'chapter_adopted',
     );
-    assert.ok(screen.getByTestId('workbench-compression-card'));
+    assert.equal(compressed?.status, 'applied');
   });
-  assert.equal(
-    (screen.getByTestId('workbench-compress-context') as HTMLButtonElement).disabled,
-    false,
-  );
-
-  fireEvent.click(secondTask);
-  await waitFor(() => {
-    assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-002');
-  });
-  assert.equal(screen.queryByTestId('workbench-composer-error'), null);
-  assert.equal(screen.queryByTestId('workbench-compression-card'), null);
 });
 
 test('WorkbenchPage restores the last valid task instead of the first project', async () => {
@@ -5510,7 +5423,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
     '保留这段尚未发送的创作目标',
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '使用当前模型新建会话' }));
+  fireEvent.click(await screen.findByRole('button', { name: '使用当前模型新建会话' }));
   await waitFor(() => {
     assert.equal(
       (screen.getByTestId('workbench-new-task-goal') as HTMLTextAreaElement).value,
@@ -5529,7 +5442,7 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
     );
   });
 
-  fireEvent.click(screen.getByRole('button', { name: '模型设置' }));
+  fireEvent.click(await screen.findByRole('button', { name: '模型设置' }));
   await waitFor(() => assert.ok(screen.getByTestId('model-settings-destination')));
 });
 

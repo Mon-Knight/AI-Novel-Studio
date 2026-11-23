@@ -525,7 +525,7 @@ Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说�
 上下文压缩必须区分：
 
 - **任务对话压缩**：压缩某个 Session 的历史，用于控制模型输入，可以采用 Runtime 的自动 compaction；
-- **小说上下文压缩**：处理正式人物、剧情、伏笔、世界观等知识。Provider 生成带 `derivationType=context_compression` 的可验证 `generic_json` 候选；桌面端按正式来源重算覆盖与基线，并在单一 Rust/SQLite 事务中停用旧活动版本、写入新 ContextRecord 与 append-only 决定。其他 `generic_json` 仍不具备该权限。
+- **小说上下文压缩**：处理正式人物、剧情、伏笔、世界观等知识。系统在章节正式采用、章节总结确认生效、分卷完成或分卷总结/大纲确认后自动分析小说上下文并校验覆盖率与预算，在满足条件且基线变化时自动写入新活动版本 ContextRecord 并停用旧压缩记录，不在工作台顶栏暴露人工压缩按钮；历史会话中既有的 `derivationType=context_compression` 候选仍保留桌面端按正式来源重算覆盖与基线后的事务应用兼容。其他 `generic_json` 仍不具备该权限。
 
 “小说 Memory”还必须区分两类实现：migration 026 的 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs` 是桌面 SQLite 长期事实；`NovelMemoryManager`/`NovelMemoryStateUpdater` 的 `Map` 是进程内兼容/实验状态，重启即丢失。后者不能作为长期 Memory、重启恢复或 Canonical `memory.search` 已稳定的证据。
 

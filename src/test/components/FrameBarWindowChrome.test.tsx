@@ -82,16 +82,19 @@ describe('frame bar window chrome', () => {
     await waitFor(() => expect(chromeHarness.close).toHaveBeenCalledOnce());
   });
 
-  it('keeps interactive frame bar controls outside the drag region', () => {
+  it('keeps interactive frame bar controls outside the drag region and hosts all three workspace tabs', () => {
     chromeHarness.native = true;
     renderShell();
-    for (const name of ['收起侧栏', '资源中心与设置', '最小化', '最大化', '关闭']) {
+    for (const name of ['收起侧栏', '最小化', '最大化', '关闭']) {
       expect(screen.getByRole('button', { name }).hasAttribute('data-tauri-drag-region')).toBe(
         false,
       );
     }
-    expect(screen.getByRole('link', { name: /会话/ }).hasAttribute('data-tauri-drag-region')).toBe(
-      false,
-    );
+    for (const label of [/会话/, /项目/, /资源中心/]) {
+      expect(screen.getByRole('link', { name: label }).hasAttribute('data-tauri-drag-region')).toBe(
+        false,
+      );
+    }
+    expect(screen.queryByRole('button', { name: '资源中心与设置' })).toBeNull();
   });
 });

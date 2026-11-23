@@ -19,7 +19,6 @@ import {
 } from './WorkbenchPageStates';
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
-import { WorkbenchTaskAuthorizationControl } from './WorkbenchTaskAuthorizationControl';
 import { WorkbenchChapterSummaryStatus } from './WorkbenchChapterSummaryStatus';
 import { WorkbenchChapterStageProgress } from './WorkbenchChapterStageProgress';
 import type { WorkbenchSidePanelState } from './hooks/useWorkbenchSidePanel';
@@ -61,14 +60,12 @@ interface WorkbenchPageContentProps {
   chaptersLoading: boolean;
   chaptersError: string;
   effectiveStatus: string;
-  compressionBusy: boolean;
   bundleReady: boolean;
   bundle: TaskConversationBundle | null | undefined;
   conversationsError: string;
   bundleStaleError?: string;
   onSelectChapter: (chapterId: string) => void;
   onCreateChapter: () => void;
-  onCompress: () => void;
   streamProps: StreamProps | null;
   onRetryBundle: () => void;
   selectedNovelId: string;
@@ -112,14 +109,12 @@ export function WorkbenchPageContent({
   chaptersLoading,
   chaptersError,
   effectiveStatus,
-  compressionBusy,
   bundleReady,
   bundle,
   conversationsError,
   bundleStaleError = '',
   onSelectChapter,
   onCreateChapter,
-  onCompress,
   streamProps,
   onRetryBundle,
   selectedNovelId,
@@ -190,21 +185,8 @@ export function WorkbenchPageContent({
               chaptersLoading={chaptersLoading}
               chaptersError={chaptersError}
               effectiveStatus={effectiveStatus}
-              compressionBusy={compressionBusy}
-              bundleReady={bundleReady}
-              authorizationControl={
-                <WorkbenchTaskAuthorizationControl
-                  conversation={selectedConversation}
-                  novelTitle={selectedNovel?.title || '小说项目'}
-                  chapters={chapters}
-                  activeChapterId={chapterId}
-                  bundle={bundle}
-                  bundleReady={bundleReady}
-                />
-              }
               onSelectChapter={onSelectChapter}
               onCreateChapter={onCreateChapter}
-              onCompress={onCompress}
               onShowPlugins={() => openReference('plugins')}
               sidePanelOpen={sidePanel.view !== null}
               sidePanelView={sidePanel.view}

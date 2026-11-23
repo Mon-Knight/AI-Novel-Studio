@@ -312,23 +312,7 @@
 }
 
 .workbench-tree-footer {
-  padding: var(--space-3);
-}
-
-.workbench-library-link {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  margin-left: auto;
-  padding: 0;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-}
-
-.workbench-library-link:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
+  padding: 6px 8px;
 }
 
 /* === 中间：任务头部与对话流 === */
@@ -906,6 +890,7 @@
 
 .workbench-side-launcher-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -998,9 +983,11 @@
 
 .workbench-side-view-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   padding: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* 侧面板内的创作上下文：纵向单列、去掉输入区里的高度上限与分隔底色 */
@@ -1027,21 +1014,14 @@
   gap: 10px;
 }
 
-.workbench-side-view-body .workbench-asset-scope-group {
-  padding: 8px 10px 4px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-card);
-}
-
 .workbench-side-view-body .workbench-asset-scope-group h3 {
   margin-bottom: 6px;
   color: var(--color-text-secondary);
 }
 
 .workbench-side-view-body .workbench-asset-scope-item {
-  min-height: 40px;
-  grid-template-columns: 64px minmax(0, 1fr) 22px;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .workbench-side-view-body .workbench-asset-scope-item-copy strong,
@@ -1070,6 +1050,7 @@
 
 .workbench-side-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -1155,10 +1136,12 @@
 
 .workbench-side-runs {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .workbench-side-run {
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -1167,6 +1150,7 @@
 
 .workbench-side-run-heading {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
@@ -1185,6 +1169,7 @@
 
 .workbench-side-events {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin: 8px 0 0;
   padding: 0;

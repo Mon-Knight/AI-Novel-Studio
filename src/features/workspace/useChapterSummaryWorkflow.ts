@@ -7,6 +7,7 @@ import {
   type ChapterWorkflowState,
 } from '../../services/conversation/chapterWorkflowService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
+import { novelContextAutoCompressionService } from '../../services/context/novelContextAutoCompressionService';
 import { chapterRepository } from '../../services/database/chapterRepository';
 
 export function useChapterSummaryWorkflow(
@@ -99,7 +100,14 @@ export function useChapterSummaryWorkflow(
         (latest.isExpired || latest.adoptedDraftId !== currentChapter.adoptedDraftId)
       )
         throw new Error('此总结已过期，不能启用为当前采用稿的上下文。');
-      await chapterSummaryService.setEnabled(summary.id, !summary.enabled);
+      const nextEnabled = !summary.enabled;
+      await chapterSummaryService.setEnabled(summary.id, nextEnabled);
+      if (nextEnabled) {
+        void novelContextAutoCompressionService.triggerAfterConfirmation(
+          state.chapter.novelId,
+          'chapter_summary_confirmed',
+        );
+      }
       if (scope === epoch.current) await refresh();
     } catch (cause) {
       if (scope === epoch.current)

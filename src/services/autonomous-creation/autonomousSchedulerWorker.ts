@@ -2,6 +2,7 @@ import { appLogger } from '../observability/appLogger';
 import { generateId } from '../database/db';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
+import { novelContextAutoCompressionService } from '../context/novelContextAutoCompressionService';
 import type { ChapterDraft } from '../../types/ai';
 import type {
   AutonomousChapterPlan,
@@ -337,6 +338,10 @@ export class AutonomousSchedulerWorker {
             );
             analysisConfirmed = true;
             outcome = 'confirmed';
+            await novelContextAutoCompressionService.triggerAfterConfirmation(
+              adopted.novelId,
+              'chapter_adopted',
+            );
           }
           const finished = await this.dependencies.scheduler.finishChapter({
             runId: run.runId,

@@ -1,4 +1,5 @@
 import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../types/conversation';
+import { novelContextAutoCompressionService } from '../../services/context/novelContextAutoCompressionService';
 
 export type StructuredArtifactDecisionInput = {
   artifact: ConversationArtifactCard;
@@ -42,4 +43,21 @@ export async function settleStructuredArtifactDecision(
     applied: input.applied,
     selectedChapterId,
   });
+  if (
+    input.applied &&
+    (input.artifact.artifactType === 'chapter_summary' ||
+      input.artifact.artifactType === 'volume_summary' ||
+      input.artifact.artifactType === 'outline')
+  ) {
+    const trigger =
+      input.artifact.artifactType === 'volume_summary'
+        ? 'volume_summary_confirmed'
+        : input.artifact.artifactType === 'chapter_summary'
+          ? 'chapter_summary_confirmed'
+          : 'outline_confirmed';
+    await novelContextAutoCompressionService.triggerAfterConfirmation(
+      input.selectedNovelId,
+      trigger,
+    );
+  }
 }

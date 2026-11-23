@@ -1,8 +1,6 @@
-import type { ReactNode } from 'react';
 import {
   Database,
   FileText,
-  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
@@ -11,7 +9,6 @@ import {
 import type { WorkbenchSidePanelView } from './hooks/useWorkbenchSidePanel';
 import type { Chapter } from '../../types/chapter';
 import type { TaskConversation } from '../../types/conversation';
-import { statusLabel } from './workbenchHelpers';
 import { ChapterLocator } from '../../components/workspace/ChapterLocator';
 
 interface WorkbenchTaskHeaderProps {
@@ -22,13 +19,9 @@ interface WorkbenchTaskHeaderProps {
   hasChapter: boolean;
   chaptersLoading: boolean;
   chaptersError: string;
-  effectiveStatus: string;
-  compressionBusy: boolean;
-  bundleReady: boolean;
-  authorizationControl?: ReactNode;
+  effectiveStatus?: string;
   onSelectChapter: (chapterId: string) => void;
   onCreateChapter: () => void;
-  onCompress: () => void;
   onShowPlugins: () => void;
   sidePanelOpen?: boolean;
   sidePanelView?: WorkbenchSidePanelView | null;
@@ -48,12 +41,8 @@ export function WorkbenchTaskHeader({
   chaptersLoading,
   chaptersError,
   effectiveStatus,
-  compressionBusy,
-  bundleReady,
-  authorizationControl,
   onSelectChapter,
   onCreateChapter,
-  onCompress,
   onShowPlugins,
   sidePanelOpen = false,
   sidePanelView = null,
@@ -69,7 +58,11 @@ export function WorkbenchTaskHeader({
       data-testid="workbench-task-header"
       data-conversation-id={conversation.conversationId}
     >
-      <div className="workbench-task-header-inner">
+      <div
+        className="workbench-task-header-inner"
+        data-testid={effectiveStatus ? 'workbench-conversation-status' : undefined}
+        data-status={effectiveStatus}
+      >
         <div className="workbench-task-heading">
           <div className="workbench-task-title-block">
             <div className="workbench-eyebrow">{novelTitle}</div>
@@ -110,24 +103,6 @@ export function WorkbenchTaskHeader({
         </div>
 
         <div className="workbench-task-header-actions">
-          <span
-            className={'workbench-run-badge is-' + effectiveStatus}
-            data-testid="workbench-conversation-status"
-            data-status={effectiveStatus}
-          >
-            {statusLabel(effectiveStatus)}
-          </span>
-          <button
-            type="button"
-            className="workbench-header-icon-button"
-            data-testid="workbench-compress-context"
-            aria-label="压缩小说上下文"
-            title="压缩小说上下文"
-            disabled={compressionBusy || !bundleReady}
-            onClick={onCompress}
-          >
-            <Minimize2 aria-hidden="true" size={16} strokeWidth={1.8} />
-          </button>
           {onOpenContext && (
             <button
               type="button"
@@ -210,7 +185,6 @@ export function WorkbenchTaskHeader({
           )}
         </div>
       </div>
-      {authorizationControl}
     </header>
   );
 }

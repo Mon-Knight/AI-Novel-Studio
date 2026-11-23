@@ -47,8 +47,8 @@ const NO_ARRIVALS: ReadonlySet<string> = new Set();
 
 export interface WorkbenchMessageStreamProps {
   bundle: TaskConversationBundle;
-  compressionCandidate: NovelContextCompressionCandidate | null;
-  compressionBusy: boolean;
+  compressionCandidate?: NovelContextCompressionCandidate | null;
+  compressionBusy?: boolean;
   compressionPresentation?: WorkbenchCompressionPresentation | null;
   artifactFocusRequest?: WorkbenchArtifactFocusRequest | null;
   presentationContext?: WorkbenchPresentationContext;
@@ -58,7 +58,7 @@ export interface WorkbenchMessageStreamProps {
   assetReadinessBusy: boolean;
   selectedConversationRunning: boolean;
   chapterSummaryOrchestration: ChapterSummaryOrchestrationState;
-  onDismissCompression: () => void;
+  onDismissCompression?: () => void;
   onReloadArtifacts?: () => void;
   onDecideArtifact: (
     artifact: ConversationArtifactCard,
@@ -90,8 +90,8 @@ export function WorkbenchMessageStream(props: WorkbenchMessageStreamProps) {
 
 function WorkbenchConversationStream({
   bundle,
-  compressionCandidate,
-  compressionBusy,
+  compressionCandidate = null,
+  compressionBusy = false,
   compressionPresentation,
   artifactFocusRequest,
   presentationContext,
@@ -101,7 +101,7 @@ function WorkbenchConversationStream({
   assetReadinessBusy,
   selectedConversationRunning,
   chapterSummaryOrchestration,
-  onDismissCompression,
+  onDismissCompression = () => undefined,
   onReloadArtifacts,
   onDecideArtifact,
   onRetry,

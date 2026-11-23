@@ -9,6 +9,7 @@ export function WorkbenchTaskAuthorizationStatus({
   stage,
   stopReason,
   sourceTurnId,
+  conversationStatus,
   onManage,
 }: {
   authorizations: TaskAuthorization[];
@@ -18,6 +19,7 @@ export function WorkbenchTaskAuthorizationStatus({
   stage?: string;
   stopReason?: string;
   sourceTurnId?: string;
+  conversationStatus?: string;
   onManage: () => void;
 }) {
   const active = authorizations.filter(
@@ -31,7 +33,12 @@ export function WorkbenchTaskAuthorizationStatus({
     .slice()
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   return (
-    <section aria-label="本任务授权与执行状态" className="workbench-readiness-hint">
+    <section
+      aria-label="本任务授权与执行状态"
+      className="workbench-readiness-hint"
+      data-testid={conversationStatus ? 'workbench-conversation-status' : undefined}
+      data-status={conversationStatus}
+    >
       <button
         type="button"
         className="btn btn-secondary btn-sm"
