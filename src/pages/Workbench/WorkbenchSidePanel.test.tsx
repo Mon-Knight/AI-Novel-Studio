@@ -125,6 +125,39 @@ describe('workbench side panel', () => {
     expect(runs[0].textContent).toContain('模型超时');
   });
 
+  it('keeps run log bounded horizontally and shows status instead of null ms for timeless host events', () => {
+    const bundleWithNullDuration: TaskConversationBundle = {
+      ...bundle,
+      toolEvents: [
+        ...bundle.toolEvents,
+        {
+          eventId: 'event-host',
+          runId: 'run-1',
+          sequence: 0,
+          toolName: 'dsh.execution_contract',
+          argumentsSummary: {},
+          status: 'succeeded',
+          durationMs: null as unknown as undefined,
+          createdAt: '2026-09-01T00:00:00.100Z',
+        },
+      ],
+    };
+    render(<WorkbenchRunLog bundle={bundleWithNullDuration} />);
+    const eventsContainer = screen.getByTestId('workbench-side-events');
+    expect(eventsContainer.textContent).not.toContain('null ms');
+    expect(eventsContainer.textContent).toContain('dsh.execution_contract');
+    expect(eventsContainer.textContent).toContain('已完成');
+
+    const zcodeCss = readFileSync(resolve('src/styles/workbench-zcode.css'), 'utf8');
+    expect(zcodeCss).toMatch(/\.workbench-side-view-body\s*\{[^}]*overflow-x:\s*hidden/u);
+    expect(zcodeCss).toMatch(
+      /\.workbench-side-runs\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
+    );
+    expect(zcodeCss).toMatch(
+      /\.workbench-side-events\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
+    );
+  });
+
   it('opens launcher tabs in place and returns to the launcher', () => {
     const { result } = renderHook(() => {
       // The plugin flag is real component state; a plain object would keep the hook closed over

@@ -2,6 +2,7 @@ import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { confirmDanger } from '../../utils/nativeDialog';
 import { volumeRepository } from '../../services/database/volumeRepository';
+import { novelContextAutoCompressionService } from '../../services/context/novelContextAutoCompressionService';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import {
   createVolumeForNovel,
@@ -122,7 +123,10 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   };
 
   const handleUpdateVolume = async (id: string, input: UpdateVolumeInput) => {
-    await volumeRepository.update(id, input);
+    const updated = await volumeRepository.update(id, input);
+    if (input.status === 'completed' || updated?.status === 'completed') {
+      void novelContextAutoCompressionService.triggerAfterConfirmation(novelId, 'volume_confirmed');
+    }
     await loadData();
     setShowVolumeForm(false);
     setEditingVolume(null);

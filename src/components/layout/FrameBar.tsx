@@ -1,12 +1,12 @@
-import { Copy, Minus, PanelLeft, Settings2, Square, X } from 'lucide-react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Copy, Minus, PanelLeft, Square, X } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import { APP_VERSION } from '../../constants/version';
 import type { WindowChrome } from '../../hooks/useWindowChrome';
 import {
-  HUB_ENTRY,
+  HUB_HOME_PATH,
   isEntryActive,
   resolveShellContext,
-  WORKSPACE_ENTRIES,
+  TOP_NAV_ENTRIES,
 } from './shellNavigation';
 
 interface FrameBarProps {
@@ -21,12 +21,13 @@ interface FrameBarProps {
  */
 export function FrameBar({ sidebarCollapsed, onToggleSidebar, chrome }: FrameBarProps) {
   const location = useLocation();
-  const navigate = useNavigate();
   const context = resolveShellContext(location.pathname);
   const showPageTab =
     context.section === 'project' || context.section === 'other'
       ? location.pathname !== '/novels'
-      : context.section === 'hub';
+      : context.section === 'hub'
+        ? location.pathname !== HUB_HOME_PATH
+        : false;
 
   return (
     <header
@@ -53,11 +54,11 @@ export function FrameBar({ sidebarCollapsed, onToggleSidebar, chrome }: FrameBar
         <PanelLeft aria-hidden="true" size={16} strokeWidth={1.8} />
       </button>
       <nav className="frame-tabs" aria-label="工作区标签" data-tauri-drag-region>
-        {WORKSPACE_ENTRIES.map((entry) => {
+        {TOP_NAV_ENTRIES.map((entry) => {
           const active = isEntryActive(entry, location.pathname) && !showPageTab;
           const Icon = entry.icon;
           return (
-            <NavLink
+            <Link
               key={entry.path}
               to={entry.path}
               className={`frame-tab ${active ? 'is-active' : ''}`}
@@ -65,7 +66,7 @@ export function FrameBar({ sidebarCollapsed, onToggleSidebar, chrome }: FrameBar
             >
               <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>{entry.label}</span>
-            </NavLink>
+            </Link>
           );
         })}
         {showPageTab && (
@@ -78,15 +79,6 @@ export function FrameBar({ sidebarCollapsed, onToggleSidebar, chrome }: FrameBar
         <span className="frame-version" title="当前版本" data-tauri-drag-region>
           {APP_VERSION}
         </span>
-        <button
-          type="button"
-          className={`frame-icon-button ${isEntryActive(HUB_ENTRY, location.pathname) ? 'is-active' : ''}`}
-          aria-label="资源中心与设置"
-          title="资源中心与设置"
-          onClick={() => navigate(HUB_ENTRY.path)}
-        >
-          <Settings2 aria-hidden="true" size={16} strokeWidth={1.8} />
-        </button>
       </div>
       {chrome.native && (
         <div className="frame-window-controls" role="group" aria-label="窗口控制">

@@ -5,6 +5,7 @@ import type {
   TaskAuthorizationReceipt,
 } from '../../types/taskAuthorization';
 import { taskAuthorizationService } from '../../services/conversation/taskAuthorizationService';
+import { novelContextAutoCompressionService } from '../../services/context/novelContextAutoCompressionService';
 
 interface AuthorizationState {
   scope: string;
@@ -39,6 +40,7 @@ export function useWorkbenchTaskAuthorization(input: {
   const mounted = useRef(true);
   const readSequence = useRef(0);
   const mutations = useRef(new Set<string>());
+  const knownReceiptsByScope = useRef(new Map<string, Set<string>>());
   const [state, setState] = useState(() => emptyState(scope));
   const isCurrent = useCallback(() => mounted.current && currentScope.current === scope, [scope]);
   const refresh = useCallback(async () => {
@@ -73,11 +75,28 @@ export function useWorkbenchTaskAuthorization(input: {
         }),
       );
       if (!isCurrent() || request !== readSequence.current) return false;
+      const nextReceipts = groups.flat();
+      const seenReceipts = knownReceiptsByScope.current.get(scope);
+      if (!seenReceipts) {
+        knownReceiptsByScope.current.set(
+          scope,
+          new Set(nextReceipts.map((receipt) => receipt.receiptId)),
+        );
+      } else {
+        const hasNewReceipt = nextReceipts.some((receipt) => !seenReceipts.has(receipt.receiptId));
+        for (const receipt of nextReceipts) seenReceipts.add(receipt.receiptId);
+        if (hasNewReceipt) {
+          void novelContextAutoCompressionService.triggerAfterConfirmation(
+            novelId,
+            'preauthorized_write',
+          );
+        }
+      }
       setState((previous) => ({
         ...previous,
         scope,
         authorizations,
-        receipts: groups.flat(),
+        receipts: nextReceipts,
         loading: false,
         error: '',
       }));

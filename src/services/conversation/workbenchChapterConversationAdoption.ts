@@ -3,6 +3,7 @@ import type { ArtifactDecision, ConversationArtifactCard } from '../../types/con
 import type { ResultArtifactBundle } from '../../types/result-artifact';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
+import { novelContextAutoCompressionService } from '../context/novelContextAutoCompressionService';
 import { draftVersionService } from '../database/draftVersionService';
 import {
   artifactDecisionService,
@@ -133,13 +134,18 @@ export async function adoptWorkbenchChapterCandidateFromConversation(
     note: '通过创作工作台对话显式采用未修改候选',
   });
   const expectedContentHash = await computeContentSha256(draft.content);
+  const adoption = await adoptDraft({
+    authorizationId: result.authorization.authorizationId,
+    draftId: draft.id,
+    expectedDraftVersion: draft.versionNo,
+    expectedContentHash,
+  });
+  await novelContextAutoCompressionService.triggerAfterConfirmation(
+    input.novelId,
+    'chapter_adopted',
+  );
   return {
     decision: result.decision,
-    adoption: await adoptDraft({
-      authorizationId: result.authorization.authorizationId,
-      draftId: draft.id,
-      expectedDraftVersion: draft.versionNo,
-      expectedContentHash,
-    }),
+    adoption,
   };
 }

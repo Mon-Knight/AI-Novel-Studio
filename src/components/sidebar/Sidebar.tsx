@@ -1,6 +1,5 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { SidebarFooter } from '../layout/SidebarFooter';
-import { SidebarQuickActions } from '../layout/SidebarQuickActions';
 import { isEntryActive, sidebarGroups } from '../layout/shellNavigation';
 
 interface SidebarProps {
@@ -8,8 +7,8 @@ interface SidebarProps {
 }
 
 /**
- * ZCode-style global sidebar: quick actions, workspace sections, the active project's
- * pages and a footer identity row. The workbench route renders its own project/task tree.
+ * ZCode-style project sidebar: project library, the active project's pages,
+ * and the bottom user-center trigger. Top-level workspace switching lives in FrameBar.
  */
 function Sidebar({ compact = false }: SidebarProps) {
   const location = useLocation();
@@ -21,8 +20,6 @@ function Sidebar({ compact = false }: SidebarProps) {
       aria-label="应用导航"
       data-compact={compact ? 'true' : 'false'}
     >
-      {!compact && <SidebarQuickActions />}
-
       <nav className="sidebar-nav" aria-label="全局导航">
         {groups.map((group) => (
           <div className="sidebar-group" key={group.label}>
@@ -31,7 +28,7 @@ function Sidebar({ compact = false }: SidebarProps) {
               const Icon = entry.icon;
               const active = isEntryActive(entry, location.pathname, location.search);
               return (
-                <NavLink
+                <Link
                   key={entry.path}
                   to={entry.path}
                   className={`sidebar-nav-item ${active ? 'active' : ''}`}
@@ -43,7 +40,7 @@ function Sidebar({ compact = false }: SidebarProps) {
                     <Icon size={18} strokeWidth={1.8} />
                   </span>
                   <span className="nav-label">{entry.label}</span>
-                </NavLink>
+                </Link>
               );
             })}
           </div>

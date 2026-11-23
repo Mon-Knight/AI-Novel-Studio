@@ -147,4 +147,14 @@ describe('workbench tree row identity', () => {
       vi.useRealTimers();
     }
   });
+
+  it('replaces the footer library jump button with the clickable AI Novel Studio user-center menu', () => {
+    render(navigation(navigationProps(false, 0)));
+    expect(document.querySelector('.workbench-library-link')).toBeNull();
+    const trigger = screen.getByTestId('sidebar-user-menu-trigger');
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('sidebar-user-menu')).not.toBeNull();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('sidebar-user-menu')).toBeNull();
+  });
 });

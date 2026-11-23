@@ -94,7 +94,10 @@ export function WorkbenchRunLog({ bundle }: { bundle: TaskConversationBundle }) 
           <section className="workbench-side-run" key={run.runId} data-run-id={run.runId}>
             <header className="workbench-side-run-heading">
               <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span className="workbench-side-row-title">
+              <span
+                className="workbench-side-row-title"
+                title={`${run.modelSnapshot.providerId} · ${run.modelSnapshot.modelId}`}
+              >
                 {run.modelSnapshot.providerId} · {run.modelSnapshot.modelId}
               </span>
               <span className={`workbench-side-badge is-${run.status}`}>
@@ -112,12 +115,12 @@ export function WorkbenchRunLog({ bundle }: { bundle: TaskConversationBundle }) 
                   <li
                     key={event.eventId}
                     className={`workbench-side-event is-${event.status}`}
-                    title={event.error || undefined}
+                    title={event.error || event.toolName}
                   >
                     <ToolEventStatusIcon status={event.status} />
                     <span className="workbench-side-event-name">{event.toolName}</span>
-                    <span className="workbench-side-row-meta">
-                      {event.durationMs !== undefined
+                    <span className="workbench-side-event-meta">
+                      {typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)
                         ? `${event.durationMs} ms`
                         : statusLabel(event.status)}
                     </span>

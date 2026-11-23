@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkbenchTaskMenu } from './WorkbenchTaskMenu';
-import { Check, Ellipsis, Library, Search, X } from 'lucide-react';
+import { Check, Ellipsis, Search, X } from 'lucide-react';
 import type { Novel } from '../../types/novel';
 import type { TaskConversation } from '../../types/conversation';
 import { formatRecentActivity, statusLabel } from './workbenchHelpers';
@@ -33,7 +33,7 @@ interface WorkbenchNavigationProps {
   onSetTaskArchived: (conversationId: string, archived: boolean) => Promise<void>;
   onRetryProjects: () => void;
   onRetryConversations: () => void;
-  onOpenLibrary: () => void;
+  onOpenLibrary?: () => void;
 }
 
 function NavigationSkeleton() {
@@ -71,7 +71,6 @@ export function WorkbenchNavigation({
   onSetTaskArchived,
   onRetryProjects,
   onRetryConversations,
-  onOpenLibrary,
 }: WorkbenchNavigationProps) {
   const { query, setQuery, archive: archiveView, setArchive: setArchiveView } = directory;
   const [openMenuId, setOpenMenuId] = useState('');
@@ -452,20 +451,7 @@ export function WorkbenchNavigation({
         )}
       </div>
 
-      <SidebarFooter
-        className="workbench-tree-footer"
-        action={
-          <button
-            type="button"
-            className="workbench-library-link"
-            aria-label="管理小说作品"
-            title="管理小说作品"
-            onClick={onOpenLibrary}
-          >
-            <Library aria-hidden="true" size={15} strokeWidth={1.8} />
-          </button>
-        }
-      />
+      <SidebarFooter className="workbench-tree-footer" />
       {openMenuConversation && (
         <WorkbenchTaskMenu
           conversation={openMenuConversation}

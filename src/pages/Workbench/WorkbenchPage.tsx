@@ -24,7 +24,7 @@ import { useWorkbenchVisibility } from './hooks/useWorkbenchVisibility';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
 import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
-import { useWorkbenchCompression } from './hooks/useWorkbenchCompression';
+import { useNovelContextAutoCompression } from '../../features/workbench/useNovelContextAutoCompression';
 import { useWorkbenchConversations } from './hooks/useWorkbenchConversations';
 import { useWorkbenchIntent } from './hooks/useWorkbenchIntent';
 import { useWorkbenchPageChrome } from './hooks/useWorkbenchPageChrome';
@@ -113,8 +113,6 @@ export function WorkbenchPage() {
     clearRevisionSource,
     composerError,
     setComposerError,
-    beginComposerErrorOperation,
-    commitComposerErrorOperation,
     runningConversationIds,
     targetConflict,
     selectedConversationPreparing,
@@ -184,18 +182,9 @@ export function WorkbenchPage() {
       settleAssetCandidateDecision,
     ],
   );
-  const {
-    compressionCandidate,
-    compressionPresentation,
-    setCompressionCandidate,
-    compressionBusy,
-    proposeContextCompression,
-  } = useWorkbenchCompression({
-    selectedNovelId,
-    selectedConversationId,
-    refreshBundle,
-    beginComposerErrorOperation,
-    commitComposerErrorOperation,
+  useNovelContextAutoCompression({
+    novelId: selectedNovelId,
+    onCompressed: () => void assetScope.refresh(),
   });
   const artifactActions = useWorkbenchArtifacts({
     selectedNovelId,
@@ -407,20 +396,16 @@ export function WorkbenchPage() {
       chaptersLoading={chaptersLoading}
       chaptersError={chaptersError}
       effectiveStatus={effectiveStatus}
-      compressionBusy={compressionBusy}
       bundleReady={bundleReady}
       bundle={bundle}
       conversationsError={conversationsError}
       bundleStaleError={bundleStaleError}
       onSelectChapter={(value) => void selectChapter(value)}
       onCreateChapter={() => navigate(`/novels/${selectedNovelId}`)}
-      onCompress={() => void proposeContextCompression()}
       streamProps={
         bundle && selectedConversation
           ? {
               bundle,
-              compressionCandidate,
-              compressionPresentation,
               artifactFocusRequest,
               presentationContext: {
                 novelId: selectedNovelId,
@@ -428,13 +413,11 @@ export function WorkbenchPage() {
                 chapters: chapters.map((chapter) => ({ id: chapter.id, title: chapter.title })),
               },
               onInsertExample: chrome.insertExample,
-              compressionBusy,
               decisionBusyCardId,
               assetRecovery,
               assetReadinessBusy,
               selectedConversationRunning,
               chapterSummaryOrchestration,
-              onDismissCompression: () => setCompressionCandidate(null),
               historyHasOlder,
               historyHasNewer,
               historyExpandToken,

@@ -69,7 +69,7 @@ function ScopeItem({
     : '';
   return (
     <div
-      className={`workbench-asset-scope-item is-${item.status}`}
+      className={`workbench-asset-scope-item is-${item.status}${item.actionPath ? ' has-action' : ''}`}
       data-testid={`workbench-asset-scope-${item.key}`}
       data-asset-status={item.status}
     >

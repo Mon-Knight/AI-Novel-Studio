@@ -11,6 +11,7 @@ import type {
 } from '../../../types/chapterSummary';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import { chapterContextPersistenceService } from '../../../services/context/chapterContextPersistenceService';
+import { novelContextAutoCompressionService } from '../../../services/context/novelContextAutoCompressionService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
 import { validateSummary } from '../../../services/ai/summaryValidator';
@@ -251,6 +252,12 @@ function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProp
           setGenResult(null);
           setValidation(null);
           setTimeout(() => setSaveSuccess(false), 3000);
+          if (contextEligible) {
+            void novelContextAutoCompressionService.triggerAfterConfirmation(
+              novelId,
+              'chapter_summary_confirmed',
+            );
+          }
         },
       );
     } catch (e: unknown) {
@@ -264,8 +271,15 @@ function LegacyChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProp
     if (!summary) return;
     setGenError('');
     try {
-      await chapterSummaryService.setEnabled(summary.id, !summary.enabled);
-      setSummary({ ...summary, enabled: !summary.enabled });
+      const nextEnabled = !summary.enabled;
+      await chapterSummaryService.setEnabled(summary.id, nextEnabled);
+      setSummary({ ...summary, enabled: nextEnabled });
+      if (nextEnabled) {
+        void novelContextAutoCompressionService.triggerAfterConfirmation(
+          novelId,
+          'chapter_summary_confirmed',
+        );
+      }
     } catch (error: unknown) {
       appLogger.error(error);
       setGenError(describeUnknownError(error, '章节上下文启用状态保存失败'));

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { novelContextAutoCompressionService } from '../../../services/context/novelContextAutoCompressionService';
 import { qualityCheckService } from '../../../services/quality/qualityCheckService';
 import { formatDateTime } from '../../../utils/date';
 import { formatNumber } from '../../../utils/format';
@@ -161,6 +162,10 @@ function DraftHistoryPanel({
       ) {
         throw new Error('正文采用结果与目标章节不一致');
       }
+      void novelContextAutoCompressionService.triggerAfterConfirmation(
+        verifiedDraft.novelId,
+        'chapter_adopted',
+      );
       // Adoption is authoritative once the transaction commits, but the user
       // may have continued editing while that IPC was in flight. Re-check the
       // live editor before replacing it with the adopted version.

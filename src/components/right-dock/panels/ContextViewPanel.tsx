@@ -14,6 +14,7 @@ import type {
 } from '../../../types/context';
 import type { VolumeCompletionCheck, VolumeSummarizeResult } from '../../../types/chapterSummary';
 import { contextRecordService } from '../../../services/context/contextRecordService';
+import { novelContextAutoCompressionService } from '../../../services/context/novelContextAutoCompressionService';
 import { volumeRepository } from '../../../services/database/volumeRepository';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import {
@@ -225,6 +226,10 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         importance: 5,
         isActive: true,
       });
+      void novelContextAutoCompressionService.triggerAfterConfirmation(
+        novelId,
+        'volume_summary_confirmed',
+      );
 
       // 刷新
       setGenResult((prev) => {

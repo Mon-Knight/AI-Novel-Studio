@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -147,4 +149,59 @@ test('asset scope panel exposes compact group summaries and a collapse action', 
   assert.match(html, /data-context-group-summary="structure"[^>]*>.*?部分未准备/su);
   assert.match(html, /data-testid="workbench-asset-scope-details"/u);
   assert.match(html, /data-testid="workbench-asset-scope-collapse"/u);
+});
+
+test('asset scope items reserve the trailing action column only when actionPath exists and keep flexible copy width in side panel', () => {
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchAssetScopePanel, {
+      embedded: true,
+      summary: {
+        novelId: 'novel-1',
+        items: [
+          {
+            key: 'world',
+            group: 'foundation',
+            label: '正式世界',
+            value: '诡境铁道体系',
+            status: 'ready',
+            required: true,
+            actionPath: '/novels/novel-1',
+          },
+          {
+            key: 'memory_context',
+            group: 'continuity',
+            label: 'Memory',
+            value: '活动文档 3 条',
+            status: 'ready',
+            required: false,
+          },
+        ],
+        requiredMissingCount: 0,
+        unavailableCount: 0,
+      },
+      loading: false,
+      error: '',
+      onRefresh: () => undefined,
+      onOpen: () => undefined,
+    }),
+  );
+
+  assert.match(
+    html,
+    /class="workbench-asset-scope-item is-ready has-action"[^>]*data-testid="workbench-asset-scope-world"/u,
+  );
+  assert.match(
+    html,
+    /class="workbench-asset-scope-item is-ready"[^>]*data-testid="workbench-asset-scope-memory_context"/u,
+  );
+  const zcodeCss = readFileSync(resolve('src/styles/workbench-zcode.css'), 'utf8');
+  const refinementCss = readFileSync(resolve('src/styles/workbench-refinement.css'), 'utf8');
+  assert.doesNotMatch(
+    zcodeCss,
+    /\.workbench-side-view-body\s+\.workbench-asset-scope-item\s*\{[^}]*64px/u,
+  );
+  assert.match(
+    refinementCss,
+    /\.workbench-side-view-body\s+\.workbench-asset-scope-item\.has-action\s*\{[^}]*minmax\(0,\s*1fr\)\s+auto\s+28px/u,
+  );
 });

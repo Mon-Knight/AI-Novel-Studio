@@ -102,6 +102,14 @@ export const HUB_ENTRY: ShellNavEntry = {
   matchPrefix: true,
 };
 
+export const TOP_NAV_ENTRIES: ShellNavEntry[] = [...WORKSPACE_ENTRIES, HUB_ENTRY];
+
+export const PROJECT_LIBRARY_ENTRY: ShellNavEntry = {
+  path: '/novels',
+  label: '项目库',
+  icon: Library,
+};
+
 export function resolveNovelId(pathname: string): string | null {
   const match = /^\/novels\/([^/]+)/u.exec(pathname);
   return match ? decodeURIComponent(match[1]) : null;
@@ -124,6 +132,7 @@ export function isEntryActive(entry: ShellNavEntry, pathname: string, search = '
     return (params.get(key) ?? 'general') === value;
   }
   if (entry.path === '/') return pathname === '/';
+  if (entry.path === HUB_HOME_PATH && entry.matchPrefix) return HUB_ROUTE_PATTERN.test(pathname);
   if (entry.matchPrefix) return pathname === entryPath || pathname.startsWith(`${entryPath}/`);
   return pathname === entryPath;
 }
@@ -164,9 +173,9 @@ export function resolveShellContext(pathname: string): ShellContext {
   return { section: 'other', layout: 'standard', novelId: null, pageLabel };
 }
 
-/** Builds the sidebar navigation groups for a route: workspace entries plus the active project. */
+/** Builds the project-scoped sidebar navigation groups for non-workbench project routes. */
 export function sidebarGroups(pathname: string): ShellNavGroup[] {
-  const groups: ShellNavGroup[] = [{ label: '工作区', entries: [...WORKSPACE_ENTRIES, HUB_ENTRY] }];
+  const groups: ShellNavGroup[] = [{ label: '小说项目', entries: [PROJECT_LIBRARY_ENTRY] }];
   const novelId = resolveNovelId(pathname);
   if (novelId) groups.push({ label: '当前项目', entries: projectEntries(novelId) });
   return groups;

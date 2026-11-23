@@ -5,6 +5,7 @@ import { logWorkspaceWarning } from '../../../services/workspace/workspaceErrorS
 import { getAppErrorUserMessage, normalizeAppError } from '../../../types/appError';
 import type { DocumentAdoptState, EditorAreaProps, EditorDocumentState } from './editorAreaTypes';
 import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
+import { novelContextAutoCompressionService } from '../../../services/context/novelContextAutoCompressionService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { confirmInfo } from '../../../utils/nativeDialog';
@@ -41,11 +42,20 @@ export async function persistEditorAdoption(input: {
       expectedDraftVersion: input.draft.versionNo,
       expectedContentHash,
     });
+    void novelContextAutoCompressionService.triggerAfterConfirmation(
+      result.adoptedDraft.novelId,
+      'chapter_adopted',
+    );
     return result.adoptedDraft;
   }
   await input.onBeforeAdopt?.(input.draft.id);
   input.assertCurrent();
-  return draftVersionService.adopt(input.draft.id, input.chapterId);
+  const adopted = await draftVersionService.adopt(input.draft.id, input.chapterId);
+  void novelContextAutoCompressionService.triggerAfterConfirmation(
+    adopted.novelId,
+    'chapter_adopted',
+  );
+  return adopted;
 }
 
 export interface EditorCandidateAdoptionOptions {

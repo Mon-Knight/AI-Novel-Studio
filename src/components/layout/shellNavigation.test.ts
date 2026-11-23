@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  HUB_ENTRY,
   HUB_GROUPS,
   isEntryActive,
   projectEntries,
   resolvePageLabel,
   resolveShellContext,
   sidebarGroups,
+  TOP_NAV_ENTRIES,
 } from './shellNavigation';
 
 describe('shell navigation model', () => {
@@ -58,12 +60,18 @@ describe('shell navigation model', () => {
     const styles = HUB_GROUPS[0].entries[0];
     expect(isEntryActive(styles, '/styles/anything')).toBe(true);
     expect(isEntryActive(styles, '/stylesheet')).toBe(false);
+    expect(TOP_NAV_ENTRIES.map((entry) => entry.label)).toEqual(['会话', '项目', '资源中心']);
+    expect(isEntryActive(HUB_ENTRY, '/styles')).toBe(true);
+    expect(isEntryActive(HUB_ENTRY, '/ai-tasks')).toBe(true);
+    expect(isEntryActive(HUB_ENTRY, '/novels')).toBe(false);
   });
 
-  it('adds the active project pages to the sidebar and encodes novel ids in links', () => {
-    expect(sidebarGroups('/novels').map((group) => group.label)).toEqual(['工作区']);
+  it('keeps only project entries in the project sidebar and encodes novel ids in links', () => {
+    const libraryOnly = sidebarGroups('/novels');
+    expect(libraryOnly.map((group) => group.label)).toEqual(['小说项目']);
+    expect(libraryOnly[0].entries.map((entry) => entry.label)).toEqual(['项目库']);
     const groups = sidebarGroups('/novels/n%201/outline');
-    expect(groups.map((group) => group.label)).toEqual(['工作区', '当前项目']);
+    expect(groups.map((group) => group.label)).toEqual(['小说项目', '当前项目']);
     expect(groups[1].entries).toHaveLength(7);
     expect(projectEntries('n 1')[1].path).toBe('/novels/n%201/workspace');
   });

@@ -14,6 +14,7 @@ interface Props {
   activeChapterId?: string;
   bundle: TaskConversationBundle | null | undefined;
   bundleReady: boolean;
+  effectiveStatus?: string;
 }
 
 /** Compose task authorization feedback; native actions remain in the feature/service boundary. */
@@ -24,6 +25,7 @@ function DesktopTaskAuthorizationControl({
   activeChapterId,
   bundle,
   bundleReady,
+  effectiveStatus,
 }: Props) {
   const projection = projectTaskAuthorizationContext(
     bundleReady ? bundle : null,
@@ -46,6 +48,7 @@ function DesktopTaskAuthorizationControl({
         error={authorization.error}
         stage={projection.stage}
         stopReason={projection.stopReason}
+        conversationStatus={effectiveStatus}
         onManage={() => setOpenScope(scope)}
       />
       {openScope === scope && (
@@ -78,6 +81,8 @@ export function WorkbenchTaskAuthorizationControl(props: Props) {
     return (
       <span
         className="workbench-chapter-hint"
+        data-testid={props.effectiveStatus ? 'workbench-conversation-status' : undefined}
+        data-status={props.effectiveStatus}
         title="浏览器开发模式不具备原生任务预授权与正式写入能力"
       >
         人工确认
